@@ -407,7 +407,6 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
         {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
       </main>
-      <RealtimeToasts notices={realtime.notices} />
       <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} />
     </div>
   );
@@ -472,7 +471,6 @@ function useRealtime(onEntityChanged: () => void) {
   const [state, setState] = useState<"connecting" | "connected" | "thinking" | "working" | "offline">("connecting");
   const [label, setLabel] = useState("Агент подключается");
   const [notice, setNotice] = useState("");
-  const [notices, setNotices] = useState<Array<{ id: string; text: string }>>([]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -498,7 +496,6 @@ function useRealtime(onEntityChanged: () => void) {
             setLabel("Агент делает");
             const toast = message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`;
             setNotice(toast);
-            setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast }, ...current].slice(0, 4));
             window.clearTimeout(noticeTimer);
             noticeTimer = window.setTimeout(() => setNotice(""), 5000);
           }
@@ -531,16 +528,7 @@ function useRealtime(onEntityChanged: () => void) {
     };
   }, [onEntityChanged]);
 
-  return { pulse, state, label, notice, notices };
-}
-
-function RealtimeToasts({ notices }: { notices: Array<{ id: string; text: string }> }) {
-  if (!notices.length) return null;
-  return (
-    <div className="toast-stack">
-      {notices.map((notice) => <div className="browser-toast" key={notice.id}>{notice.text}</div>)}
-    </div>
-  );
+  return { pulse, state, label, notice };
 }
 
 function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
@@ -626,6 +614,7 @@ function MemoryBoard({ memories, onSaved }: { memories: Memory[]; onSaved: () =>
 function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
   const activeRuns = runs.filter((run) => ["running", "doing"].includes(run.status)).slice(0, 4);
   const visibleRuns = activeRuns.length ? activeRuns : runs.slice(0, 4);
+  const openInbox = inbox.filter((item) => item.status !== "done").slice(0, 4);
 
   return (
     <section className="agent-work-board" aria-label="Работа агентов">
@@ -651,14 +640,14 @@ function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActiv
       </div>
       <div className="agent-work-column">
         <h3>Inbox</h3>
-        {inbox.slice(0, 4).map((item) => (
+        {openInbox.map((item) => (
           <div className={item.requires_human ? "agent-work-row needs-human" : "agent-work-row"} key={item.id}>
             <span className="agent-dot inbox" />
             <strong>{item.agent_name}</strong>
             <small>{item.title}</small>
           </div>
         ))}
-        {!inbox.length && <EmptyState text="Входящие пусты" />}
+        {!openInbox.length && <EmptyState text="Входящие пусты" />}
       </div>
       <div className="agent-work-column">
         <h3>Решения</h3>
@@ -764,7 +753,7 @@ function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSa
 
   if (node?.type === "todo_group" && node.id) {
     const project = projects.find((item) => item.id === node.id);
-    if (project) return <ProjectTodoCards project={project} />;
+    if (project) return <ProjectTodoCards project={project} onSaved={onSaved} />;
   }
 
   if (node?.type === "project" && node.id) {
@@ -957,7 +946,7 @@ function ProjectTodoNotes({ project, projects, onColorChange, onSaved }: { proje
   );
 }
 
-function ProjectTodoCards({ project }: { project: Project }) {
+function ProjectTodoCards({ project, onSaved }: { project: Project; onSaved: () => void }) {
   const todos = sortTodos(project.todos);
   const activeCount = todos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
 
@@ -967,6 +956,7 @@ function ProjectTodoCards({ project }: { project: Project }) {
         <strong>Todo · {project.name}</strong>
         <span>{activeCount} активно · {todos.length} всего</span>
       </div>
+      <TodoForm projects={[project]} onSaved={onSaved} />
       {todos.length ? (
         <div className="todo-note-grid">
           {todos.map((todo) => (
@@ -2014,13 +2004,13 @@ function EntityFeed({ memories, projects, artifacts }: { memories: Memory[]; pro
   return (
     <div className="context-list">
       {rows.map((row) => (
-        <article className="memory-row" key={row.key}>
-          <div className="row-id">{row.kind}</div>
-          <div>
+        <article className="memory-row entity-feed-card" key={row.key}>
+          <span className="entity-feed-kind">{row.kind}</span>
+          <div className="entity-feed-body">
             <strong>{row.title}</strong>
             <p>{row.text}</p>
-            <span className="muted">{formatBytes(row.bytes)}</span>
           </div>
+          <span className="entity-feed-size">{formatBytes(row.bytes)}</span>
         </article>
       ))}
     </div>

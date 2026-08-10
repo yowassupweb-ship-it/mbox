@@ -15,8 +15,9 @@ export function TopBar({ query, onQueryChange, realtimeState = "connecting", rea
         <Search size={18} />
         <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Поиск" />
       </div>
-      <div className={`realtime-pill ${realtimeState}`}>
-        {notice || realtimeLabel}
+      <div className={`realtime-pill monostatus ${realtimeState}`}>
+        <strong>{realtimeLabel}</strong>
+        {notice && <span>{notice}</span>}
       </div>
     </header>
   );
