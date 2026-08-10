@@ -22,7 +22,8 @@ import {
 } from "lucide-react";
 import { BottomNav } from "./components/BottomNav";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
-import { TopBar } from "./components/TopBar";
+import { TopBar, type AgentRosterEntry } from "./components/TopBar";
+import { AgentAvatar, agentIdentity } from "./components/AgentAvatar";
 import type { SectionKey } from "./types";
 import "./styles.css";
 
@@ -379,10 +380,38 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     [realtime.notices, data.auditEvents],
   );
   const agentLabel = useMemo(() => {
-    if (realtime.state !== "connected") return realtime.label;
-    const online = data.agents.filter((agent) => agent.status === "active");
-    return online.length ? `${online.map((agent) => agent.name).join(", ")} на связи` : "Агентов нет на связи";
+    if (realtime.state === "offline") return "Нет связи с сервером";
+    if (realtime.state === "connecting") return realtime.label;
+    const active = data.agents.filter((agent) => agent.status === "active");
+    const working = active.filter((agent) => agent.live_runs > 0);
+    if (working.length) return `${working.map((agent) => agent.name).join(", ")} в работе`;
+    if (active.length) return `${active.map((agent) => agent.name).join(", ")} на связи`;
+    const idle = data.agents.find((agent) => agent.status === "idle");
+    return idle ? `Никого нет · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи";
   }, [realtime.state, realtime.label, data.agents]);
+  const headerState = useMemo<"connecting" | "connected" | "working" | "offline">(() => {
+    if (realtime.state === "offline") return "offline";
+    if (realtime.state === "connecting") return "connecting";
+    if (data.agents.some((agent) => agent.live_runs > 0)) return "working";
+    return "connected";
+  }, [realtime.state, data.agents]);
+  const agentRoster = useMemo<AgentRosterEntry[]>(() => {
+    const goalByAgent = new Map<string, string>();
+    for (const run of data.runs) {
+      if (["running", "doing"].includes(run.status) && !goalByAgent.has(run.agent_name)) {
+        goalByAgent.set(run.agent_name, run.goal);
+      }
+    }
+    return data.agents.map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+      status: agent.status,
+      live: agent.live_runs > 0,
+      statusLabel: agentStatusLabels[agent.status] || agent.status,
+      detail: goalByAgent.get(agent.name),
+      since: formatSince(agent.last_seen),
+    }));
+  }, [data.agents, data.runs]);
 
   const setRoute = useCallback((nextSection: SectionKey, nextQuery = query, nextNodeKey = selectedNodeKey, mode: "push" | "replace" = "push") => {
     setSectionState(nextSection);
@@ -411,7 +440,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   return (
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
       <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
-        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={agentLabel} notice={realtime.notice} notices={agentNotices} />
+        <TopBar query={query} onQueryChange={setQuery} realtimeState={headerState} realtimeLabel={agentLabel} notice={realtime.notice} notices={agentNotices} roster={agentRoster} />
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
@@ -507,8 +536,6 @@ function useRealtime(onEntityChanged: () => void) {
           const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string };
           if (message.type === "entity_changed") {
             onEntityChanged();
-            setState("working");
-            setLabel("Агент делает");
             const toast = message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`;
             setNotice(toast);
             setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast, at: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, ...current].slice(0, 8));
@@ -525,8 +552,6 @@ function useRealtime(onEntityChanged: () => void) {
           }
           if (message.type === "server_tick") {
             setPulse((value) => value + 1);
-            setState((current) => current === "working" ? "working" : "thinking");
-            setLabel((current) => current === "Агент делает" ? current : "Агент думает");
           }
         } catch {
           setPulse((value) => value + 1);
@@ -635,54 +660,126 @@ function MemoryBoard({ memories, onSaved }: { memories: Memory[]; onSaved: () =>
   );
 }
 
-function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
-  const activeRuns = runs.filter((run) => ["running", "doing"].includes(run.status)).slice(0, 4);
-  const visibleRuns = activeRuns.length ? activeRuns : runs.slice(0, 4);
-  const openInbox = inbox.filter((item) => item.status !== "done").slice(0, 4);
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+function ActivityBars() {
+  return (
+    <span className="activity-bars" aria-hidden="true">
+      <span /><span /><span /><span />
+    </span>
+  );
+}
+
+function AgentCard({ agent, runs, decisions }: { agent: AgentActivity; runs: AgentRun[]; decisions: DecisionEntry[] }) {
+  const mine = runs.filter((run) => run.agent_name === agent.name);
+  const liveRun = mine.find((run) => ["running", "doing"].includes(run.status));
+  const lastRun = liveRun || mine[0];
+  const lastDecision = decisions.find((decision) => decision.actor === agent.name);
+  const files = (Array.isArray(lastRun?.touched_files) ? (lastRun!.touched_files as string[]) : []).slice(0, 5);
+  const working = agent.live_runs > 0;
+  const stateKey = working ? "working" : agent.status;
+  const stateLabel = working ? "в работе" : agentStatusLabels[agent.status] || agent.status;
+  const accent = agentIdentity(agent.name).accent;
 
   return (
-    <section className="agent-work-board" aria-label="Работа агентов">
-      <div className="agent-work-column">
-        <h3>Агенты</h3>
-        {agents.length ? agents.slice(0, 6).map((agent) => (
-          <div className="agent-work-row" key={agent.id}>
-            <span className={`agent-dot ${agent.status}`} />
-            <strong>{agent.name}</strong>
-            <small>{agentStatusLabels[agent.status] || agent.status} · {formatSince(agent.last_seen)}</small>
-          </div>
-        )) : <EmptyState text="Агенты пока не подключены" />}
+    <article className={`agent-card ${stateKey}`} style={{ ["--agent-accent" as string]: accent }}>
+      <div className="agent-card-top">
+        <AgentAvatar name={agent.name} status={agent.status} live={working} size={46} />
+        <div className="agent-card-id">
+          <strong>{agent.name}</strong>
+          <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""}</span>
+        </div>
+        <span className={`agent-card-state ${stateKey}`}>{stateLabel}</span>
       </div>
-      <div className="agent-work-column">
-        <h3>Сессии</h3>
-        {visibleRuns.length ? visibleRuns.map((run) => (
-          <div className="agent-work-row" key={run.id}>
-            <span className={`agent-dot ${run.status}`} />
-            <strong>{run.agent_name}</strong>
-            <small>{run.goal}</small>
-          </div>
-        )) : <EmptyState text="Сессий пока нет" />}
+
+      <div className="agent-card-now">
+        {working && <ActivityBars />}
+        <span className={working ? "agent-card-goal live" : "agent-card-goal"}>
+          {lastRun ? (working ? lastRun.goal : `последнее: ${lastRun.goal}`) : "нет активности"}
+        </span>
       </div>
-      <div className="agent-work-column">
-        <h3>Inbox</h3>
-        {openInbox.map((item) => (
-          <div className={item.requires_human ? "agent-work-row needs-human" : "agent-work-row"} key={item.id}>
-            <span className="agent-dot inbox" />
-            <strong>{item.agent_name}</strong>
-            <small>{item.title}</small>
-          </div>
-        ))}
-        {!openInbox.length && <EmptyState text="Входящие пусты" />}
+
+      {files.length > 0 && (
+        <div className="agent-card-files">
+          {files.map((file) => <code key={file} title={file}>{baseName(file)}</code>)}
+        </div>
+      )}
+
+      <div className="agent-card-metrics">
+        <div className="metric"><b>{agent.runs}</b><span>сессий</span></div>
+        <div className="metric"><b>{agent.events}</b><span>действий</span></div>
+        <div className="metric"><b>{agent.active_sessions}</b><span>подключений</span></div>
       </div>
-      <div className="agent-work-column">
-        <h3>Решения</h3>
-        {decisions.slice(0, 4).map((decision) => (
-          <div className="agent-work-row" key={decision.id}>
-            <span className="agent-dot decision" />
-            <strong>{decision.actor}</strong>
-            <small>{decision.title}</small>
-          </div>
-        ))}
-        {!decisions.length && <EmptyState text="Решений пока нет" />}
+
+      <div className="agent-card-foot">
+        {lastDecision ? <span className="agent-card-decision" title={lastDecision.title}>◆ {lastDecision.title}</span> : <span className="agent-card-decision muted">решений нет</span>}
+        <time>{formatSince(agent.last_seen)}</time>
+      </div>
+    </article>
+  );
+}
+
+function StreamRow({ actor, title, tag }: { actor: string; title: string; tag?: string }) {
+  return (
+    <div className="stream-row">
+      <AgentAvatar name={actor} size={24} />
+      <div className="stream-row-body">
+        <span className="stream-row-actor">{actor}{tag ? <em> · {tag}</em> : null}</span>
+        <span className="stream-row-title" title={title}>{title}</span>
+      </div>
+    </div>
+  );
+}
+
+function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
+  const online = agents.filter((agent) => agent.status === "active").length;
+  const working = agents.filter((agent) => agent.live_runs > 0).length;
+  const activeRuns = runs.filter((run) => ["running", "doing"].includes(run.status));
+  const visibleRuns = (activeRuns.length ? activeRuns : runs).slice(0, 5);
+  const openInbox = inbox.filter((item) => item.status !== "done").slice(0, 5);
+
+  return (
+    <section className="agent-activity" aria-label="Работа агентов">
+      <header className="agent-activity-head">
+        <h3>Работа агентов</h3>
+        <div className="agent-activity-summary">
+          <span><b>{agents.length}</b> агентов</span>
+          <span className="dot-sep" />
+          <span className="tone-active"><b>{online}</b> на связи</span>
+          {working > 0 && <span className="tone-working"><b>{working}</b> в работе</span>}
+        </div>
+      </header>
+
+      {agents.length ? (
+        <div className="agent-cards">
+          {agents.slice(0, 8).map((agent) => (
+            <AgentCard key={agent.id} agent={agent} runs={runs} decisions={decisions} />
+          ))}
+        </div>
+      ) : <EmptyState text="Агенты пока не подключены" />}
+
+      <div className="agent-streams">
+        <div className="agent-stream">
+          <h4>Сессии</h4>
+          {visibleRuns.length ? visibleRuns.map((run) => (
+            <StreamRow key={run.id} actor={run.agent_name} title={run.goal} tag={runStatusLabels[run.status] || run.status} />
+          )) : <EmptyState text="Сессий пока нет" />}
+        </div>
+        <div className="agent-stream">
+          <h4>Inbox</h4>
+          {openInbox.length ? openInbox.map((item) => (
+            <StreamRow key={item.id} actor={item.agent_name} title={item.title} tag={item.requires_human ? "нужен человек" : undefined} />
+          )) : <EmptyState text="Входящие пусты" />}
+        </div>
+        <div className="agent-stream">
+          <h4>Решения</h4>
+          {decisions.length ? decisions.slice(0, 5).map((decision) => (
+            <StreamRow key={decision.id} actor={decision.actor} title={decision.title} />
+          )) : <EmptyState text="Решений пока нет" />}
+        </div>
       </div>
     </section>
   );
@@ -1786,12 +1883,15 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
         <div className="entity-list">
           {agents.length ? agents.map((agent) => (
             <div className="agent-row" key={agent.id}>
-              <div>
-                <strong>{agent.name}</strong>
-                <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""} · {agent.scope}</span>
+              <div className="agent-row-id">
+                <AgentAvatar name={agent.name} status={agent.status} live={agent.live_runs > 0} size={40} />
+                <div>
+                  <strong>{agent.name}</strong>
+                  <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""} · {agent.scope}</span>
+                </div>
               </div>
               <div className="agent-status">
-                <span className={`agent-state ${agent.status}`}>{agentStatusLabels[agent.status] || agent.status}</span>
+                <span className={`agent-state ${agent.live_runs > 0 ? "working" : agent.status}`}>{agent.live_runs > 0 ? "в работе" : agentStatusLabels[agent.status] || agent.status}</span>
                 <small>{agent.active_sessions} сессий · {agent.events} действий · {formatSince(agent.last_seen)}</small>
               </div>
             </div>
@@ -2244,6 +2344,15 @@ const agentStatusLabels: Record<string, string> = {
   active: "на связи",
   idle: "ожидает",
   offline: "отключен",
+};
+
+const runStatusLabels: Record<string, string> = {
+  running: "идёт",
+  doing: "в работе",
+  done: "готово",
+  finished: "завершено",
+  failed: "ошибка",
+  blocked: "блок",
 };
 
 const auditActionLabels: Record<string, string> = {

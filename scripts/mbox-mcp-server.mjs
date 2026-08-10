@@ -262,6 +262,36 @@ server.registerTool(
 );
 
 server.registerTool(
+  "create_project",
+  {
+    title: "Create MBOX project",
+    description: "Create a new project node. Use props for structured facts (owner, client, domain, environment, stack details), stack for the tech list. Idempotent by name is NOT guaranteed — check list_project_context first.",
+    inputSchema: {
+      name: z.string(),
+      status: z.string().default("active"),
+      stack: z.array(z.string()).default([]),
+      git_url: z.string().default(""),
+      deploy_provider: z.string().default(""),
+      deploy_target: z.string().default(""),
+      color: z.string().default("#2c2c2e"),
+      access_level: z.enum(["private", "agents", "public"]).default("agents"),
+      props: z.record(z.any()).default({}),
+    },
+  },
+  async ({ name, status, stack, git_url, deploy_provider, deploy_target, color, access_level, props }) => {
+    const existing = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(name)}`);
+    if (existing.projects.find((item) => item.name === name)) {
+      throw new Error(`Project already exists: ${name}`);
+    }
+    const data = await mboxFetch("/api/mbox/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, status, stack, git_url, deploy_provider, deploy_target, color, access_level, props }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.registerTool(
   "list_recent_history",
   {
     title: "List MBOX history",
