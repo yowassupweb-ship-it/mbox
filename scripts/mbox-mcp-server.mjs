@@ -287,4 +287,32 @@ server.registerTool(
   },
 );
 
+async function ping(event) {
+  try {
+    await mboxFetch("/api/mbox/agent/ping", {
+      method: "POST",
+      body: JSON.stringify({
+        agent: agentName,
+        event,
+        kind: "trusted_mcp",
+        client: process.env.MBOX_AGENT_CLIENT || "mbox-prod MCP",
+        scope: "projects,todos,history,approved_secrets",
+      }),
+    });
+  } catch (error) {
+    console.error(`MBOX presence ping failed: ${error.message}`);
+  }
+}
+
 await server.connect(new StdioServerTransport());
+
+await ping("session_start");
+const heartbeat = setInterval(() => ping("heartbeat"), 60_000);
+heartbeat.unref();
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    clearInterval(heartbeat);
+    process.exit(0);
+  });
+}

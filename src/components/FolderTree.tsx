@@ -8,6 +8,8 @@ export type FolderTreeNode = {
   entityKind?: "relations" | "properties" | "philosophy" | "deploy" | "stack" | "access" | "git";
   name: string;
   meta?: string;
+  bytes?: number;
+  total_bytes?: number;
   color?: string;
   note?: string;
   status?: string;

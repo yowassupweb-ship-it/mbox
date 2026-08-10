@@ -237,6 +237,25 @@ CREATE TABLE IF NOT EXISTS decision_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS agent_presence (
+  agent_name TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'ai_agent',
+  client TEXT NOT NULL DEFAULT '',
+  scope TEXT NOT NULL DEFAULT '',
+  sessions INTEGER NOT NULL DEFAULT 0,
+  props JSONB NOT NULL DEFAULT '{}',
+  first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'ai_agent';
+ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS client TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS sessions INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS props JSONB NOT NULL DEFAULT '{}';
+
+CREATE INDEX IF NOT EXISTS idx_agent_presence_seen ON agent_presence(last_seen DESC);
+
 CREATE INDEX IF NOT EXISTS idx_memories_search ON memories USING GIN(search_vector);
 CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_memories_metadata ON memories USING GIN(metadata);
@@ -257,6 +276,7 @@ CREATE INDEX IF NOT EXISTS idx_protected_secrets_project ON protected_secrets(pr
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_inbox_status ON agent_inbox(status, priority, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_active ON agent_runs(status, heartbeat_at DESC);
 CREATE INDEX IF NOT EXISTS idx_decision_log_project ON decision_log(project_id, created_at DESC);

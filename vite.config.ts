@@ -204,36 +204,101 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/agents") {
-            const sessions = await queryPostgres<{ active_sessions: number; last_seen: string | null }>(
-              `SELECT count(*)::int AS active_sessions, max(s.created_at)::text AS last_seen
-               FROM auth_sessions s
-               JOIN users u ON u.id = s.user_id
-               WHERE s.expires_at > now()`,
+            const result = await queryPostgres<{
+              name: string;
+              kind: string;
+              client: string;
+              scope: string;
+              sessions: number;
+              events: number;
+              runs: number;
+              live_runs: number;
+              online: boolean | null;
+              last_seen: string | null;
+              first_seen: string | null;
+            }>(
+              `WITH presence AS (
+                 SELECT agent_name AS name, kind, client, scope, sessions, first_seen, last_seen
+                 FROM agent_presence
+               ),
+               audited AS (
+                 SELECT actor AS name, count(*)::int AS events, max(created_at) AS last_seen
+                 FROM audit_events
+                 WHERE actor <> 'system' AND created_at > now() - interval '30 days'
+                 GROUP BY actor
+               ),
+               ran AS (
+                 SELECT agent_name AS name,
+                        count(*)::int AS runs,
+                        count(*) FILTER (WHERE finished_at IS NULL AND heartbeat_at > now() - interval '5 minutes')::int AS live_runs,
+                        max(GREATEST(heartbeat_at, started_at)) AS last_seen
+                 FROM agent_runs
+                 GROUP BY agent_name
+               ),
+               names AS (
+                 SELECT name FROM presence
+                 UNION SELECT name FROM audited
+                 UNION SELECT name FROM ran
+               )
+               SELECT n.name,
+                      COALESCE(p.kind, 'ai_agent') AS kind,
+                      COALESCE(p.client, '') AS client,
+                      COALESCE(p.scope, '') AS scope,
+                      COALESCE(p.sessions, 0) AS sessions,
+                      COALESCE(a.events, 0) AS events,
+                      COALESCE(r.runs, 0) AS runs,
+                      COALESCE(r.live_runs, 0) AS live_runs,
+                      (p.last_seen > now() - interval '2 minutes') AS online,
+                      GREATEST(p.last_seen, a.last_seen, r.last_seen)::text AS last_seen,
+                      COALESCE(p.first_seen, a.last_seen, r.last_seen)::text AS first_seen
+               FROM names n
+               LEFT JOIN presence p ON p.name = n.name
+               LEFT JOIN audited a ON a.name = n.name
+               LEFT JOIN ran r ON r.name = n.name
+               ORDER BY GREATEST(p.last_seen, a.last_seen, r.last_seen) DESC NULLS LAST`,
             );
-            return sendJson(res, 200, {
-              agents: [
-                {
-                  id: "mbox-prod-mcp",
-                  name: "MBOX MCP",
-                  kind: "trusted_mcp",
-                  status: realtimeClients.size > 0 || Number(sessions.rows[0]?.active_sessions ?? 0) > 0 ? "active" : "idle",
-                  scope: "projects,todos,history,approved_secrets",
-                  active_sessions: sessions.rows[0]?.active_sessions ?? 0,
-                  live_connections: realtimeClients.size,
-                  last_seen: sessions.rows[0]?.last_seen ?? new Date().toISOString(),
-                },
-                {
-                  id: "codex-chatgpt",
-                  name: "Codex / ChatGPT",
-                  kind: "ai_agent",
-                  status: Number(sessions.rows[0]?.active_sessions ?? 0) > 0 ? "active" : "idle",
-                  scope: "uses mbox-prod MCP after session reload",
-                  active_sessions: sessions.rows[0]?.active_sessions ?? 0,
-                  live_connections: realtimeClients.size,
-                  last_seen: sessions.rows[0]?.last_seen ?? new Date().toISOString(),
-                },
-              ],
+
+            const now = Date.now();
+            const agents = result.rows.map((row) => {
+              const seenAgo = row.last_seen ? now - new Date(row.last_seen).getTime() : Infinity;
+              const online = Boolean(row.online) || row.live_runs > 0;
+              return {
+                id: row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "agent",
+                name: row.name,
+                kind: row.kind,
+                status: online ? "active" : seenAgo < 24 * 3600 * 1000 ? "idle" : "offline",
+                scope: row.scope || "projects,todos,history,approved_secrets",
+                client: row.client,
+                active_sessions: row.sessions,
+                live_connections: online ? 1 : 0,
+                events: row.events,
+                runs: row.runs,
+                live_runs: row.live_runs,
+                first_seen: row.first_seen,
+                last_seen: row.last_seen,
+              };
             });
+
+            return sendJson(res, 200, { agents, ui_clients: realtimeClients.size });
+          }
+
+          if (url.pathname === "/api/mbox/agent/ping" && req.method === "POST") {
+            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string }>(req);
+            const name = String(body.agent || req.headers["x-mbox-agent"] || "Agent").trim() || "Agent";
+            const started = body.event === "session_start";
+            const result = await queryPostgres<{ agent_name: string; kind: string; client: string; scope: string; sessions: number; last_seen: string }>(
+              `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions)
+               VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1)
+               ON CONFLICT (agent_name) DO UPDATE
+                 SET last_seen = now(),
+                     kind = COALESCE(NULLIF(EXCLUDED.kind, ''), agent_presence.kind),
+                     client = COALESCE(NULLIF(EXCLUDED.client, ''), agent_presence.client),
+                     scope = COALESCE(NULLIF(EXCLUDED.scope, ''), agent_presence.scope),
+                     sessions = agent_presence.sessions + $5
+               RETURNING agent_name, kind, client, scope, sessions, last_seen::text`,
+              [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
+            );
+            return sendJson(res, 200, { presence: result.rows[0] });
           }
 
           if (url.pathname === "/api/mbox/status") {

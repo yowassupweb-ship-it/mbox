@@ -732,6 +732,19 @@ button {
   background: #7cc6ff;
 }
 
+.agent-dot.offline {
+  background: #6b7280;
+  box-shadow: none;
+}
+
+.agent-state.active {
+  color: #7cc6ff;
+}
+
+.agent-state.offline {
+  color: var(--text-muted);
+}
+
 .agent-dot.inbox {
   background: #ffd27d;
 }

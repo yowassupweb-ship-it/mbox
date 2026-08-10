@@ -185,9 +185,14 @@ type AgentActivity = {
   kind: string;
   status: string;
   scope: string;
+  client: string;
   active_sessions: number;
   live_connections: number;
-  last_seen: string;
+  events: number;
+  runs: number;
+  live_runs: number;
+  first_seen: string | null;
+  last_seen: string | null;
 };
 
 type AgentInboxItem = {
@@ -369,6 +374,15 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   const [selectedNodeKey, setSelectedNodeKeyState] = useState(() => nodeFromLocation());
   const data = useMboxData(query);
   const realtime = useRealtime(data.reload);
+  const agentNotices = useMemo(
+    () => [...realtime.notices, ...data.auditEvents.slice(0, 12).map(auditNotice)].slice(0, 12),
+    [realtime.notices, data.auditEvents],
+  );
+  const agentLabel = useMemo(() => {
+    if (realtime.state !== "connected") return realtime.label;
+    const online = data.agents.filter((agent) => agent.status === "active");
+    return online.length ? `${online.map((agent) => agent.name).join(", ")} на связи` : "Агентов нет на связи";
+  }, [realtime.state, realtime.label, data.agents]);
 
   const setRoute = useCallback((nextSection: SectionKey, nextQuery = query, nextNodeKey = selectedNodeKey, mode: "push" | "replace" = "push") => {
     setSectionState(nextSection);
@@ -397,7 +411,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   return (
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
       <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
-        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={realtime.label} notice={realtime.notice} notices={realtime.notices} />
+        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={agentLabel} notice={realtime.notice} notices={agentNotices} />
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
@@ -490,12 +504,20 @@ function useRealtime(onEntityChanged: () => void) {
 
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string };
+          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string };
           if (message.type === "entity_changed") {
             onEntityChanged();
             setState("working");
             setLabel("Агент делает");
             const toast = message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`;
+            setNotice(toast);
+            setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast, at: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, ...current].slice(0, 8));
+            window.clearTimeout(noticeTimer);
+            noticeTimer = window.setTimeout(() => setNotice(""), 5000);
+          }
+          if (message.type === "agent_presence") {
+            onEntityChanged();
+            const toast = `Агент ${message.agent || "Agent"} подключился`;
             setNotice(toast);
             setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast, at: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, ...current].slice(0, 8));
             window.clearTimeout(noticeTimer);
@@ -626,7 +648,7 @@ function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActiv
           <div className="agent-work-row" key={agent.id}>
             <span className={`agent-dot ${agent.status}`} />
             <strong>{agent.name}</strong>
-            <small>{agent.status} · {agent.active_sessions} сессий</small>
+            <small>{agentStatusLabels[agent.status] || agent.status} · {formatSince(agent.last_seen)}</small>
           </div>
         )) : <EmptyState text="Агенты пока не подключены" />}
       </div>
@@ -700,7 +722,7 @@ function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNodeKey, on
   const [items, setItems] = useState(projects);
   const [menu, setMenu] = useState<TreeMenuState | null>(null);
   const [selectedNode, setSelectedNode] = useState<FolderTreeNode | null>(null);
-  const roots = useMemo(() => filterTree(items.map(projectToTree), query), [items, query]);
+  const roots = useMemo(() => filterTree(rollupBytes(items.map(projectToTree)), query), [items, query]);
 
   useEffect(() => {
     setItems(projects);
@@ -1762,18 +1784,18 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
       </Panel>
       <Panel title="Агенты" icon={GitBranch}>
         <div className="entity-list">
-          {agents.map((agent) => (
+          {agents.length ? agents.map((agent) => (
             <div className="agent-row" key={agent.id}>
               <div>
                 <strong>{agent.name}</strong>
-                <span>{agent.kind} · {agent.scope}</span>
+                <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""} · {agent.scope}</span>
               </div>
               <div className="agent-status">
-                <span>{agent.status === "active" ? "активен" : "ожидает"}</span>
-                <small>{agent.live_connections} подключений · {agent.active_sessions} сессий</small>
+                <span className={`agent-state ${agent.status}`}>{agentStatusLabels[agent.status] || agent.status}</span>
+                <small>{agent.active_sessions} сессий · {agent.events} действий · {formatSince(agent.last_seen)}</small>
               </div>
             </div>
-          ))}
+          )) : <EmptyState text="Агенты пока не подключались" />}
         </div>
       </Panel>
       <Panel title="Inbox агента" icon={BookOpen}>
@@ -2086,22 +2108,49 @@ function EmptyState({ text }: { text: string }) {
 function buildArtifactTree(artifacts: Artifact[], folders: FolderRow[]): FolderTreeNode[] {
   const baseFolders = folders
     .filter((folder) => folder.entity_type === "artifact")
-    .map((folder) => ({ id: folder.id, type: "folder" as const, name: folder.name, meta: formatBytes(folder.memory_bytes), color: folder.color, children: [] as FolderTreeNode[] }));
+    .map((folder) => ({ id: folder.id, type: "folder" as const, name: folder.name, bytes: folder.memory_bytes, color: folder.color, children: [] as FolderTreeNode[] }));
 
   const byCategory = new Map<string, FolderTreeNode>();
   for (const folder of baseFolders) byCategory.set(folder.name, folder);
   for (const artifact of artifacts) {
     const category = artifact.category || "Other";
-    if (!byCategory.has(category)) byCategory.set(category, { name: category, children: [] });
+    if (!byCategory.has(category)) byCategory.set(category, { type: "folder", name: category, bytes: 0, children: [] });
     byCategory.get(category)!.children!.push({
       id: artifact.id,
       type: "artifact",
       name: artifact.name,
       note: artifact.content,
+      bytes: artifact.memory_bytes,
       meta: `${artifact.version} · ${artifact.status} · ${formatBytes(artifact.memory_bytes)}`,
     });
   }
-  return Array.from(byCategory.values());
+  return rollupBytes(Array.from(byCategory.values()));
+}
+
+const containerTypes = new Set(["folder", "project", "todo_group"]);
+
+function rollupBytes(nodes: FolderTreeNode[]): FolderTreeNode[] {
+  return nodes.map((node) => {
+    const children = node.children ? rollupBytes(node.children) : node.children;
+    const total = (node.bytes || 0) + (children || []).reduce((sum, child) => sum + (child.total_bytes || 0), 0);
+    if (!containerTypes.has(node.type || "")) return { ...node, children, total_bytes: total };
+    const items = countContained(children);
+    const size = `${items} ${plural(items, "элемент", "элемента", "элементов")} · ${formatBytes(total)}`;
+    return { ...node, children, total_bytes: total, meta: node.meta ? `${node.meta} · ${size}` : size };
+  });
+}
+
+function countContained(nodes: FolderTreeNode[] | undefined): number {
+  if (!nodes) return 0;
+  return nodes.reduce((sum, node) => sum + 1 + countContained(node.children), 0);
+}
+
+function plural(count: number, one: string, few: string, many: string) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function projectToTree(project: Project): FolderTreeNode {
@@ -2112,10 +2161,11 @@ function projectToTree(project: Project): FolderTreeNode {
     id: project.id,
     type: "project",
     name: project.name,
-    meta: `${project.status} · ${formatBytes(project.memory_bytes)}`,
+    meta: project.status,
+    bytes: project.memory_bytes,
     color: project.color,
     children: [
-      { id: project.id, type: "todo_group", name: `Todo (${openTodos})`, meta: "заметки задач", color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
+      { id: project.id, type: "todo_group", name: `Todo (${openTodos})`, color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, bytes: todo.memory_bytes, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
       { id: project.id, type: "project_entity", entityKind: "git", name: "Git", meta: project.git_url ? "репозиторий" : "не указан", color: "#2e4a3a", children: [{ type: "meta", name: project.git_url || "Git не указан" }] },
       { id: project.id, type: "project_entity", entityKind: "relations", name: "Связи", meta: `${relatedNames.length}`, children: relatedNames.length ? relatedNames.map((name) => ({ type: "meta", name })) : [{ type: "meta", name: "Связей нет" }] },
       { id: project.id, type: "project_entity", entityKind: "properties", name: "Свойства", meta: `${Object.keys(project.props || {}).length}`, children: Object.entries(project.props || {}).map(([key, value]) => ({ type: "meta", name: `${key}: ${value}` })) },
@@ -2176,6 +2226,43 @@ function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "нет даты";
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
+}
+
+function formatSince(value: string | null) {
+  if (!value) return "не появлялся";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "не появлялся";
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "только что";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} мин назад`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} ч назад`;
+  if (seconds < 7 * 86400) return `${Math.floor(seconds / 86400)} дн назад`;
+  return formatDate(value);
+}
+
+const agentStatusLabels: Record<string, string> = {
+  active: "на связи",
+  idle: "ожидает",
+  offline: "отключен",
+};
+
+const auditActionLabels: Record<string, string> = {
+  create: "добавил",
+  update: "отредактировал",
+  delete: "удалил",
+  claim: "взял в работу",
+  heartbeat: "обновил работу",
+  finish: "завершил",
+};
+
+function auditNotice(event: AuditEvent) {
+  const verb = auditActionLabels[event.action] || event.action;
+  const detail = event.summary || event.entity_type;
+  return {
+    id: `audit-${event.id}`,
+    text: `Агент ${event.actor} ${verb} ${detail}`,
+    at: new Date(event.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+  };
 }
 
 function projectName(projects: Project[], projectId: string | null) {

@@ -33,6 +33,7 @@ const agentStructure = {
     audit_events: "append-only history of database changes.",
     agent_inbox: "agent-visible inbox for notices, proposals and human decisions.",
     agent_runs: "agent work sessions with goal, read context, commands, touched files, heartbeat and result.",
+    agent_presence: "live agent roster: who is connected right now, session count and last heartbeat. Fed by POST /api/mbox/agent/ping.",
     decision_log: "durable decisions explaining why something was done.",
     task_leases: "todos can be claimed by one agent through claimed_by, claimed_until and heartbeat_at.",
   },
@@ -202,6 +203,14 @@ async function handleApiWithContext(req, res, url) {
     const token = randomBytes(32).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
     await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')", [user.rows[0].id, tokenHash]);
+    await query(
+      `DELETE FROM auth_sessions
+       WHERE expires_at < now()
+          OR (user_id = $1 AND id NOT IN (
+                SELECT id FROM auth_sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20
+              ))`,
+      [user.rows[0].id],
+    );
     res.setHeader("set-cookie", `mbox_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`);
     return sendJson(res, 200, { user: user.rows[0] });
   }
@@ -223,37 +232,91 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { structure: agentStructure });
   }
 
-  if (url.pathname === "/api/mbox/agents") {
-    const sessions = await query(
-      `SELECT count(*)::int AS active_sessions, max(s.created_at)::text AS last_seen
-       FROM auth_sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.expires_at > now()`,
+  if (url.pathname === "/api/mbox/agent/ping" && req.method === "POST") {
+    const body = await readBody(req);
+    const name = String(body.agent || actorFromReq(req)).trim() || "Agent";
+    const started = body.event === "session_start";
+    const result = await query(
+      `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions)
+       VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1)
+       ON CONFLICT (agent_name) DO UPDATE
+         SET last_seen = now(),
+             kind = COALESCE(NULLIF(EXCLUDED.kind, ''), agent_presence.kind),
+             client = COALESCE(NULLIF(EXCLUDED.client, ''), agent_presence.client),
+             scope = COALESCE(NULLIF(EXCLUDED.scope, ''), agent_presence.scope),
+             sessions = agent_presence.sessions + $5
+       RETURNING agent_name, kind, client, scope, sessions, last_seen::text`,
+      [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
     );
-    return sendJson(res, 200, {
-      agents: [
-        {
-          id: "mbox-prod-mcp",
-          name: "MBOX MCP",
-          kind: "trusted_mcp",
-          status: realtimeClients.size > 0 || Number(sessions.rows[0]?.active_sessions || 0) > 0 ? "active" : "idle",
-          scope: "projects,todos,history,approved_secrets",
-          active_sessions: sessions.rows[0]?.active_sessions || 0,
-          live_connections: realtimeClients.size,
-          last_seen: sessions.rows[0]?.last_seen || new Date().toISOString(),
-        },
-        {
-          id: "codex-chatgpt",
-          name: "Codex / ChatGPT",
-          kind: "ai_agent",
-          status: Number(sessions.rows[0]?.active_sessions || 0) > 0 ? "active" : "idle",
-          scope: "uses mbox-prod MCP after session reload",
-          active_sessions: sessions.rows[0]?.active_sessions || 0,
-          live_connections: realtimeClients.size,
-          last_seen: sessions.rows[0]?.last_seen || new Date().toISOString(),
-        },
-      ],
+    if (started) broadcastRealtime("agent_presence", { agent: name, event: "session_start" });
+    return sendJson(res, 200, { presence: result.rows[0] });
+  }
+
+  if (url.pathname === "/api/mbox/agents") {
+    const result = await query(
+      `WITH presence AS (
+         SELECT agent_name AS name, kind, client, scope, sessions, first_seen, last_seen
+         FROM agent_presence
+       ),
+       audited AS (
+         SELECT actor AS name, count(*)::int AS events, max(created_at) AS last_seen
+         FROM audit_events
+         WHERE actor <> 'system' AND created_at > now() - interval '30 days'
+         GROUP BY actor
+       ),
+       ran AS (
+         SELECT agent_name AS name,
+                count(*)::int AS runs,
+                count(*) FILTER (WHERE finished_at IS NULL AND heartbeat_at > now() - interval '5 minutes')::int AS live_runs,
+                max(GREATEST(heartbeat_at, started_at)) AS last_seen
+         FROM agent_runs
+         GROUP BY agent_name
+       ),
+       names AS (
+         SELECT name FROM presence
+         UNION SELECT name FROM audited
+         UNION SELECT name FROM ran
+       )
+       SELECT n.name,
+              COALESCE(p.kind, 'ai_agent') AS kind,
+              COALESCE(p.client, '') AS client,
+              COALESCE(p.scope, '') AS scope,
+              COALESCE(p.sessions, 0) AS sessions,
+              COALESCE(a.events, 0) AS events,
+              COALESCE(r.runs, 0) AS runs,
+              COALESCE(r.live_runs, 0) AS live_runs,
+              (p.last_seen > now() - interval '2 minutes') AS online,
+              GREATEST(p.last_seen, a.last_seen, r.last_seen)::text AS last_seen,
+              COALESCE(p.first_seen, a.last_seen, r.last_seen)::text AS first_seen
+       FROM names n
+       LEFT JOIN presence p ON p.name = n.name
+       LEFT JOIN audited a ON a.name = n.name
+       LEFT JOIN ran r ON r.name = n.name
+       ORDER BY GREATEST(p.last_seen, a.last_seen, r.last_seen) DESC NULLS LAST`,
+    );
+
+    const now = Date.now();
+    const agents = result.rows.map((row) => {
+      const seenAgo = row.last_seen ? now - new Date(row.last_seen).getTime() : Infinity;
+      const online = row.online || row.live_runs > 0;
+      return {
+        id: row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "agent",
+        name: row.name,
+        kind: row.kind,
+        status: online ? "active" : seenAgo < 24 * 3600 * 1000 ? "idle" : "offline",
+        scope: row.scope || "projects,todos,history,approved_secrets",
+        client: row.client,
+        active_sessions: row.sessions,
+        live_connections: online ? 1 : 0,
+        events: row.events,
+        runs: row.runs,
+        live_runs: row.live_runs,
+        first_seen: row.first_seen,
+        last_seen: row.last_seen,
+      };
     });
+
+    return sendJson(res, 200, { agents, ui_clients: realtimeClients.size });
   }
 
   if (url.pathname === "/api/mbox/memories") {
@@ -318,7 +381,37 @@ async function handleApiWithContext(req, res, url) {
       return sendJson(res, 201, { folder: result.rows[0] });
     }
     const result = await query(
-      `SELECT id::text, parent_id::text, name, entity_type, access_level, color, pg_column_size(folders)::int AS memory_bytes
+      `WITH RECURSIVE own AS (
+         SELECT f.id,
+                pg_column_size(f)::int
+                  + COALESCE((SELECT sum(pg_column_size(m))::int FROM memories m WHERE m.folder_id = f.id), 0)
+                  + COALESCE((SELECT sum(pg_column_size(p))::int FROM projects p WHERE p.folder_id = f.id), 0)
+                  + COALESCE((SELECT sum(pg_column_size(a))::int FROM artifacts a
+                              WHERE a.folder_id = f.id
+                                 OR (a.folder_id IS NULL AND f.entity_type = 'artifact' AND a.category = f.name)), 0)
+                  + COALESCE((SELECT sum(pg_column_size(s))::int FROM protected_secrets s WHERE s.folder_id = f.id), 0) AS bytes,
+                COALESCE((SELECT count(*) FROM memories m WHERE m.folder_id = f.id), 0)
+                  + COALESCE((SELECT count(*) FROM projects p WHERE p.folder_id = f.id), 0)
+                  + COALESCE((SELECT count(*) FROM artifacts a
+                              WHERE a.folder_id = f.id
+                                 OR (a.folder_id IS NULL AND f.entity_type = 'artifact' AND a.category = f.name)), 0)
+                  + COALESCE((SELECT count(*) FROM protected_secrets s WHERE s.folder_id = f.id), 0) AS items
+         FROM folders f
+       ),
+       tree AS (
+         SELECT f.id AS root_id, f.id AS node_id, 0 AS depth FROM folders f
+         UNION ALL
+         SELECT t.root_id, c.id, t.depth + 1 FROM tree t JOIN folders c ON c.parent_id = t.node_id WHERE t.depth < 20
+       ),
+       rollup AS (
+         SELECT t.root_id AS id, sum(o.bytes)::int AS content_bytes, sum(o.items)::int AS content_items
+         FROM tree t JOIN own o ON o.id = t.node_id
+         GROUP BY t.root_id
+       )
+       SELECT id::text, parent_id::text, name, entity_type, access_level, color,
+              pg_column_size(folders)::int AS memory_bytes,
+              COALESCE((SELECT content_bytes FROM rollup WHERE rollup.id = folders.id), 0) AS content_bytes,
+              COALESCE((SELECT content_items FROM rollup WHERE rollup.id = folders.id), 0) AS content_items
        FROM folders
        WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR entity_type ILIKE '%' || $1 || '%'
        ORDER BY COALESCE(parent_id, 0), name`,

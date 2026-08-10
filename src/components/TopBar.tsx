@@ -35,7 +35,7 @@ export function TopBar({ query, onQueryChange, realtimeState = "connecting", rea
                 </div>
               ))}
             </div>
-          ) : <p>Пока нет действий в этой вкладке</p>}
+          ) : <p>Агенты ещё ничего не меняли</p>}
         </div>
       )}
     </header>
