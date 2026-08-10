@@ -1,0 +1,38 @@
+{
+  "name": "mbox",
+  "version": "1.0.0",
+  "description": "",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "start": "node server/mbox-server.mjs",
+    "build": "vite build --outDir public --emptyOutDir false",
+    "preview": "vite preview --host 0.0.0.0",
+    "mbox:docker:up": "docker compose -f docker-compose.mbox.yml up -d",
+    "mbox:docker:down": "docker compose -f docker-compose.mbox.yml down",
+    "mbox:db:tunnel": "python scripts/mbox_ssh_tunnel.py",
+    "mbox:cleanup": "node scripts/mbox-maintenance.mjs cleanup",
+    "mbox:sort": "node scripts/mbox-maintenance.mjs sort",
+    "mbox:index": "node scripts/mbox-maintenance.mjs index",
+    "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "lucide-react": "^0.468.0",
+    "pg": "^8.23.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "vite": "^6.0.7",
+    "ws": "^8.21.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.21.0",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.4.5"
+  }
+}

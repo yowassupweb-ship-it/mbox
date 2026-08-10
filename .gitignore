@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Wrangler local state
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp files
+*.tmp
+*.sql
+!schema/*.sql

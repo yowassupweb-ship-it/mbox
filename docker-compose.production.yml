@@ -1,0 +1,41 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.mbox
+    container_name: mbox-ui
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://mbox:${POSTGRES_PASSWORD}@mbox-postgres:5432/mbox
+      MBOX_SECRET_KEY: ${POSTGRES_PASSWORD}
+      MBOX_AGENT_SCOPE: agents
+      MBOX_SERVER_HOST: ${MBOX_SERVER_HOST}
+      MBOX_VPN_MANAGED_EXTERNALLY: "true"
+      MBOX_PORT: "3000"
+      MBOX_HOST: "0.0.0.0"
+    networks:
+      - mbox-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: mbox-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - mbox_caddy_data:/data
+      - mbox_caddy_config:/config
+    networks:
+      - mbox-net
+    depends_on:
+      - app
+
+networks:
+  mbox-net:
+    external: true
+
+volumes:
+  mbox_caddy_data:
+  mbox_caddy_config:

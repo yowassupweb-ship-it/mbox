@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mbox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mbox
+      POSTGRES_USER: mbox
+      POSTGRES_PASSWORD: ${MBOX_POSTGRES_PASSWORD:-mbox_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - mbox_postgres:/var/lib/postgresql/data
+      - ./schema/mbox_postgres.sql:/docker-entrypoint-initdb.d/001_mbox_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mbox -d mbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: node:22-alpine
+    container_name: mbox-ui
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      DATABASE_URL: postgres://mbox:${MBOX_POSTGRES_PASSWORD:-mbox_dev_password}@postgres:5432/mbox
+      MBOX_AGENT_SCOPE: agents
+      MBOX_SERVER_HOST: ${MBOX_SERVER_HOST:-127.0.0.1}
+      MBOX_VPN_MANAGED_EXTERNALLY: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  mbox_postgres:

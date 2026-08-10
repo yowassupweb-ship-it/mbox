@@ -1,0 +1,4 @@
+{$MBOX_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy mbox-ui:3000
+}
