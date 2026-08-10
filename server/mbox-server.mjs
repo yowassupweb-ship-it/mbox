@@ -112,15 +112,25 @@ function actorFromReq(req) {
   return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
 }
 
+function readableDetail(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  const questionMarks = (text.match(/\?/g) || []).length;
+  const letters = (text.match(/[A-Za-zА-Яа-яЁё]/g) || []).length;
+  if (questionMarks >= 4 && questionMarks >= letters) return fallback;
+  return text;
+}
+
 function broadcastChange(req, action, entity, detail = "") {
   const actor = String(actorFromReq(req));
   const verb = actionLabels[action] || action;
+  const safeDetail = readableDetail(detail, entity);
   broadcastRealtime("entity_changed", {
     entity,
     action,
     actor,
-    detail,
-    notification: `Агент ${actor} ${verb} ${detail || entity}`,
+    detail: safeDetail,
+    notification: `Агент ${actor} ${verb} ${safeDetail}`,
   });
 }
 
@@ -818,7 +828,7 @@ function serveStatic(req, res, url) {
   const file = fs.existsSync(safeTarget) && fs.statSync(safeTarget).isFile() ? safeTarget : path.join(publicDir, "index.html");
   const ext = path.extname(file);
   const type = ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : ext === ".html" ? "text/html; charset=utf-8" : "application/octet-stream";
-  res.writeHead(200, { "content-type": type });
+  res.writeHead(200, { "content-type": type, "cache-control": ext === ".html" ? "no-store" : "no-cache" });
   fs.createReadStream(file).pipe(res);
 }
 

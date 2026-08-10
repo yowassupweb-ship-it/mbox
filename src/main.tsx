@@ -397,7 +397,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   return (
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
       <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
-        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={realtime.label} notice={realtime.notice} />
+        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={realtime.label} notice={realtime.notice} notices={realtime.notices} />
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
@@ -471,6 +471,7 @@ function useRealtime(onEntityChanged: () => void) {
   const [state, setState] = useState<"connecting" | "connected" | "thinking" | "working" | "offline">("connecting");
   const [label, setLabel] = useState("Агент подключается");
   const [notice, setNotice] = useState("");
+  const [notices, setNotices] = useState<Array<{ id: string; text: string; at: string }>>([]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -496,6 +497,7 @@ function useRealtime(onEntityChanged: () => void) {
             setLabel("Агент делает");
             const toast = message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`;
             setNotice(toast);
+            setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast, at: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, ...current].slice(0, 8));
             window.clearTimeout(noticeTimer);
             noticeTimer = window.setTimeout(() => setNotice(""), 5000);
           }
@@ -528,7 +530,7 @@ function useRealtime(onEntityChanged: () => void) {
     };
   }, [onEntityChanged]);
 
-  return { pulse, state, label, notice };
+  return { pulse, state, label, notice, notices };
 }
 
 function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {

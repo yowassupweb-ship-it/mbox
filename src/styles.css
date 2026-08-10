@@ -325,6 +325,7 @@ button {
   gap: 10px;
   padding: 0 0 4px;
   background: transparent;
+  overflow: visible;
 }
 
 .graph-mode .topbar {
@@ -384,11 +385,15 @@ button {
   backdrop-filter: blur(18px) saturate(150%);
   max-width: min(52vw, 560px);
   min-width: 156px;
+  cursor: pointer;
+  outline: 0;
+  transition: background-color .35s ease, border-color .35s ease, color .35s ease, transform .35s ease, box-shadow .35s ease;
 }
 
 .realtime-pill.monostatus strong {
   color: #edf4ff;
   white-space: nowrap;
+  transition: color .35s ease;
 }
 
 .realtime-pill.monostatus span {
@@ -412,6 +417,7 @@ button {
 .realtime-pill.working {
   color: #ffe3b0;
   border-color: rgba(255, 204, 102, .2);
+  transform: translateY(-1px);
 }
 
 .realtime-pill.offline {
@@ -419,27 +425,61 @@ button {
   border-color: rgba(255, 138, 128, .2);
 }
 
-.toast-stack {
-  position: fixed;
-  top: 58px;
-  right: 18px;
-  z-index: 80;
-  width: min(360px, calc(100vw - 24px));
-  display: grid;
-  gap: 8px;
-  pointer-events: none;
+.realtime-pill:hover,
+.realtime-pill[aria-expanded="true"] {
+  background: rgba(58, 58, 62, .86);
+  box-shadow: 0 16px 34px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.08);
 }
 
-.browser-toast {
-  border: var(--border-width) solid rgba(255,255,255,.1);
-  border-radius: 24px;
-  padding: 12px 14px;
-  background: rgba(44, 44, 46, .82);
-  color: #dce8f8;
-  box-shadow: var(--chin-shadow), 0 18px 46px rgba(0,0,0,.36);
-  backdrop-filter: blur(22px) saturate(160%);
-  font-size: 13px;
-  font-weight: 760;
+.agent-status-popover {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  transform: translateX(42px);
+  width: min(420px, calc(100vw - 24px));
+  max-height: 320px;
+  overflow: auto;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 26px;
+  background: rgba(28, 28, 30, .92);
+  box-shadow: 0 24px 54px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(22px) saturate(150%);
+  padding: 14px;
+  color: var(--text-main);
+  animation: status-pop .18s ease-out;
+}
+
+.agent-status-popover > strong {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.agent-status-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-status-item {
+  display: grid;
+  gap: 4px;
+  border-radius: 18px;
+  padding: 10px;
+  background: rgba(255,255,255,.05);
+}
+
+.agent-status-item span {
+  overflow-wrap: anywhere;
+}
+
+.agent-status-item time,
+.agent-status-popover p {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@keyframes status-pop {
+  from { opacity: 0; transform: translateX(42px) translateY(-6px) scale(.98); }
+  to { opacity: 1; transform: translateX(42px) translateY(0) scale(1); }
 }
 
 .bottom-nav .nav-item {
@@ -2155,11 +2195,12 @@ time {
     justify-self: start;
   }
 
-  .toast-stack {
-    top: 56px;
-    right: 10px;
+  .agent-status-popover {
+    top: 52px;
     left: 10px;
+    right: 10px;
     width: auto;
+    transform: none;
   }
 
   .hero-band,
