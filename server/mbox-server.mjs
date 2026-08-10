@@ -29,6 +29,10 @@ const agentStructure = {
     folders: "hierarchical containers for projects, artifacts and memory areas.",
     protected_secrets: "credentials, visible to agents only after explicit approval.",
     audit_events: "append-only history of database changes.",
+    agent_inbox: "agent-visible inbox for notices, proposals and human decisions.",
+    agent_runs: "agent work sessions with goal, read context, commands, touched files, heartbeat and result.",
+    decision_log: "durable decisions explaining why something was done.",
+    task_leases: "todos can be claimed by one agent through claimed_by, claimed_until and heartbeat_at.",
   },
   todo_statuses: {
     open: { label_ru: "Новая", ai_rule: "available but not the first priority" },
@@ -49,10 +53,11 @@ const agentStructure = {
     "Call /api/mbox/agent/structure first to understand schema.",
     "Call /api/mbox/projects and read props, relations, todos, git and deploy before changing code.",
     "Treat graph_edges as explicit truth about which projects belong to one larger entity.",
-    "Call /api/mbox/agent/next-task?project=MBOX to pick work.",
+    "Call /api/mbox/agent/context?project=MBOX to get a full compact snapshot.",
+    "Call /api/mbox/agent/next-task?project=MBOX&agent=Codex to pick and claim work.",
     "Update todos through PATCH /api/mbox/todos/:id; keep notes concise and put structured facts into todo props.",
     "Create graph edges when the task reveals a project relation.",
-    "Use /api/mbox/history to understand recent changes.",
+    "Use /api/mbox/history, /api/mbox/agent/inbox, /api/mbox/agent/runs and /api/mbox/decisions to understand recent work.",
     "Use approved secrets only through /api/mbox/agent/approved-secrets after user approval.",
   ],
   agent_instruction_ru: [
@@ -67,6 +72,15 @@ const agentStructure = {
     during_work: ["write important decisions to project props or memory", "create relations when context links projects", "keep todo note current"],
     after_work: ["set task status", "add a short done todo or audit memory when work was not started from an existing todo"],
   },
+};
+
+const actionLabels = {
+  create: "добавил",
+  update: "отредактировал",
+  delete: "удалил",
+  claim: "взял в работу",
+  heartbeat: "обновил работу",
+  finish: "завершил",
 };
 
 function loadEnv(file) {
@@ -90,6 +104,22 @@ function broadcastRealtime(type, payload = {}) {
   for (const client of realtimeClients) {
     if (client.readyState === 1) client.send(message);
   }
+}
+
+function actorFromReq(req) {
+  return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
+}
+
+function broadcastChange(req, action, entity, detail = "") {
+  const actor = String(actorFromReq(req));
+  const verb = actionLabels[action] || action;
+  broadcastRealtime("entity_changed", {
+    entity,
+    action,
+    actor,
+    detail,
+    notification: `Агент ${actor} ${verb} ${detail || entity}`,
+  });
 }
 
 async function readBody(req) {
@@ -217,7 +247,7 @@ async function handleApi(req, res, url) {
          RETURNING id::text`,
         [String(body.title || "").trim(), String(body.content || ""), String(body.entity_type || ""), String(body.access_level || ""), Array.isArray(body.tags) ? body.tags : []],
       );
-      broadcastRealtime("entity_changed", { entity: "memories" });
+      broadcastChange(req, "create", "memories", String(body.title || "").trim());
       return sendJson(res, 201, { memory: result.rows[0] });
     }
     const result = await query(
@@ -247,13 +277,13 @@ async function handleApi(req, res, url) {
        RETURNING id::text`,
       [String(body.title || "").trim(), body.content ?? null, String(body.access_level || ""), Array.isArray(body.tags) ? body.tags : null, memoryMatch[1]],
     );
-    if (result.rows[0]) broadcastRealtime("entity_changed", { entity: "memories" });
+    if (result.rows[0]) broadcastChange(req, "update", "memories", String(body.title || "").trim() || `#${memoryMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { memory: result.rows[0] } : { error: "not_found" });
   }
 
   if (memoryMatch && req.method === "DELETE") {
     await query("DELETE FROM memories WHERE id = $1", [memoryMatch[1]]);
-    broadcastRealtime("entity_changed", { entity: "memories" });
+    broadcastChange(req, "delete", "memories", `#${memoryMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -266,7 +296,7 @@ async function handleApi(req, res, url) {
          RETURNING id::text`,
         [body.parent_id || null, String(body.name || "").trim(), String(body.entity_type || "artifact"), String(body.access_level || "private"), String(body.color || "#2c2c2e")],
       );
-      broadcastRealtime("entity_changed", { entity: "folders" });
+      broadcastChange(req, "create", "folders", String(body.name || "").trim());
       return sendJson(res, 201, { folder: result.rows[0] });
     }
     const result = await query(
@@ -293,13 +323,13 @@ async function handleApi(req, res, url) {
        RETURNING id::text`,
       [body.parent_id || null, String(body.name || "").trim(), String(body.entity_type || ""), String(body.access_level || ""), String(body.color || ""), folderMatch[1]],
     );
-    if (result.rows[0]) broadcastRealtime("entity_changed", { entity: "folders" });
+    if (result.rows[0]) broadcastChange(req, "update", "folders", String(body.name || "").trim() || `#${folderMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { folder: result.rows[0] } : { error: "not_found" });
   }
 
   if (folderMatch && req.method === "DELETE") {
     await query("DELETE FROM folders WHERE id = $1", [folderMatch[1]]);
-    broadcastRealtime("entity_changed", { entity: "folders" });
+    broadcastChange(req, "delete", "folders", `#${folderMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -312,7 +342,7 @@ async function handleApi(req, res, url) {
          RETURNING id::text`,
         [body.folder_id || null, String(body.name || "").trim(), String(body.category || "Code"), String(body.version || "v1"), String(body.status || "created"), String(body.content || ""), String(body.access_level || "")],
       );
-      broadcastRealtime("entity_changed", { entity: "artifacts" });
+      broadcastChange(req, "create", "artifacts", String(body.name || "").trim());
       return sendJson(res, 201, { artifact: result.rows[0] });
     }
     const result = await query(
@@ -342,13 +372,13 @@ async function handleApi(req, res, url) {
        RETURNING id::text`,
       [body.folder_id || null, String(body.name || "").trim(), String(body.category || ""), String(body.version || ""), String(body.status || ""), body.content ?? null, artifactMatch[1]],
     );
-    if (result.rows[0]) broadcastRealtime("entity_changed", { entity: "artifacts" });
+    if (result.rows[0]) broadcastChange(req, "update", "artifacts", String(body.name || "").trim() || `#${artifactMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { artifact: result.rows[0] } : { error: "not_found" });
   }
 
   if (artifactMatch && req.method === "DELETE") {
     await query("DELETE FROM artifacts WHERE id = $1", [artifactMatch[1]]);
-    broadcastRealtime("entity_changed", { entity: "artifacts" });
+    broadcastChange(req, "delete", "artifacts", `#${artifactMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -361,7 +391,7 @@ async function handleApi(req, res, url) {
          RETURNING id::text`,
         [String(body.name || "").trim(), String(body.status || ""), JSON.stringify(Array.isArray(body.stack) ? body.stack : []), String(body.git_url || ""), String(body.deploy_provider || ""), String(body.deploy_target || ""), String(body.color || "#2c2c2e"), String(body.access_level || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
       );
-      broadcastRealtime("entity_changed", { entity: "projects" });
+      broadcastChange(req, "create", "projects", String(body.name || "").trim());
       return sendJson(res, 201, { project: result.rows[0] });
     }
     const projects = await query(
@@ -373,10 +403,11 @@ async function handleApi(req, res, url) {
        LIMIT 200`,
       [q],
     );
-    const todos = await query("SELECT id::text, project_id::text, title, note, status, priority, props, pg_column_size(todos)::int AS memory_bytes FROM todos ORDER BY updated_at DESC");
+    const todos = await query("SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text, pg_column_size(todos)::int AS memory_bytes FROM todos ORDER BY updated_at DESC");
     const relations = await query(
       `SELECT e.id::text, e.from_id::text AS from_project_id, fp.name AS from_project_name,
-              e.to_id::text AS to_project_id, tp.name AS to_project_name, e.edge_type
+              e.to_id::text AS to_project_id, tp.name AS to_project_name, e.edge_type,
+              e.title, e.description, e.owner, e.group_entity, e.strength, e.valid_until::text
        FROM graph_edges e
        JOIN projects fp ON fp.id = e.from_id AND e.from_entity = 'project'
        JOIN projects tp ON tp.id = e.to_id AND e.to_entity = 'project'
@@ -399,19 +430,19 @@ async function handleApi(req, res, url) {
       const toId = String(body.to_id || "");
       if (!fromId || !toId || fromId === toId) return sendJson(res, 400, { error: "invalid_edge" });
       const result = await query(
-        `INSERT INTO graph_edges(from_entity, from_id, to_entity, to_id, edge_type, score)
-         VALUES ('project', $1, 'project', $2, COALESCE(NULLIF($3, ''), 'related'), 1)
+        `INSERT INTO graph_edges(from_entity, from_id, to_entity, to_id, edge_type, title, description, owner, group_entity, strength, valid_until, score)
+         VALUES ('project', $1, 'project', $2, COALESCE(NULLIF($3, ''), 'related'), $4, $5, $6, $7, COALESCE($8, 1), $9, 1)
          ON CONFLICT DO NOTHING
          RETURNING id::text`,
-        [fromId, toId, String(body.edge_type || "")],
+        [fromId, toId, String(body.edge_type || ""), String(body.title || ""), String(body.description || ""), String(body.owner || ""), String(body.group_entity || ""), Number(body.strength || 1), body.valid_until || null],
       );
-      broadcastRealtime("entity_changed", { entity: "graph_edges" });
+      broadcastChange(req, "create", "graph_edges", String(body.edge_type || "related"));
       return sendJson(res, 201, { edge: result.rows[0] || null });
     }
     const result = await query(
       `SELECT e.id::text, e.from_entity, e.from_id::text, COALESCE(fp.name, e.from_entity || ' #' || e.from_id::text) AS from_label,
               e.to_entity, e.to_id::text, COALESCE(tp.name, e.to_entity || ' #' || e.to_id::text) AS to_label,
-              e.edge_type
+              e.edge_type, e.title, e.description, e.owner, e.group_entity, e.strength, e.valid_until::text
        FROM graph_edges e
        LEFT JOIN projects fp ON e.from_entity = 'project' AND fp.id = e.from_id
        LEFT JOIN projects tp ON e.to_entity = 'project' AND tp.id = e.to_id
@@ -424,7 +455,7 @@ async function handleApi(req, res, url) {
   const edgeMatch = url.pathname.match(/^\/api\/mbox\/graph\/edges\/(\d+)$/);
   if (edgeMatch && req.method === "DELETE") {
     await query("DELETE FROM graph_edges WHERE id = $1", [edgeMatch[1]]);
-    broadcastRealtime("entity_changed", { entity: "graph_edges" });
+    broadcastChange(req, "delete", "graph_edges", `#${edgeMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -460,13 +491,13 @@ async function handleApi(req, res, url) {
         body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null,
       ],
     );
-    if (result.rows[0]) broadcastRealtime("entity_changed", { entity: "projects" });
+    if (result.rows[0]) broadcastChange(req, "update", "projects", String(body.name || "").trim() || `#${projectMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { project: result.rows[0] } : { error: "not_found" });
   }
 
   if (projectMatch && req.method === "DELETE") {
     await query("DELETE FROM projects WHERE id = $1", [projectMatch[1]]);
-    broadcastRealtime("entity_changed", { entity: "projects" });
+    broadcastChange(req, "delete", "projects", `#${projectMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -478,7 +509,7 @@ async function handleApi(req, res, url) {
        RETURNING id::text`,
       [body.project_id, String(body.title || "").trim(), String(body.note || ""), String(body.status || ""), String(body.priority || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {}), String(body.access_level || "")],
     );
-    broadcastRealtime("entity_changed", { entity: "todos" });
+    broadcastChange(req, "create", "todos", String(body.title || "").trim());
     return sendJson(res, 201, { todo: result.rows[0] });
   }
 
@@ -492,18 +523,21 @@ async function handleApi(req, res, url) {
          status = COALESCE(NULLIF($3, ''), status),
          priority = COALESCE(NULLIF($4, ''), priority),
          props = COALESCE($6, props),
+         claimed_by = COALESCE($7, claimed_by),
+         claimed_until = COALESCE($8, claimed_until),
+         heartbeat_at = CASE WHEN $9 THEN now() ELSE heartbeat_at END,
          updated_at = now()
        WHERE id = $5
        RETURNING id::text`,
-      [String(body.title || "").trim(), body.note ?? null, String(body.status || ""), String(body.priority || ""), todoMatch[1], body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null],
+      [String(body.title || "").trim(), body.note ?? null, String(body.status || ""), String(body.priority || ""), todoMatch[1], body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, typeof body.claimed_by === "string" ? body.claimed_by : null, body.claimed_until || null, Boolean(body.heartbeat)],
     );
-    if (result.rows[0]) broadcastRealtime("entity_changed", { entity: "todos" });
+    if (result.rows[0]) broadcastChange(req, "update", "todos", String(body.title || "").trim() || `#${todoMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { todo: result.rows[0] } : { error: "not_found" });
   }
 
   if (todoMatch && req.method === "DELETE") {
     await query("DELETE FROM todos WHERE id = $1", [todoMatch[1]]);
-    broadcastRealtime("entity_changed", { entity: "todos" });
+    broadcastChange(req, "delete", "todos", `#${todoMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -524,21 +558,173 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { events: result.rows });
   }
 
+  if (url.pathname === "/api/mbox/agent/context") {
+    const projectName = url.searchParams.get("project") || "MBOX";
+    const projects = await query(
+      `SELECT id::text, name, status, stack, git_url, deploy_target, deploy_provider, props, color, access_level,
+              pg_column_size(projects)::int AS memory_bytes
+       FROM projects
+       WHERE name = $1
+       LIMIT 1`,
+      [projectName],
+    );
+    const project = projects.rows[0] || null;
+    if (!project) return sendJson(res, 404, { error: "project_not_found" });
+    const todos = await query(
+      `SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text,
+              pg_column_size(todos)::int AS memory_bytes
+       FROM todos
+       WHERE project_id = $1
+       ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC`,
+      [project.id],
+    );
+    const relations = await query(
+      `SELECT e.id::text, e.from_entity, e.from_id::text, COALESCE(fp.name, e.from_entity || ' #' || e.from_id::text) AS from_label,
+              e.to_entity, e.to_id::text, COALESCE(tp.name, e.to_entity || ' #' || e.to_id::text) AS to_label,
+              e.edge_type, e.title, e.description, e.owner, e.group_entity, e.strength, e.valid_until::text
+       FROM graph_edges e
+       LEFT JOIN projects fp ON e.from_entity = 'project' AND fp.id = e.from_id
+       LEFT JOIN projects tp ON e.to_entity = 'project' AND tp.id = e.to_id
+       WHERE (e.from_entity = 'project' AND e.from_id = $1) OR (e.to_entity = 'project' AND e.to_id = $1)
+       ORDER BY e.created_at DESC`,
+      [project.id],
+    );
+    const decisions = await query("SELECT id::text, actor, title, decision, rationale, impact, props, created_at::text FROM decision_log WHERE project_id = $1 ORDER BY created_at DESC LIMIT 25", [project.id]);
+    const inbox = await query("SELECT id::text, agent_name, item_type, title, body, status, priority, requires_human, props, created_at::text, updated_at::text FROM agent_inbox WHERE project_id = $1 AND status <> 'done' ORDER BY created_at DESC LIMIT 50", [project.id]);
+    const runs = await query("SELECT id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 20", [project.id]);
+    const history = await query("SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text FROM audit_events WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50", [project.id]);
+    const secrets = await query(
+      `SELECT s.id::text, s.title, s.login, s.url,
+              pgp_sym_decrypt(s.secret_ciphertext::bytea, $2) AS password,
+              s.approved_until::text
+       FROM protected_secrets s
+       WHERE s.project_id = $1
+         AND s.agent_share_state = 'approved'
+         AND (s.approved_until IS NULL OR s.approved_until > now())
+       ORDER BY s.updated_at DESC`,
+      [project.id, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key"],
+    );
+    return sendJson(res, 200, { project, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, approved_secrets: secrets.rows });
+  }
+
+  if (url.pathname === "/api/mbox/agent/inbox") {
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      const result = await query(
+        `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+         VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
+         RETURNING id::text`,
+        [body.project_id || null, String(body.agent_name || actorFromReq(req)), String(body.item_type || ""), String(body.title || "").trim(), String(body.body || ""), String(body.status || ""), String(body.priority || ""), Boolean(body.requires_human), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+      );
+      broadcastChange(req, "create", "agent_inbox", String(body.title || "").trim());
+      return sendJson(res, 201, { inbox_item: result.rows[0] });
+    }
+    const result = await query("SELECT id::text, project_id::text, agent_name, item_type, title, body, status, priority, requires_human, props, pg_column_size(agent_inbox)::int AS memory_bytes, created_at::text, updated_at::text FROM agent_inbox ORDER BY updated_at DESC LIMIT 200");
+    return sendJson(res, 200, { inbox: result.rows });
+  }
+
+  const inboxMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)$/);
+  if (inboxMatch && req.method === "PATCH") {
+    const body = await readBody(req);
+    const result = await query(
+      `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
+       WHERE id = $5 RETURNING id::text`,
+      [String(body.status || ""), String(body.priority || ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1]],
+    );
+    if (result.rows[0]) broadcastChange(req, "update", "agent_inbox", `#${inboxMatch[1]}`);
+    return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
+  }
+
+  if (url.pathname === "/api/mbox/agent/runs") {
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      const result = await query(
+        `INSERT INTO agent_runs(project_id, todo_id, agent_name, status, goal, read_context, commands, touched_files, result, props)
+         VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'running'), $5, $6, $7, $8, $9, $10)
+         RETURNING id::text`,
+        [body.project_id || null, body.todo_id || null, String(body.agent_name || actorFromReq(req)), String(body.status || ""), String(body.goal || ""), JSON.stringify(Array.isArray(body.read_context) ? body.read_context : []), JSON.stringify(Array.isArray(body.commands) ? body.commands : []), JSON.stringify(Array.isArray(body.touched_files) ? body.touched_files : []), String(body.result || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+      );
+      broadcastChange(req, "create", "agent_runs", String(body.goal || "run"));
+      return sendJson(res, 201, { run: result.rows[0] });
+    }
+    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs ORDER BY started_at DESC LIMIT 100");
+    return sendJson(res, 200, { runs: result.rows });
+  }
+
+  const runMatch = url.pathname.match(/^\/api\/mbox\/agent\/runs\/(\d+)$/);
+  if (runMatch && req.method === "PATCH") {
+    const body = await readBody(req);
+    const result = await query(
+      `UPDATE agent_runs SET status = COALESCE(NULLIF($1, ''), status), result = COALESCE($2, result), commands = COALESCE($3, commands), touched_files = COALESCE($4, touched_files), props = COALESCE($5, props), heartbeat_at = now(), finished_at = CASE WHEN $6 THEN now() ELSE finished_at END
+       WHERE id = $7 RETURNING id::text`,
+      [String(body.status || ""), body.result ?? null, Array.isArray(body.commands) ? JSON.stringify(body.commands) : null, Array.isArray(body.touched_files) ? JSON.stringify(body.touched_files) : null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, ["done", "failed", "blocked"].includes(String(body.status || "")), runMatch[1]],
+    );
+    if (result.rows[0]) broadcastChange(req, ["done", "failed", "blocked"].includes(String(body.status || "")) ? "finish" : "heartbeat", "agent_runs", `#${runMatch[1]}`);
+    return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { run: result.rows[0] } : { error: "not_found" });
+  }
+
+  if (url.pathname === "/api/mbox/decisions") {
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      const result = await query(
+        `INSERT INTO decision_log(project_id, agent_run_id, actor, title, decision, rationale, impact, props)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id::text`,
+        [body.project_id || null, body.agent_run_id || null, String(body.actor || actorFromReq(req)), String(body.title || "").trim(), String(body.decision || ""), String(body.rationale || ""), String(body.impact || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+      );
+      broadcastChange(req, "create", "decision_log", String(body.title || "").trim());
+      return sendJson(res, 201, { decision: result.rows[0] });
+    }
+    const result = await query("SELECT id::text, project_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props, pg_column_size(decision_log)::int AS memory_bytes, created_at::text FROM decision_log ORDER BY created_at DESC LIMIT 200");
+    return sendJson(res, 200, { decisions: result.rows });
+  }
+
+  const claimMatch = url.pathname.match(/^\/api\/mbox\/todos\/(\d+)\/claim$/);
+  if (claimMatch && req.method === "POST") {
+    const body = await readBody(req);
+    const agent = String(body.agent_name || actorFromReq(req));
+    const minutes = Math.max(5, Math.min(240, Number(body.minutes || 45)));
+    const result = await query(
+      `UPDATE todos
+       SET claimed_by = $1, claimed_until = now() + ($2 || ' minutes')::interval, heartbeat_at = now(), status = CASE WHEN status = 'open' THEN 'doing' ELSE status END, updated_at = now()
+       WHERE id = $3 AND (claimed_until IS NULL OR claimed_until < now() OR claimed_by = $1)
+       RETURNING id::text, claimed_by, claimed_until::text, heartbeat_at::text`,
+      [agent, minutes, claimMatch[1]],
+    );
+    if (!result.rows[0]) return sendJson(res, 409, { error: "already_claimed" });
+    broadcastChange(req, "claim", "todos", `#${claimMatch[1]}`);
+    return sendJson(res, 200, { todo: result.rows[0] });
+  }
+
   if (url.pathname === "/api/mbox/agent/next-task") {
     const projectName = url.searchParams.get("project") || "MBOX";
+    const agent = url.searchParams.get("agent") || String(actorFromReq(req));
     const result = await query(
-      `SELECT t.id::text, t.title, t.note, t.status, t.priority, p.id::text AS project_id, p.name AS project_name
+      `SELECT t.id::text, t.title, t.note, t.status, t.priority, t.props, t.claimed_by, t.claimed_until::text, t.heartbeat_at::text, p.id::text AS project_id, p.name AS project_name
        FROM todos t
        JOIN projects p ON p.id = t.project_id
        WHERE p.name = $1 AND t.status IN ('next', 'open', 'doing', 'blocked', 'review')
+         AND (t.claimed_until IS NULL OR t.claimed_until < now() OR t.claimed_by = $2)
        ORDER BY
          CASE t.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
          CASE t.status WHEN 'doing' THEN 1 WHEN 'next' THEN 2 WHEN 'open' THEN 3 WHEN 'blocked' THEN 4 ELSE 5 END,
          t.updated_at DESC
        LIMIT 1`,
-      [projectName],
+      [projectName, agent],
     );
-    return sendJson(res, 200, { task: result.rows[0] || null });
+    const task = result.rows[0] || null;
+    if (!task) return sendJson(res, 200, { task: null });
+    const lease = await query(
+      `UPDATE todos SET claimed_by = $1, claimed_until = now() + interval '45 minutes', heartbeat_at = now(), status = CASE WHEN status = 'open' THEN 'doing' ELSE status END, updated_at = now()
+       WHERE id = $2 AND (claimed_until IS NULL OR claimed_until < now() OR claimed_by = $1)
+       RETURNING claimed_by, claimed_until::text, heartbeat_at::text, status`,
+      [agent, task.id],
+    );
+    if (lease.rows[0]) {
+      broadcastChange(req, "claim", "todos", task.title);
+      Object.assign(task, lease.rows[0]);
+    }
+    return sendJson(res, 200, { task });
   }
 
   if (url.pathname === "/api/mbox/agent/approved-secrets") {
@@ -579,7 +765,7 @@ async function handleApi(req, res, url) {
           body.project_id || null,
         ],
       );
-      broadcastRealtime("entity_changed", { entity: "secrets" });
+      broadcastChange(req, "create", "secrets", title);
       return sendJson(res, 201, { secret: result.rows[0] });
     }
     const result = await query("SELECT id::text, project_id::text, title, login, url, access_level, agent_share_state, pg_column_size(protected_secrets)::int AS memory_bytes, approved_until::text, updated_at::text FROM protected_secrets ORDER BY updated_at DESC LIMIT 100");
@@ -610,7 +796,7 @@ async function handleApi(req, res, url) {
                  approved_until::text, updated_at::text`,
       [body.project_id || null, String(body.agent_share_state || ""), body.approved_until || null, secretMatch[1], title, login, typeof body.url === "string" ? body.url.trim() : null, password, secretKey, hasApprovedUntil],
     );
-    broadcastRealtime("entity_changed", { entity: "secrets" });
+    broadcastChange(req, "update", "secrets", title || `#${secretMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { secret: result.rows[0] } : { error: "not_found" });
   }
 

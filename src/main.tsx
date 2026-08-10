@@ -74,6 +74,12 @@ type ProjectRelation = {
   to_project_id: string;
   to_project_name: string;
   edge_type: string;
+  title?: string;
+  description?: string;
+  owner?: string;
+  group_entity?: string;
+  strength?: number;
+  valid_until?: string | null;
 };
 
 type GraphEdge = {
@@ -85,6 +91,12 @@ type GraphEdge = {
   to_id: string;
   to_label: string;
   edge_type: string;
+  title: string;
+  description: string;
+  owner: string;
+  group_entity: string;
+  strength: number;
+  valid_until: string | null;
 };
 
 type GraphNode = {
@@ -113,6 +125,9 @@ type Todo = {
   status: string;
   priority: string;
   props: Record<string, string>;
+  claimed_by: string;
+  claimed_until: string | null;
+  heartbeat_at: string | null;
   memory_bytes: number;
 };
 
@@ -173,6 +188,52 @@ type AgentActivity = {
   active_sessions: number;
   live_connections: number;
   last_seen: string;
+};
+
+type AgentInboxItem = {
+  id: string;
+  project_id: string | null;
+  agent_name: string;
+  item_type: string;
+  title: string;
+  body: string;
+  status: string;
+  priority: string;
+  requires_human: boolean;
+  props: Record<string, unknown>;
+  memory_bytes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type AgentRun = {
+  id: string;
+  project_id: string | null;
+  todo_id: string | null;
+  agent_name: string;
+  status: string;
+  goal: string;
+  read_context: unknown[];
+  commands: unknown[];
+  touched_files: unknown[];
+  result: string;
+  memory_bytes: number;
+  started_at: string;
+  heartbeat_at: string;
+  finished_at: string | null;
+};
+
+type DecisionEntry = {
+  id: string;
+  project_id: string | null;
+  agent_run_id: string | null;
+  actor: string;
+  title: string;
+  decision: string;
+  rationale: string;
+  impact: string;
+  memory_bytes: number;
+  created_at: string;
 };
 
 type Me = {
@@ -274,7 +335,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   return (
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
       <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
-        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={realtime.label} />
+        <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={realtime.label} notice={realtime.notice} />
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} onSaved={data.reload} />}
@@ -282,8 +343,9 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
-        {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} onSaved={data.reload} onLogout={onLogout} />}
+        {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
       </main>
+      <RealtimeToasts notices={realtime.notices} />
       <BottomNav sections={sections} activeSection={section} onSelect={setSection} />
     </div>
   );
@@ -298,6 +360,9 @@ function useMboxData(query: string) {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [agents, setAgents] = useState<AgentActivity[]>([]);
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
+  const [inbox, setInbox] = useState<AgentInboxItem[]>([]);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [decisions, setDecisions] = useState<DecisionEntry[]>([]);
   const [revision, setRevision] = useState(0);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -314,7 +379,10 @@ function useMboxData(query: string) {
       fetchJson<{ events: AuditEvent[] }>("/api/mbox/history"),
       fetchJson<{ agents: AgentActivity[] }>("/api/mbox/agents"),
       fetchJson<{ edges: GraphEdge[] }>("/api/mbox/graph/edges"),
-    ]).then(([memoryData, artifactData, projectData, folderData, secretData, historyData, agentData, edgeData]) => {
+      fetchJson<{ inbox: AgentInboxItem[] }>("/api/mbox/agent/inbox"),
+      fetchJson<{ runs: AgentRun[] }>("/api/mbox/agent/runs"),
+      fetchJson<{ decisions: DecisionEntry[] }>("/api/mbox/decisions"),
+    ]).then(([memoryData, artifactData, projectData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
       if (!alive) return;
       setMemories(memoryData.memories);
       setArtifacts(artifactData.artifacts);
@@ -324,6 +392,9 @@ function useMboxData(query: string) {
       setAuditEvents(historyData.events);
       setAgents(agentData.agents);
       setGraphEdges(edgeData.edges);
+      setInbox(inboxData.inbox);
+      setRuns(runsData.runs);
+      setDecisions(decisionData.decisions);
     });
 
     return () => {
@@ -331,17 +402,20 @@ function useMboxData(query: string) {
     };
   }, [query, revision]);
 
-  return { memories, artifacts, projects, folders, secrets, auditEvents, agents, graphEdges, reload };
+  return { memories, artifacts, projects, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, reload };
 }
 
 function useRealtime(onEntityChanged: () => void) {
   const [pulse, setPulse] = useState(0);
   const [state, setState] = useState<"connecting" | "connected" | "thinking" | "working" | "offline">("connecting");
   const [label, setLabel] = useState("Агент подключается");
+  const [notice, setNotice] = useState("");
+  const [notices, setNotices] = useState<Array<{ id: string; text: string }>>([]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
     let reconnectTimer = 0;
+    let noticeTimer = 0;
     let closed = false;
 
     function connect() {
@@ -355,11 +429,16 @@ function useRealtime(onEntityChanged: () => void) {
 
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as { type?: string; entity?: string; at?: string };
+          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string };
           if (message.type === "entity_changed") {
             onEntityChanged();
             setState("working");
             setLabel("Агент делает");
+            const toast = message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`;
+            setNotice(toast);
+            setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast }, ...current].slice(0, 4));
+            window.clearTimeout(noticeTimer);
+            noticeTimer = window.setTimeout(() => setNotice(""), 5000);
           }
           if (message.type === "server_tick") {
             setPulse((value) => value + 1);
@@ -385,11 +464,21 @@ function useRealtime(onEntityChanged: () => void) {
     return () => {
       closed = true;
       window.clearTimeout(reconnectTimer);
+      window.clearTimeout(noticeTimer);
       socket?.close();
     };
   }, [onEntityChanged]);
 
-  return { pulse, state, label };
+  return { pulse, state, label, notice, notices };
+}
+
+function RealtimeToasts({ notices }: { notices: Array<{ id: string; text: string }> }) {
+  if (!notices.length) return null;
+  return (
+    <div className="toast-stack">
+      {notices.map((notice) => <div className="browser-toast" key={notice.id}>{notice.text}</div>)}
+    </div>
+  );
 }
 
 function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
@@ -730,6 +819,10 @@ function ProjectRelationForm({ project, projects, onSaved }: { project: Project;
   const available = projects.filter((item) => item.id !== project.id);
   const [targetId, setTargetId] = useState(available[0]?.id ?? "");
   const [edgeType, setEdgeType] = useState("related");
+  const [groupEntity, setGroupEntity] = useState("");
+  const [owner, setOwner] = useState("");
+  const [strength, setStrength] = useState(1);
+  const [description, setDescription] = useState("");
 
   useEffect(() => {
     setTargetId(available[0]?.id ?? "");
@@ -740,8 +833,9 @@ function ProjectRelationForm({ project, projects, onSaved }: { project: Project;
     await fetchJson("/api/mbox/graph/edges", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ from_id: project.id, to_id: targetId, edge_type: edgeType }),
+      body: JSON.stringify({ from_id: project.id, to_id: targetId, edge_type: edgeType, group_entity: groupEntity, owner, strength, description }),
     });
+    setDescription("");
     onSaved();
   }
 
@@ -757,15 +851,19 @@ function ProjectRelationForm({ project, projects, onSaved }: { project: Project;
           {available.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
         <input value={edgeType} onChange={(event) => setEdgeType(event.target.value)} placeholder="Связь или большая сущность" />
+        <input value={groupEntity} onChange={(event) => setGroupEntity(event.target.value)} placeholder="Группа" />
+        <input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Владелец" />
+        <input value={String(strength)} onChange={(event) => setStrength(Number(event.target.value) || 1)} placeholder="Сила" />
         <button className="primary-action compact-submit" type="button" onClick={addRelation}>Связать</button>
       </div>
+      <textarea className="relation-description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Почему эти проекты связаны" />
       {project.relations.length ? (
         <div className="relation-list">
           {project.relations.map((relation) => {
             const other = relation.from_project_id === project.id ? relation.to_project_name : relation.from_project_name;
             return (
               <div className="relation-chip" key={relation.id}>
-                <span>{relation.edge_type} · {other}</span>
+                <span>{relation.edge_type} · {other}{relation.group_entity ? ` · ${relation.group_entity}` : ""}{relation.owner ? ` · ${relation.owner}` : ""}</span>
                 <button type="button" onClick={() => removeRelation(relation.id)}>Удалить</button>
               </div>
             );
@@ -1443,7 +1541,7 @@ function TreeContextMenu({ state, projects, onClose, onSaved }: { state: TreeMen
   );
 }
 
-function AccessBoard({ user, secrets, agents, projects, onSaved, onLogout }: { user: { username: string; role: string }; secrets: SecretSummary[]; agents: AgentActivity[]; projects: Project[]; onSaved: () => void; onLogout: () => void }) {
+function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, onSaved, onLogout }: { user: { username: string; role: string }; secrets: SecretSummary[]; agents: AgentActivity[]; projects: Project[]; inbox: AgentInboxItem[]; runs: AgentRun[]; decisions: DecisionEntry[]; onSaved: () => void; onLogout: () => void }) {
   const [items, setItems] = useState(secrets);
   const [formOpen, setFormOpen] = useState(false);
   const [editingSecret, setEditingSecret] = useState<SecretSummary | null>(null);
@@ -1510,6 +1608,39 @@ function AccessBoard({ user, secrets, agents, projects, onSaved, onLogout }: { u
               </div>
             </div>
           ))}
+        </div>
+      </Panel>
+      <Panel title="Inbox агента" icon={BookOpen}>
+        <div className="agent-entity-list">
+          {inbox.length ? inbox.slice(0, 8).map((item) => (
+            <div className={item.requires_human ? "agent-entity-row needs-human" : "agent-entity-row"} key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.agent_name} · {item.item_type} · {item.status} · {item.priority} · {formatBytes(item.memory_bytes)}</span>
+              {item.body && <p>{item.body}</p>}
+            </div>
+          )) : <EmptyState text="Inbox агента пуст" />}
+        </div>
+      </Panel>
+      <Panel title="Agent run log" icon={History}>
+        <div className="agent-entity-list">
+          {runs.length ? runs.slice(0, 8).map((run) => (
+            <div className="agent-entity-row" key={run.id}>
+              <strong>{run.goal || `Run #${run.id}`}</strong>
+              <span>{run.agent_name} · {run.status} · файлов: {Array.isArray(run.touched_files) ? run.touched_files.length : 0} · {formatBytes(run.memory_bytes)}</span>
+              {run.result && <p>{run.result}</p>}
+            </div>
+          )) : <EmptyState text="Run log пуст" />}
+        </div>
+      </Panel>
+      <Panel title="Decision log" icon={Flag}>
+        <div className="agent-entity-list">
+          {decisions.length ? decisions.slice(0, 8).map((decision) => (
+            <div className="agent-entity-row" key={decision.id}>
+              <strong>{decision.title}</strong>
+              <span>{decision.actor} · {formatBytes(decision.memory_bytes)}</span>
+              <p>{decision.decision || decision.rationale}</p>
+            </div>
+          )) : <EmptyState text="Решений пока нет" />}
         </div>
       </Panel>
       <Panel title="Инструкция AI" icon={BookOpen}>
@@ -1818,7 +1949,7 @@ function projectToTree(project: Project): FolderTreeNode {
     meta: `${project.status} · ${formatBytes(project.memory_bytes)}`,
     color: project.color,
     children: [
-      { type: "todo_group", name: `Todo (${openTodos})`, meta: "заметки задач", color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)} · ${formatBytes(todo.memory_bytes)}` })) },
+      { type: "todo_group", name: `Todo (${openTodos})`, meta: "заметки задач", color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
       { id: project.id, type: "project_entity", entityKind: "git", name: "Git", meta: project.git_url ? "репозиторий" : "не указан", color: "#2e4a3a", children: [{ type: "meta", name: project.git_url || "Git не указан" }] },
       { id: project.id, type: "project_entity", entityKind: "relations", name: "Связи", meta: `${relatedNames.length}`, children: relatedNames.length ? relatedNames.map((name) => ({ type: "meta", name })) : [{ type: "meta", name: "Связей нет" }] },
       { id: project.id, type: "project_entity", entityKind: "properties", name: "Свойства", meta: `${Object.keys(project.props || {}).length}`, children: Object.entries(project.props || {}).map(([key, value]) => ({ type: "meta", name: `${key}: ${value}` })) },

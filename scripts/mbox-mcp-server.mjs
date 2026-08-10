@@ -5,6 +5,7 @@ import { z } from "zod";
 const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "Admin";
 const password = process.env.MBOX_PASSWORD;
+const agentName = process.env.MBOX_AGENT_NAME || "MBOX Agent";
 
 if (!baseUrl || !password) {
   console.error("MBOX_URL and MBOX_PASSWORD are required");
@@ -20,6 +21,7 @@ async function mboxFetch(path, init = {}) {
     headers: {
       "content-type": "application/json",
       cookie,
+      "x-mbox-agent": agentName,
       ...(init.headers || {}),
     },
   });
@@ -65,8 +67,21 @@ server.registerTool(
     inputSchema: { project: z.string().default("MBOX") },
   },
   async ({ project }) => {
-    const data = await mboxFetch(`/api/mbox/agent/next-task?project=${encodeURIComponent(project)}`);
+    const data = await mboxFetch(`/api/mbox/agent/next-task?project=${encodeURIComponent(project)}&agent=${encodeURIComponent(agentName)}`);
     return { content: [{ type: "text", text: JSON.stringify(data.task, null, 2) }] };
+  },
+);
+
+server.registerTool(
+  "get_agent_context",
+  {
+    title: "Get MBOX agent context snapshot",
+    description: "Return one compact project snapshot: project, todos, relations, decisions, inbox, runs, history and approved secrets.",
+    inputSchema: { project: z.string().default("MBOX") },
+  },
+  async ({ project }) => {
+    const data = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project)}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );
 
@@ -92,18 +107,112 @@ server.registerTool(
       from_project: z.string(),
       to_project: z.string(),
       edge_type: z.string().default("related"),
+      group_entity: z.string().default(""),
+      owner: z.string().default(""),
+      description: z.string().default(""),
+      strength: z.number().default(1),
     },
   },
-  async ({ from_project, to_project, edge_type }) => {
+  async ({ from_project, to_project, edge_type, group_entity, owner, description, strength }) => {
     const projects = await mboxFetch("/api/mbox/projects");
     const from = projects.projects.find((item) => item.name === from_project);
     const to = projects.projects.find((item) => item.name === to_project);
     if (!from || !to) throw new Error("Project not found");
     const data = await mboxFetch("/api/mbox/graph/edges", {
       method: "POST",
-      body: JSON.stringify({ from_id: from.id, to_id: to.id, edge_type }),
+      body: JSON.stringify({ from_id: from.id, to_id: to.id, edge_type, group_entity, owner, description, strength }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.registerTool(
+  "claim_task",
+  {
+    title: "Claim MBOX task",
+    description: "Claim a todo lease so another agent does not work on it at the same time.",
+    inputSchema: { id: z.string(), minutes: z.number().default(45) },
+  },
+  async ({ id, minutes }) => {
+    const data = await mboxFetch(`/api/mbox/todos/${id}/claim`, {
+      method: "POST",
+      body: JSON.stringify({ agent_name: agentName, minutes }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data.todo, null, 2) }] };
+  },
+);
+
+server.registerTool(
+  "create_inbox_item",
+  {
+    title: "Create MBOX agent inbox item",
+    description: "Write a notice, proposal or human decision request into the agent inbox.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      title: z.string(),
+      body: z.string().default(""),
+      item_type: z.string().default("notice"),
+      priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
+      requires_human: z.boolean().default(false),
+    },
+  },
+  async ({ project, title, body, item_type, priority, requires_human }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    const data = await mboxFetch("/api/mbox/agent/inbox", {
+      method: "POST",
+      body: JSON.stringify({ project_id: target?.id || null, agent_name: agentName, title, body, item_type, priority, requires_human }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data.inbox_item, null, 2) }] };
+  },
+);
+
+server.registerTool(
+  "create_agent_run",
+  {
+    title: "Create MBOX agent run",
+    description: "Start or record an agent work session.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      todo_id: z.string().optional(),
+      goal: z.string(),
+      status: z.string().default("running"),
+      touched_files: z.array(z.string()).default([]),
+      result: z.string().default(""),
+    },
+  },
+  async ({ project, todo_id, goal, status, touched_files, result }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    const data = await mboxFetch("/api/mbox/agent/runs", {
+      method: "POST",
+      body: JSON.stringify({ project_id: target?.id || null, todo_id: todo_id || null, agent_name: agentName, goal, status, touched_files, result }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data.run, null, 2) }] };
+  },
+);
+
+server.registerTool(
+  "record_decision",
+  {
+    title: "Record MBOX decision",
+    description: "Write a decision log entry explaining why something was done.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      title: z.string(),
+      decision: z.string(),
+      rationale: z.string().default(""),
+      impact: z.string().default(""),
+    },
+  },
+  async ({ project, title, decision, rationale, impact }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    const data = await mboxFetch("/api/mbox/decisions", {
+      method: "POST",
+      body: JSON.stringify({ project_id: target?.id || null, actor: agentName, title, decision, rationale, impact }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data.decision, null, 2) }] };
   },
 );
 

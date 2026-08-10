@@ -406,6 +406,29 @@ button {
   border-color: rgba(255, 138, 128, .2);
 }
 
+.toast-stack {
+  position: fixed;
+  top: 58px;
+  right: 18px;
+  z-index: 80;
+  width: min(360px, calc(100vw - 24px));
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.browser-toast {
+  border: var(--border-width) solid rgba(255,255,255,.1);
+  border-radius: 24px;
+  padding: 12px 14px;
+  background: rgba(44, 44, 46, .82);
+  color: #dce8f8;
+  box-shadow: var(--chin-shadow), 0 18px 46px rgba(0,0,0,.36);
+  backdrop-filter: blur(22px) saturate(160%);
+  font-size: 13px;
+  font-weight: 760;
+}
+
 .bottom-nav .nav-item {
   transform: none;
 }
@@ -1323,6 +1346,38 @@ time {
   color: var(--text-muted);
 }
 
+.agent-entity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-entity-row {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 22px;
+  padding: 11px 13px;
+  background: rgba(44,44,46,.66);
+  box-shadow: var(--chin-shadow);
+}
+
+.agent-entity-row.needs-human {
+  border-color: rgba(255, 204, 102, .28);
+}
+
+.agent-entity-row strong {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.agent-entity-row span,
+.agent-entity-row p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .agent-guide {
   display: grid;
   gap: 10px;
@@ -1366,13 +1421,14 @@ time {
 
 .relation-form {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.2fr) auto;
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr) minmax(120px, .9fr) minmax(120px, .9fr) 82px auto;
   gap: 10px;
 }
 
 .relation-form select,
 .relation-form input,
-.project-props-editor textarea {
+.project-props-editor textarea,
+.relation-description {
   width: 100%;
   border: var(--border-width) solid var(--border-color);
   border-radius: 24px;
@@ -1386,6 +1442,14 @@ time {
 .relation-form select,
 .relation-form input {
   height: 42px;
+}
+
+.relation-description {
+  min-height: 78px;
+  max-height: 160px;
+  padding: 12px 14px;
+  resize: vertical;
+  box-shadow: var(--container-inset);
 }
 
 .relation-entity-form {
@@ -1890,6 +1954,13 @@ time {
     white-space: nowrap;
     font-size: 12px;
     padding: 0 10px;
+  }
+
+  .toast-stack {
+    top: 56px;
+    right: 10px;
+    left: 10px;
+    width: auto;
   }
 
   .hero-band,

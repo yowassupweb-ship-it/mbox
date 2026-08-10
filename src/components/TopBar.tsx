@@ -5,9 +5,10 @@ type TopBarProps = {
   onQueryChange: (query: string) => void;
   realtimeState?: "connecting" | "connected" | "thinking" | "working" | "offline";
   realtimeLabel?: string;
+  notice?: string;
 };
 
-export function TopBar({ query, onQueryChange, realtimeState = "connecting", realtimeLabel = "Агент подключается" }: TopBarProps) {
+export function TopBar({ query, onQueryChange, realtimeState = "connecting", realtimeLabel = "Агент подключается", notice = "" }: TopBarProps) {
   return (
     <header className="topbar">
       <div className="search-shell">
@@ -15,7 +16,7 @@ export function TopBar({ query, onQueryChange, realtimeState = "connecting", rea
         <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Поиск" />
       </div>
       <div className={`realtime-pill ${realtimeState}`}>
-        {realtimeLabel}
+        {notice || realtimeLabel}
       </div>
     </header>
   );

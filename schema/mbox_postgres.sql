@@ -98,12 +98,18 @@ CREATE TABLE IF NOT EXISTS todos (
   priority TEXT NOT NULL DEFAULT 'normal',
   props JSONB NOT NULL DEFAULT '{}',
   access_level TEXT NOT NULL DEFAULT 'private',
+  claimed_by TEXT NOT NULL DEFAULT '',
+  claimed_until TIMESTAMPTZ,
+  heartbeat_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE todos ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE todos ADD COLUMN IF NOT EXISTS props JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS claimed_until TIMESTAMPTZ;
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id BIGSERIAL PRIMARY KEY,
@@ -126,9 +132,22 @@ CREATE TABLE IF NOT EXISTS graph_edges (
   to_entity TEXT NOT NULL,
   to_id BIGINT NOT NULL,
   edge_type TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  owner TEXT NOT NULL DEFAULT '',
+  group_entity TEXT NOT NULL DEFAULT '',
+  strength DOUBLE PRECISION NOT NULL DEFAULT 1,
+  valid_until TIMESTAMPTZ,
   score DOUBLE PRECISION,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE graph_edges ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
+ALTER TABLE graph_edges ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE graph_edges ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT '';
+ALTER TABLE graph_edges ADD COLUMN IF NOT EXISTS group_entity TEXT NOT NULL DEFAULT '';
+ALTER TABLE graph_edges ADD COLUMN IF NOT EXISTS strength DOUBLE PRECISION NOT NULL DEFAULT 1;
+ALTER TABLE graph_edges ADD COLUMN IF NOT EXISTS valid_until TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS server_metrics (
   id BIGSERIAL PRIMARY KEY,
@@ -173,16 +192,63 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS agent_inbox (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
+  agent_name TEXT NOT NULL DEFAULT 'agent',
+  item_type TEXT NOT NULL DEFAULT 'notice',
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  priority TEXT NOT NULL DEFAULT 'normal',
+  requires_human BOOLEAN NOT NULL DEFAULT false,
+  props JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
+  todo_id BIGINT REFERENCES todos(id) ON DELETE SET NULL,
+  agent_name TEXT NOT NULL DEFAULT 'agent',
+  status TEXT NOT NULL DEFAULT 'running',
+  goal TEXT NOT NULL DEFAULT '',
+  read_context JSONB NOT NULL DEFAULT '[]',
+  commands JSONB NOT NULL DEFAULT '[]',
+  touched_files JSONB NOT NULL DEFAULT '[]',
+  result TEXT NOT NULL DEFAULT '',
+  props JSONB NOT NULL DEFAULT '{}',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS decision_log (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
+  agent_run_id BIGINT REFERENCES agent_runs(id) ON DELETE SET NULL,
+  actor TEXT NOT NULL DEFAULT 'agent',
+  title TEXT NOT NULL,
+  decision TEXT NOT NULL DEFAULT '',
+  rationale TEXT NOT NULL DEFAULT '',
+  impact TEXT NOT NULL DEFAULT '',
+  props JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_memories_search ON memories USING GIN(search_vector);
 CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_memories_metadata ON memories USING GIN(metadata);
 CREATE INDEX IF NOT EXISTS idx_memories_access ON memories(access_level);
 CREATE INDEX IF NOT EXISTS idx_artifacts_folder ON artifacts(folder_id);
 CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id);
+CREATE INDEX IF NOT EXISTS idx_todos_claimed ON todos(claimed_by, claimed_until);
 CREATE INDEX IF NOT EXISTS idx_todos_props ON todos USING GIN(props);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_todos_project_title ON todos(project_id, title);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_from ON graph_edges(from_entity, from_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_to ON graph_edges(to_entity, to_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_group ON graph_edges(group_entity);
 CREATE INDEX IF NOT EXISTS idx_projects_props ON projects USING GIN(props);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_parent_name_safe ON folders((COALESCE(parent_id, 0)), name);
 CREATE INDEX IF NOT EXISTS idx_server_metrics_captured ON server_metrics(captured_at DESC);
@@ -191,6 +257,9 @@ CREATE INDEX IF NOT EXISTS idx_protected_secrets_project ON protected_secrets(pr
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_agent_inbox_status ON agent_inbox(status, priority, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_active ON agent_runs(status, heartbeat_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_log_project ON decision_log(project_id, created_at DESC);
 
 CREATE OR REPLACE FUNCTION write_audit_event()
 RETURNS trigger AS $$
@@ -244,6 +313,21 @@ FOR EACH ROW EXECUTE FUNCTION write_audit_event();
 DROP TRIGGER IF EXISTS trg_audit_protected_secrets ON protected_secrets;
 CREATE TRIGGER trg_audit_protected_secrets
 AFTER INSERT OR UPDATE OR DELETE ON protected_secrets
+FOR EACH ROW EXECUTE FUNCTION write_audit_event();
+
+DROP TRIGGER IF EXISTS trg_audit_agent_inbox ON agent_inbox;
+CREATE TRIGGER trg_audit_agent_inbox
+AFTER INSERT OR UPDATE OR DELETE ON agent_inbox
+FOR EACH ROW EXECUTE FUNCTION write_audit_event();
+
+DROP TRIGGER IF EXISTS trg_audit_agent_runs ON agent_runs;
+CREATE TRIGGER trg_audit_agent_runs
+AFTER INSERT OR UPDATE OR DELETE ON agent_runs
+FOR EACH ROW EXECUTE FUNCTION write_audit_event();
+
+DROP TRIGGER IF EXISTS trg_audit_decision_log ON decision_log;
+CREATE TRIGGER trg_audit_decision_log
+AFTER INSERT OR UPDATE OR DELETE ON decision_log
 FOR EACH ROW EXECUTE FUNCTION write_audit_event();
 
 INSERT INTO users(email, username, password_hash, role)
