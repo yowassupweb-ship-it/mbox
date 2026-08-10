@@ -212,6 +212,7 @@ button {
   font-size: 14px;
   font-weight: 760;
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .nav-item.active {
@@ -583,6 +584,73 @@ button {
   overscroll-behavior: contain;
 }
 
+.agent-work-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.agent-work-column {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 28px;
+  background: var(--panel-bg);
+  box-shadow: var(--chin-shadow);
+  padding: 14px;
+  min-width: 0;
+}
+
+.agent-work-column h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.agent-work-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: #e8edf7;
+}
+
+.agent-work-row + .agent-work-row {
+  margin-top: 8px;
+}
+
+.agent-work-row small {
+  color: #9aa5b7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-work-row.needs-human {
+  color: #ffd7a8;
+}
+
+.agent-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #8aa4c2;
+  box-shadow: 0 0 0 4px rgba(138, 164, 194, .12);
+}
+
+.agent-dot.active,
+.agent-dot.running,
+.agent-dot.doing {
+  background: #7cc6ff;
+}
+
+.agent-dot.inbox {
+  background: #ffd27d;
+}
+
+.agent-dot.decision {
+  background: #a7d79b;
+}
+
 .folder-tree {
   display: grid;
   gap: 8px;
@@ -926,6 +994,74 @@ button {
 .note-editor {
   display: grid;
   gap: 12px;
+}
+
+.todo-card-board {
+  display: grid;
+  gap: 14px;
+}
+
+.todo-note-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.todo-note-card {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 28px;
+  background: var(--element-bg);
+  box-shadow: var(--chin-shadow);
+  padding: 15px;
+  min-height: 142px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.todo-note-card.is-done {
+  opacity: .46;
+  filter: grayscale(1);
+}
+
+.todo-note-card.is-done strong,
+.todo-note-card.is-done p {
+  text-decoration: line-through;
+}
+
+.todo-note-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.todo-note-card-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-note-card p {
+  margin: 0;
+  color: #d8dfeb;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.todo-note-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.todo-note-card-meta span {
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: rgba(255,255,255,.06);
+  color: #aeb8c8;
+  font-size: 12px;
 }
 
 .todo-guide {
@@ -1898,6 +2034,7 @@ time {
   .metrics-grid,
   .content-grid.two,
   .overview-grid,
+  .agent-work-board,
   .project-workspace,
   .settings-grid,
   .server-grid {

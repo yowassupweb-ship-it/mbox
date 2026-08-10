@@ -279,7 +279,7 @@ BEGIN
   title_value := COALESCE(row_data->>'title', row_data->>'name', TG_TABLE_NAME || ' #' || COALESCE(entity_id_value::TEXT, ''));
 
   INSERT INTO audit_events(actor, action, entity_type, entity_id, project_id, summary, metadata)
-  VALUES ('system', lower(TG_OP), TG_TABLE_NAME, entity_id_value, project_id_value, title_value, row_data);
+  VALUES (COALESCE(NULLIF(current_setting('mbox.actor', true), ''), 'system'), lower(TG_OP), TG_TABLE_NAME, entity_id_value, project_id_value, title_value, row_data);
 
   RETURN COALESCE(NEW, OLD);
 END;

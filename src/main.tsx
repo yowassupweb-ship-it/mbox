@@ -1,4 +1,4 @@
-import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+﻿import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
@@ -251,6 +251,43 @@ const sections: Array<{ key: SectionKey; label: string; icon: LucideIcon }> = [
   { key: "settings", label: "Доступ", icon: ShieldCheck },
 ];
 
+const sectionKeys = new Set<SectionKey>(sections.map((section) => section.key));
+
+function sectionFromLocation(): SectionKey {
+  const raw = window.location.pathname.split("/").filter(Boolean)[0] as SectionKey | undefined;
+  return raw && sectionKeys.has(raw) ? raw : "overview";
+}
+
+function queryFromLocation() {
+  return new URLSearchParams(window.location.search).get("q") ?? "";
+}
+
+function nodeFromLocation() {
+  return new URLSearchParams(window.location.search).get("node") ?? "";
+}
+
+function nodeRouteKey(node: FolderTreeNode | null) {
+  if (!node) return "";
+  return `${node.type ?? "node"}:${node.entityKind ?? ""}:${node.id ?? node.name}`;
+}
+
+function findNodeByRouteKey(nodes: FolderTreeNode[], key: string): FolderTreeNode | null {
+  for (const node of nodes) {
+    if (nodeRouteKey(node) === key) return node;
+    const child = node.children ? findNodeByRouteKey(node.children, key) : null;
+    if (child) return child;
+  }
+  return null;
+}
+
+function routeFor(section: SectionKey, query = "", nodeKey = "") {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  if (nodeKey) params.set("node", nodeKey);
+  const search = params.toString();
+  return `/${section}${search ? `?${search}` : ""}`;
+}
+
 const todoStatusLabels: Record<string, string> = {
   open: "Новая",
   next: "Следующая",
@@ -327,10 +364,35 @@ function App() {
 }
 
 function Workspace({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
-  const [section, setSection] = useState<SectionKey>("overview");
-  const [query, setQuery] = useState("");
+  const [section, setSectionState] = useState<SectionKey>(() => sectionFromLocation());
+  const [query, setQueryState] = useState(() => queryFromLocation());
+  const [selectedNodeKey, setSelectedNodeKeyState] = useState(() => nodeFromLocation());
   const data = useMboxData(query);
   const realtime = useRealtime(data.reload);
+
+  const setRoute = useCallback((nextSection: SectionKey, nextQuery = query, nextNodeKey = selectedNodeKey, mode: "push" | "replace" = "push") => {
+    setSectionState(nextSection);
+    setQueryState(nextQuery);
+    setSelectedNodeKeyState(nextNodeKey);
+    const nextUrl = routeFor(nextSection, nextQuery, nextNodeKey);
+    if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
+      window.history[mode === "push" ? "pushState" : "replaceState"]({}, "", nextUrl);
+    }
+  }, [query, selectedNodeKey]);
+
+  const setSection = useCallback((nextSection: SectionKey) => setRoute(nextSection, query, "", "push"), [query, setRoute]);
+  const setQuery = useCallback((nextQuery: string) => setRoute(section, nextQuery, selectedNodeKey, "replace"), [section, selectedNodeKey, setRoute]);
+  const setSelectedNodeKey = useCallback((nextNodeKey: string) => setRoute(section, query, nextNodeKey, "replace"), [section, query, setRoute]);
+
+  useEffect(() => {
+    function syncFromLocation() {
+      setSectionState(sectionFromLocation());
+      setQueryState(queryFromLocation());
+      setSelectedNodeKeyState(nodeFromLocation());
+    }
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, []);
 
   return (
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
@@ -338,15 +400,15 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         <TopBar query={query} onQueryChange={setQuery} realtimeState={realtime.state} realtimeLabel={realtime.label} notice={realtime.notice} />
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
-        {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} onSaved={data.reload} />}
-        {section === "projects" && <ProjectsBoard projects={data.projects} query={query} onSaved={data.reload} />}
+        {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
+        {section === "projects" && <ProjectsBoard projects={data.projects} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
         {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
         {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
       </main>
       <RealtimeToasts notices={realtime.notices} />
-      <BottomNav sections={sections} activeSection={section} onSelect={setSection} />
+      <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} />
     </div>
   );
 }
@@ -547,6 +609,7 @@ function Overview({ data }: { data: ReturnType<typeof useMboxData> }) {
           <ProjectList projects={data.projects.slice(0, 5)} />
         </Panel>
       </div>
+      <AgentWorkBoard agents={data.agents} runs={data.runs} inbox={data.inbox} decisions={data.decisions} />
     </>
   );
 }
@@ -560,15 +623,78 @@ function MemoryBoard({ memories, onSaved }: { memories: Memory[]; onSaved: () =>
   );
 }
 
-function ArtifactsBoard({ artifacts, folders, query, onSaved }: { artifacts: Artifact[]; folders: FolderRow[]; query: string; onSaved: () => void }) {
+function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
+  const activeRuns = runs.filter((run) => ["running", "doing"].includes(run.status)).slice(0, 4);
+  const visibleRuns = activeRuns.length ? activeRuns : runs.slice(0, 4);
+
+  return (
+    <section className="agent-work-board" aria-label="Работа агентов">
+      <div className="agent-work-column">
+        <h3>Агенты</h3>
+        {agents.length ? agents.slice(0, 6).map((agent) => (
+          <div className="agent-work-row" key={agent.id}>
+            <span className={`agent-dot ${agent.status}`} />
+            <strong>{agent.name}</strong>
+            <small>{agent.status} · {agent.active_sessions} сессий</small>
+          </div>
+        )) : <EmptyState text="Агенты пока не подключены" />}
+      </div>
+      <div className="agent-work-column">
+        <h3>Сессии</h3>
+        {visibleRuns.length ? visibleRuns.map((run) => (
+          <div className="agent-work-row" key={run.id}>
+            <span className={`agent-dot ${run.status}`} />
+            <strong>{run.agent_name}</strong>
+            <small>{run.goal}</small>
+          </div>
+        )) : <EmptyState text="Сессий пока нет" />}
+      </div>
+      <div className="agent-work-column">
+        <h3>Inbox</h3>
+        {inbox.slice(0, 4).map((item) => (
+          <div className={item.requires_human ? "agent-work-row needs-human" : "agent-work-row"} key={item.id}>
+            <span className="agent-dot inbox" />
+            <strong>{item.agent_name}</strong>
+            <small>{item.title}</small>
+          </div>
+        ))}
+        {!inbox.length && <EmptyState text="Входящие пусты" />}
+      </div>
+      <div className="agent-work-column">
+        <h3>Решения</h3>
+        {decisions.slice(0, 4).map((decision) => (
+          <div className="agent-work-row" key={decision.id}>
+            <span className="agent-dot decision" />
+            <strong>{decision.actor}</strong>
+            <small>{decision.title}</small>
+          </div>
+        ))}
+        {!decisions.length && <EmptyState text="Решений пока нет" />}
+      </div>
+    </section>
+  );
+}
+
+function ArtifactsBoard({ artifacts, folders, query, selectedNodeKey, onSelectedNodeKey, onSaved }: { artifacts: Artifact[]; folders: FolderRow[]; query: string; selectedNodeKey: string; onSelectedNodeKey: (key: string) => void; onSaved: () => void }) {
   const roots = useMemo(() => filterTree(buildArtifactTree(artifacts, folders), query), [artifacts, folders, query]);
   const [menu, setMenu] = useState<TreeMenuState | null>(null);
   const [selectedNode, setSelectedNode] = useState<FolderTreeNode | null>(null);
+
+  useEffect(() => {
+    if (!selectedNodeKey) return;
+    const node = findNodeByRouteKey(roots, selectedNodeKey);
+    if (node) setSelectedNode(node);
+  }, [roots, selectedNodeKey]);
+
+  function selectNode(node: FolderTreeNode) {
+    setSelectedNode(node);
+    onSelectedNodeKey(nodeRouteKey(node));
+  }
   return (
     <div className="content-grid settings-grid">
       <Panel title="Папки" icon={FolderKanban}>
         <FolderForm folders={folders} onSaved={onSaved} />
-        {roots.length ? <FolderTree key={query} defaultOpen={query ? roots.map((node) => node.name) : []} roots={roots} onSelect={setSelectedNode} onContext={(node, position) => setMenu({ node, position })} /> : <EmptyState text="Артефактов в базе пока нет" />}
+        {roots.length ? <FolderTree key={query} defaultOpen={query ? roots.map((node) => node.name) : []} roots={roots} onSelect={selectNode} onContext={(node, position) => setMenu({ node, position })} /> : <EmptyState text="Артефактов в базе пока нет" />}
       </Panel>
       <Panel title="Просмотр" icon={Archive}>
         <ArtifactForm folders={folders} onSaved={onSaved} />
@@ -579,7 +705,7 @@ function ArtifactsBoard({ artifacts, folders, query, onSaved }: { artifacts: Art
   );
 }
 
-function ProjectsBoard({ projects, query, onSaved }: { projects: Project[]; query: string; onSaved: () => void }) {
+function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNodeKey, onSaved }: { projects: Project[]; query: string; selectedNodeKey: string; onSelectedNodeKey: (key: string) => void; onSaved: () => void }) {
   const [items, setItems] = useState(projects);
   const [menu, setMenu] = useState<TreeMenuState | null>(null);
   const [selectedNode, setSelectedNode] = useState<FolderTreeNode | null>(null);
@@ -588,6 +714,17 @@ function ProjectsBoard({ projects, query, onSaved }: { projects: Project[]; quer
   useEffect(() => {
     setItems(projects);
   }, [projects]);
+
+  useEffect(() => {
+    if (!selectedNodeKey) return;
+    const node = findNodeByRouteKey(roots, selectedNodeKey);
+    if (node) setSelectedNode(node);
+  }, [roots, selectedNodeKey]);
+
+  function selectNode(node: FolderTreeNode) {
+    setSelectedNode(node);
+    onSelectedNodeKey(nodeRouteKey(node));
+  }
 
   async function updateProjectColor(projectId: string, color: string) {
     setItems((current) => current.map((project) => project.id === projectId ? { ...project, color } : project));
@@ -603,7 +740,7 @@ function ProjectsBoard({ projects, query, onSaved }: { projects: Project[]; quer
     <div className="project-workspace">
       <Panel title="Проекты" icon={FolderKanban}>
         <ProjectForm onSaved={onSaved} />
-        {roots.length ? <FolderTree key={query} defaultOpen={query ? roots.map((node) => node.name) : []} roots={roots} onSelect={setSelectedNode} onContext={(node, position) => setMenu({ node, position })} /> : <EmptyState text="Проектов в базе пока нет" />}
+        {roots.length ? <FolderTree key={query} defaultOpen={query ? roots.map((node) => node.name) : []} roots={roots} onSelect={selectNode} onContext={(node, position) => setMenu({ node, position })} /> : <EmptyState text="Проектов в базе пока нет" />}
       </Panel>
       <Panel title="Просмотр" icon={BookOpen}>
         <ProjectInspector node={selectedNode} projects={items} fallbackProject={items[0]} onColorChange={updateProjectColor} onSaved={onSaved} />
@@ -623,6 +760,11 @@ function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSa
     const project = projects.find((item) => item.todos.some((todo) => todo.id === node.id));
     const todo = project?.todos.find((item) => item.id === node.id);
     if (project && todo) return <TodoNote project={project} todo={todo} onSaved={onSaved} />;
+  }
+
+  if (node?.type === "todo_group" && node.id) {
+    const project = projects.find((item) => item.id === node.id);
+    if (project) return <ProjectTodoCards project={project} />;
   }
 
   if (node?.type === "project" && node.id) {
@@ -811,6 +953,39 @@ function ProjectTodoNotes({ project, projects, onColorChange, onSaved }: { proje
           setSaveState("error");
         }
       }}>{saveState === "saving" ? "Сохраняю" : saveState === "saved" ? "Сохранено" : saveState === "error" ? "Ошибка" : "Сохранить заметку"}</button>
+    </div>
+  );
+}
+
+function ProjectTodoCards({ project }: { project: Project }) {
+  const todos = sortTodos(project.todos);
+  const activeCount = todos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
+
+  return (
+    <div className="todo-card-board">
+      <div className="entity-line">
+        <strong>Todo · {project.name}</strong>
+        <span>{activeCount} активно · {todos.length} всего</span>
+      </div>
+      {todos.length ? (
+        <div className="todo-note-grid">
+          {todos.map((todo) => (
+            <article className={["todo-note-card", ["done", "archived"].includes(todo.status) ? "is-done" : "", todo.status === "doing" ? "is-doing" : ""].filter(Boolean).join(" ")} key={todo.id}>
+              <div className="todo-note-card-head">
+                {todo.status === "doing" && <span className="todo-spinner" aria-label="В работе" />}
+                <strong>{todo.title}</strong>
+              </div>
+              {todo.note && <p>{todo.note}</p>}
+              <div className="todo-note-card-meta">
+                <span>{todoStatusLabel(todo.status)}</span>
+                <span>{todoPriorityLabel(todo.priority)}</span>
+                {todo.claimed_by && <span>{todo.claimed_by}</span>}
+                <span>{formatBytes(todo.memory_bytes)}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : <EmptyState text="Todo пока нет" />}
     </div>
   );
 }
@@ -1111,11 +1286,10 @@ function GraphBoard({ folders, memories, projects, edges, onSaved }: { folders: 
 
   function updateLinkCursor(event: PointerEvent<HTMLDivElement>) {
     if (!linkSource) return;
-    const world = event.currentTarget.querySelector(".graph-world");
-    const rect = world?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+    const rect = event.currentTarget.getBoundingClientRect();
     setLinkCursor({
-      x: Math.min(100, Math.max(0, ((event.clientX - rect.left) / rect.width) * 100)),
-      y: Math.min(100, Math.max(0, ((event.clientY - rect.top) / rect.height) * 100)),
+      x: Math.min(100, Math.max(0, ((event.clientX - rect.left - view.x) / view.scale / rect.width) * 100)),
+      y: Math.min(100, Math.max(0, ((event.clientY - rect.top - view.y) / view.scale / rect.height) * 100)),
     });
   }
 
@@ -1123,7 +1297,7 @@ function GraphBoard({ folders, memories, projects, edges, onSaved }: { folders: 
     <section className="graph-fullscreen" aria-label="Карта графа MBOX">
       <div className="graph-link-tools">
         <input value={linkType} onChange={(event) => setLinkType(event.target.value)} placeholder="тип связи" />
-        <span>{linkSource ? `нить от: ${linkSource.label}` : "нажми проект и протяни нить ко второму"}</span>
+        {linkSource && <span>нить от: {linkSource.label}</span>}
         {linkSource && <button type="button" onClick={() => {
           setLinkSource(null);
           setLinkCursor(null);
@@ -1190,7 +1364,7 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
             <article className="timeline-item" key={event.id}>
               <div>
                 <strong>{event.summary || `${event.entity_type} #${event.entity_id ?? ""}`}</strong>
-                <span>{event.action} · {event.entity_type} · {formatBytes(event.memory_bytes)}</span>
+                <span>{event.actor || "system"} · {event.action} · {event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""} · {formatBytes(event.memory_bytes)}</span>
               </div>
               <time>{formatDateTime(event.created_at)}</time>
             </article>
@@ -1949,7 +2123,7 @@ function projectToTree(project: Project): FolderTreeNode {
     meta: `${project.status} · ${formatBytes(project.memory_bytes)}`,
     color: project.color,
     children: [
-      { type: "todo_group", name: `Todo (${openTodos})`, meta: "заметки задач", color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
+      { id: project.id, type: "todo_group", name: `Todo (${openTodos})`, meta: "заметки задач", color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
       { id: project.id, type: "project_entity", entityKind: "git", name: "Git", meta: project.git_url ? "репозиторий" : "не указан", color: "#2e4a3a", children: [{ type: "meta", name: project.git_url || "Git не указан" }] },
       { id: project.id, type: "project_entity", entityKind: "relations", name: "Связи", meta: `${relatedNames.length}`, children: relatedNames.length ? relatedNames.map((name) => ({ type: "meta", name })) : [{ type: "meta", name: "Связей нет" }] },
       { id: project.id, type: "project_entity", entityKind: "properties", name: "Свойства", meta: `${Object.keys(project.props || {}).length}`, children: Object.entries(project.props || {}).map(([key, value]) => ({ type: "meta", name: `${key}: ${value}` })) },
@@ -2030,3 +2204,4 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+

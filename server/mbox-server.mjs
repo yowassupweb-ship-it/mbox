@@ -3,6 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Client } from "pg";
 import { WebSocketServer } from "ws";
 
@@ -16,6 +17,7 @@ loadEnv(path.join(root, ".env.local"));
 const port = Number(process.env.MBOX_PORT || process.env.PORT || 3000);
 const host = process.env.MBOX_HOST || "127.0.0.1";
 const realtimeClients = new Set();
+const requestContext = new AsyncLocalStorage();
 const agentStructure = {
   entity_model: {
     projects: "root work folders. Each project owns todos, git, deploy, stack and access scopes.",
@@ -139,6 +141,8 @@ async function query(sql, values = []) {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try {
+    const actor = requestContext.getStore()?.actor;
+    if (actor) await client.query("SELECT set_config('mbox.actor', $1, false)", [actor]);
     return await client.query(sql, values);
   } finally {
     await client.end();
@@ -169,6 +173,10 @@ async function requireUser(req, res) {
 }
 
 async function handleApi(req, res, url) {
+  return requestContext.run({ actor: actorFromReq(req) }, () => handleApiWithContext(req, res, url));
+}
+
+async function handleApiWithContext(req, res, url) {
   const q = url.searchParams.get("q")?.trim() || "";
 
   if (url.pathname === "/api/mbox/auth/login" && req.method === "POST") {
@@ -523,9 +531,9 @@ async function handleApi(req, res, url) {
          status = COALESCE(NULLIF($3, ''), status),
          priority = COALESCE(NULLIF($4, ''), priority),
          props = COALESCE($6, props),
-         claimed_by = COALESCE($7, claimed_by),
-         claimed_until = COALESCE($8, claimed_until),
-         heartbeat_at = CASE WHEN $9 THEN now() ELSE heartbeat_at END,
+         claimed_by = CASE WHEN $3 IN ('done', 'archived') THEN '' ELSE COALESCE($7, claimed_by) END,
+         claimed_until = CASE WHEN $3 IN ('done', 'archived') THEN NULL ELSE COALESCE($8, claimed_until) END,
+         heartbeat_at = CASE WHEN $3 IN ('done', 'archived') THEN NULL WHEN $9 THEN now() ELSE heartbeat_at END,
          updated_at = now()
        WHERE id = $5
        RETURNING id::text`,

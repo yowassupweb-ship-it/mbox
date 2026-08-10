@@ -11,17 +11,21 @@ type BottomNavProps = {
   sections: NavSection[];
   activeSection: SectionKey;
   onSelect: (section: SectionKey) => void;
+  hrefFor: (section: SectionKey) => string;
 };
 
-export function BottomNav({ sections, activeSection, onSelect }: BottomNavProps) {
+export function BottomNav({ sections, activeSection, onSelect, hrefFor }: BottomNavProps) {
   return (
     <nav className="bottom-nav" aria-label="Основные разделы">
       <div className="bottom-nav-inner">
         {sections.map(({ key, label, icon: Icon }) => (
-          <button className={activeSection === key ? "nav-item active" : "nav-item"} key={key} onClick={() => onSelect(key)}>
+          <a className={activeSection === key ? "nav-item active" : "nav-item"} href={hrefFor(key)} key={key} onClick={(event) => {
+            event.preventDefault();
+            onSelect(key);
+          }}>
             <Icon size={18} />
             <span>{label}</span>
-          </button>
+          </a>
         ))}
       </div>
     </nav>
