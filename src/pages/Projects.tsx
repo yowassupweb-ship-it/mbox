@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FolderPlus, Folder, ListTodo, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
+import { FolderBoard } from "../features/projects/FolderBoard";
 import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
 import { formatBytes } from "../lib/format";
 import { fetchJson } from "../lib/api";
-import type { FolderRow, Project } from "../types";
+import type { FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
 
 // Кроме восьми постоянных сущностей у проекта могут быть свои папки: folder:<id>.
@@ -20,7 +21,7 @@ function parseRoute(key: string): { projectId?: string; view: View } {
   return { projectId: projectId || undefined, view: (known as string[]).includes(view) ? (view as View) : "todo" };
 }
 
-export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNodeKey, onSaved, renderEntity, renderTodoForm, onProjectContext, folders }: {
+export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNodeKey, onSaved, renderEntity, renderTodoForm, onProjectContext, folders, memories }: {
   projects: Project[];
   query: string;
   selectedNodeKey: string;
@@ -29,6 +30,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   renderEntity: (project: Project, kind: ProjectEntityKind) => ReactNode;
   renderTodoForm: (project: Project) => ReactNode;
   folders: FolderRow[];
+  memories: Memory[];
   onProjectContext?: (project: Project, position: { x: number; y: number }) => void;
 }) {
   const route = parseRoute(selectedNodeKey);
@@ -168,7 +170,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
             <TodoCardGrid project={project} onSaved={onSaved} />
           </>
         ) : openFolder ? (
-          <EmptyState text={`Папка «${openFolder.name}» пока пуста. Складывать в неё сущности будем следующим шагом.`} />
+          <FolderBoard folder={openFolder} project={project} memories={memories} onSaved={onSaved} />
         ) : renderEntity(project, view as ProjectEntityKind)}
       </section>
     </div>

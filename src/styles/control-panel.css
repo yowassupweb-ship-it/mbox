@@ -380,6 +380,71 @@
 
 .relation-add-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 
+/* Содержимое папки проекта: записи и форма новой записи. */
+
+.folder-board { display: grid; gap: var(--space-4); justify-items: start; }
+
+.folder-notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.folder-note {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+}
+
+.folder-note header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.folder-note header strong { min-width: 0; overflow-wrap: anywhere; }
+
+.folder-note header button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.folder-note header button:hover { background: rgba(255, 255, 255, .06); color: var(--text-main); }
+.folder-note header button:last-child:hover { color: var(--state-danger); }
+
+.folder-note p {
+  margin: 0;
+  color: #d8dfeb;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.folder-note footer { color: var(--text-muted); font-size: var(--text-xs); }
+.folder-note.is-editing { grid-column: 1 / -1; }
+
+.folder-note-form {
+  display: grid;
+  gap: var(--space-3);
+  width: min(100%, 620px);
+}
+
+.folder-note-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+
 /* Постоянные сущности проекта. У каждой своя форма, а не общая textarea. */
 
 .entity-panel { display: grid; gap: var(--space-4); justify-items: start; }

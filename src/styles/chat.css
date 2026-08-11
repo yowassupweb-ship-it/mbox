@@ -255,6 +255,10 @@
   backdrop-filter: blur(18px) saturate(150%);
 }
 
+.agent-chat-toggle {
+  max-width: var(--chat-slot);
+}
+
 .agent-chat-toggle b {
   min-width: 20px;
   padding: 0 7px;
@@ -263,6 +267,37 @@
   color: #04210e;
   font-size: var(--text-xs);
   line-height: 20px;
+}
+
+/*
+ * Тесно — кнопка сворачивается в кружок с иконкой, и место под неё сжимается вместе с ней.
+ * Панель навигации читает ту же переменную, поэтому подпирать её магическим числом не нужно:
+ * сузилась кнопка — сразу освободилось место под разделы.
+ */
+@media (max-width: 900px) {
+  :root { --chat-slot: 56px; }
+
+  .agent-chat-toggle {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+    position: relative;
+  }
+
+  .agent-chat-toggle span { display: none; }
+
+  .agent-chat-toggle b {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    padding: 0 5px;
+    font-size: 10px;
+    line-height: 18px;
+    box-shadow: 0 0 0 2px var(--bg-color);
+  }
+
+  .agent-chat-toggle .chat-dot { position: absolute; bottom: 2px; right: 6px; }
 }
 
 @media (max-width: 720px) {

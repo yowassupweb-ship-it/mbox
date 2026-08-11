@@ -2,6 +2,8 @@ export type SectionKey = "overview" | "memories" | "artifacts" | "projects" | "g
 
 export type Memory = {
   id: string;
+  folder_id: string | null;
+  project_id?: string | null;
   title: string;
   content: string;
   entity_type: string;

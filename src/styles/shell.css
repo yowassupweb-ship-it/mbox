@@ -192,10 +192,18 @@
   justify-content: flex-start;
   align-items: center;
   gap: 10px;
-  padding-right: 150px;
-  overflow: hidden;
+  /* Справа — место под кнопку «Агенты», слева от неё разделы прокручиваются.
+     Прокрутка, а не обрезка: разделов восемь, и на половине экрана они не помещаются никак,
+     но обрезанный раздел выглядит поломкой, а уехавший — нормальным поведением. */
+  padding-right: calc(var(--chat-slot) + var(--space-2));
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
+
+.bottom-nav .nav-item { scroll-snap-align: start; }
 
 .bottom-nav-inner::-webkit-scrollbar {
   display: none;

@@ -544,7 +544,7 @@ function mboxDevApi() {
               return sendJson(res, 201, { memory: result.rows[0] });
             }
             const result = await queryPostgres(
-              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
+              `SELECT id::text, folder_id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
                       pg_column_size(memories)::int AS memory_bytes,
                       created_at::text, updated_at::text
                FROM memories
