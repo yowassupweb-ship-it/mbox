@@ -1,0 +1,45 @@
+/* База: reset, скроллбары, body, элементы форм */
+
+* { box-sizing: border-box; }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(150, 158, 172, .5) rgba(28, 28, 30, .34);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(28, 28, 30, .34);
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(28, 28, 30, .34);
+  border-radius: 999px;
+  background: rgba(150, 158, 172, .5);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(188, 196, 210, .68);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}

@@ -361,16 +361,16 @@ function mboxDevApi() {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
-                `INSERT INTO folders(parent_id, name, entity_type, access_level, color)
-                 VALUES ($1, $2, $3, $4, $5)
+                `INSERT INTO folders(parent_id, name, entity_type, access_level, color, project_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)
                  RETURNING id::text`,
-                [body.parent_id || null, String(body.name ?? "").trim(), String(body.entity_type ?? "artifact"), String(body.access_level ?? "private"), String(body.color ?? "#2c2c2e")],
+                [body.parent_id || null, String(body.name ?? "").trim(), String(body.entity_type ?? "artifact"), String(body.access_level ?? "private"), String(body.color ?? "#2c2c2e"), body.project_id || null],
               );
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "folders" });
               return sendJson(res, 201, { folder: result.rows[0] });
             }
             const result = await queryPostgres(
-              `SELECT id::text, parent_id::text, name, entity_type, access_level, color, pg_column_size(folders)::int AS memory_bytes
+              `SELECT id::text, parent_id::text, project_id::text, name, entity_type, access_level, color, pg_column_size(folders)::int AS memory_bytes
                FROM folders
                WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR entity_type ILIKE '%' || $1 || '%'
                ORDER BY COALESCE(parent_id, 0), name`,
@@ -626,6 +626,122 @@ function mboxDevApi() {
                LIMIT 200`,
             );
             return sendJson(res, 200, { events: result.rows });
+          }
+
+          // Расстановка узлов карты. Держать в паре с server/mbox-server.mjs.
+          if (url.pathname === "/api/mbox/graph/positions") {
+            if (req.method === "POST") {
+              const body = await readBody<{ positions?: Array<{ entity_type?: string; entity_id?: string; x?: number; y?: number }> }>(req);
+              const items = Array.isArray(body.positions) ? body.positions : [];
+              const rows = items
+                .filter((item) => item && item.entity_type && item.entity_id)
+                .map((item) => [String(item.entity_type), String(item.entity_id), Number(item.x) || 0, Number(item.y) || 0]);
+              if (!rows.length) return sendJson(res, 400, { error: "positions_required" });
+              const values = rows.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, now())`).join(", ");
+              await queryPostgres(
+                `INSERT INTO graph_positions(entity_type, entity_id, x, y, updated_at)
+                 VALUES ${values}
+                 ON CONFLICT (entity_type, entity_id)
+                 DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, updated_at = now()`,
+                rows.flat(),
+              );
+              return sendJson(res, 200, { ok: true, saved: rows.length });
+            }
+            if (req.method === "DELETE") {
+              await queryPostgres("DELETE FROM graph_positions");
+              return sendJson(res, 200, { ok: true });
+            }
+            const result = await queryPostgres("SELECT entity_type, entity_id, x, y FROM graph_positions");
+            return sendJson(res, 200, { positions: result.rows });
+          }
+
+          // Отметки «просмотрено». Держать в паре с server/mbox-server.mjs — реализации независимые.
+          if (url.pathname === "/api/mbox/seen") {
+            const user = await currentUser(req);
+            const actor = (user as { username?: string } | null)?.username || "anonymous";
+
+            if (req.method === "POST") {
+              const body = await readBody<{ marks?: Array<{ entity_type?: string; entity_id?: string; bytes?: number }>; entity_type?: string; entity_id?: string; bytes?: number }>(req);
+              const marks = Array.isArray(body.marks) ? body.marks : [body];
+              const rows = marks
+                .filter((mark) => mark && mark.entity_type && mark.entity_id)
+                .map((mark) => [actor, String(mark.entity_type), String(mark.entity_id), Number(mark.bytes) || 0]);
+              if (!rows.length) return sendJson(res, 400, { error: "marks_required" });
+
+              const values = rows.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}, now())`).join(", ");
+              await queryPostgres(
+                `INSERT INTO seen_marks(actor, entity_type, entity_id, seen_bytes, seen_at)
+                 VALUES ${values}
+                 ON CONFLICT (actor, entity_type, entity_id)
+                 DO UPDATE SET seen_bytes = EXCLUDED.seen_bytes, seen_at = EXCLUDED.seen_at`,
+                rows.flat(),
+              );
+              return sendJson(res, 200, { ok: true, saved: rows.length });
+            }
+
+            const result = await queryPostgres(
+              "SELECT entity_type, entity_id::text, seen_bytes, seen_at::text FROM seen_marks WHERE actor = $1",
+              [actor],
+            );
+            return sendJson(res, 200, { marks: result.rows });
+          }
+
+          if (url.pathname === "/api/mbox/agent/inbox" && req.method === "POST") {
+            const body = await readBody<{ project_id?: string | null; agent_name?: string; item_type?: string; title?: string; body?: string; status?: string; priority?: string; requires_human?: boolean; props?: Record<string, unknown> }>(req);
+            const result = await queryPostgres(
+              `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+               VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
+               RETURNING id::text`,
+              [
+                body.project_id || null,
+                String(body.agent_name || "Agent"),
+                String(body.item_type || ""),
+                String(body.title || "").trim(),
+                String(body.body || ""),
+                String(body.status || ""),
+                String(body.priority || ""),
+                Boolean(body.requires_human),
+                JSON.stringify(body.props && typeof body.props === "object" ? body.props : {}),
+              ],
+            );
+            broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
+            return sendJson(res, 201, { inbox_item: result.rows[0] });
+          }
+
+          if (url.pathname === "/api/mbox/agent/inbox" && req.method === "GET") {
+            const result = await queryPostgres(
+              `SELECT id::text, project_id::text, agent_name, item_type, title, body, status, priority, requires_human, props,
+                      pg_column_size(agent_inbox)::int AS memory_bytes,
+                      created_at::text, updated_at::text
+               FROM agent_inbox
+               ORDER BY updated_at DESC
+               LIMIT 200`,
+            );
+            return sendJson(res, 200, { inbox: result.rows });
+          }
+
+          if (url.pathname === "/api/mbox/agent/runs" && req.method === "GET") {
+            const result = await queryPostgres(
+              `SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props,
+                      pg_column_size(agent_runs)::int AS memory_bytes,
+                      started_at::text, heartbeat_at::text, finished_at::text
+               FROM agent_runs
+               ORDER BY started_at DESC
+               LIMIT 100`,
+            );
+            return sendJson(res, 200, { runs: result.rows });
+          }
+
+          if (url.pathname === "/api/mbox/decisions" && req.method === "GET") {
+            const result = await queryPostgres(
+              `SELECT id::text, project_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props,
+                      pg_column_size(decision_log)::int AS memory_bytes,
+                      created_at::text
+               FROM decision_log
+               ORDER BY created_at DESC
+               LIMIT 200`,
+            );
+            return sendJson(res, 200, { decisions: result.rows });
           }
 
           if (url.pathname === "/api/mbox/agent/next-task") {

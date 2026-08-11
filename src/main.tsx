@@ -1,4 +1,4 @@
-﻿import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
@@ -8,351 +8,48 @@ import {
   Flag,
   Eye,
   EyeOff,
-  FileCode2,
   FolderKanban,
   GitBranch,
   History,
   KeyRound,
-  Library,
   LockKeyhole,
   Plus,
   Server,
   ShieldCheck,
-  type LucideIcon,
 } from "lucide-react";
 import { BottomNav } from "./components/BottomNav";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
 import { TopBar, type AgentRosterEntry } from "./components/TopBar";
-import { AgentAvatar, agentIdentity } from "./components/AgentAvatar";
-import type { SectionKey } from "./types";
+import { AgentAvatar } from "./components/AgentAvatar";
+import { fetchJson, saveEntity } from "./lib/api";
+import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
+import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
+import { findNodeByRouteKey, nodeFromLocation, nodeRouteKey, queryFromLocation, routeFor, sectionFromLocation } from "./lib/routing";
+import { filterTree, formatProps, parseProps, projectToTree, rollupBytes, sortTodos } from "./lib/tree";
+import { sections } from "./app/sections";
+import { OfflineBanner, ShellLoading } from "./app/ShellStates";
+import { LoginScreen } from "./pages/LoginScreen";
+import { Overview } from "./pages/Overview";
+import { MemoryBoard } from "./pages/Memories";
+import { ArtifactsBoard } from "./pages/Artifacts";
+import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
+import { ProjectsBoard } from "./pages/Projects";
+import { GraphBoard } from "./pages/Graph";
+import { AgentChat } from "./features/agents/AgentChat";
+import { AddTodoForm, TodoCardGrid } from "./features/projects/TodoCards";
+import { PropsEditor } from "./features/projects/PropsEditor";
+import { RelationsPanel } from "./features/projects/RelationsPanel";
+import type { ProjectEntityKind } from "./features/tree/entityKinds";
+import { EmptyState, ManualForm, Panel, saveLabel } from "./ui";
+import { bootstrapSeen, countUnseen, loadSeen, onSeenChange } from "./lib/seen";
+import { useMboxData } from "./hooks/useMboxData";
+import { useRealtime } from "./hooks/useRealtime";
+import type {
+  AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, DecisionEntry, FolderRow,
+  GraphEdge, GraphNode, GraphVisualEdge, Me, Memory, Project,
+  SecretSummary, SectionKey, ServerMetrics, Todo,
+} from "./types";
 import "./styles.css";
-
-type Memory = {
-  id: string;
-  title: string;
-  content: string;
-  entity_type: string;
-  access_level: string;
-  tags: string[];
-  metadata: Record<string, unknown>;
-  memory_bytes: number;
-  created_at: string;
-  updated_at: string;
-};
-
-type Artifact = {
-  id: string;
-  folder_id: string | null;
-  name: string;
-  category: string;
-  version: string;
-  status: string;
-  content: string;
-  access_level: string;
-  memory_bytes: number;
-};
-
-type Project = {
-  id: string;
-  name: string;
-  status: string;
-  stack: string[];
-  git_url: string;
-  deploy_target: string;
-  deploy_provider: string;
-  props: Record<string, string>;
-  relations: ProjectRelation[];
-  color: string;
-  access_level: string;
-  memory_bytes: number;
-  todos: Todo[];
-};
-
-type ProjectRelation = {
-  id: string;
-  from_project_id: string;
-  from_project_name: string;
-  to_project_id: string;
-  to_project_name: string;
-  edge_type: string;
-  title?: string;
-  description?: string;
-  owner?: string;
-  group_entity?: string;
-  strength?: number;
-  valid_until?: string | null;
-};
-
-type GraphEdge = {
-  id: string;
-  from_entity: string;
-  from_id: string;
-  from_label: string;
-  to_entity: string;
-  to_id: string;
-  to_label: string;
-  edge_type: string;
-  title: string;
-  description: string;
-  owner: string;
-  group_entity: string;
-  strength: number;
-  valid_until: string | null;
-};
-
-type GraphNode = {
-  id: string;
-  label: string;
-  group: string;
-  x: number;
-  y: number;
-  color: string;
-  projectId?: string;
-};
-
-type GraphVisualEdge = {
-  key: string;
-  from: GraphNode;
-  to: GraphNode;
-  edge_type: string;
-  relation: boolean;
-};
-
-type Todo = {
-  id: string;
-  project_id: string;
-  title: string;
-  note: string;
-  status: string;
-  priority: string;
-  props: Record<string, string>;
-  claimed_by: string;
-  claimed_until: string | null;
-  heartbeat_at: string | null;
-  memory_bytes: number;
-};
-
-type FolderRow = {
-  id: string;
-  parent_id: string | null;
-  name: string;
-  entity_type: string;
-  access_level: string;
-  color: string;
-  memory_bytes: number;
-};
-
-type ServerMetrics = {
-  hostname: string;
-  load_1: number;
-  cpu_percent: number;
-  memory_used_mb: number;
-  memory_total_mb: number;
-  disk_used_mb: number;
-  disk_total_mb: number;
-  docker_containers: Array<Record<string, string>>;
-  captured_at: string;
-};
-
-type SecretSummary = {
-  id: string;
-  project_id: string | null;
-  title: string;
-  login: string;
-  url: string;
-  access_level: string;
-  agent_share_state: string;
-  memory_bytes: number;
-  approved_until: string | null;
-  updated_at: string;
-};
-
-type AuditEvent = {
-  id: string;
-  actor: string;
-  action: string;
-  entity_type: string;
-  entity_id: string | null;
-  project_id: string | null;
-  summary: string;
-  metadata: Record<string, unknown>;
-  memory_bytes: number;
-  created_at: string;
-};
-
-type AgentActivity = {
-  id: string;
-  name: string;
-  kind: string;
-  status: string;
-  scope: string;
-  client: string;
-  active_sessions: number;
-  live_connections: number;
-  events: number;
-  runs: number;
-  live_runs: number;
-  first_seen: string | null;
-  last_seen: string | null;
-};
-
-type AgentInboxItem = {
-  id: string;
-  project_id: string | null;
-  agent_name: string;
-  item_type: string;
-  title: string;
-  body: string;
-  status: string;
-  priority: string;
-  requires_human: boolean;
-  props: Record<string, unknown>;
-  memory_bytes: number;
-  created_at: string;
-  updated_at: string;
-};
-
-type AgentRun = {
-  id: string;
-  project_id: string | null;
-  todo_id: string | null;
-  agent_name: string;
-  status: string;
-  goal: string;
-  read_context: unknown[];
-  commands: unknown[];
-  touched_files: unknown[];
-  result: string;
-  memory_bytes: number;
-  started_at: string;
-  heartbeat_at: string;
-  finished_at: string | null;
-};
-
-type DecisionEntry = {
-  id: string;
-  project_id: string | null;
-  agent_run_id: string | null;
-  actor: string;
-  title: string;
-  decision: string;
-  rationale: string;
-  impact: string;
-  memory_bytes: number;
-  created_at: string;
-};
-
-type Me = {
-  user: { id: string; username: string; role: string } | null;
-};
-
-const sections: Array<{ key: SectionKey; label: string; icon: LucideIcon }> = [
-  { key: "overview", label: "Обзор", icon: Library },
-  { key: "memories", label: "Память", icon: BookOpen },
-  { key: "artifacts", label: "Артефакты", icon: FileCode2 },
-  { key: "projects", label: "Проекты", icon: FolderKanban },
-  { key: "graph", label: "Граф", icon: GitBranch },
-  { key: "history", label: "История", icon: History },
-  { key: "server", label: "Сервер", icon: Server },
-  { key: "settings", label: "Доступ", icon: ShieldCheck },
-];
-
-const sectionKeys = new Set<SectionKey>(sections.map((section) => section.key));
-
-function sectionFromLocation(): SectionKey {
-  const raw = window.location.pathname.split("/").filter(Boolean)[0] as SectionKey | undefined;
-  return raw && sectionKeys.has(raw) ? raw : "overview";
-}
-
-function queryFromLocation() {
-  return new URLSearchParams(window.location.search).get("q") ?? "";
-}
-
-function nodeFromLocation() {
-  return new URLSearchParams(window.location.search).get("node") ?? "";
-}
-
-function nodeRouteKey(node: FolderTreeNode | null) {
-  if (!node) return "";
-  return `${node.type ?? "node"}:${node.entityKind ?? ""}:${node.id ?? node.name}`;
-}
-
-function findNodeByRouteKey(nodes: FolderTreeNode[], key: string): FolderTreeNode | null {
-  for (const node of nodes) {
-    if (nodeRouteKey(node) === key) return node;
-    const child = node.children ? findNodeByRouteKey(node.children, key) : null;
-    if (child) return child;
-  }
-  return null;
-}
-
-function routeFor(section: SectionKey, query = "", nodeKey = "") {
-  const params = new URLSearchParams();
-  if (query.trim()) params.set("q", query.trim());
-  if (nodeKey) params.set("node", nodeKey);
-  const search = params.toString();
-  return `/${section}${search ? `?${search}` : ""}`;
-}
-
-const todoStatusLabels: Record<string, string> = {
-  open: "Новая",
-  next: "Следующая",
-  doing: "В работе",
-  blocked: "Заблокирована",
-  review: "На проверке",
-  done: "Готово",
-  archived: "Архив",
-};
-
-const todoPriorityLabels: Record<string, string> = {
-  low: "Низкий",
-  normal: "Обычный",
-  high: "Высокий",
-  urgent: "Срочно",
-};
-
-const todoStatusHint: Record<string, string> = {
-  open: "можно брать, но не первая в очереди",
-  next: "следующая задача для агента",
-  doing: "сейчас в работе",
-  blocked: "нужен ответ или внешний доступ",
-  review: "готово к проверке человеком",
-  done: "завершено, не брать в работу",
-  archived: "историческая запись",
-};
-
-function todoStatusLabel(value: string) {
-  return todoStatusLabels[value] ?? value;
-}
-
-function todoPriorityLabel(value: string) {
-  return todoPriorityLabels[value] ?? value;
-}
-
-function parseProps(value: string) {
-  return Object.fromEntries(
-    value
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const separator = line.includes(":") ? line.indexOf(":") : line.indexOf("=");
-        if (separator === -1) return [line, ""] as const;
-        return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()] as const;
-      })
-      .filter(([key]) => key),
-  );
-}
-
-function formatProps(props: Record<string, string>) {
-  return Object.entries(props || {}).map(([key, value]) => `${key}: ${value}`).join("\n");
-}
-
-function sortTodos(todos: Todo[]) {
-  const statusWeight: Record<string, number> = { doing: 0, next: 1, open: 2, blocked: 3, review: 4, done: 8, archived: 9 };
-  const priorityWeight: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
-  return [...todos].sort((a, b) => (statusWeight[a.status] ?? 5) - (statusWeight[b.status] ?? 5) || (priorityWeight[a.priority] ?? 2) - (priorityWeight[b.priority] ?? 2));
-}
 
 function App() {
   const [me, setMe] = useState<Me>({ user: null });
@@ -368,7 +65,6 @@ function App() {
   if (!me.user) return <LoginScreen onLogin={setMe} />;
   return <Workspace user={me.user} onLogout={() => setMe({ user: null })} />;
 }
-
 function Workspace({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
   const [section, setSectionState] = useState<SectionKey>(() => sectionFromLocation());
   const [query, setQueryState] = useState(() => queryFromLocation());
@@ -380,15 +76,36 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     [realtime.notices, data.auditEvents],
   );
   const agentLabel = useMemo(() => {
+    // Статус читается сверху вниз: чем ниже случай, тем спокойнее обстановка.
     if (realtime.state === "offline") return "Нет связи с сервером";
     if (realtime.state === "connecting") return realtime.label;
+
     const active = data.agents.filter((agent) => agent.status === "active");
     const working = active.filter((agent) => agent.live_runs > 0);
-    if (working.length) return `${working.map((agent) => agent.name).join(", ")} в работе`;
-    if (active.length) return `${active.map((agent) => agent.name).join(", ")} на связи`;
-    const idle = data.agents.find((agent) => agent.status === "idle");
-    return idle ? `Никого нет · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи";
-  }, [realtime.state, realtime.label, data.agents]);
+    const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
+    const onReview = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "review").length, 0);
+    const blocked = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "blocked").length, 0);
+    const leased = data.projects.flatMap((project) => project.todos).filter((todo) => todo.claimed_by && todo.claimed_until && new Date(todo.claimed_until) > new Date());
+    const failedRun = data.runs.find((run) => run.status === "failed");
+
+    if (needsHuman.length) return `Нужен ты: ${needsHuman[0].title}`;
+    if (failedRun) return `${failedRun.agent_name}: сессия упала`;
+    if (blocked) return `${blocked} ${plural(blocked, "задача заблокирована", "задачи заблокированы", "задач заблокировано")}`;
+    if (onReview) return `${onReview} ${plural(onReview, "задача ждёт", "задачи ждут", "задач ждут")} проверки`;
+
+    if (working.length === 1) {
+      const goal = data.runs.find((run) => run.agent_name === working[0].name && ["running", "doing"].includes(run.status))?.goal;
+      return goal ? `${working[0].name}: ${goal}` : `${working[0].name} в работе`;
+    }
+    if (working.length > 1) return `${working.length} агента в работе: ${working.map((agent) => agent.name).join(", ")}`;
+
+    if (leased.length) return `${leased[0].claimed_by} держит «${leased[0].title}»`;
+    if (active.length === 1) return `${active[0].name} на связи, задачу не взял`;
+    if (active.length > 1) return `${active.length} агента на связи: ${active.map((agent) => agent.name).join(", ")}`;
+
+    const idle = [...data.agents].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""))[0];
+    return idle ? `Тишина · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи";
+  }, [realtime.state, realtime.label, data.agents, data.inbox, data.projects, data.runs]);
   const headerState = useMemo<"connecting" | "connected" | "working" | "offline">(() => {
     if (realtime.state === "offline") return "offline";
     if (realtime.state === "connecting") return "connecting";
@@ -412,6 +129,25 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
       since: formatSince(agent.last_seen),
     }));
   }, [data.agents, data.runs]);
+
+  const [seenTick, setSeenTick] = useState(0);
+  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
+
+  const todoMarks = useMemo(
+    () => data.projects.flatMap((project) => project.todos.map((todo) => ({ key: `todo:${todo.id}`, bytes: todo.memory_bytes }))),
+    [data.projects],
+  );
+
+  // Сначала тянем отметки из базы, и только потом решаем, что считать новым.
+  useEffect(() => { void loadSeen(); }, []);
+
+  useEffect(() => {
+    if (todoMarks.length) bootstrapSeen(todoMarks);
+  }, [todoMarks, seenTick]);
+
+  const [projectMenu, setProjectMenu] = useState<TreeMenuState | null>(null);
+  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
+  const unseenTodos = useMemo(() => countUnseen(todoMarks), [todoMarks, seenTick]);
 
   const setRoute = useCallback((nextSection: SectionKey, nextQuery = query, nextNodeKey = selectedNodeKey, mode: "push" | "replace" = "push") => {
     setSectionState(nextSection);
@@ -441,425 +177,27 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
       <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
         <TopBar query={query} onQueryChange={setQuery} realtimeState={headerState} realtimeLabel={agentLabel} notice={realtime.notice} notices={agentNotices} roster={agentRoster} />
+        {data.offline && <OfflineBanner onRetry={data.reload} />}
+        {data.loading && <p className="muted empty-state">Загрузка данных</p>}
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
-        {section === "projects" && <ProjectsBoard projects={data.projects} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
+        {section === "projects" && <ProjectsBoard projects={data.projects} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => {
+          if (kind === "properties") return <PropsEditor project={project} onSaved={data.reload} />;
+          if (kind === "relations") return <RelationsPanel project={project} projects={data.projects} onSaved={data.reload} />;
+          return <ProjectEntityEditor project={project} projects={data.projects} kind={kind} onSaved={data.reload} />;
+        }} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
         {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
         {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
       </main>
-      <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} />
+      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
+      {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
+      <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} badges={{ projects: unseenTodos }} />
     </div>
   );
 }
-
-function useMboxData(query: string) {
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [folders, setFolders] = useState<FolderRow[]>([]);
-  const [secrets, setSecrets] = useState<SecretSummary[]>([]);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
-  const [agents, setAgents] = useState<AgentActivity[]>([]);
-  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
-  const [inbox, setInbox] = useState<AgentInboxItem[]>([]);
-  const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [decisions, setDecisions] = useState<DecisionEntry[]>([]);
-  const [revision, setRevision] = useState(0);
-  const reload = useCallback(() => setRevision((value) => value + 1), []);
-
-  useEffect(() => {
-    let alive = true;
-    const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
-
-    Promise.all([
-      fetchJson<{ memories: Memory[] }>(`/api/mbox/memories${qs}`),
-      fetchJson<{ artifacts: Artifact[] }>(`/api/mbox/artifacts${qs}`),
-      fetchJson<{ projects: Project[] }>(`/api/mbox/projects${qs}`),
-      fetchJson<{ folders: FolderRow[] }>(`/api/mbox/folders${qs}`),
-      fetchJson<{ secrets: SecretSummary[] }>("/api/mbox/secrets"),
-      fetchJson<{ events: AuditEvent[] }>("/api/mbox/history"),
-      fetchJson<{ agents: AgentActivity[] }>("/api/mbox/agents"),
-      fetchJson<{ edges: GraphEdge[] }>("/api/mbox/graph/edges"),
-      fetchJson<{ inbox: AgentInboxItem[] }>("/api/mbox/agent/inbox"),
-      fetchJson<{ runs: AgentRun[] }>("/api/mbox/agent/runs"),
-      fetchJson<{ decisions: DecisionEntry[] }>("/api/mbox/decisions"),
-    ]).then(([memoryData, artifactData, projectData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
-      if (!alive) return;
-      setMemories(memoryData.memories);
-      setArtifacts(artifactData.artifacts);
-      setProjects(projectData.projects);
-      setFolders(folderData.folders);
-      setSecrets(secretData.secrets);
-      setAuditEvents(historyData.events);
-      setAgents(agentData.agents);
-      setGraphEdges(edgeData.edges);
-      setInbox(inboxData.inbox);
-      setRuns(runsData.runs);
-      setDecisions(decisionData.decisions);
-    });
-
-    return () => {
-      alive = false;
-    };
-  }, [query, revision]);
-
-  return { memories, artifacts, projects, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, reload };
-}
-
-function useRealtime(onEntityChanged: () => void) {
-  const [pulse, setPulse] = useState(0);
-  const [state, setState] = useState<"connecting" | "connected" | "thinking" | "working" | "offline">("connecting");
-  const [label, setLabel] = useState("Агент подключается");
-  const [notice, setNotice] = useState("");
-  const [notices, setNotices] = useState<Array<{ id: string; text: string; at: string }>>([]);
-
-  useEffect(() => {
-    let socket: WebSocket | null = null;
-    let reconnectTimer = 0;
-    let noticeTimer = 0;
-    let closed = false;
-
-    function connect() {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(`${protocol}//${window.location.host}/api/mbox/realtime`);
-
-      socket.onopen = () => {
-        setState("connected");
-        setLabel("Агент подключен");
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string };
-          if (message.type === "entity_changed") {
-            onEntityChanged();
-            const toast = message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`;
-            setNotice(toast);
-            setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast, at: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, ...current].slice(0, 8));
-            window.clearTimeout(noticeTimer);
-            noticeTimer = window.setTimeout(() => setNotice(""), 5000);
-          }
-          if (message.type === "agent_presence") {
-            onEntityChanged();
-            const toast = `Агент ${message.agent || "Agent"} подключился`;
-            setNotice(toast);
-            setNotices((current) => [{ id: `${Date.now()}-${Math.random()}`, text: toast, at: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, ...current].slice(0, 8));
-            window.clearTimeout(noticeTimer);
-            noticeTimer = window.setTimeout(() => setNotice(""), 5000);
-          }
-          if (message.type === "server_tick") {
-            setPulse((value) => value + 1);
-          }
-        } catch {
-          setPulse((value) => value + 1);
-        }
-      };
-
-      socket.onclose = () => {
-        if (!closed) {
-          setState("offline");
-          setLabel("Агент отключен");
-          reconnectTimer = window.setTimeout(connect, 3000);
-        }
-      };
-    }
-
-    connect();
-
-    return () => {
-      closed = true;
-      window.clearTimeout(reconnectTimer);
-      window.clearTimeout(noticeTimer);
-      socket?.close();
-    };
-  }, [onEntityChanged]);
-
-  return { pulse, state, label, notice, notices };
-}
-
-function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
-  const [username, setUsername] = useState("Admin");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    try {
-      const me = await fetchJson<Me>("/api/mbox/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      onLogin(me);
-    } catch {
-      setError("Неверный логин или пароль");
-    }
-  }
-
-  return (
-    <main className="login-screen">
-      <form className="login-panel" onSubmit={submit}>
-        <div className="panel-title">
-          <LockKeyhole size={18} />
-          <h2>Вход</h2>
-        </div>
-        <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Логин" />
-        <label className="password-field">
-          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль" type={showPassword ? "text" : "password"} />
-          <button aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"} type="button" onClick={() => setShowPassword((value) => !value)}>
-            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-          </button>
-        </label>
-        {error && <p className="error-text">{error}</p>}
-        <button className="primary-action login-action" type="submit">Войти</button>
-      </form>
-    </main>
-  );
-}
-
-function Overview({ data }: { data: ReturnType<typeof useMboxData> }) {
-  const totalBytes = sumBytes([
-    ...data.memories.map((item) => item.memory_bytes),
-    ...data.artifacts.map((item) => item.memory_bytes),
-    ...data.projects.map((item) => item.memory_bytes),
-    ...data.secrets.map((item) => item.memory_bytes),
-  ]);
-
-  return (
-    <>
-      <section className="metrics-grid">
-        <Metric title="Память" value={data.memories.length} subtitle={formatBytes(totalBytes)} icon={BookOpen} />
-        <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} icon={Archive} />
-        <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} icon={FolderKanban} />
-        <Metric title="Секреты" value={data.secrets.length} subtitle={formatBytes(sumBytes(data.secrets.map((item) => item.memory_bytes)))} icon={ShieldCheck} />
-      </section>
-      <div className="content-grid overview-grid">
-        <Panel title="Последние сущности" icon={BookOpen}>
-          <EntityFeed memories={data.memories} projects={data.projects} artifacts={data.artifacts} />
-        </Panel>
-        <Panel title="Проекты" icon={FolderKanban}>
-          <ProjectList projects={data.projects.slice(0, 5)} />
-        </Panel>
-      </div>
-      <AgentWorkBoard agents={data.agents} runs={data.runs} inbox={data.inbox} decisions={data.decisions} />
-    </>
-  );
-}
-
-function MemoryBoard({ memories, onSaved }: { memories: Memory[]; onSaved: () => void }) {
-  return (
-    <Panel title="Память" icon={BookOpen}>
-      <MemoryForm onSaved={onSaved} />
-      <MemoryTable memories={memories} />
-    </Panel>
-  );
-}
-
-function baseName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
-function ActivityBars() {
-  return (
-    <span className="activity-bars" aria-hidden="true">
-      <span /><span /><span /><span />
-    </span>
-  );
-}
-
-function AgentCard({ agent, runs, decisions }: { agent: AgentActivity; runs: AgentRun[]; decisions: DecisionEntry[] }) {
-  const mine = runs.filter((run) => run.agent_name === agent.name);
-  const liveRun = mine.find((run) => ["running", "doing"].includes(run.status));
-  const lastRun = liveRun || mine[0];
-  const lastDecision = decisions.find((decision) => decision.actor === agent.name);
-  const files = (Array.isArray(lastRun?.touched_files) ? (lastRun!.touched_files as string[]) : []).slice(0, 5);
-  const working = agent.live_runs > 0;
-  const stateKey = working ? "working" : agent.status;
-  const stateLabel = working ? "в работе" : agentStatusLabels[agent.status] || agent.status;
-  const accent = agentIdentity(agent.name).accent;
-
-  return (
-    <article className={`agent-card ${stateKey}`} style={{ ["--agent-accent" as string]: accent }}>
-      <div className="agent-card-top">
-        <AgentAvatar name={agent.name} status={agent.status} live={working} size={46} />
-        <div className="agent-card-id">
-          <strong>{agent.name}</strong>
-          <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""}</span>
-        </div>
-        <span className={`agent-card-state ${stateKey}`}>{stateLabel}</span>
-      </div>
-
-      <div className="agent-card-now">
-        {working && <ActivityBars />}
-        <span className={working ? "agent-card-goal live" : "agent-card-goal"}>
-          {lastRun ? (working ? lastRun.goal : `последнее: ${lastRun.goal}`) : "нет активности"}
-        </span>
-      </div>
-
-      {files.length > 0 && (
-        <div className="agent-card-files">
-          {files.map((file) => <code key={file} title={file}>{baseName(file)}</code>)}
-        </div>
-      )}
-
-      <div className="agent-card-metrics">
-        <div className="metric"><b>{agent.runs}</b><span>сессий</span></div>
-        <div className="metric"><b>{agent.events}</b><span>действий</span></div>
-        <div className="metric"><b>{agent.active_sessions}</b><span>подключений</span></div>
-      </div>
-
-      <div className="agent-card-foot">
-        {lastDecision ? <span className="agent-card-decision" title={lastDecision.title}>◆ {lastDecision.title}</span> : <span className="agent-card-decision muted">решений нет</span>}
-        <time>{formatSince(agent.last_seen)}</time>
-      </div>
-    </article>
-  );
-}
-
-function StreamRow({ actor, title, tag }: { actor: string; title: string; tag?: string }) {
-  return (
-    <div className="stream-row">
-      <AgentAvatar name={actor} size={24} />
-      <div className="stream-row-body">
-        <span className="stream-row-actor">{actor}{tag ? <em> · {tag}</em> : null}</span>
-        <span className="stream-row-title" title={title}>{title}</span>
-      </div>
-    </div>
-  );
-}
-
-function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
-  const online = agents.filter((agent) => agent.status === "active").length;
-  const working = agents.filter((agent) => agent.live_runs > 0).length;
-  const activeRuns = runs.filter((run) => ["running", "doing"].includes(run.status));
-  const visibleRuns = (activeRuns.length ? activeRuns : runs).slice(0, 5);
-  const openInbox = inbox.filter((item) => item.status !== "done").slice(0, 5);
-
-  return (
-    <section className="agent-activity" aria-label="Работа агентов">
-      <header className="agent-activity-head">
-        <h3>Работа агентов</h3>
-        <div className="agent-activity-summary">
-          <span><b>{agents.length}</b> агентов</span>
-          <span className="dot-sep" />
-          <span className="tone-active"><b>{online}</b> на связи</span>
-          {working > 0 && <span className="tone-working"><b>{working}</b> в работе</span>}
-        </div>
-      </header>
-
-      {agents.length ? (
-        <div className="agent-cards">
-          {agents.slice(0, 8).map((agent) => (
-            <AgentCard key={agent.id} agent={agent} runs={runs} decisions={decisions} />
-          ))}
-        </div>
-      ) : <EmptyState text="Агенты пока не подключены" />}
-
-      <div className="agent-streams">
-        <div className="agent-stream">
-          <h4>Сессии</h4>
-          {visibleRuns.length ? visibleRuns.map((run) => (
-            <StreamRow key={run.id} actor={run.agent_name} title={run.goal} tag={runStatusLabels[run.status] || run.status} />
-          )) : <EmptyState text="Сессий пока нет" />}
-        </div>
-        <div className="agent-stream">
-          <h4>Inbox</h4>
-          {openInbox.length ? openInbox.map((item) => (
-            <StreamRow key={item.id} actor={item.agent_name} title={item.title} tag={item.requires_human ? "нужен человек" : undefined} />
-          )) : <EmptyState text="Входящие пусты" />}
-        </div>
-        <div className="agent-stream">
-          <h4>Решения</h4>
-          {decisions.length ? decisions.slice(0, 5).map((decision) => (
-            <StreamRow key={decision.id} actor={decision.actor} title={decision.title} />
-          )) : <EmptyState text="Решений пока нет" />}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ArtifactsBoard({ artifacts, folders, query, selectedNodeKey, onSelectedNodeKey, onSaved }: { artifacts: Artifact[]; folders: FolderRow[]; query: string; selectedNodeKey: string; onSelectedNodeKey: (key: string) => void; onSaved: () => void }) {
-  const roots = useMemo(() => filterTree(buildArtifactTree(artifacts, folders), query), [artifacts, folders, query]);
-  const [menu, setMenu] = useState<TreeMenuState | null>(null);
-  const [selectedNode, setSelectedNode] = useState<FolderTreeNode | null>(null);
-
-  useEffect(() => {
-    if (!selectedNodeKey) return;
-    const node = findNodeByRouteKey(roots, selectedNodeKey);
-    if (node) setSelectedNode(node);
-  }, [roots, selectedNodeKey]);
-
-  function selectNode(node: FolderTreeNode) {
-    setSelectedNode(node);
-    onSelectedNodeKey(nodeRouteKey(node));
-  }
-  return (
-    <div className="content-grid settings-grid">
-      <Panel title="Папки" icon={FolderKanban}>
-        <FolderForm folders={folders} onSaved={onSaved} />
-        {roots.length ? <FolderTree key={query} defaultOpen={query ? roots.map((node) => node.name) : []} roots={roots} onSelect={selectNode} onContext={(node, position) => setMenu({ node, position })} /> : <EmptyState text="Артефактов в базе пока нет" />}
-      </Panel>
-      <Panel title="Просмотр" icon={Archive}>
-        <ArtifactForm folders={folders} onSaved={onSaved} />
-        {selectedNode ? <EntityPreview node={selectedNode} /> : <EmptyState text="Выбери папку или артефакт в дереве" />}
-      </Panel>
-      {menu && <TreeContextMenu state={menu} projects={[]} onClose={() => setMenu(null)} onSaved={onSaved} />}
-    </div>
-  );
-}
-
-function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNodeKey, onSaved }: { projects: Project[]; query: string; selectedNodeKey: string; onSelectedNodeKey: (key: string) => void; onSaved: () => void }) {
-  const [items, setItems] = useState(projects);
-  const [menu, setMenu] = useState<TreeMenuState | null>(null);
-  const [selectedNode, setSelectedNode] = useState<FolderTreeNode | null>(null);
-  const roots = useMemo(() => filterTree(rollupBytes(items.map(projectToTree)), query), [items, query]);
-
-  useEffect(() => {
-    setItems(projects);
-  }, [projects]);
-
-  useEffect(() => {
-    if (!selectedNodeKey) return;
-    const node = findNodeByRouteKey(roots, selectedNodeKey);
-    if (node) setSelectedNode(node);
-  }, [roots, selectedNodeKey]);
-
-  function selectNode(node: FolderTreeNode) {
-    setSelectedNode(node);
-    onSelectedNodeKey(nodeRouteKey(node));
-  }
-
-  async function updateProjectColor(projectId: string, color: string) {
-    setItems((current) => current.map((project) => project.id === projectId ? { ...project, color } : project));
-    await fetchJson(`/api/mbox/projects/${projectId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ color }),
-    });
-    onSaved();
-  }
-
-  return (
-    <div className="project-workspace">
-      <Panel title="Проекты" icon={FolderKanban}>
-        <ProjectForm onSaved={onSaved} />
-        {roots.length ? <FolderTree key={query} defaultOpen={query ? roots.map((node) => node.name) : []} roots={roots} onSelect={selectNode} onContext={(node, position) => setMenu({ node, position })} /> : <EmptyState text="Проектов в базе пока нет" />}
-      </Panel>
-      <Panel title="Просмотр" icon={BookOpen}>
-        <ProjectInspector node={selectedNode} projects={items} fallbackProject={items[0]} onColorChange={updateProjectColor} onSaved={onSaved} />
-      </Panel>
-      {menu && <TreeContextMenu state={menu} projects={items} onClose={() => setMenu(null)} onSaved={onSaved} />}
-    </div>
-  );
-}
-
 function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSaved }: { node: FolderTreeNode | null; projects: Project[]; fallbackProject?: Project; onColorChange: (projectId: string, color: string) => void; onSaved: () => void }) {
   if (node?.type === "project_entity" && node.id && node.entityKind) {
     const project = projects.find((item) => item.id === node.id);
@@ -885,7 +223,6 @@ function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSa
   if (node) return <EntityPreview node={node} />;
   return <ProjectTodoNotes project={fallbackProject} projects={projects} onColorChange={onColorChange} onSaved={onSaved} />;
 }
-
 function ProjectEntityEditor({ project, projects, kind, onSaved }: { project: Project; projects: Project[]; kind: NonNullable<FolderTreeNode["entityKind"]>; onSaved: () => void }) {
   const [stack, setStack] = useState(project.stack.join("\n"));
   const [gitUrl, setGitUrl] = useState(project.git_url || "");
@@ -1010,14 +347,6 @@ function ProjectEntityEditor({ project, projects, kind, onSaved }: { project: Pr
     </div>
   );
 }
-
-function saveLabel(state: "idle" | "saving" | "saved" | "error", idle: string) {
-  if (state === "saving") return "Сохраняю";
-  if (state === "saved") return "Сохранено";
-  if (state === "error") return "Ошибка";
-  return idle;
-}
-
 function ProjectTodoNotes({ project, projects, onColorChange, onSaved }: { project?: Project; projects: Project[]; onColorChange: (projectId: string, color: string) => void; onSaved: () => void }) {
   const [note, setNote] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1066,41 +395,20 @@ function ProjectTodoNotes({ project, projects, onColorChange, onSaved }: { proje
     </div>
   );
 }
-
 function ProjectTodoCards({ project, onSaved }: { project: Project; onSaved: () => void }) {
-  const todos = sortTodos(project.todos);
-  const activeCount = todos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
+  const activeCount = project.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
 
   return (
     <div className="todo-card-board">
       <div className="entity-line">
         <strong>Todo · {project.name}</strong>
-        <span>{activeCount} активно · {todos.length} всего</span>
+        <span>{activeCount} активно · {project.todos.length} всего</span>
       </div>
       <TodoForm projects={[project]} onSaved={onSaved} />
-      {todos.length ? (
-        <div className="todo-note-grid">
-          {todos.map((todo) => (
-            <article className={["todo-note-card", ["done", "archived"].includes(todo.status) ? "is-done" : "", todo.status === "doing" ? "is-doing" : ""].filter(Boolean).join(" ")} key={todo.id}>
-              <div className="todo-note-card-head">
-                {todo.status === "doing" && <span className="todo-spinner" aria-label="В работе" />}
-                <strong>{todo.title}</strong>
-              </div>
-              {todo.note && <p>{todo.note}</p>}
-              <div className="todo-note-card-meta">
-                <span>{todoStatusLabel(todo.status)}</span>
-                <span>{todoPriorityLabel(todo.priority)}</span>
-                {todo.claimed_by && <span>{todo.claimed_by}</span>}
-                <span>{formatBytes(todo.memory_bytes)}</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : <EmptyState text="Todo пока нет" />}
+      <TodoCardGrid project={project} onSaved={onSaved} />
     </div>
   );
 }
-
 function ProjectRelationForm({ project, projects, onSaved }: { project: Project; projects: Project[]; onSaved: () => void }) {
   const available = projects.filter((item) => item.id !== project.id);
   const [targetId, setTargetId] = useState(available[0]?.id ?? "");
@@ -1159,7 +467,6 @@ function ProjectRelationForm({ project, projects, onSaved }: { project: Project;
     </div>
   );
 }
-
 function ProjectPropsEditor({ project, onSaved }: { project: Project; onSaved: () => void }) {
   const [propsText, setPropsText] = useState(formatProps(project.props || {}));
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1192,7 +499,6 @@ function ProjectPropsEditor({ project, onSaved }: { project: Project; onSaved: (
     </div>
   );
 }
-
 function TodoNote({ project, todo, onSaved }: { project: Project; todo: Todo; onSaved: () => void }) {
   const [title, setTitle] = useState(todo.title);
   const [note, setNote] = useState(todo.note);
@@ -1258,17 +564,6 @@ function TodoNote({ project, todo, onSaved }: { project: Project; todo: Todo; on
     </div>
   );
 }
-
-function EntityPreview({ node }: { node: FolderTreeNode }) {
-  return (
-    <div className="entity-preview">
-      <strong>{node.name}</strong>
-      {node.meta && <span>{node.meta}</span>}
-      <p>{node.note || "Выбрана сущность дерева. ПКМ открывает действия: цвет, создание, удаление."}</p>
-    </div>
-  );
-}
-
 function TodoStatusGuide() {
   return (
     <div className="todo-guide" title="Машинные коды сохранены в API: open, next, doing, blocked, review, done, archived; priority: low, normal, high, urgent">
@@ -1285,7 +580,6 @@ function TodoStatusGuide() {
     </div>
   );
 }
-
 function RelationsBoard({ edges, projects, onSaved }: { edges: GraphEdge[]; projects: Project[]; onSaved: () => void }) {
   const [fromId, setFromId] = useState(projects[0]?.id ?? "");
   const [toId, setToId] = useState(projects.find((project) => project.id !== fromId)?.id ?? "");
@@ -1351,121 +645,6 @@ function RelationsBoard({ edges, projects, onSaved }: { edges: GraphEdge[]; proj
     </div>
   );
 }
-
-function GraphBoard({ folders, memories, projects, edges, onSaved }: { folders: FolderRow[]; memories: Memory[]; projects: Project[]; edges: GraphEdge[]; onSaved: () => void }) {
-  const [selected, setSelected] = useState<{ id: string; label: string; group: string; projectId?: string } | null>(null);
-  const [linkSource, setLinkSource] = useState<{ id: string; label: string } | null>(null);
-  const [linkCursor, setLinkCursor] = useState<{ x: number; y: number } | null>(null);
-  const [linkType, setLinkType] = useState("related");
-  const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
-  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
-  const projectNames = new Set(projects.map((project) => project.name.toLowerCase()));
-  const visibleMemories = memories.filter((memory) => !projectNames.has(memory.title.replace(/^Проект\s+/i, "").toLowerCase()));
-  const nodes: GraphNode[] = [
-    ...projects.map((project, index) => ({ id: `project-${project.id}`, projectId: project.id, label: project.name, group: "Проект", x: 50, y: 32 + index * 15, color: project.color })),
-    ...folders.slice(0, 18).map((folder, index) => ({ id: `folder-${folder.id}`, label: folder.name, group: "Папка", x: 22 + (index % 4) * 19, y: 54 + Math.floor(index / 4) * 14, color: folder.color })),
-    ...visibleMemories.slice(0, 16).map((memory, index) => ({ id: `memory-${memory.id}`, label: memory.title, group: "Память", x: 72 + (index % 3) * 10, y: 36 + Math.floor(index / 3) * 11, color: "#5a7f5b" })),
-  ];
-  const projectNodeById = new Map(nodes.filter((node) => node.projectId).map((node) => [node.projectId!, node]));
-  const autoEdges: GraphVisualEdge[] = nodes.slice(1).map((node, index) => ({ key: `auto-${node.id}`, from: nodes[index % Math.max(1, projects.length)] ?? nodes[0], to: node, edge_type: "context", relation: false }));
-  const relationEdges = edges
-    .filter((edge) => edge.from_entity === "project" && edge.to_entity === "project")
-    .map((edge) => ({ key: `edge-${edge.id}`, from: projectNodeById.get(edge.from_id), to: projectNodeById.get(edge.to_id), edge_type: edge.edge_type, relation: true }))
-    .filter((edge): edge is GraphVisualEdge => Boolean(edge.from && edge.to));
-  const graphThreads = [...autoEdges, ...relationEdges];
-
-  async function selectNode(node: GraphNode) {
-    setSelected(node);
-    if (!node.projectId) return;
-    if (!linkSource) {
-      setLinkSource({ id: node.projectId, label: node.label });
-      return;
-    }
-    if (linkSource.id === node.projectId) {
-      setLinkSource(null);
-      return;
-    }
-    await fetchJson("/api/mbox/graph/edges", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ from_id: linkSource.id, to_id: node.projectId, edge_type: linkType }),
-    });
-    setLinkSource(null);
-    setLinkCursor(null);
-    onSaved();
-  }
-
-  function updateLinkCursor(event: PointerEvent<HTMLDivElement>) {
-    if (!linkSource) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    setLinkCursor({
-      x: Math.min(100, Math.max(0, ((event.clientX - rect.left - view.x) / view.scale / rect.width) * 100)),
-      y: Math.min(100, Math.max(0, ((event.clientY - rect.top - view.y) / view.scale / rect.height) * 100)),
-    });
-  }
-
-  return (
-    <section className="graph-fullscreen" aria-label="Карта графа MBOX">
-      <div className="graph-link-tools">
-        <input value={linkType} onChange={(event) => setLinkType(event.target.value)} placeholder="тип связи" />
-        {linkSource && <span>нить от: {linkSource.label}</span>}
-        {linkSource && <button type="button" onClick={() => {
-          setLinkSource(null);
-          setLinkCursor(null);
-        }}>Сбросить</button>}
-      </div>
-      <div
-        className={linkSource ? "graph-canvas linking-mode" : "graph-canvas"}
-        onWheel={(event) => {
-          event.preventDefault();
-          setView((current) => ({ ...current, scale: Math.min(1.9, Math.max(.72, current.scale - event.deltaY * .001)) }));
-        }}
-        onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
-          if (event.target instanceof HTMLElement && event.target.closest(".graph-card")) return;
-          setDrag({ x: event.clientX - view.x, y: event.clientY - view.y });
-        }}
-        onPointerMove={(event) => {
-          updateLinkCursor(event);
-          if (drag) setView((current) => ({ ...current, x: event.clientX - drag.x, y: event.clientY - drag.y }));
-        }}
-        onPointerUp={() => setDrag(null)}
-        onPointerLeave={() => setDrag(null)}
-      >
-        <div className="graph-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {graphThreads.map((edge) => {
-              const midX = (edge.from.x + edge.to.x) / 2;
-              const midY = (edge.from.y + edge.to.y) / 2;
-              const curve = Math.max(4, Math.min(16, Math.abs(edge.to.x - edge.from.x) * .18 + Math.abs(edge.to.y - edge.from.y) * .1));
-              const d = `M ${edge.from.x} ${edge.from.y} C ${midX} ${edge.from.y - curve}, ${midX} ${edge.to.y + curve}, ${edge.to.x} ${edge.to.y}`;
-              return (
-                <g className={edge.relation ? "graph-thread relation-edge" : "graph-thread"} key={edge.key}>
-                  <path d={d} />
-                  {edge.relation && <text x={midX} y={midY}>{edge.edge_type}</text>}
-                </g>
-              );
-            })}
-            {linkSource && linkCursor && (() => {
-              const sourceNode = projectNodeById.get(linkSource.id);
-              if (!sourceNode) return null;
-              const midX = (sourceNode.x + linkCursor.x) / 2;
-              const d = `M ${sourceNode.x} ${sourceNode.y} C ${midX} ${sourceNode.y - 8}, ${midX} ${linkCursor.y + 8}, ${linkCursor.x} ${linkCursor.y}`;
-              return <path className="graph-thread-preview" d={d} />;
-            })()}
-          </svg>
-          {nodes.map((node) => (
-            <button className={linkSource?.id === node.projectId ? "graph-card linking" : "graph-card"} key={node.id} style={{ left: `${node.x}%`, top: `${node.y}%`, "--node-color": node.color } as CSSProperties} onClick={() => selectNode(node)} type="button">
-              <span>{node.group}</span>
-              <strong>{node.label}</strong>
-            </button>
-          ))}
-        </div>
-        {selected && <div className="graph-inspector"><strong>{selected.label}</strong><span>{selected.group}</span></div>}
-      </div>
-    </section>
-  );
-}
-
 function HistoryBoard({ events }: { events: AuditEvent[] }) {
   return (
     <Panel title="История" icon={History}>
@@ -1485,7 +664,6 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
     </Panel>
   );
 }
-
 function ServerBoard({ pulse }: { pulse: number }) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
 
@@ -1531,106 +709,6 @@ function ServerBoard({ pulse }: { pulse: number }) {
     </div>
   );
 }
-
-function MemoryForm({ onSaved }: { onSaved: () => void }) {
-  const [id, setId] = useState("");
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [tags, setTags] = useState("");
-  const [accessLevel, setAccessLevel] = useState("private");
-
-  return (
-    <ManualForm title="Добавить или править память" onSubmit={async () => {
-      await saveEntity("/api/mbox/memories", id, { title, content, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), access_level: accessLevel });
-      setId("");
-      setTitle("");
-      setContent("");
-      setTags("");
-      onSaved();
-    }}>
-      <input value={id} onChange={(event) => setId(event.target.value)} placeholder="ID для правки" />
-      <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Название" />
-      <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Содержимое" />
-      <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Теги через запятую" />
-      <select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value)}>
-        <option value="private">private</option>
-        <option value="agents">agents</option>
-        <option value="public">public</option>
-      </select>
-    </ManualForm>
-  );
-}
-
-function FolderForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () => void }) {
-  const [id, setId] = useState("");
-  const [parentId, setParentId] = useState("");
-  const [name, setName] = useState("");
-  const [entityType, setEntityType] = useState("artifact");
-  const [accessLevel, setAccessLevel] = useState("agents");
-  const [color, setColor] = useState("#2c2c2e");
-
-  return (
-    <ManualForm title="Добавить или править папку" onSubmit={async () => {
-      await saveEntity("/api/mbox/folders", id, { parent_id: parentId || null, name, entity_type: entityType, access_level: accessLevel, color });
-      setId("");
-      setName("");
-      onSaved();
-    }}>
-      <input value={id} onChange={(event) => setId(event.target.value)} placeholder="ID для правки" />
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Название папки" />
-      <select value={parentId} onChange={(event) => setParentId(event.target.value)}>
-        <option value="">Без родителя</option>
-        {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-      </select>
-      <select value={entityType} onChange={(event) => setEntityType(event.target.value)}>
-        <option value="artifact">artifact</option>
-        <option value="project">project</option>
-        <option value="memory">memory</option>
-        <option value="todo">todo</option>
-        <option value="script">script</option>
-        <option value="agent_scope">agent_scope</option>
-      </select>
-      <select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value)}>
-        <option value="private">private</option>
-        <option value="agents">agents</option>
-        <option value="public">public</option>
-      </select>
-      <input type="color" value={color} onChange={(event) => setColor(event.target.value)} />
-    </ManualForm>
-  );
-}
-
-function ArtifactForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () => void }) {
-  const [id, setId] = useState("");
-  const [folderId, setFolderId] = useState("");
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("Code");
-  const [version, setVersion] = useState("v1");
-  const [status, setStatus] = useState("created");
-  const [content, setContent] = useState("");
-
-  return (
-    <ManualForm title="Добавить или править артефакт" onSubmit={async () => {
-      await saveEntity("/api/mbox/artifacts", id, { folder_id: folderId || null, name, category, version, status, content, access_level: "agents" });
-      setId("");
-      setName("");
-      setContent("");
-      onSaved();
-    }}>
-      <input value={id} onChange={(event) => setId(event.target.value)} placeholder="ID для правки" />
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Название" />
-      <input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Категория" />
-      <input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="Версия" />
-      <input value={status} onChange={(event) => setStatus(event.target.value)} placeholder="Статус" />
-      <select value={folderId} onChange={(event) => setFolderId(event.target.value)}>
-        <option value="">Без папки</option>
-        {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-      </select>
-      <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Содержимое" />
-    </ManualForm>
-  );
-}
-
 function ProjectForm({ onSaved }: { onSaved: () => void }) {
   const [id, setId] = useState("");
   const [name, setName] = useState("");
@@ -1670,7 +748,6 @@ function ProjectForm({ onSaved }: { onSaved: () => void }) {
     </ManualForm>
   );
 }
-
 function TodoForm({ projects, onSaved }: { projects: Project[]; onSaved: () => void }) {
   const [id, setId] = useState("");
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
@@ -1709,123 +786,6 @@ function TodoForm({ projects, onSaved }: { projects: Project[]; onSaved: () => v
     </ManualForm>
   );
 }
-
-function ManualForm({ title, children, onSubmit }: { title: string; children: ReactNode; onSubmit: () => Promise<void> }) {
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      await onSubmit();
-      setOpen(false);
-    } catch {
-      setError("Не удалось сохранить");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="manual-box">
-      <button className="primary-action add-secret-action" type="button" onClick={() => setOpen((value) => !value)}>
-        <Plus size={18} />
-        <span>{title}</span>
-      </button>
-      {open && (
-        <form className="manual-form" onSubmit={submit}>
-          {children}
-          {error && <p className="error-text">{error}</p>}
-          <button className="primary-action compact-submit" disabled={saving} type="submit">{saving ? "Сохраняю" : "Сохранить"}</button>
-        </form>
-      )}
-    </div>
-  );
-}
-
-type TreeMenuState = {
-  node: FolderTreeNode;
-  position: { x: number; y: number };
-};
-
-function TreeContextMenu({ state, projects, onClose, onSaved }: { state: TreeMenuState; projects: Project[]; onClose: () => void; onSaved: () => void }) {
-  const { node, position } = state;
-  const canColor = Boolean(node.id && (node.type === "folder" || node.type === "project"));
-  const canDelete = Boolean(node.id && node.type && node.type !== "meta");
-  const canCreateFolder = node.type === "folder";
-  const canCreateTodo = node.type === "project";
-
-  async function colorNode() {
-    const color = window.prompt("Цвет в формате #RRGGBB", node.color || "#2c2c2e");
-    if (!color) return;
-    if (!/^#[0-9a-fA-F]{6}$/.test(color)) return window.alert("Нужен цвет вида #2c2c2e");
-    await fetchJson(node.type === "project" ? `/api/mbox/projects/${node.id}` : `/api/mbox/folders/${node.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ color }),
-    });
-    onSaved();
-    onClose();
-  }
-
-  async function createFolder() {
-    const name = window.prompt("Название новой папки");
-    if (!name?.trim()) return;
-    await fetchJson("/api/mbox/folders", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ parent_id: node.id, name: name.trim(), entity_type: "artifact", access_level: "agents", color: node.color || "#2c2c2e" }),
-    });
-    onSaved();
-    onClose();
-  }
-
-  async function createTodo() {
-    const project = projects.find((item) => item.id === node.id);
-    const title = window.prompt("Название todo");
-    if (!project || !title?.trim()) return;
-    await fetchJson("/api/mbox/todos", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ project_id: project.id, title: title.trim(), status: "open", priority: "normal", access_level: "private" }),
-    });
-    onSaved();
-    onClose();
-  }
-
-  async function deleteNode() {
-    if (!node.id || !node.type) return;
-    if (!window.confirm(`Удалить "${node.name}"?`)) return;
-    const paths: Record<string, string> = {
-      folder: "folders",
-      project: "projects",
-      todo: "todos",
-      artifact: "artifacts",
-      memory: "memories",
-    };
-    const path = paths[node.type];
-    if (!path) return;
-    await fetchJson(`/api/mbox/${path}/${node.id}`, { method: "DELETE" });
-    onSaved();
-    onClose();
-  }
-
-  return (
-    <div className="tree-menu-scrim" onClick={onClose}>
-      <div className="tree-menu" style={{ left: Math.min(position.x, window.innerWidth - 236), top: Math.min(position.y, window.innerHeight - 240) }} onClick={(event) => event.stopPropagation()}>
-        <strong>{node.name}</strong>
-        {canColor && <button onClick={colorNode} type="button">Покрасить</button>}
-        {canCreateFolder && <button onClick={createFolder} type="button">Создать папку</button>}
-        {canCreateTodo && <button onClick={createTodo} type="button">Создать todo</button>}
-        {canDelete && <button className="danger-action" onClick={deleteNode} type="button">Удалить</button>}
-      </div>
-    </div>
-  );
-}
-
 function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, onSaved, onLogout }: { user: { username: string; role: string }; secrets: SecretSummary[]; agents: AgentActivity[]; projects: Project[]; inbox: AgentInboxItem[]; runs: AgentRun[]; decisions: DecisionEntry[]; onSaved: () => void; onLogout: () => void }) {
   const [items, setItems] = useState(secrets);
   const [formOpen, setFormOpen] = useState(false);
@@ -1992,7 +952,6 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
     </div>
   );
 }
-
 type NewSecret = {
   project_id: string | null;
   title: string;
@@ -2000,7 +959,6 @@ type NewSecret = {
   password: string;
   url: string;
 };
-
 function SecretForm({ projects, onSubmit, initial, submitLabel = "Сохранить" }: { projects: Project[]; onSubmit: (secret: NewSecret) => Promise<void>; initial?: SecretSummary; submitLabel?: string }) {
   const [projectId, setProjectId] = useState(initial?.project_id ?? projects[0]?.id ?? "");
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -2066,132 +1024,6 @@ function SecretForm({ projects, onSubmit, initial, submitLabel = "Сохрани
     </form>
   );
 }
-
-function Metric({ title, value, subtitle, icon: Icon }: { title: string; value: number; subtitle: string; icon: LucideIcon }) {
-  return (
-    <article className="metric-card">
-      <div className="metric-icon"><Icon size={20} /></div>
-      <span>{title}</span>
-      <strong>{value}</strong>
-      <small>{subtitle}</small>
-    </article>
-  );
-}
-
-function Panel({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
-  return (
-    <section className="panel">
-      <div className="panel-title">
-        <Icon size={18} />
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function MemoryList({ memories }: { memories: Memory[] }) {
-  if (!memories.length) return <EmptyState text="Память в базе пока пустая" />;
-  return (
-    <div className="context-list">
-      {memories.map((memory) => (
-        <article className="memory-row" key={memory.id}>
-          <div className="row-id">#{memory.id}</div>
-          <div>
-            <strong>{memory.title}</strong>
-            <p>{memory.content}</p>
-            <span className="muted">{formatBytes(memory.memory_bytes)}</span>
-          </div>
-          <time>{formatDate(memory.updated_at)}</time>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function EntityFeed({ memories, projects, artifacts }: { memories: Memory[]; projects: Project[]; artifacts: Artifact[] }) {
-  const projectNames = new Set(projects.map((project) => project.name.toLowerCase()));
-  const seen = new Set<string>();
-  const rows = [
-    ...memories
-      .filter((item) => !projectNames.has(item.title.replace(/^Проект\s+/i, "").toLowerCase()))
-      .map((item) => ({ key: `memory-${item.id}`, title: item.title, text: item.content, bytes: item.memory_bytes, kind: "Память" })),
-    ...projects.map((item) => ({ key: `project-${item.id}`, title: item.name, text: item.stack.join(", ") || "Стек не указан", bytes: item.memory_bytes, kind: "Проект" })),
-    ...artifacts.map((item) => ({ key: `artifact-${item.id}`, title: item.name, text: `${item.category} · ${item.version}`, bytes: item.memory_bytes, kind: "Артефакт" })),
-  ].filter((row) => {
-    const signature = `${row.kind}:${row.title}:${row.text}`.toLowerCase();
-    if (seen.has(signature)) return false;
-    seen.add(signature);
-    return true;
-  }).slice(0, 8);
-  if (!rows.length) return <EmptyState text="База пока пустая" />;
-  return (
-    <div className="context-list">
-      {rows.map((row) => (
-        <article className="memory-row entity-feed-card" key={row.key}>
-          <span className="entity-feed-kind">{row.kind}</span>
-          <div className="entity-feed-body">
-            <strong>{row.title}</strong>
-            <p>{row.text}</p>
-          </div>
-          <span className="entity-feed-size">{formatBytes(row.bytes)}</span>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function MemoryTable({ memories }: { memories: Memory[] }) {
-  if (!memories.length) return <EmptyState text="Память в базе пока пустая" />;
-  return (
-    <div className="memory-table-wrap">
-      <table className="memory-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Название</th>
-            <th>Тип</th>
-            <th>Теги</th>
-            <th>Доступ</th>
-            <th>Размер</th>
-            <th>Обновлено</th>
-          </tr>
-        </thead>
-        <tbody>
-          {memories.map((memory) => (
-            <tr key={memory.id}>
-              <td>#{memory.id}</td>
-              <td>{memory.title}</td>
-              <td>{memory.entity_type}</td>
-              <td>{memory.tags.join(", ") || "none"}</td>
-              <td>{memory.access_level}</td>
-              <td>{formatBytes(memory.memory_bytes)}</td>
-              <td>{formatDate(memory.updated_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ProjectList({ projects }: { projects: Project[] }) {
-  if (!projects.length) return <EmptyState text="Проектов в базе пока нет" />;
-  return (
-    <div className="project-list">
-      {projects.map((project) => (
-        <article className="project-card" key={project.id} style={{ "--project-color": project.color || "#2c2c2e" } as CSSProperties}>
-          <div>
-            <strong>{project.name}</strong>
-            <p>{project.stack.join(", ") || "Стек не указан"}</p>
-          </div>
-          <span>{formatBytes(project.memory_bytes)}</span>
-        </article>
-      ))}
-    </div>
-  );
-}
-
 function EntityLine({ title, value }: { title: string; value: string }) {
   return (
     <div className="entity-line">
@@ -2200,196 +1032,8 @@ function EntityLine({ title, value }: { title: string; value: string }) {
     </div>
   );
 }
-
-function EmptyState({ text }: { text: string }) {
-  return <p className="muted empty-state">{text}</p>;
-}
-
-function buildArtifactTree(artifacts: Artifact[], folders: FolderRow[]): FolderTreeNode[] {
-  const baseFolders = folders
-    .filter((folder) => folder.entity_type === "artifact")
-    .map((folder) => ({ id: folder.id, type: "folder" as const, name: folder.name, bytes: folder.memory_bytes, color: folder.color, children: [] as FolderTreeNode[] }));
-
-  const byCategory = new Map<string, FolderTreeNode>();
-  for (const folder of baseFolders) byCategory.set(folder.name, folder);
-  for (const artifact of artifacts) {
-    const category = artifact.category || "Other";
-    if (!byCategory.has(category)) byCategory.set(category, { type: "folder", name: category, bytes: 0, children: [] });
-    byCategory.get(category)!.children!.push({
-      id: artifact.id,
-      type: "artifact",
-      name: artifact.name,
-      note: artifact.content,
-      bytes: artifact.memory_bytes,
-      meta: `${artifact.version} · ${artifact.status} · ${formatBytes(artifact.memory_bytes)}`,
-    });
-  }
-  return rollupBytes(Array.from(byCategory.values()));
-}
-
-const containerTypes = new Set(["folder", "project", "todo_group"]);
-
-function rollupBytes(nodes: FolderTreeNode[]): FolderTreeNode[] {
-  return nodes.map((node) => {
-    const children = node.children ? rollupBytes(node.children) : node.children;
-    const total = (node.bytes || 0) + (children || []).reduce((sum, child) => sum + (child.total_bytes || 0), 0);
-    if (!containerTypes.has(node.type || "")) return { ...node, children, total_bytes: total };
-    const items = countContained(children);
-    const size = `${items} ${plural(items, "элемент", "элемента", "элементов")} · ${formatBytes(total)}`;
-    return { ...node, children, total_bytes: total, meta: node.meta ? `${node.meta} · ${size}` : size };
-  });
-}
-
-function countContained(nodes: FolderTreeNode[] | undefined): number {
-  if (!nodes) return 0;
-  return nodes.reduce((sum, node) => sum + 1 + countContained(node.children), 0);
-}
-
-function plural(count: number, one: string, few: string, many: string) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
-}
-
-function projectToTree(project: Project): FolderTreeNode {
-  const sortedTodos = sortTodos(project.todos);
-  const openTodos = sortedTodos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
-  const relatedNames = project.relations.map((relation) => relation.from_project_id === project.id ? relation.to_project_name : relation.from_project_name);
-  return {
-    id: project.id,
-    type: "project",
-    name: project.name,
-    meta: project.status,
-    bytes: project.memory_bytes,
-    color: project.color,
-    children: [
-      { id: project.id, type: "todo_group", name: `Todo (${openTodos})`, color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, bytes: todo.memory_bytes, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
-      { id: project.id, type: "project_entity", entityKind: "git", name: "Git", meta: project.git_url ? "репозиторий" : "не указан", color: "#2e4a3a", children: [{ type: "meta", name: project.git_url || "Git не указан" }] },
-      { id: project.id, type: "project_entity", entityKind: "relations", name: "Связи", meta: `${relatedNames.length}`, children: relatedNames.length ? relatedNames.map((name) => ({ type: "meta", name })) : [{ type: "meta", name: "Связей нет" }] },
-      { id: project.id, type: "project_entity", entityKind: "properties", name: "Свойства", meta: `${Object.keys(project.props || {}).length}`, children: Object.entries(project.props || {}).map(([key, value]) => ({ type: "meta", name: `${key}: ${value}` })) },
-      { id: project.id, type: "project_entity", entityKind: "philosophy", name: "Философия", meta: project.props?.philosophy ? "задана" : "пусто", children: [
-        { type: "meta", name: project.props?.philosophy || "Не задана" },
-        { type: "meta", name: project.props?.principles ? `Принципы: ${project.props.principles}` : "Принципы не заданы" },
-      ] },
-      { id: project.id, type: "project_entity", entityKind: "deploy", name: "Деплой", meta: project.deploy_provider || "не указан", children: [{ type: "meta", name: project.deploy_provider || "Провайдер не указан" }, { type: "meta", name: project.deploy_target || "Цель деплоя не указана" }] },
-      { id: project.id, type: "project_entity", entityKind: "stack", name: "Стек", meta: `${project.stack.length}`, children: project.stack.map((item) => ({ type: "meta", name: item })) },
-      { id: project.id, type: "project_entity", entityKind: "access", name: "Доступ", meta: project.access_level, children: [{ type: "meta", name: project.access_level }] },
-    ],
-  };
-}
-
-function filterTree(nodes: FolderTreeNode[], query: string): FolderTreeNode[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return nodes;
-  const result: FolderTreeNode[] = [];
-  for (const node of nodes) {
-    const children = node.children ? filterTree(node.children, query) : [];
-    const ownMatch = `${node.name} ${node.meta ?? ""}`.toLowerCase().includes(needle);
-    if (ownMatch || children.length) result.push({ ...node, children: children.length ? children : node.children });
-  }
-  return result;
-}
-
-async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, init);
-  if (!res.ok) throw new Error(`request_failed:${res.status}`);
-  return (await res.json()) as T;
-}
-
-async function saveEntity(basePath: string, id: string, body: Record<string, unknown>) {
-  return fetchJson(id.trim() ? `${basePath}/${id.trim()}` : basePath, {
-    method: id.trim() ? "PATCH" : "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-function sumBytes(values: number[]) {
-  return values.reduce((sum, value) => sum + Number(value || 0), 0);
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "нет даты";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(date);
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "нет даты";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
-}
-
-function formatSince(value: string | null) {
-  if (!value) return "не появлялся";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "не появлялся";
-  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
-  if (seconds < 60) return "только что";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} мин назад`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} ч назад`;
-  if (seconds < 7 * 86400) return `${Math.floor(seconds / 86400)} дн назад`;
-  return formatDate(value);
-}
-
-const agentStatusLabels: Record<string, string> = {
-  active: "на связи",
-  idle: "ожидает",
-  offline: "отключен",
-};
-
-const runStatusLabels: Record<string, string> = {
-  running: "идёт",
-  doing: "в работе",
-  done: "готово",
-  finished: "завершено",
-  failed: "ошибка",
-  blocked: "блок",
-};
-
-const auditActionLabels: Record<string, string> = {
-  create: "добавил",
-  update: "отредактировал",
-  delete: "удалил",
-  claim: "взял в работу",
-  heartbeat: "обновил работу",
-  finish: "завершил",
-};
-
-function auditNotice(event: AuditEvent) {
-  const verb = auditActionLabels[event.action] || event.action;
-  const detail = event.summary || event.entity_type;
-  return {
-    id: `audit-${event.id}`,
-    text: `Агент ${event.actor} ${verb} ${detail}`,
-    at: new Date(event.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-  };
-}
-
-function projectName(projects: Project[], projectId: string | null) {
-  if (!projectId) return "без проекта";
-  return projects.find((project) => project.id === projectId)?.name ?? `project #${projectId}`;
-}
-
-function ShellLoading() {
-  return (
-    <main className="login-screen">
-      <div className="login-panel">Загрузка</div>
-    </main>
-  );
-}
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
-

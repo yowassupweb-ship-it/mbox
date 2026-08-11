@@ -1,0 +1,499 @@
+/* Агенты: аватары, ростер, карточки работы, потоки */
+
+.agent-work-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.agent-work-column {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 28px;
+  background: var(--panel-bg);
+  box-shadow: var(--chin-shadow);
+  padding: 14px;
+  min-width: 0;
+}
+
+.agent-work-column h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.agent-work-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: #e8edf7;
+}
+
+.agent-work-row + .agent-work-row {
+  margin-top: 8px;
+}
+
+.agent-work-row small {
+  color: #9aa5b7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-work-row.needs-human {
+  color: #ffd7a8;
+}
+
+.agent-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #8aa4c2;
+  box-shadow: 0 0 0 4px rgba(138, 164, 194, .12);
+}
+
+.agent-dot.active,
+.agent-dot.running,
+.agent-dot.doing {
+  background: #7cc6ff;
+}
+
+.agent-dot.offline {
+  background: #6b7280;
+  box-shadow: none;
+}
+
+.agent-state.active {
+  color: #7cc6ff;
+}
+
+.agent-state.offline {
+  color: var(--text-muted);
+}
+
+.agent-dot.inbox {
+  background: #ffd27d;
+}
+
+.agent-dot.decision {
+  background: #a7d79b;
+}
+
+/* Agent identity — avatars, presence rings, roster */
+.agent-avatar {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  color: #fff;
+  background:
+    radial-gradient(120% 120% at 30% 22%,
+      color-mix(in srgb, var(--agent-accent, #8aa4c2) 94%, #fff 6%),
+      color-mix(in srgb, var(--agent-accent, #8aa4c2) 58%, #000 42%));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 6px rgba(0, 0, 0, .38);
+  outline: 1.5px solid rgba(0, 0, 0, .4);
+  transition: box-shadow .3s ease, transform .3s ease;
+}
+
+.agent-avatar svg { display: block; }
+
+.agent-avatar::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 30%;
+  height: 30%;
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 50%;
+  background: #6b7280;
+  box-shadow: 0 0 0 2px var(--container-bg, #1c1c1e);
+  transition: background-color .3s ease;
+}
+
+.agent-avatar.active::after { background: #35c759; }
+.agent-avatar.idle::after { background: #ffd60a; }
+.agent-avatar.offline::after { background: #6b7280; }
+.agent-avatar.working::after { background: #7cc6ff; }
+
+.agent-avatar.working {
+  animation: avatar-pulse 1.9s ease-out infinite;
+}
+
+@keyframes avatar-pulse {
+  0% { box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 6px rgba(0,0,0,.38), 0 0 0 0 color-mix(in srgb, var(--agent-accent, #7cc6ff) 55%, transparent); }
+  70% { box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 6px rgba(0,0,0,.38), 0 0 0 7px transparent; }
+  100% { box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 6px rgba(0,0,0,.38), 0 0 0 0 transparent; }
+}
+
+.pill-avatars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pill-avatars .agent-avatar + .agent-avatar { margin-left: -9px; }
+
+.realtime-pill:has(.pill-avatars) { padding-left: 6px; }
+
+.popover-section + .popover-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: var(--border-width) solid rgba(255, 255, 255, .06);
+}
+
+.popover-section > strong {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13px;
+  letter-spacing: .01em;
+  color: var(--text-main);
+}
+
+.agent-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.agent-roster-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .045);
+}
+
+.agent-roster-item.active { background: rgba(53, 199, 89, .09); }
+
+.agent-roster-body {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.agent-roster-name {
+  font-weight: 700;
+  color: #eef3fb;
+}
+
+.agent-roster-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-roster-meta {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+
+.agent-roster-state {
+  font-size: 11px;
+  font-weight: 720;
+  color: #9aa5b7;
+}
+
+.agent-roster-state.active { color: #58d977; }
+.agent-roster-state.working { color: #7cc6ff; }
+.agent-roster-state.offline { color: var(--text-muted); }
+
+.agent-roster-meta time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.agent-work-row.with-avatar {
+  grid-template-columns: 30px minmax(0, auto) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.agent-row-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Agent activity board — cards + streams */
+.agent-activity {
+  margin-top: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.agent-activity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.agent-activity-head h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: -.01em;
+}
+
+.agent-activity-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agent-activity-summary b { color: var(--text-main); font-weight: 760; }
+.agent-activity-summary .tone-active b { color: #58d977; }
+.agent-activity-summary .tone-working b { color: #7cc6ff; }
+
+.dot-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .22);
+}
+
+/* min(100%, ...) обязателен: голый minmax(288px, 1fr) не сжимается и режет карточки на узкой ширине. */
+.agent-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 288px), 1fr));
+  gap: 12px;
+}
+
+.agent-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 11px;
+  padding: 15px;
+  border-radius: 24px;
+  border: var(--border-width) solid var(--border-color);
+  background:
+    radial-gradient(140% 120% at 100% 0%, color-mix(in srgb, var(--agent-accent, #8aa4c2) 12%, transparent), transparent 46%),
+    var(--container-bg, #1c1c1e);
+  box-shadow: var(--chin-shadow);
+  overflow: hidden;
+  transition: border-color .3s ease, box-shadow .3s ease, transform .3s ease;
+}
+
+.agent-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: color-mix(in srgb, var(--agent-accent, #8aa4c2) 78%, transparent);
+  opacity: .5;
+  transition: opacity .3s ease;
+}
+
+.agent-card.active { border-color: color-mix(in srgb, var(--agent-accent, #8aa4c2) 26%, var(--border-color)); }
+
+.agent-card.working {
+  border-color: color-mix(in srgb, var(--agent-accent, #7cc6ff) 40%, transparent);
+  box-shadow: var(--chin-shadow), 0 0 0 1px color-mix(in srgb, var(--agent-accent, #7cc6ff) 22%, transparent), 0 14px 34px rgba(0, 0, 0, .34);
+}
+
+.agent-card.working::before { opacity: 1; }
+
+.agent-card-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-card-id { min-width: 0; display: grid; gap: 2px; }
+.agent-card-id strong { font-size: 15px; }
+.agent-card-id span {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-state {
+  align-self: start;
+  font-size: 11px;
+  font-weight: 720;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #9aa5b7;
+  background: rgba(255, 255, 255, .06);
+  white-space: nowrap;
+}
+
+.agent-card-state.active { color: #58d977; background: rgba(53, 199, 89, .12); }
+.agent-card-state.working { color: #051826; background: #7cc6ff; }
+.agent-card-state.offline { color: var(--text-muted); }
+
+.agent-card-now {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: 22px;
+}
+
+/* Цель сессии — это предложение, а не ярлык. Даём ей две строки вместо обрезки в одну. */
+.agent-card-goal {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.agent-card-now .activity-bars { margin-top: 3px; }
+
+.agent-card-goal.live { color: #e8edf7; font-weight: 600; }
+
+.activity-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 15px;
+  flex: none;
+}
+
+.activity-bars span {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--agent-accent, #7cc6ff);
+  animation: activity-eq 1s ease-in-out infinite;
+}
+
+.activity-bars span:nth-child(1) { height: 40%; animation-delay: -.1s; }
+.activity-bars span:nth-child(2) { height: 100%; animation-delay: -.4s; }
+.activity-bars span:nth-child(3) { height: 65%; animation-delay: -.7s; }
+.activity-bars span:nth-child(4) { height: 85%; animation-delay: -.25s; }
+
+@keyframes activity-eq {
+  0%, 100% { transform: scaleY(.35); }
+  50% { transform: scaleY(1); }
+}
+
+.agent-card-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.agent-card-files code {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .055);
+  color: #b6c1d4;
+  font-family: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-top: 3px;
+}
+
+.metric {
+  display: grid;
+  gap: 1px;
+  padding: 8px 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .04);
+  text-align: center;
+}
+
+.metric b { font-size: 17px; font-weight: 760; color: #eef3fb; font-variant-numeric: tabular-nums; }
+.metric span { font-size: 10.5px; color: var(--text-muted); text-transform: lowercase; }
+
+.agent-card-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.agent-card-decision {
+  min-width: 0;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--agent-accent, #a7d79b) 70%, #cfe3ff);
+}
+
+.agent-card-decision.muted { color: var(--text-muted); }
+.agent-card-foot time { color: var(--text-muted); white-space: nowrap; flex: none; }
+
+.agent-streams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 232px), 1fr));
+  gap: 12px;
+}
+
+.agent-stream {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 22px;
+  background: var(--container-bg, #1c1c1e);
+  box-shadow: var(--chin-shadow);
+  padding: 14px;
+  min-width: 0;
+}
+
+.agent-stream h4 {
+  margin: 0 0 11px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.stream-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.stream-row + .stream-row { margin-top: 9px; }
+.stream-row-body { min-width: 0; display: grid; gap: 1px; }
+
+.stream-row-actor { font-size: 12.5px; font-weight: 640; color: #dfe6f1; }
+.stream-row-actor em { color: var(--text-muted); font-style: normal; font-weight: 500; }
+
+.stream-row-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .agent-streams { grid-template-columns: 1fr; }
+}

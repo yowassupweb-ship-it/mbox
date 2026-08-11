@@ -18,6 +18,8 @@
     "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export"
   },
   "dependencies": {
+    "@chatscope/chat-ui-kit-react": "^2.1.1",
+    "@chatscope/chat-ui-kit-styles": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@vitejs/plugin-react": "^4.3.4",
     "lucide-react": "^0.468.0",

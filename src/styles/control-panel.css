@@ -1,0 +1,620 @@
+/* Страница Проекты — панель контроля. Без вложенных панелей: главный блок занимает всю ширину. */
+
+.control-panel {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Выбор проекта */
+
+.project-rail {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+  scrollbar-width: none;
+}
+
+.project-rail::-webkit-scrollbar { display: none; }
+
+.project-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--container-bg);
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.project-pill-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--project-color, #2c2c2e);
+}
+
+.project-pill-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .07);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-pill.is-active {
+  color: var(--text-main);
+  background: var(--element-bg);
+  border-color: color-mix(in srgb, var(--project-color, #8ab4ff) 45%, var(--border-color));
+  box-shadow: var(--chin-shadow);
+}
+
+/* Разделы проекта */
+
+.entity-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(50%, 132px), 1fr));
+  gap: var(--space-2);
+}
+
+.entity-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "icon name" "icon meta";
+  align-items: center;
+  gap: 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--container-bg);
+  text-align: left;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.entity-tile svg { grid-area: icon; color: var(--kind-accent, #d4dceb); }
+.entity-tile b { grid-area: name; color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-medium); }
+.entity-tile small { grid-area: meta; color: var(--text-muted); font-size: var(--text-xs); }
+
+.entity-tile.is-active {
+  background: var(--element-bg);
+  border-color: color-mix(in srgb, var(--kind-accent, #8ab4ff) 52%, var(--border-color));
+  box-shadow: var(--chin-shadow);
+}
+
+/* Главный блок: без рамки и подложки, во всю ширину. */
+
+.control-body {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+.control-body-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.control-body-head h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+}
+
+.control-body-head .muted { font-size: var(--text-sm); }
+
+/* Перетаскивание карточек */
+
+.todo-drag-slot {
+  display: block;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  margin-bottom: var(--space-3);
+  cursor: grab;
+}
+
+.todo-drag-slot:active { cursor: grabbing; }
+
+/*
+ * Отметка изменений в духе редактора. Число — это разница в байтах с момента, когда карточку открывали.
+ * Точного «+строк / −строк» из API не достать: история изменений по сущности не хранится, есть только текущий размер.
+ */
+/* Выполненное — отдельным блоком внизу, свёрнуто по умолчанию. */
+
+.todo-done-block {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.todo-done-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border: 0;
+  border-top: var(--border-width) solid var(--border-color);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-align: left;
+}
+
+.todo-done-head svg { transition: transform var(--duration-fast) var(--ease-out); }
+.todo-done-head svg.is-open { transform: rotate(180deg); }
+
+.todo-done-head b {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .07);
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-board-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.todo-board-tools .muted { font-size: var(--text-sm); }
+
+/* Счётчик непрочитанного в нижней навигации */
+
+.nav-item { position: relative; }
+
+.nav-badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--state-ok);
+  color: #04210e;
+  font-size: 10.5px;
+  font-weight: var(--weight-bold);
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-badge {
+  flex: none;
+  align-self: start;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diff-badge.is-new { color: var(--state-ok-soft); background: color-mix(in srgb, var(--state-ok) 18%, transparent); }
+.diff-badge.is-plus { color: var(--state-ok-soft); background: color-mix(in srgb, var(--state-ok) 14%, transparent); }
+.diff-badge.is-minus { color: var(--state-danger); background: color-mix(in srgb, var(--state-danger) 14%, transparent); }
+
+/* Непрочитанное — зеленоватое, завершённое — красноватое. */
+.todo-note-card.is-fresh {
+  border-color: color-mix(in srgb, var(--state-ok) 34%, var(--border-color));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--state-ok) 7%, var(--element-bg)), var(--element-bg) 62%);
+}
+
+.todo-note-card.is-changed {
+  border-color: color-mix(in srgb, var(--state-live) 30%, var(--border-color));
+}
+
+.todo-note-card.is-done {
+  opacity: .72;
+  filter: none;
+  border-color: color-mix(in srgb, var(--state-danger) 30%, var(--border-color));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--state-danger) 8%, var(--element-bg)), var(--element-bg) 62%);
+}
+
+.todo-note-card.is-done .todo-note-card-body { color: #9aa5b7; }
+
+.todo-drag-slot.is-dragging {
+  opacity: .45;
+  transform: scale(.98);
+}
+
+.todo-drag-slot > .todo-note-card { height: 100%; }
+
+/* Свойства — как переменные окружения: строки ключ-значение, без шифрования. */
+
+.env-editor { display: grid; gap: var(--space-4); }
+.env-hint { font-size: var(--text-sm); line-height: var(--leading-normal); }
+.env-hint code {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .07);
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: var(--text-xs);
+}
+
+.env-rows { display: grid; gap: var(--space-2); }
+
+.env-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 280px) minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.env-row input,
+.env-row textarea {
+  padding: 9px 12px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+}
+
+.env-key {
+  font-family: "SF Mono", ui-monospace, monospace;
+  text-transform: none;
+}
+
+.env-value { resize: vertical; min-height: 38px; line-height: 1.4; }
+
+.env-row.is-duplicate .env-key { border-color: var(--state-danger); }
+
+.env-remove {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--container-bg);
+  color: var(--text-muted);
+}
+
+.env-remove:hover { color: var(--state-danger); border-color: color-mix(in srgb, var(--state-danger) 40%, var(--border-color)); }
+
+.env-actions { display: flex; gap: var(--space-2); align-items: center; }
+
+@media (max-width: 720px) {
+  .env-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .env-value { grid-column: 1 / -1; }
+}
+
+/* Связи */
+
+.relations-panel { display: grid; gap: var(--space-4); justify-items: start; }
+
+.relation-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.relation-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  box-shadow: var(--chin-shadow);
+  min-width: 0;
+}
+
+.relation-card header { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.relation-card header svg { color: #8ab4ff; flex: none; }
+.relation-card header strong { min-width: 0; overflow-wrap: anywhere; }
+
+.relation-card header button {
+  margin-left: auto;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .05);
+  color: var(--text-muted);
+}
+
+.relation-card header button:hover { color: var(--state-danger); }
+
+.relation-direction {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.relation-direction em { color: #8ab4ff; font-style: normal; font-weight: var(--weight-medium); }
+.relation-why { margin: 0; color: #d8dfeb; font-size: var(--text-sm); line-height: 1.45; overflow-wrap: anywhere; }
+.relation-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-xs); }
+
+.relation-add {
+  display: grid;
+  gap: var(--space-3);
+  width: min(560px, 100%);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--container-bg);
+}
+
+.relation-add input,
+.relation-add select,
+.relation-add textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+}
+
+.relation-add-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+
+/* Очередь проверки на Обзоре */
+
+.review-panel { border-color: color-mix(in srgb, var(--state-warn) 30%, var(--border-color)); }
+
+.review-queue { display: grid; gap: var(--space-3); }
+
+.review-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+}
+
+.review-item-body { display: grid; gap: 3px; min-width: 0; }
+.review-item-body .muted { font-size: var(--text-xs); }
+.review-item-body strong { overflow-wrap: anywhere; }
+
+.review-item-body p {
+  margin: 0;
+  color: #aeb8c8;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.review-item-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+@media (max-width: 720px) {
+  .review-item { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Пилюля статуса не должна распирать шапку: длинный статус обрезается, полный текст остаётся в title. */
+
+.realtime-pill {
+  max-width: min(46vw, 520px);
+  min-width: 0;
+}
+
+.realtime-pill strong,
+.realtime-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* Кто говорит, видно по аватару, имени и цвету полосы у пузыря. */
+.chat-msg {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.chat-msg.is-mine { grid-template-columns: minmax(0, 1fr); justify-items: end; }
+
+.chat-bubble {
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-left: 3px solid var(--agent-accent, #8ab4ff);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+}
+
+.chat-msg.is-mine .chat-bubble {
+  max-width: 86%;
+  border-left: var(--border-width) solid var(--border-color);
+  border-right: 3px solid var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 15%, var(--element-bg));
+}
+
+.chat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: 3px;
+}
+
+.chat-meta b { font-size: var(--text-sm); color: var(--agent-accent, var(--text-main)); }
+.chat-msg.is-mine .chat-meta b { color: var(--text-main); }
+.chat-meta time { color: var(--text-muted); font-size: var(--text-xs); }
+
+.chat-bubble p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-flag {
+  display: inline-block;
+  margin-top: var(--space-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--state-warn) 18%, transparent);
+  color: var(--state-warn);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.chat-error { margin: 0 var(--space-5); }
+
+.agent-chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-top: var(--border-width) solid var(--border-color);
+}
+
+.agent-chat-form textarea {
+  padding: 11px 14px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  resize: none;
+}
+
+/* Кнопка отправки — квадратная и прижата к низу поля, а не растянута по его высоте. */
+.chat-send {
+  align-self: end;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 720px) {
+  .agent-chat { left: 12px; right: 12px; width: auto; }
+  .agent-chat-panel { height: min(76svh, 620px); }
+}
+
+.chat-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-5) 0;
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.chat-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.chat-tabs button.is-active { color: var(--text-main); border-bottom-color: var(--accent-color); }
+
+.chat-tabs b {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .07);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-more {
+  margin-top: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-color);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.entity-tile.is-add {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.entity-tile.is-add svg { color: var(--text-muted); }
+.entity-tile.is-add:hover { border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color)); }
+.entity-tile.is-add:hover svg,
+.entity-tile.is-add:hover b { color: var(--accent-color); }
+
+/* Конфа: кому адресовано сообщение */
+
+.chat-targets {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5) 0;
+}
+
+.chat-targets button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 10px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--element-bg);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.chat-targets button.is-active {
+  color: var(--text-main);
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 18%, var(--element-bg));
+}
+
+.chat-msg.is-pending .chat-bubble { opacity: .6; }
+.chat-msg.is-failed .chat-bubble { border-right-color: var(--state-danger); }
+.chat-msg.is-failed .chat-meta time { color: var(--state-danger); }
+
+/* Кто забрал задачу — видно аватаром агента, а не только именем. */
+.todo-chip.todo-claimed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 4px;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, .09);
+}

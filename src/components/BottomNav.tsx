@@ -12,9 +12,10 @@ type BottomNavProps = {
   activeSection: SectionKey;
   onSelect: (section: SectionKey) => void;
   hrefFor: (section: SectionKey) => string;
+  badges?: Partial<Record<SectionKey, number>>;
 };
 
-export function BottomNav({ sections, activeSection, onSelect, hrefFor }: BottomNavProps) {
+export function BottomNav({ sections, activeSection, onSelect, hrefFor, badges }: BottomNavProps) {
   return (
     <nav className="bottom-nav" aria-label="Основные разделы">
       <div className="bottom-nav-inner">
@@ -25,6 +26,7 @@ export function BottomNav({ sections, activeSection, onSelect, hrefFor }: Bottom
           }}>
             <Icon size={18} />
             <span>{label}</span>
+            {Boolean(badges?.[key]) && <b className="nav-badge" aria-label={`${badges![key]} непрочитанных`}>{badges![key]}</b>}
           </a>
         ))}
       </div>

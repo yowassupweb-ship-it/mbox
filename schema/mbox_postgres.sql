@@ -256,6 +256,40 @@ ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS props JSONB NOT NULL DEFAULT
 
 CREATE INDEX IF NOT EXISTS idx_agent_presence_seen ON agent_presence(last_seen DESC);
 
+-- Отметки «просмотрено». Механизм заимствован у Memora (memories_events с флагом consumed),
+-- но обобщён на любую сущность MBOX. Живёт в базе, а не в браузере, поэтому непрочитанное
+-- одинаково на телефоне и на десктопе. seen_bytes хранит размер на момент просмотра —
+-- по нему считается, изменилась ли сущность с тех пор.
+-- Расстановка узлов на карте. Карта общая, а не персональная: она отражает реальность проекта,
+-- поэтому позиции не привязаны к пользователю. Ключ — тип сущности плюс её id.
+CREATE TABLE IF NOT EXISTS graph_positions (
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  x DOUBLE PRECISION NOT NULL DEFAULT 0,
+  y DOUBLE PRECISION NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (entity_type, entity_id)
+);
+
+-- Папки проекта. Раньше folders обслуживали только артефакты, и у проекта не могло быть
+-- собственных разделов сверх восьми захардкоженных. project_id делает папку принадлежащей проекту.
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_folders_project ON folders(project_id);
+
+CREATE TABLE IF NOT EXISTS seen_marks (
+  id BIGSERIAL PRIMARY KEY,
+  actor TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id BIGINT NOT NULL,
+  seen_bytes INTEGER NOT NULL DEFAULT 0,
+  seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE seen_marks ADD COLUMN IF NOT EXISTS seen_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE seen_marks ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_seen_marks_entity ON seen_marks(actor, entity_type, entity_id);
+
 CREATE INDEX IF NOT EXISTS idx_memories_search ON memories USING GIN(search_vector);
 CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_memories_metadata ON memories USING GIN(metadata);

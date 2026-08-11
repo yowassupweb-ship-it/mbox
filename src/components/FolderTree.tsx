@@ -1,4 +1,5 @@
 import { ChevronRight, FileText, Folder, GitBranch, ListTodo } from "lucide-react";
+import { entityKindMeta } from "../features/tree/entityKinds";
 import type { CSSProperties, MouseEvent } from "react";
 import { useState } from "react";
 
@@ -45,9 +46,11 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
     node.status ? `todo-status-${node.status}` : "",
     node.priority ? `todo-priority-${node.priority}` : "",
   ].filter(Boolean).join(" ");
+  const kind = entityKindMeta(node.entityKind);
   const rowStyle = {
     "--tree-depth": level,
     "--tree-color": node.color || "#2c2c2e",
+    ...(kind ? { "--kind-accent": kind.accent } : {}),
   } as CSSProperties;
 
   function openContext(event: MouseEvent) {
@@ -57,9 +60,9 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
   }
 
   if (!hasChildren) {
-    const FileIcon = node.type === "todo" ? ListTodo : node.type === "git_group" ? GitBranch : FileText;
+    const FileIcon = kind?.icon ?? (node.type === "todo" ? ListTodo : node.type === "git_group" ? GitBranch : FileText);
     return (
-      <div className={rowClass} style={rowStyle} onClick={() => onSelect?.(node)} onContextMenu={openContext}>
+      <div className={rowClass} style={rowStyle} data-kind={node.entityKind} onClick={() => onSelect?.(node)} onContextMenu={openContext}>
         {node.type === "todo" && node.status === "doing" && <span className="todo-spinner" aria-label="В работе" />}
         <FileIcon size={18} />
         <span>{node.name}</span>
@@ -71,11 +74,12 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
   return (
     <div className="tree-branch">
       {(() => {
-        const BranchIcon = node.type === "todo_group" ? ListTodo : node.type === "git_group" ? GitBranch : Folder;
+        const BranchIcon = kind?.icon ?? (node.type === "todo_group" ? ListTodo : node.type === "git_group" ? GitBranch : Folder);
         return (
       <button
         className={rowClass}
         style={rowStyle}
+        data-kind={node.entityKind}
         onClick={() => {
           setOpen((value) => !value);
           onSelect?.(node);

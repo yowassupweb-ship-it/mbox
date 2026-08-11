@@ -27,7 +27,7 @@ const agentStructure = {
     philosophy: "project-level principles, taste, constraints and decision logic stored in project props, usually philosophy and principles keys.",
     todos: "note-like tasks attached to a project. The note field is the main working surface.",
     todo_props: "structured key/value task facts such as context, acceptance criteria, dependency, screen, owner and device.",
-    memories: "database-backed knowledge records available for search and graph context.",
+    memories: "database-backed knowledge records available for search and graph context. Agent-written memories must include source_agent plus project_id/todo_id in metadata when applicable.",
     folders: "hierarchical containers for projects, artifacts and memory areas.",
     protected_secrets: "credentials, visible to agents only after explicit approval.",
     audit_events: "append-only history of database changes.",
@@ -73,7 +73,7 @@ const agentStructure = {
   agent_contract: {
     before_work: ["describe_structure", "list_project_context", "get_next_task"],
     during_work: ["write important decisions to project props or memory", "create relations when context links projects", "keep todo note current"],
-    after_work: ["set task status", "add a short done todo or audit memory when work was not started from an existing todo"],
+    after_work: ["set task status", "record a memory for significant work with source_agent, project_id, todo_id and touched_files in metadata"],
   },
 };
 
@@ -133,6 +133,31 @@ function broadcastChange(req, action, entity, detail = "") {
     detail: safeDetail,
     notification: `Агент ${actor} ${verb} ${safeDetail}`,
   });
+}
+
+function detailMode(url, fallback = "full") {
+  const detail = String(url.searchParams.get("detail") || fallback).toLowerCase();
+  return detail === "full" ? "full" : "short";
+}
+
+function textPreview(value, limit = 240) {
+  const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit - 1).trimEnd()}...`;
+}
+
+function compactTextRow(row, fields, limit = 240) {
+  const compact = { ...row };
+  for (const field of fields) {
+    const raw = compact[field];
+    const rawText = typeof raw === "string" ? raw : JSON.stringify(raw ?? "");
+    compact[`${field}_preview`] = textPreview(raw, limit);
+    compact[`${field}_bytes`] = Buffer.byteLength(rawText, "utf8");
+    compact[`${field}_truncated`] = rawText.length > compact[`${field}_preview`].length;
+    delete compact[field];
+  }
+  return compact;
 }
 
 async function readBody(req) {
@@ -323,10 +348,18 @@ async function handleApiWithContext(req, res, url) {
     if (req.method === "POST") {
       const body = await readBody(req);
       const result = await query(
-        `INSERT INTO memories(title, content, entity_type, access_level, tags)
-         VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'memory'), COALESCE(NULLIF($4, ''), 'private'), $5)
+        `INSERT INTO memories(folder_id, title, content, entity_type, access_level, tags, metadata)
+         VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'memory'), COALESCE(NULLIF($5, ''), 'private'), $6, $7)
          RETURNING id::text`,
-        [String(body.title || "").trim(), String(body.content || ""), String(body.entity_type || ""), String(body.access_level || ""), Array.isArray(body.tags) ? body.tags : []],
+        [
+          body.folder_id || null,
+          String(body.title || "").trim(),
+          String(body.content || ""),
+          String(body.entity_type || ""),
+          String(body.access_level || ""),
+          Array.isArray(body.tags) ? body.tags : [],
+          JSON.stringify(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+        ],
       );
       broadcastChange(req, "create", "memories", String(body.title || "").trim());
       return sendJson(res, 201, { memory: result.rows[0] });
@@ -372,10 +405,10 @@ async function handleApiWithContext(req, res, url) {
     if (req.method === "POST") {
       const body = await readBody(req);
       const result = await query(
-        `INSERT INTO folders(parent_id, name, entity_type, access_level, color)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO folders(parent_id, name, entity_type, access_level, color, project_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id::text`,
-        [body.parent_id || null, String(body.name || "").trim(), String(body.entity_type || "artifact"), String(body.access_level || "private"), String(body.color || "#2c2c2e")],
+        [body.parent_id || null, String(body.name || "").trim(), String(body.entity_type || "artifact"), String(body.access_level || "private"), String(body.color || "#2c2c2e"), body.project_id || null],
       );
       broadcastChange(req, "create", "folders", String(body.name || "").trim());
       return sendJson(res, 201, { folder: result.rows[0] });
@@ -408,7 +441,7 @@ async function handleApiWithContext(req, res, url) {
          FROM tree t JOIN own o ON o.id = t.node_id
          GROUP BY t.root_id
        )
-       SELECT id::text, parent_id::text, name, entity_type, access_level, color,
+       SELECT id::text, parent_id::text, project_id::text, name, entity_type, access_level, color,
               pg_column_size(folders)::int AS memory_bytes,
               COALESCE((SELECT content_bytes FROM rollup WHERE rollup.id = folders.id), 0) AS content_bytes,
               COALESCE((SELECT content_items FROM rollup WHERE rollup.id = folders.id), 0) AS content_items
@@ -494,6 +527,7 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/projects") {
+    const detail = detailMode(url);
     if (req.method === "POST") {
       const body = await readBody(req);
       const result = await query(
@@ -528,7 +562,9 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, {
       projects: projects.rows.map((project) => ({
         ...project,
-        todos: todos.rows.filter((todo) => todo.project_id === project.id),
+        todos: todos.rows
+          .filter((todo) => todo.project_id === project.id)
+          .map((todo) => (detail === "short" ? compactTextRow(todo, ["note"]) : todo)),
         relations: relations.rows.filter((edge) => edge.from_project_id === project.id || edge.to_project_id === project.id),
       })),
     });
@@ -625,6 +661,17 @@ async function handleApiWithContext(req, res, url) {
   }
 
   const todoMatch = url.pathname.match(/^\/api\/mbox\/todos\/(\d+)$/);
+  if (todoMatch && req.method === "GET") {
+    const result = await query(
+      `SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text,
+              access_level, pg_column_size(todos)::int AS memory_bytes, created_at::text, updated_at::text
+       FROM todos
+       WHERE id = $1`,
+      [todoMatch[1]],
+    );
+    return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { todo: result.rows[0] } : { error: "not_found" });
+  }
+
   if (todoMatch && req.method === "PATCH") {
     const body = await readBody(req);
     const result = await query(
@@ -671,6 +718,7 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/agent/context") {
     const projectName = url.searchParams.get("project") || "MBOX";
+    const detail = detailMode(url, "short");
     const projects = await query(
       `SELECT id::text, name, status, stack, git_url, deploy_target, deploy_provider, props, color, access_level,
               pg_column_size(projects)::int AS memory_bytes
@@ -712,10 +760,160 @@ async function handleApiWithContext(req, res, url) {
        WHERE s.project_id = $1
          AND s.agent_share_state = 'approved'
          AND (s.approved_until IS NULL OR s.approved_until > now())
-       ORDER BY s.updated_at DESC`,
+      ORDER BY s.updated_at DESC`,
       [project.id, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key"],
     );
-    return sendJson(res, 200, { project, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, approved_secrets: secrets.rows });
+    if (detail === "full") {
+      return sendJson(res, 200, { project, detail, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, approved_secrets: secrets.rows });
+    }
+    return sendJson(res, 200, {
+      project,
+      detail,
+      counts: {
+        todos: todos.rows.length,
+        relations: relations.rows.length,
+        decisions: decisions.rows.length,
+        inbox: inbox.rows.length,
+        runs: runs.rows.length,
+        history: history.rows.length,
+        approved_secrets: secrets.rows.length,
+      },
+      todos: todos.rows.map((todo) => compactTextRow({
+        id: todo.id,
+        project_id: todo.project_id,
+        title: todo.title,
+        note: todo.note,
+        status: todo.status,
+        priority: todo.priority,
+        props_keys: Object.keys(todo.props || {}),
+        claimed_by: todo.claimed_by,
+        claimed_until: todo.claimed_until,
+        heartbeat_at: todo.heartbeat_at,
+        memory_bytes: todo.memory_bytes,
+      }, ["note"], 180)),
+      relations: relations.rows.map((relation) => ({
+        id: relation.id,
+        from_entity: relation.from_entity,
+        from_id: relation.from_id,
+        from_label: relation.from_label,
+        to_entity: relation.to_entity,
+        to_id: relation.to_id,
+        to_label: relation.to_label,
+        edge_type: relation.edge_type,
+        title: relation.title,
+        description_preview: textPreview(relation.description, 160),
+        owner: relation.owner,
+        group_entity: relation.group_entity,
+        strength: relation.strength,
+        valid_until: relation.valid_until,
+      })),
+      decisions: decisions.rows.map((decision) => ({
+        id: decision.id,
+        actor: decision.actor,
+        title: decision.title,
+        decision_preview: textPreview(decision.decision, 180),
+        rationale_preview: textPreview(decision.rationale, 120),
+        impact_preview: textPreview(decision.impact, 120),
+        props_keys: Object.keys(decision.props || {}),
+        created_at: decision.created_at,
+      })),
+      inbox: inbox.rows.map((item) => ({
+        id: item.id,
+        agent_name: item.agent_name,
+        item_type: item.item_type,
+        title: item.title,
+        body_preview: textPreview(item.body, 180),
+        status: item.status,
+        priority: item.priority,
+        requires_human: item.requires_human,
+        props_keys: Object.keys(item.props || {}),
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+      })),
+      runs: runs.rows.map((run) => ({
+        id: run.id,
+        todo_id: run.todo_id,
+        agent_name: run.agent_name,
+        status: run.status,
+        goal: run.goal,
+        touched_files: run.touched_files,
+        result_preview: textPreview(run.result, 160),
+        props_keys: Object.keys(run.props || {}),
+        started_at: run.started_at,
+        heartbeat_at: run.heartbeat_at,
+        finished_at: run.finished_at,
+      })),
+      history: history.rows.map((event) => ({
+        id: event.id,
+        actor: event.actor,
+        action: event.action,
+        entity_type: event.entity_type,
+        entity_id: event.entity_id,
+        summary: event.summary,
+        metadata_preview: textPreview(event.metadata, 160),
+        created_at: event.created_at,
+      })),
+      approved_secrets: secrets.rows.map((secret) => ({ id: secret.id, title: secret.title, login: secret.login, url: secret.url, approved_until: secret.approved_until })),
+    });
+  }
+
+  // Расстановка узлов карты. Общая для всех, поэтому без привязки к пользователю.
+  if (url.pathname === "/api/mbox/graph/positions") {
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      const items = Array.isArray(body.positions) ? body.positions : [body];
+      const rows = items
+        .filter((item) => item && item.entity_type && item.entity_id)
+        .map((item) => [String(item.entity_type), String(item.entity_id), Number(item.x) || 0, Number(item.y) || 0]);
+      if (!rows.length) return sendJson(res, 400, { error: "positions_required" });
+      const values = rows.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, now())`).join(", ");
+      await query(
+        `INSERT INTO graph_positions(entity_type, entity_id, x, y, updated_at)
+         VALUES ${values}
+         ON CONFLICT (entity_type, entity_id)
+         DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, updated_at = now()`,
+        rows.flat(),
+      );
+      return sendJson(res, 200, { ok: true, saved: rows.length });
+    }
+    if (req.method === "DELETE") {
+      await query("DELETE FROM graph_positions");
+      return sendJson(res, 200, { ok: true });
+    }
+    const result = await query("SELECT entity_type, entity_id, x, y FROM graph_positions");
+    return sendJson(res, 200, { positions: result.rows });
+  }
+
+  // Отметки «просмотрено», привязанные к пользователю, а не к браузеру.
+  if (url.pathname === "/api/mbox/seen") {
+    const user = await currentUser(req);
+    const actor = user?.username || "anonymous";
+
+    if (req.method === "POST") {
+      const body = await readBody(req);
+      const marks = Array.isArray(body.marks) ? body.marks : [body];
+      const rows = marks
+        .filter((mark) => mark && mark.entity_type && mark.entity_id)
+        .map((mark) => [actor, String(mark.entity_type), String(mark.entity_id), Number(mark.bytes) || 0]);
+      if (!rows.length) return sendJson(res, 400, { error: "marks_required" });
+
+      // Одним запросом на всю пачку: пула соединений нет, каждый query() открывает новый клиент.
+      const values = rows.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4}, now())`).join(", ");
+      await query(
+        `INSERT INTO seen_marks(actor, entity_type, entity_id, seen_bytes, seen_at)
+         VALUES ${values}
+         ON CONFLICT (actor, entity_type, entity_id)
+         DO UPDATE SET seen_bytes = EXCLUDED.seen_bytes, seen_at = EXCLUDED.seen_at`,
+        rows.flat(),
+      );
+      return sendJson(res, 200, { ok: true, saved: rows.length });
+    }
+
+    const result = await query(
+      "SELECT entity_type, entity_id::text, seen_bytes, seen_at::text FROM seen_marks WHERE actor = $1",
+      [actor],
+    );
+    return sendJson(res, 200, { marks: result.rows });
   }
 
   if (url.pathname === "/api/mbox/agent/inbox") {

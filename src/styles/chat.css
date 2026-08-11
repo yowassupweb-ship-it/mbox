@@ -1,0 +1,394 @@
+/*
+ * Перекраска готового кита @chatscope под MBOX.
+ * Кит приходит со светлой темой, поэтому переопределяем его переменные и ключевые узлы.
+ */
+
+.agent-chat {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(96px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: grid;
+  gap: var(--space-2);
+  justify-items: end;
+}
+
+.agent-chat-shell {
+  width: min(560px, calc(100vw - 32px));
+  height: min(72vh, 680px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-xl);
+  background: var(--container-bg);
+  box-shadow: var(--chin-shadow), 0 22px 54px rgba(0, 0, 0, .55);
+  overflow: hidden;
+}
+
+/* Ростер агентов с межевыми статусами */
+
+.chat-roster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-color);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .03), transparent);
+}
+
+.chat-roster button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--element-bg);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.chat-roster button.is-active {
+  color: var(--text-main);
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 18%, var(--element-bg));
+}
+
+.chat-roster em { font-style: normal; opacity: .65; }
+.chat-roster .chat-close { margin-left: auto; border-radius: var(--radius-sm); padding: 4px 6px; }
+
+.chat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--state-off);
+  flex: none;
+}
+
+.chat-dot.state-working { background: var(--state-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-live) 25%, transparent); }
+.chat-dot.state-thinking { background: var(--state-ok); }
+.chat-dot.state-idle { background: var(--state-warn); }
+.chat-dot.state-offline { background: var(--state-off); }
+
+/* Собственно кит */
+
+.agent-chat-shell .cs-main-container,
+.agent-chat-shell .cs-chat-container,
+.agent-chat-shell .cs-message-list,
+.agent-chat-shell .cs-conversation-header,
+.agent-chat-shell .cs-message-input {
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  font-family: inherit;
+}
+
+.agent-chat-shell .cs-conversation-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-color);
+  background: transparent;
+}
+
+.agent-chat-shell .cs-conversation-header__content { padding: 0; }
+
+.agent-chat-shell .cs-conversation-header__user-name {
+  background: transparent;
+  color: var(--text-main);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  padding: 0;
+}
+
+.agent-chat-shell .cs-conversation-header__info {
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  padding: 0;
+}
+
+.agent-chat-shell .cs-message-list { padding: var(--space-4) var(--space-4) var(--space-2); }
+.agent-chat-shell .cs-message-list__scroll-wrapper { padding-right: var(--space-2); }
+
+/* Пузыри: крупный радиус, один угол приплюснут в сторону автора — так видно, кто говорит. */
+.agent-chat-shell .cs-message__content {
+  border-radius: 20px;
+  background: var(--element-bg);
+  border: var(--border-width) solid var(--border-color);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: 11px 15px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .25);
+}
+
+.agent-chat-shell .cs-message--incoming .cs-message__content {
+  border-bottom-left-radius: 7px;
+}
+
+.agent-chat-shell .cs-message--outgoing .cs-message__content {
+  border-bottom-right-radius: 7px;
+  border-color: color-mix(in srgb, var(--accent-color) 42%, transparent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 30%, var(--element-bg)),
+    color-mix(in srgb, var(--accent-color) 20%, var(--element-bg)));
+  color: #eef4ff;
+}
+
+.agent-chat-shell .cs-message { margin-bottom: 2px; }
+.agent-chat-shell .cs-message + .cs-message { margin-top: var(--space-3); }
+.agent-chat-shell .cs-message--outgoing { max-width: 82%; margin-left: auto; }
+.agent-chat-shell .cs-message--incoming { max-width: 88%; }
+.agent-chat-shell .cs-message__avatar { align-self: flex-end; padding-right: var(--space-2); }
+
+.agent-chat-shell .cs-message__header,
+.agent-chat-shell .cs-message__footer {
+  color: var(--text-muted);
+  font-size: 11px;
+  padding-bottom: 4px;
+  gap: var(--space-2);
+}
+
+.agent-chat-shell .cs-message--outgoing .cs-message__header { justify-content: flex-end; }
+
+.agent-chat-shell .cs-message__sender-name { font-weight: var(--weight-medium); }
+
+.agent-chat-shell .cs-message-separator {
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin: var(--space-4) 0 var(--space-3);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.agent-chat-shell .cs-message-separator::before,
+.agent-chat-shell .cs-message-separator::after { background: var(--border-color); }
+
+.agent-chat-shell .cs-avatar { width: 30px; height: 30px; }
+
+.chat-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #06121f;
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  box-shadow: 0 0 0 2px var(--container-bg), 0 0 0 3px rgba(255, 255, 255, .06);
+}
+
+.agent-chat-shell .cs-typing-indicator { background: transparent; }
+.agent-chat-shell .cs-typing-indicator {
+  padding: var(--space-2) var(--space-4);
+  max-width: 100%;
+}
+
+.agent-chat-shell .cs-typing-indicator__text {
+  color: var(--state-live);
+  font-size: var(--text-xs);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+.agent-chat-shell .cs-typing-indicator__dot { background: var(--state-live); }
+
+.agent-chat-shell .cs-message-input {
+  border-top: var(--border-width) solid var(--border-color);
+  padding: var(--space-3) var(--space-4);
+}
+
+.agent-chat-shell .cs-message-input__content-editor-wrapper,
+.agent-chat-shell .cs-message-input__content-editor {
+  background: var(--element-bg);
+  color: var(--text-main);
+  border-radius: 22px;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.agent-chat-shell .cs-message-input__content-editor-wrapper {
+  box-shadow: var(--container-inset);
+  border: var(--border-width) solid var(--border-color);
+  padding: 10px 16px;
+  min-height: 44px;
+}
+
+.agent-chat-shell .cs-message-input__content-editor-wrapper:focus-within {
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+}
+
+.agent-chat-shell .cs-message-input__tools .cs-button--send {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-color);
+  color: #04182e;
+  align-self: end;
+  margin-left: var(--space-2);
+}
+
+.agent-chat-shell .cs-button--send:disabled { opacity: .4; }
+.agent-chat-shell .cs-message-input__content-editor[data-placeholder]::before { color: var(--text-muted); }
+.agent-chat-shell .cs-button--send { color: var(--accent-color); }
+
+.cs-message.chat-pending .cs-message__content { opacity: .55; }
+.cs-message.chat-failed .cs-message__content { border: 1px solid var(--state-danger); }
+
+/* Кнопка вызова */
+
+.agent-chat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--container-bg);
+  box-shadow: var(--chin-shadow);
+  color: var(--text-main);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
+
+.agent-chat-toggle b {
+  min-width: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: var(--state-ok);
+  color: #04210e;
+  font-size: var(--text-xs);
+  line-height: 20px;
+}
+
+@media (max-width: 720px) {
+  .agent-chat { left: 12px; right: 12px; }
+  .agent-chat-shell { width: 100%; height: min(76svh, 620px); }
+}
+
+/*
+ * Добивка поверх кита: у него много белых подложек и свой радиус.
+ * Селекторы намеренно длиннее китовых, чтобы выигрывать по специфичности независимо от порядка.
+ */
+
+.agent-chat-shell .cs-message .cs-message__content,
+.agent-chat-shell .cs-message.cs-message--incoming .cs-message__content {
+  border-radius: 22px 22px 22px 8px;
+  background: var(--element-bg);
+}
+
+.agent-chat-shell .cs-message.cs-message--outgoing .cs-message__content {
+  border-radius: 22px 22px 8px 22px;
+}
+
+/* Белые куски в поле ввода: у кита светлые фоны на самом инпуте, обёртке и панели инструментов. */
+.agent-chat-shell .cs-message-input,
+.agent-chat-shell .cs-message-input__content-editor-container,
+.agent-chat-shell .cs-message-input__content-editor-wrapper,
+.agent-chat-shell .cs-message-input__content-editor,
+.agent-chat-shell .cs-message-input__tools {
+  background: transparent;
+  color: var(--text-main);
+}
+
+.agent-chat-shell .cs-message-input__content-editor-wrapper,
+.agent-chat-shell .cs-message-input__content-editor-container {
+  background: var(--element-bg);
+  border-radius: 22px;
+}
+
+.agent-chat-shell .cs-message-input__content-editor-container { padding: 0; }
+.agent-chat-shell .cs-message-input__content-editor { padding: 0; }
+
+.agent-chat-shell .cs-message-input__content-editor-wrapper:not(:first-child) { margin-left: 0; }
+
+/* Полосы прокрутки и подложки списка */
+.agent-chat-shell .cs-message-list,
+.agent-chat-shell .cs-message-list__scroll-wrapper,
+.agent-chat-shell .cs-chat-container,
+.agent-chat-shell .cs-main-container {
+  background: transparent;
+}
+
+.agent-chat-shell .cs-main-container > .cs-chat-container .cs-message-input { border-top: var(--border-width) solid var(--border-color); }
+
+/* Аватар кита имеет белую подложку под изображением */
+.agent-chat-shell .cs-avatar,
+.agent-chat-shell .cs-avatar img { background: transparent; }
+
+/* Минималистичные пузыри: без обводки и теней, только заливка. */
+
+.agent-chat-shell .cs-message .cs-message__content,
+.agent-chat-shell .cs-message.cs-message--incoming .cs-message__content {
+  border: 0;
+  box-shadow: none;
+  background: rgba(255, 255, 255, .055);
+}
+
+.agent-chat-shell .cs-message.cs-message--outgoing .cs-message__content {
+  border: 0;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--accent-color) 26%, transparent);
+  color: #eaf1ff;
+}
+
+
+/* Своё поле ввода: китовое убрано, иконка берётся из lucide, как во всём приложении. */
+
+.chat-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: end;
+  padding: var(--space-3) var(--space-4);
+  border-top: var(--border-width) solid var(--border-color);
+}
+
+.chat-composer textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 140px;
+  padding: 12px 16px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 22px;
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  resize: none;
+  field-sizing: content;
+}
+
+.chat-composer textarea::placeholder { color: var(--text-muted); }
+.chat-composer textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+}
+
+.chat-composer button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-color);
+  color: #04182e;
+  box-shadow: var(--accent-shadow);
+  transition: filter var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+.chat-composer button:hover:not(:disabled) { filter: brightness(1.1); }
+.chat-composer button:active:not(:disabled) { transform: translateY(1px); }
+.chat-composer button:disabled { opacity: .38; box-shadow: none; cursor: default; }

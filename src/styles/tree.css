@@ -1,0 +1,215 @@
+/* Дерево папок и контекстное меню */
+
+.folder-tree {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tree-branch,
+.tree-children {
+  display: grid;
+  gap: 8px;
+}
+
+.tree-row {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 calc(16px + var(--tree-depth, 0) * 22px);
+  border: 1px solid rgba(7, 10, 16, .62);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tree-color, var(--element-bg)) 32%, var(--element-bg));
+  box-shadow: var(--chin-shadow);
+  color: var(--text-main);
+}
+
+.tree-row.todo-status-done,
+.tree-row.todo-status-archived {
+  opacity: .54;
+  filter: grayscale(1);
+}
+
+.tree-row.todo-status-doing {
+  border-color: rgba(118, 177, 255, .42);
+  box-shadow: var(--chin-shadow), inset 0 0 0 1px rgba(118, 177, 255, .14);
+}
+
+.todo-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid rgba(210, 224, 246, .22);
+  border-top-color: #cfe3ff;
+  animation: todo-spin .82s linear infinite;
+}
+
+@keyframes todo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tree-row.todo-status-done span,
+.tree-row.todo-status-archived span {
+  color: #8f98a7;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.tree-row.todo-priority-urgent {
+  border-color: rgba(255, 138, 128, .32);
+}
+
+.tree-row.todo-priority-high {
+  border-color: rgba(255, 204, 102, .22);
+}
+
+.tree-row.tree-todo_group {
+  background: color-mix(in srgb, #203a5f 52%, var(--element-bg));
+  border-color: rgba(123, 180, 255, .18);
+}
+
+.tree-row.tree-todo_group svg {
+  color: #9fc9ff;
+}
+
+.tree-row.tree-git_group {
+  background: color-mix(in srgb, #1f4330 48%, var(--element-bg));
+  border-color: rgba(121, 211, 143, .16);
+}
+
+.tree-row.tree-git_group svg {
+  color: #9bdcae;
+}
+
+.tree-row.tree-project_entity {
+  background: color-mix(in srgb, #34343a 66%, var(--element-bg));
+  border-color: rgba(255, 255, 255, .08);
+}
+
+.tree-row.tree-project_entity svg {
+  color: #d4dceb;
+}
+
+/* Каждая постоянная сущность проекта узнаётся по цвету иконки и левой метке. */
+.tree-row[data-kind] svg { color: var(--kind-accent, #d4dceb); }
+
+.tree-row[data-kind] {
+  position: relative;
+  border-color: color-mix(in srgb, var(--kind-accent, #d4dceb) 22%, rgba(255, 255, 255, .08));
+}
+
+.tree-row[data-kind]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 22%;
+  bottom: 22%;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--kind-accent, #d4dceb);
+  opacity: .8;
+}
+
+.tree-row:active,
+.nav-item:active {
+  transform: translateY(1.5px);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.tree-chevron {
+  transition: transform .18s ease;
+}
+
+.tree-row.open .tree-chevron {
+  transform: rotate(90deg);
+}
+
+.tree-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 780;
+}
+
+.tree-label-button {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 780;
+}
+
+.tree-row small {
+  margin-left: auto;
+  color: #93a1b5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 44%;
+}
+
+.tree-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.tree-menu {
+  position: fixed;
+  width: min(220px, calc(100vw - 24px));
+  display: grid;
+  gap: 6px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: 24px;
+  padding: 10px;
+  background: rgba(28, 28, 30, .94);
+  box-shadow: var(--chin-shadow), 0 18px 46px rgba(0,0,0,.42);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+
+.tree-menu strong {
+  padding: 6px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-menu button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--element-bg);
+  color: var(--text-main);
+  text-align: left;
+}
+
+.tree-menu .danger-action {
+  color: #ff8a80;
+}
+
+.folder-row {
+  color: #e3ecfb;
+}
+
+.file-row {
+  color: #b9c6d8;
+}
+
+.library-note {
+  margin: 14px 0 0;
+  color: #93a1b5;
+}

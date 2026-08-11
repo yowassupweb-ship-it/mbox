@@ -1,0 +1,134 @@
+/* UI-кит. Только то, чего не было в старых стилях — существующие классы примитивы переиспользуют. */
+
+.panel-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ghost-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--element-bg);
+  box-shadow: var(--chin-shadow);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: transform var(--duration-fast) var(--ease-out), filter var(--duration-fast) var(--ease-out);
+}
+
+.ghost-action:hover { filter: brightness(1.14); }
+.ghost-action:active { transform: translateY(1px); box-shadow: var(--container-inset); }
+
+.save-button.is-saved { --accent-color: var(--state-ok); --accent-chin: #1c7a37; }
+.save-button.is-error { --accent-color: var(--state-danger); --accent-chin: #99251d; }
+.save-button:disabled { opacity: .68; cursor: default; }
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.field-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.field-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Широкое содержимое скроллится внутри контейнера, а не тащит за собой страницу. */
+.table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+}
+
+/* Мастер-деталь: на широком две колонки, на узком — два экрана с возвратом. */
+
+.pane-back { display: none; }
+.color-field input[type="color"] { width: 100%; height: 38px; }
+
+@media (max-width: 860px) {
+  .master-detail[data-pane="detail"] > .pane-master,
+  .master-detail[data-pane="master"] > .pane-detail {
+    display: none;
+  }
+
+  .pane-back {
+    display: inline-flex;
+    padding: var(--space-1) var(--space-3);
+  }
+}
+
+/* Состояния оболочки */
+
+.shell-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.shell-spinner {
+  animation: shell-spin 1s linear infinite;
+  color: var(--accent-color);
+}
+
+@keyframes shell-spin {
+  to { transform: rotate(360deg); }
+}
+
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid color-mix(in srgb, var(--state-danger) 34%, var(--border-color));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--state-danger) 12%, var(--container-bg));
+  color: var(--text-main);
+  font-size: var(--text-sm);
+}
+
+.offline-banner svg { color: var(--state-danger); flex: none; }
+.offline-banner span { min-width: 0; }
+
+.offline-banner button {
+  margin-left: auto;
+  flex: none;
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--element-bg);
+  color: var(--text-main);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.meta-chip.tone-ok { color: var(--state-ok-soft); }
+.meta-chip.tone-live { color: var(--state-live); }
+.meta-chip.tone-warn { color: var(--state-warn); }
+.meta-chip.tone-danger { color: var(--state-danger); }

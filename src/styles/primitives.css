@@ -1,0 +1,164 @@
+/* Примитивы: метрики, сетки контента, панели, базовые списки и карточки */
+
+/* Плитки метрик перетекают сами: 4 в ряд на широком, 2 на планшете, 1 на телефоне — без медиазапросов. */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 184px), 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  min-height: 124px;
+  border-radius: 34px;
+  padding: 20px;
+  display: grid;
+  align-content: space-between;
+}
+
+.metric-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+}
+
+.metric-card strong {
+  font-size: 34px;
+}
+
+.metric-card small {
+  color: var(--text-muted);
+}
+
+.content-grid {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+
+.content-grid.two,
+.overview-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(min(100%, 320px), .8fr);
+}
+
+.content-grid.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.panel {
+  border-radius: 36px;
+  padding: 20px;
+  min-width: 0;
+  overflow: visible;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.panel-title h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.context-list,
+.artifact-stack,
+.project-list,
+.timeline-list,
+.settings-list,
+.relation-list,
+.status-list {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-row,
+.artifact-card,
+.project-card,
+.timeline-item,
+.setting-row,
+.relation-item,
+.status-line {
+  border: 1px solid rgba(7, 10, 16, .62);
+  border-radius: 24px;
+  padding: 14px;
+  background: rgba(255,255,255,.46);
+  box-shadow: 0 12px 24px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.dark .memory-row,
+.dark .artifact-card,
+.dark .project-card,
+.dark .timeline-item,
+.dark .setting-row,
+.dark .relation-item,
+.dark .status-line {
+  background: var(--element-bg);
+  box-shadow: var(--chin-shadow);
+}
+
+.entity-feed-card {
+  display: grid;
+  grid-template-columns: minmax(86px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.entity-feed-kind,
+.entity-feed-size {
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(255,255,255,.06);
+  color: #aeb8c8;
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.entity-feed-body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.entity-feed-body strong,
+.entity-feed-body p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-feed-body p {
+  margin: 0;
+  color: #aeb8c8;
+}
+
+.library-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.project-workspace,
+.settings-grid,
+.server-grid,
+.relations-page {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.project-workspace {
+  height: calc(100vh - 184px);
+  align-items: stretch;
+  padding-bottom: 12px;
+}
+
+.project-workspace > .panel {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
