@@ -25,11 +25,120 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+function actorFromReq(req: IncomingMessage) {
+  return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
+}
+
+function textPreview(value: unknown, limit = 240) {
+  const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit - 1).trimEnd()}...`;
+}
+
+function compactMemoryRow(memory: Record<string, any>, limit = 400) {
+  const preview = textPreview(memory.content, limit);
+  return {
+    id: memory.id,
+    project_id: memory.project_id || memory.metadata?.project_id || null,
+    todo_id: memory.todo_id || memory.metadata?.todo_id || null,
+    agent_run_id: memory.agent_run_id || memory.metadata?.agent_run_id || null,
+    title: memory.title,
+    content_preview: preview,
+    content_bytes: Buffer.byteLength(String(memory.content || ""), "utf8"),
+    content_truncated: String(memory.content || "").length > preview.length,
+    entity_type: memory.entity_type,
+    access_level: memory.access_level,
+    tags: memory.tags,
+    source_agent: memory.metadata?.source_agent || "",
+    metadata: memory.metadata,
+    score: typeof memory.score === "number" ? Number(memory.score.toFixed(6)) : 0,
+    created_at: memory.created_at,
+    updated_at: memory.updated_at,
+  };
+}
+
 function broadcastRealtime(clients: Set<WebSocket>, type: string, payload: Record<string, unknown> = {}) {
   const message = JSON.stringify({ type, ...payload, at: new Date().toISOString() });
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) client.send(message);
   }
+}
+
+type MemoryEmbeddingRow = {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  updated_at: string;
+};
+
+type TfidfVector = {
+  id?: string;
+  terms: Record<string, number>;
+  norm: number;
+};
+
+function tokenizeEmbeddingText(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .match(/[a-z0-9а-яё]{2,}/giu) || [];
+}
+
+function memoryEmbeddingText(memory: MemoryEmbeddingRow) {
+  return [
+    memory.title,
+    memory.content,
+    Array.isArray(memory.tags) ? memory.tags.join(" ") : "",
+    memory.metadata && typeof memory.metadata === "object" ? Object.values(memory.metadata).join(" ") : "",
+  ].join(" ");
+}
+
+function vectorFromCounts(counts: Map<string, number>, documentFrequency: Map<string, number>, documentCount: number, id = ""): TfidfVector {
+  const total = [...counts.values()].reduce((sum, value) => sum + value, 0) || 1;
+  const terms: Record<string, number> = {};
+  let normSquared = 0;
+  for (const [token, hits] of counts.entries()) {
+    const idf = Math.log((1 + documentCount) / (1 + (documentFrequency.get(token) || 0))) + 1;
+    const weight = (hits / total) * idf;
+    terms[token] = Number(weight.toFixed(6));
+    normSquared += weight * weight;
+  }
+  return { id, terms, norm: Number(Math.sqrt(normSquared).toFixed(6)) };
+}
+
+function buildTfIdfIndex(documents: { id: string; text: string }[]) {
+  const documentTerms = documents.map((doc) => {
+    const counts = new Map<string, number>();
+    for (const token of tokenizeEmbeddingText(doc.text)) counts.set(token, (counts.get(token) || 0) + 1);
+    return counts;
+  });
+  const documentFrequency = new Map<string, number>();
+  for (const counts of documentTerms) {
+    for (const token of counts.keys()) documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+  }
+  const count = Math.max(documents.length, 1);
+  return documents.map((doc, index) => vectorFromCounts(documentTerms[index], documentFrequency, count, doc.id));
+}
+
+function vectorFromText(text: string, documentFrequency: Map<string, number>, documentCount: number) {
+  const counts = new Map<string, number>();
+  for (const token of tokenizeEmbeddingText(text)) counts.set(token, (counts.get(token) || 0) + 1);
+  return vectorFromCounts(counts, documentFrequency, Math.max(documentCount, 1));
+}
+
+function cosineSimilarity(left: TfidfVector, right: TfidfVector) {
+  if (!left.norm || !right.norm) return 0;
+  const [small, large] = Object.keys(left.terms).length < Object.keys(right.terms).length
+    ? [left.terms, right.terms]
+    : [right.terms, left.terms];
+  let dot = 0;
+  for (const [token, weight] of Object.entries(small)) {
+    if (large[token]) dot += weight * large[token];
+  }
+  return dot / (left.norm * right.norm);
 }
 
 const agentStructure = {
@@ -41,7 +150,7 @@ const agentStructure = {
     philosophy: "project-level principles, taste, constraints and decision logic stored in project props, usually philosophy and principles keys.",
     todos: "note-like tasks attached to a project. The note field is the main working surface.",
     todo_props: "structured key/value task facts such as context, acceptance criteria, dependency, screen, owner and device.",
-    memories: "database-backed knowledge records available for search and graph context.",
+    memories: "database-backed knowledge records available for search and graph context. Agent-written memories must include source_agent plus project_id/todo_id in metadata when applicable.",
     folders: "hierarchical containers for projects, artifacts and memory areas.",
     protected_secrets: "credentials, visible to agents only after explicit approval.",
     audit_events: "append-only history of database changes.",
@@ -81,7 +190,12 @@ const agentStructure = {
   agent_contract: {
     before_work: ["describe_structure", "list_project_context", "get_next_task"],
     during_work: ["write important decisions to project props or memory", "create relations when context links projects", "keep todo note current"],
-    after_work: ["set task status", "add a short done todo or audit memory when work was not started from an existing todo"],
+    after_work: [
+      "set task status",
+      "record a memory for significant work with source_agent, project_id, todo_id and touched_files in metadata",
+      "server auto-creates an agent-work memory when a todo becomes done or an agent_run finishes; manual record_memory for the same todo_id/agent_run_id prevents duplicates",
+      "use /api/mbox/todos/:id/trail to inspect the task -> decision -> change -> memory chain",
+    ],
   },
 };
 
@@ -106,6 +220,114 @@ async function queryPostgres<T extends QueryResultRow>(sql: string, values: unkn
   } finally {
     await client.end();
   }
+}
+
+async function refreshMemoryEmbeddings() {
+  const memories = await queryPostgres<MemoryEmbeddingRow>(
+    `SELECT id::text, title, content, tags, metadata, updated_at::text
+     FROM memories
+     ORDER BY id`,
+  );
+  const documents = memories.rows.map((memory) => ({ id: memory.id, text: memoryEmbeddingText(memory), updated_at: memory.updated_at }));
+  const vectors = buildTfIdfIndex(documents);
+  for (const vector of vectors) {
+    await queryPostgres(
+      `INSERT INTO memory_embeddings(memory_id, representation, dimension, encoding_source, updated_at)
+       VALUES ($1, $2, $3, 'tfidf-local-v1', now())
+       ON CONFLICT (memory_id) DO UPDATE SET
+         representation = EXCLUDED.representation,
+         dimension = EXCLUDED.dimension,
+         encoding_source = EXCLUDED.encoding_source,
+         updated_at = now()`,
+      [vector.id, JSON.stringify({ terms: vector.terms, norm: vector.norm }), Object.keys(vector.terms).length],
+    );
+  }
+  return { documents, vectors };
+}
+
+async function relevantMemories(search: string, { projectId = "", todoId = "", limit = 5 } = {}) {
+  const safeLimit = Math.min(Math.max(Number(limit || 5), 1), 5);
+  const queryText = String(search || "").trim();
+  if (!queryText) {
+    const result = await queryPostgres(
+      `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
+              created_at::text, updated_at::text
+       FROM memories
+       WHERE ($1 = '' OR project_id::text = $1 OR metadata->>'project_id' = $1)
+         AND ($2 = '' OR todo_id::text = $2 OR metadata->>'todo_id' = $2)
+       ORDER BY updated_at DESC
+       LIMIT $3`,
+      [String(projectId || ""), String(todoId || ""), safeLimit],
+    );
+    return result.rows.map((memory) => compactMemoryRow(memory));
+  }
+
+  const { documents } = await refreshMemoryEmbeddings();
+  const documentFrequency = new Map<string, number>();
+  for (const doc of documents) {
+    for (const token of new Set(tokenizeEmbeddingText(doc.text))) {
+      documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+    }
+  }
+  const queryVector = vectorFromText(queryText, documentFrequency, documents.length);
+  const result = await queryPostgres<Record<string, any>>(
+    `SELECT m.id::text, m.project_id::text, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+            m.created_at::text, m.updated_at::text, e.representation
+     FROM memories m
+     JOIN memory_embeddings e ON e.memory_id = m.id`,
+  );
+  return result.rows
+    .map((memory): Record<string, any> => {
+      const projectMatch = projectId && (String(memory.project_id || "") === String(projectId) || String(memory.metadata?.project_id || "") === String(projectId));
+      const todoMatch = todoId && (String(memory.todo_id || "") === String(todoId) || String(memory.metadata?.todo_id || "") === String(todoId));
+      const score = cosineSimilarity(queryVector, memory.representation || { terms: {}, norm: 0 }) + (projectMatch ? 0.15 : 0) + (todoMatch ? 0.25 : 0);
+      return { ...memory, score };
+    })
+    .filter((memory) => memory.score > 0)
+    .sort((a, b) => b.score - a.score || new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .slice(0, safeLimit)
+    .map((memory) => compactMemoryRow(memory));
+}
+
+async function autoRecordMemory({ projectId, todoId = null, agentRunId = null, sourceAgent, title, content, touchedFiles = [], reason }: {
+  projectId: unknown;
+  todoId?: unknown;
+  agentRunId?: unknown;
+  sourceAgent: unknown;
+  title: string;
+  content: unknown;
+  touchedFiles?: unknown[];
+  reason: string;
+}) {
+  if (!projectId || !String(content || "").trim()) return null;
+  const existing = await queryPostgres(
+    `SELECT id::text
+     FROM memories
+     WHERE ($1::bigint IS NULL OR todo_id = $1 OR metadata->>'todo_id' = $1::text)
+       AND ($2::bigint IS NULL OR agent_run_id = $2 OR metadata->>'agent_run_id' = $2::text)
+       AND (metadata->>'recorded_via' IN ('mbox MCP record_memory', 'auto') OR tags @> ARRAY['agent-work'])
+     LIMIT 1`,
+    [todoId, agentRunId],
+  );
+  if (existing.rows[0]) return { skipped: true, id: existing.rows[0].id };
+
+  const metadata = {
+    source_agent: String(sourceAgent || "Agent"),
+    project_id: String(projectId),
+    todo_id: todoId ? String(todoId) : null,
+    agent_run_id: agentRunId ? String(agentRunId) : null,
+    touched_files: Array.isArray(touchedFiles) ? touchedFiles : [],
+    recorded_via: "auto",
+    auto_reason: reason,
+  };
+  const result = await queryPostgres(
+    `INSERT INTO memories(project_id, todo_id, agent_run_id, title, content, entity_type, access_level, tags, metadata)
+     VALUES ($1, $2, $3, $4, $5, 'memory', 'agents', $6, $7)
+     RETURNING id::text`,
+    [projectId, todoId, agentRunId, textPreview(title, 160) || "Agent work result", textPreview(content, 2000), ["agent-work", "auto"], JSON.stringify(metadata)],
+  );
+  await refreshMemoryEmbeddings();
+  return { skipped: false, id: result.rows[0]?.id || null };
 }
 
 async function currentUser(req: IncomingMessage) {
@@ -312,16 +534,17 @@ function mboxDevApi() {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
-                `INSERT INTO memories(title, content, entity_type, access_level, tags)
-                 VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'memory'), COALESCE(NULLIF($4, ''), 'private'), $5)
+                `INSERT INTO memories(project_id, todo_id, agent_run_id, title, content, entity_type, access_level, tags, metadata)
+                 VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF($6, ''), 'memory'), COALESCE(NULLIF($7, ''), 'private'), $8, $9)
                  RETURNING id::text`,
-                [String(body.title ?? "").trim(), String(body.content ?? ""), String(body.entity_type ?? ""), String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : []],
+                [body.project_id || null, body.todo_id || null, body.agent_run_id || null, String(body.title ?? "").trim(), String(body.content ?? ""), String(body.entity_type ?? ""), String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : [], JSON.stringify(body.metadata && typeof body.metadata === "object" ? body.metadata : {})],
               );
+              await refreshMemoryEmbeddings();
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
               return sendJson(res, 201, { memory: result.rows[0] });
             }
             const result = await queryPostgres(
-              `SELECT id::text, title, content, entity_type, access_level, tags, metadata,
+              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
                       pg_column_size(memories)::int AS memory_bytes,
                       created_at::text, updated_at::text
                FROM memories
@@ -331,6 +554,67 @@ function mboxDevApi() {
               [q],
             );
             return sendJson(res, 200, { memories: result.rows });
+          }
+
+          if (url.pathname === "/api/mbox/memories/search") {
+            const search = url.searchParams.get("q")?.trim() ?? "";
+            const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 20), 1), 100);
+            if (!search) {
+              const recent = await queryPostgres(
+                `SELECT m.id::text, m.project_id::text, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+                        pg_column_size(m)::int AS memory_bytes,
+                        m.created_at::text, m.updated_at::text,
+                        e.dimension, e.encoding_source, e.updated_at::text AS embedding_updated_at
+                 FROM memories m
+                 LEFT JOIN memory_embeddings e ON e.memory_id = m.id
+                 ORDER BY m.updated_at DESC
+                 LIMIT $1`,
+                [limit],
+              );
+              return sendJson(res, 200, { query: search, memories: recent.rows.map((memory) => ({ ...memory, score: 0 })) });
+            }
+
+            const { documents } = await refreshMemoryEmbeddings();
+            const documentFrequency = new Map<string, number>();
+            for (const doc of documents) {
+              for (const token of new Set(tokenizeEmbeddingText(doc.text))) {
+                documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+              }
+            }
+            const queryVector = vectorFromText(search, documentFrequency, documents.length);
+            const result = await queryPostgres<{
+              id: string;
+              title: string;
+              content: string;
+              entity_type: string;
+              access_level: string;
+              tags: string[];
+              metadata: Record<string, unknown>;
+              memory_bytes: number;
+              created_at: string;
+              updated_at: string;
+              representation: TfidfVector;
+              dimension: number;
+              encoding_source: string;
+              embedding_updated_at: string;
+            }>(
+              `SELECT m.id::text, m.project_id::text, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+                      pg_column_size(m)::int AS memory_bytes,
+                      m.created_at::text, m.updated_at::text,
+                      e.representation, e.dimension, e.encoding_source, e.updated_at::text AS embedding_updated_at
+               FROM memories m
+               JOIN memory_embeddings e ON e.memory_id = m.id`,
+            );
+            const memories = result.rows
+              .map((memory) => ({
+                ...memory,
+                score: cosineSimilarity(queryVector, memory.representation || { terms: {}, norm: 0 }),
+              }))
+              .filter((memory) => memory.score > 0)
+              .sort((a, b) => b.score - a.score || new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+              .slice(0, limit)
+              .map(({ representation, ...memory }) => ({ ...memory, score: Number(memory.score.toFixed(6)) }));
+            return sendJson(res, 200, { query: search, memories });
           }
 
           const memoryMatch = url.pathname.match(/^\/api\/mbox\/memories\/(\d+)$/);
@@ -347,12 +631,14 @@ function mboxDevApi() {
                RETURNING id::text`,
               [String(body.title ?? "").trim(), body.content ?? null, String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : null, memoryMatch[1]],
             );
+            if (result.rows[0]) await refreshMemoryEmbeddings();
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { memory: result.rows[0] } : { error: "not_found" });
           }
 
           if (memoryMatch && req.method === "DELETE") {
             await queryPostgres("DELETE FROM memories WHERE id = $1", [memoryMatch[1]]);
+            await refreshMemoryEmbeddings();
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
             return sendJson(res, 200, { ok: true });
           }
@@ -596,17 +882,65 @@ function mboxDevApi() {
                  props = COALESCE($6, props),
                  updated_at = now()
                WHERE id = $5
-               RETURNING id::text`,
+               RETURNING id::text, project_id::text, title, note, status, claimed_by`,
               [String(body.title ?? "").trim(), body.note ?? null, String(body.status ?? ""), String(body.priority ?? ""), todoMatch[1], body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null],
             );
+            let auto_memory = null;
+            if (result.rows[0] && String(body.status ?? "") === "done") {
+              auto_memory = await autoRecordMemory({
+                projectId: result.rows[0].project_id,
+                todoId: result.rows[0].id,
+                sourceAgent: actorFromReq(req),
+                title: `Итог задачи: ${result.rows[0].title}`,
+                content: result.rows[0].note,
+                reason: "todo_done",
+              });
+            }
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "todos" });
-            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { todo: result.rows[0] } : { error: "not_found" });
+            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { todo: result.rows[0], auto_memory } : { error: "not_found" });
           }
 
           if (todoMatch && req.method === "DELETE") {
             await queryPostgres("DELETE FROM todos WHERE id = $1", [todoMatch[1]]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "todos" });
             return sendJson(res, 200, { ok: true });
+          }
+
+          const todoTrailMatch = url.pathname.match(/^\/api\/mbox\/todos\/(\d+)\/trail$/);
+          if (todoTrailMatch) {
+            const todo = await queryPostgres(
+              `SELECT t.id::text, t.project_id::text, t.title, t.status, t.priority, t.props, t.created_at::text, t.updated_at::text, p.name AS project_name
+               FROM todos t
+               LEFT JOIN projects p ON p.id = t.project_id
+               WHERE t.id = $1`,
+              [todoTrailMatch[1]],
+            );
+            if (!todo.rows[0]) return sendJson(res, 404, { error: "not_found" });
+            const decisions = await queryPostgres("SELECT id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props, created_at::text FROM decision_log WHERE todo_id = $1 ORDER BY created_at", [todoTrailMatch[1]]);
+            const runs = await queryPostgres("SELECT id::text, todo_id::text, agent_name, status, goal, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE todo_id = $1 ORDER BY started_at", [todoTrailMatch[1]]);
+            const memories = await queryPostgres(
+              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata, created_at::text, updated_at::text
+               FROM memories
+               WHERE todo_id = $1 OR metadata->>'todo_id' = $1::text
+               ORDER BY created_at`,
+              [todoTrailMatch[1]],
+            );
+            const history = await queryPostgres(
+              `SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text
+               FROM audit_events
+               WHERE (entity_type = 'todos' AND entity_id = $1)
+                  OR (metadata->>'todo_id' = $1::text)
+               ORDER BY created_at
+               LIMIT 100`,
+              [todoTrailMatch[1]],
+            );
+            const timeline = [
+              ...decisions.rows.map((item) => ({ kind: "decision", at: item.created_at, item })),
+              ...runs.rows.map((item) => ({ kind: "agent_run", at: item.finished_at || item.heartbeat_at || item.started_at, item })),
+              ...memories.rows.map((item) => ({ kind: "memory", at: item.created_at, item: compactMemoryRow(item) })),
+              ...history.rows.map((item) => ({ kind: "audit_event", at: item.created_at, item })),
+            ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+            return sendJson(res, 200, { todo: todo.rows[0], decisions: decisions.rows, runs: runs.rows, memories: memories.rows.map((memory) => compactMemoryRow(memory)), history: history.rows, timeline });
           }
 
           if (url.pathname === "/api/mbox/server") {
@@ -629,6 +963,90 @@ function mboxDevApi() {
           }
 
           // Расстановка узлов карты. Держать в паре с server/mbox-server.mjs.
+          if (url.pathname === "/api/mbox/agent/context") {
+            const projectName = url.searchParams.get("project") || "MBOX";
+            const detail = url.searchParams.get("detail") === "full" ? "full" : "short";
+            const projects = await queryPostgres<Record<string, any>>(
+              `SELECT id::text, name, status, stack, git_url, deploy_target, deploy_provider, props, color, access_level,
+                      pg_column_size(projects)::int AS memory_bytes
+               FROM projects
+               WHERE name = $1
+               LIMIT 1`,
+              [projectName],
+            );
+            const project = projects.rows[0] || null;
+            if (!project) return sendJson(res, 404, { error: "project_not_found" });
+            const todos = await queryPostgres<Record<string, any>>(
+              `SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text,
+                      pg_column_size(todos)::int AS memory_bytes
+               FROM todos
+               WHERE project_id = $1
+               ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC`,
+              [project.id],
+            );
+            const decisions = await queryPostgres<Record<string, any>>("SELECT id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props, created_at::text FROM decision_log WHERE project_id = $1 ORDER BY created_at DESC LIMIT 25", [project.id]);
+            const runs = await queryPostgres<Record<string, any>>("SELECT id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 20", [project.id]);
+            const history = await queryPostgres<Record<string, any>>("SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text FROM audit_events WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50", [project.id]);
+            const memories = await relevantMemories(`${project.name} ${Array.isArray(project.stack) ? project.stack.join(" ") : ""} ${JSON.stringify(project.props || {})}`, { projectId: project.id, limit: 5 });
+            if (detail === "full") return sendJson(res, 200, { project, detail, todos: todos.rows, decisions: decisions.rows, runs: runs.rows, history: history.rows, memories });
+            return sendJson(res, 200, {
+              project,
+              detail,
+              counts: { todos: todos.rows.length, decisions: decisions.rows.length, runs: runs.rows.length, history: history.rows.length, memories: memories.length },
+              todos: todos.rows.map((todo) => ({
+                id: todo.id,
+                project_id: todo.project_id,
+                title: todo.title,
+                note_preview: textPreview(todo.note, 180),
+                note_bytes: Buffer.byteLength(String(todo.note || ""), "utf8"),
+                note_truncated: String(todo.note || "").length > textPreview(todo.note, 180).length,
+                status: todo.status,
+                priority: todo.priority,
+                props_keys: Object.keys(todo.props || {}),
+                claimed_by: todo.claimed_by,
+                claimed_until: todo.claimed_until,
+                heartbeat_at: todo.heartbeat_at,
+                memory_bytes: todo.memory_bytes,
+              })),
+              decisions: decisions.rows.map((decision) => ({
+                id: decision.id,
+                todo_id: decision.todo_id,
+                agent_run_id: decision.agent_run_id,
+                actor: decision.actor,
+                title: decision.title,
+                decision_preview: textPreview(decision.decision, 180),
+                rationale_preview: textPreview(decision.rationale, 120),
+                impact_preview: textPreview(decision.impact, 120),
+                props_keys: Object.keys(decision.props || {}),
+                created_at: decision.created_at,
+              })),
+              runs: runs.rows.map((run) => ({
+                id: run.id,
+                todo_id: run.todo_id,
+                agent_name: run.agent_name,
+                status: run.status,
+                goal: run.goal,
+                touched_files: run.touched_files,
+                result_preview: textPreview(run.result, 160),
+                props_keys: Object.keys(run.props || {}),
+                started_at: run.started_at,
+                heartbeat_at: run.heartbeat_at,
+                finished_at: run.finished_at,
+              })),
+              history: history.rows.map((event) => ({
+                id: event.id,
+                actor: event.actor,
+                action: event.action,
+                entity_type: event.entity_type,
+                entity_id: event.entity_id,
+                summary: event.summary,
+                metadata_preview: textPreview(event.metadata, 160),
+                created_at: event.created_at,
+              })),
+              memories,
+            });
+          }
+
           if (url.pathname === "/api/mbox/graph/positions") {
             if (req.method === "POST") {
               const body = await readBody<{ positions?: Array<{ entity_type?: string; entity_id?: string; x?: number; y?: number }> }>(req);
@@ -720,7 +1138,31 @@ function mboxDevApi() {
             return sendJson(res, 200, { inbox: result.rows });
           }
 
-          if (url.pathname === "/api/mbox/agent/runs" && req.method === "GET") {
+          if (url.pathname === "/api/mbox/agent/runs") {
+            if (req.method === "POST") {
+              const body = await readBody<Record<string, unknown>>(req);
+              const result = await queryPostgres<Record<string, any>>(
+                `INSERT INTO agent_runs(project_id, todo_id, agent_name, status, goal, read_context, commands, touched_files, result, props)
+                 VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'running'), $5, $6, $7, $8, $9, $10)
+                 RETURNING id::text, project_id::text, todo_id::text, agent_name, status, goal, touched_files, result`,
+                [body.project_id || null, body.todo_id || null, String(body.agent_name || actorFromReq(req)), String(body.status || ""), String(body.goal || ""), JSON.stringify(Array.isArray(body.read_context) ? body.read_context : []), JSON.stringify(Array.isArray(body.commands) ? body.commands : []), JSON.stringify(Array.isArray(body.touched_files) ? body.touched_files : []), String(body.result || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+              );
+              let auto_memory = null;
+              if (result.rows[0] && ["done", "failed", "blocked"].includes(result.rows[0].status)) {
+                auto_memory = await autoRecordMemory({
+                  projectId: result.rows[0].project_id,
+                  todoId: result.rows[0].todo_id,
+                  agentRunId: result.rows[0].id,
+                  sourceAgent: result.rows[0].agent_name || actorFromReq(req),
+                  title: `РС‚РѕРі Р·Р°РїСѓСЃРєР°: ${result.rows[0].goal}`,
+                  content: result.rows[0].result,
+                  touchedFiles: result.rows[0].touched_files,
+                  reason: "agent_run_created_finished",
+                });
+              }
+              broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_runs" });
+              return sendJson(res, 201, { run: result.rows[0], auto_memory });
+            }
             const result = await queryPostgres(
               `SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props,
                       pg_column_size(agent_runs)::int AS memory_bytes,
@@ -732,9 +1174,46 @@ function mboxDevApi() {
             return sendJson(res, 200, { runs: result.rows });
           }
 
-          if (url.pathname === "/api/mbox/decisions" && req.method === "GET") {
+          const runMatch = url.pathname.match(/^\/api\/mbox\/agent\/runs\/(\d+)$/);
+          if (runMatch && req.method === "PATCH") {
+            const body = await readBody<Record<string, unknown>>(req);
+            const result = await queryPostgres<Record<string, any>>(
+              `UPDATE agent_runs SET status = COALESCE(NULLIF($1, ''), status), result = COALESCE($2, result), commands = COALESCE($3, commands), touched_files = COALESCE($4, touched_files), props = COALESCE($5, props), heartbeat_at = now(), finished_at = CASE WHEN $6 THEN now() ELSE finished_at END
+               WHERE id = $7
+               RETURNING id::text, project_id::text, todo_id::text, agent_name, status, goal, touched_files, result`,
+              [String(body.status || ""), body.result ?? null, Array.isArray(body.commands) ? JSON.stringify(body.commands) : null, Array.isArray(body.touched_files) ? JSON.stringify(body.touched_files) : null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, ["done", "failed", "blocked"].includes(String(body.status || "")), runMatch[1]],
+            );
+            let auto_memory = null;
+            if (result.rows[0] && ["done", "failed", "blocked"].includes(String(body.status || ""))) {
+              auto_memory = await autoRecordMemory({
+                projectId: result.rows[0].project_id,
+                todoId: result.rows[0].todo_id,
+                agentRunId: result.rows[0].id,
+                sourceAgent: result.rows[0].agent_name || actorFromReq(req),
+                title: `Итог запуска: ${result.rows[0].goal}`,
+                content: result.rows[0].result,
+                touchedFiles: result.rows[0].touched_files,
+                reason: "agent_run_finished",
+              });
+            }
+            if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_runs" });
+            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { run: result.rows[0], auto_memory } : { error: "not_found" });
+          }
+
+          if (url.pathname === "/api/mbox/decisions") {
+            if (req.method === "POST") {
+              const body = await readBody<Record<string, unknown>>(req);
+              const result = await queryPostgres(
+                `INSERT INTO decision_log(project_id, todo_id, agent_run_id, actor, title, decision, rationale, impact, props)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING id::text`,
+                [body.project_id || null, body.todo_id || null, body.agent_run_id || null, String(body.actor || actorFromReq(req)), String(body.title || "").trim(), String(body.decision || ""), String(body.rationale || ""), String(body.impact || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+              );
+              broadcastRealtime(realtimeClients, "entity_changed", { entity: "decision_log" });
+              return sendJson(res, 201, { decision: result.rows[0] });
+            }
             const result = await queryPostgres(
-              `SELECT id::text, project_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props,
+              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props,
                       pg_column_size(decision_log)::int AS memory_bytes,
                       created_at::text
                FROM decision_log
@@ -758,7 +1237,9 @@ function mboxDevApi() {
                LIMIT 1`,
               [projectName],
             );
-            return sendJson(res, 200, { task: result.rows[0] ?? null });
+            const task = result.rows[0] ?? null;
+            if (task) task.memories = await relevantMemories(`${task.title}\n${task.note || ""}`, { projectId: task.project_id, todoId: task.id, limit: 5 });
+            return sendJson(res, 200, { task });
           }
 
           if (url.pathname === "/api/mbox/agent/approved-secrets") {

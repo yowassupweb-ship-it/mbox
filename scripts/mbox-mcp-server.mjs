@@ -268,18 +268,20 @@ server.registerTool(
     description: "Write a decision log entry explaining why something was done.",
     inputSchema: {
       project: z.string().default("MBOX"),
+      todo_id: z.string().default(""),
+      agent_run_id: z.string().default(""),
       title: z.string(),
       decision: z.string(),
       rationale: z.string().default(""),
       impact: z.string().default(""),
     },
   },
-  async ({ project, title, decision, rationale, impact }) => {
+  async ({ project, todo_id, agent_run_id, title, decision, rationale, impact }) => {
     const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
     const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
     const data = await mboxFetch("/api/mbox/decisions", {
       method: "POST",
-      body: JSON.stringify({ project_id: target?.id || null, actor: agentName, title, decision, rationale, impact }),
+      body: JSON.stringify({ project_id: target?.id || null, todo_id: todo_id || null, agent_run_id: agent_run_id || null, actor: agentName, title, decision, rationale, impact }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.decision, null, 2) }] });
   },
@@ -338,6 +340,7 @@ server.registerTool(
     inputSchema: {
       project: z.string().default("MBOX"),
       todo_id: z.string().default(""),
+      agent_run_id: z.string().default(""),
       title: z.string(),
       content: z.string(),
       tags: z.array(z.string()).default(["agent-work"]),
@@ -345,7 +348,7 @@ server.registerTool(
       metadata: z.record(z.any()).default({}),
     },
   },
-  async ({ project, todo_id, title, content, tags, touched_files, metadata }) => {
+  async ({ project, todo_id, agent_run_id, title, content, tags, touched_files, metadata }) => {
     const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
     const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
     if (!target) throw new Error(`Project not found: ${project}`);
@@ -354,6 +357,9 @@ server.registerTool(
       body: JSON.stringify({
         title,
         content,
+        project_id: target.id,
+        todo_id: todo_id || null,
+        agent_run_id: agent_run_id || null,
         entity_type: "memory",
         access_level: "agents",
         tags,
@@ -363,12 +369,45 @@ server.registerTool(
           project,
           project_id: target.id,
           todo_id: todo_id || null,
+          agent_run_id: agent_run_id || null,
           touched_files,
           recorded_via: "mbox MCP record_memory",
         },
       }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.memory, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "get_task_trail",
+  {
+    title: "Get MBOX task trail",
+    description: "Return the task -> decision -> change -> memory chain for one todo.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const data = await mboxFetch(`/api/mbox/todos/${encodeURIComponent(id)}/trail`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "search_memory",
+  {
+    title: "Search MBOX memory",
+    description: "Search memories by local TF-IDF similarity. Use this for semantic memory lookup instead of substring-only filtering.",
+    inputSchema: {
+      query: z.string(),
+      limit: z.number().default(10),
+    },
+  },
+  async ({ query, limit }) => {
+    const params = new URLSearchParams();
+    params.set("q", query);
+    params.set("limit", String(limit));
+    const data = await mboxFetch(`/api/mbox/memories/search?${params.toString()}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.memories, null, 2) }] });
   },
 );
 

@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS memories (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+  memory_id BIGINT PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+  representation JSONB NOT NULL DEFAULT '{}',
+  dimension INTEGER NOT NULL DEFAULT 0,
+  encoding_source TEXT NOT NULL DEFAULT 'tfidf-local-v1',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE OR REPLACE FUNCTION update_memory_search_vector()
 RETURNS trigger AS $$
 BEGIN
@@ -237,6 +245,11 @@ CREATE TABLE IF NOT EXISTS decision_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS todo_id BIGINT REFERENCES todos(id) ON DELETE SET NULL;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS agent_run_id BIGINT REFERENCES agent_runs(id) ON DELETE SET NULL;
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS todo_id BIGINT REFERENCES todos(id) ON DELETE SET NULL;
+
 CREATE TABLE IF NOT EXISTS agent_presence (
   agent_name TEXT PRIMARY KEY,
   kind TEXT NOT NULL DEFAULT 'ai_agent',
@@ -294,6 +307,10 @@ CREATE INDEX IF NOT EXISTS idx_memories_search ON memories USING GIN(search_vect
 CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_memories_metadata ON memories USING GIN(metadata);
 CREATE INDEX IF NOT EXISTS idx_memories_access ON memories(access_level);
+CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_todo ON memories(todo_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_agent_run ON memories(agent_run_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_updated ON memory_embeddings(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_artifacts_folder ON artifacts(folder_id);
 CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id);
 CREATE INDEX IF NOT EXISTS idx_todos_claimed ON todos(claimed_by, claimed_until);
@@ -314,6 +331,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor, created
 CREATE INDEX IF NOT EXISTS idx_agent_inbox_status ON agent_inbox(status, priority, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_active ON agent_runs(status, heartbeat_at DESC);
 CREATE INDEX IF NOT EXISTS idx_decision_log_project ON decision_log(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_log_todo ON decision_log(todo_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_log_agent_run ON decision_log(agent_run_id, created_at DESC);
 
 CREATE OR REPLACE FUNCTION write_audit_event()
 RETURNS trigger AS $$
