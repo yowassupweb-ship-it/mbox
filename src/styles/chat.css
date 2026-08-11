@@ -255,10 +255,6 @@
   backdrop-filter: blur(18px) saturate(150%);
 }
 
-.agent-chat-toggle {
-  max-width: var(--chat-slot);
-}
-
 .agent-chat-toggle b {
   min-width: 20px;
   padding: 0 7px;
@@ -270,51 +266,42 @@
 }
 
 /*
- * Тесно — кнопка сворачивается в кружок с иконкой, и место под неё сжимается вместе с ней.
- * Панель навигации читает ту же переменную, поэтому подпирать её магическим числом не нужно:
- * сузилась кнопка — сразу освободилось место под разделы.
+ * Тесно — кнопка выпрыгивает НАД нижней панелью и садится ей на плечо.
+ *
+ * Делить одну строку с разделами не выходит: их восемь, и как ни дели место, либо кнопка их
+ * накрывает, либо раздел режется посреди слова. Поэтому на узком окне кнопка уходит из строки
+ * вверх: разделы получают всю ширину, кнопка остаётся целиком видна и ни на что не наезжает.
+ * Слот в нижней панели при этом обнуляется — она читает ту же переменную.
  */
-@media (max-width: 900px) {
-  :root { --chat-slot: 56px; }
+@media (max-width: 1200px) {
+  :root { --chat-slot: 0px; }
 
-  .agent-chat-toggle {
-    width: 44px;
-    padding: 0;
-    justify-content: center;
-    position: relative;
+  .agent-chat {
+    bottom: calc(104px + env(safe-area-inset-bottom));
   }
 
-  .agent-chat-toggle span { display: none; }
-
-  .agent-chat-toggle b {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    min-width: 18px;
-    padding: 0 5px;
-    font-size: 10px;
-    line-height: 18px;
-    box-shadow: 0 0 0 2px var(--bg-color);
+  /* Окно чата поднялось вместе с кнопкой — значит и потолка ему осталось меньше. */
+  .agent-chat-shell {
+    max-height: calc(100svh - 180px - env(safe-area-inset-bottom));
   }
-
-  .agent-chat-toggle .chat-dot { position: absolute; bottom: 2px; right: 6px; }
 }
 
 @media (max-width: 720px) {
   .agent-chat {
     left: auto;
-    right: calc(16px + env(safe-area-inset-right));
-    bottom: calc(14px + env(safe-area-inset-bottom));
+    right: calc(12px + env(safe-area-inset-right));
+    /* Плавающая панель навигации на телефоне ниже и уже — кнопка садится вплотную над ней. */
+    bottom: calc(74px + env(safe-area-inset-bottom));
   }
 
   .agent-chat-shell {
     position: fixed;
     left: 10px;
     right: 10px;
-    bottom: calc(68px + env(safe-area-inset-bottom));
+    bottom: calc(128px + env(safe-area-inset-bottom));
     width: auto;
     /* Сверху вычитается ещё и чёлка: без этого шапка чата уезжает под неё. */
-    height: calc(100svh - 92px - env(safe-area-inset-bottom) - env(safe-area-inset-top));
+    height: calc(100svh - 152px - env(safe-area-inset-bottom) - env(safe-area-inset-top));
     max-height: none;
   }
 

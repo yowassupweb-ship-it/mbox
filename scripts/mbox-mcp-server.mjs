@@ -412,6 +412,231 @@ server.registerTool(
 );
 
 server.registerTool(
+  "review_memory_quality",
+  {
+    title: "Review MBOX memory quality",
+    description: "Return a non-destructive queue of memory quality issues: duplicates, oversized/raw logs, missing links/source_agent.",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await mboxFetch("/api/mbox/memories/review");
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "digest_memory_document",
+  {
+    title: "Digest document into MBOX memories",
+    description: "Split a long document into structured memory fragments. Defaults to dry_run preview; pass dry_run=false to save fragments.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      todo_id: z.string().default(""),
+      agent_run_id: z.string().default(""),
+      title: z.string(),
+      content: z.string(),
+      tags: z.array(z.string()).default(["digest"]),
+      access_level: z.enum(["private", "agents", "public"]).default("agents"),
+      dry_run: z.boolean().default(true),
+      max_fragments: z.number().default(40),
+      min_chars: z.number().default(80),
+    },
+  },
+  async ({ project, todo_id, agent_run_id, title, content, tags, access_level, dry_run, max_fragments, min_chars }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    if (!target) throw new Error(`Project not found: ${project}`);
+    const data = await mboxFetch("/api/mbox/memories/digest", {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: target.id,
+        todo_id: todo_id || null,
+        agent_run_id: agent_run_id || null,
+        title,
+        content,
+        tags,
+        access_level,
+        dry_run,
+        max_fragments,
+        min_chars,
+        metadata: {
+          project,
+          project_id: target.id,
+          todo_id: todo_id || null,
+          agent_run_id: agent_run_id || null,
+          recorded_via: "mbox MCP digest_memory_document",
+        },
+      }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "get_memory_hierarchy",
+  {
+    title: "Get MBOX memory tag hierarchy",
+    description: "Return a derived hierarchy from memory tags, tag groups, slash paths and digest paths.",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await mboxFetch("/api/mbox/memories/hierarchy");
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "suggest_memory_hierarchy",
+  {
+    title: "Suggest MBOX memory tags and paths",
+    description: "Suggest tags and hierarchy paths for a new memory based on similar existing memories.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      title: z.string(),
+      content: z.string(),
+      tags: z.array(z.string()).default([]),
+      limit: z.number().default(8),
+    },
+  },
+  async ({ project, title, content, tags, limit }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    if (!target) throw new Error(`Project not found: ${project}`);
+    const data = await mboxFetch("/api/mbox/memories/suggest-hierarchy", {
+      method: "POST",
+      body: JSON.stringify({ project_id: target.id, title, content, tags, limit }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "list_memory_links",
+  {
+    title: "List MBOX memory cross-references",
+    description: "List cross-references between memories. Pass memory_id to focus on one memory.",
+    inputSchema: { memory_id: z.string().default("") },
+  },
+  async ({ memory_id }) => {
+    const params = new URLSearchParams();
+    if (memory_id) params.set("memory_id", memory_id);
+    const data = await mboxFetch(`/api/mbox/memory-links${params.toString() ? `?${params.toString()}` : ""}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.links, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "create_memory_link",
+  {
+    title: "Create MBOX memory cross-reference",
+    description: "Create or update a typed cross-reference between two memories.",
+    inputSchema: {
+      from_memory_id: z.string(),
+      to_memory_id: z.string(),
+      link_type: z.string().default("related"),
+      title: z.string().default(""),
+      description: z.string().default(""),
+      confidence: z.number().default(1),
+      metadata: z.record(z.any()).default({}),
+    },
+  },
+  async ({ from_memory_id, to_memory_id, link_type, title, description, confidence, metadata }) => {
+    const data = await mboxFetch("/api/mbox/memory-links", {
+      method: "POST",
+      body: JSON.stringify({ from_memory_id, to_memory_id, link_type, title, description, confidence, metadata }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.link, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "list_companies",
+  {
+    title: "List MBOX companies",
+    description: "Return companies with their company-to-project graph relations.",
+    inputSchema: { query: z.string().default("") },
+  },
+  async ({ query }) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    const data = await mboxFetch(`/api/mbox/companies${params.toString() ? `?${params.toString()}` : ""}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.companies, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "create_company",
+  {
+    title: "Create MBOX company",
+    description: "Create a company container. Use linked_projects to connect existing projects through graph_edges with from_entity=company.",
+    inputSchema: {
+      name: z.string(),
+      status: z.string().default("active"),
+      color: z.string().default("#2c2c2e"),
+      access_level: z.enum(["private", "agents", "public"]).default("agents"),
+      props: z.record(z.any()).default({}),
+      linked_projects: z.array(z.string()).default([]),
+      edge_type: z.string().default("owns_project"),
+    },
+  },
+  async ({ name, status, color, access_level, props, linked_projects, edge_type }) => {
+    const existing = await mboxFetch(`/api/mbox/companies?q=${encodeURIComponent(name)}`);
+    if (existing.companies.find((item) => item.name === name)) throw new Error(`Company already exists: ${name}`);
+    const data = await mboxFetch("/api/mbox/companies", {
+      method: "POST",
+      body: JSON.stringify({ name, status, color, access_level, props }),
+    });
+    const company = data.company;
+    const projects = linked_projects.length ? await mboxFetch("/api/mbox/projects") : { projects: [] };
+    const linked = [];
+    for (const projectName of linked_projects) {
+      const project = projects.projects.find((item) => item.name === projectName);
+      if (!project) continue;
+      const edge = await mboxFetch("/api/mbox/graph/edges", {
+        method: "POST",
+        body: JSON.stringify({ from_entity: "company", from_id: company.id, to_entity: "project", to_id: project.id, edge_type }),
+      });
+      linked.push({ project: project.name, edge: edge.edge });
+    }
+    return withPush({ content: [{ type: "text", text: JSON.stringify({ company, linked }, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "get_memory_actions",
+  {
+    title: "Get MBOX memory action journal",
+    description: "Return the action journal for one memory.",
+    inputSchema: { memory_id: z.string() },
+  },
+  async ({ memory_id }) => {
+    const data = await mboxFetch(`/api/mbox/memories/${encodeURIComponent(memory_id)}/actions`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.actions, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "record_memory_action",
+  {
+    title: "Record MBOX memory action",
+    description: "Append a note/action to one memory's journal.",
+    inputSchema: {
+      memory_id: z.string(),
+      action: z.string().default("note"),
+      note: z.string().default(""),
+      metadata: z.record(z.any()).default({}),
+    },
+  },
+  async ({ memory_id, action, note, metadata }) => {
+    const data = await mboxFetch(`/api/mbox/memories/${encodeURIComponent(memory_id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action, note, metadata }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.action, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "create_project",
   {
     title: "Create MBOX project",

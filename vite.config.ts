@@ -1,6 +1,6 @@
 import { defineConfig, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -80,6 +80,14 @@ type TfidfVector = {
   norm: number;
 };
 
+type MemoryHierarchyNode = {
+  name: string;
+  path: string;
+  count: number;
+  memory_ids: unknown[];
+  children: MemoryHierarchyNode[];
+};
+
 function tokenizeEmbeddingText(value: unknown) {
   return String(value || "")
     .toLowerCase()
@@ -144,6 +152,7 @@ function cosineSimilarity(left: TfidfVector, right: TfidfVector) {
 const agentStructure = {
   entity_model: {
     projects: "root work folders. Each project owns todos, git, deploy, stack and access scopes.",
+    companies: "containers for related projects and participants. Link companies to projects through graph_edges with from_entity=company and to_entity=project.",
     project_entities: "project-owned entities: todos, git, relations, properties, philosophy, deploy, stack and access. UI tree nodes open dedicated editors for each entity.",
     project_relations: "direct graph edges between projects; edge_type can name a larger entity or relation context, e.g. company:Вокруг света.",
     project_props: "structured key/value facts about project owner, client, domain, environment, business context and philosophy.",
@@ -220,6 +229,17 @@ async function queryPostgres<T extends QueryResultRow>(sql: string, values: unkn
   } finally {
     await client.end();
   }
+}
+
+async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) {
+  if (!memoryId || !action) return null;
+  const result = await queryPostgres(
+    `INSERT INTO memory_actions(memory_id, actor, action, note, metadata)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id::text, memory_id::text, actor, action, note, metadata, created_at::text`,
+    [memoryId, actor, action, note, JSON.stringify(metadata && typeof metadata === "object" ? metadata : {})],
+  );
+  return result.rows[0] || null;
 }
 
 async function refreshMemoryEmbeddings() {
@@ -327,7 +347,267 @@ async function autoRecordMemory({ projectId, todoId = null, agentRunId = null, s
     [projectId, todoId, agentRunId, textPreview(title, 160) || "Agent work result", textPreview(content, 2000), ["agent-work", "auto"], JSON.stringify(metadata)],
   );
   await refreshMemoryEmbeddings();
-  return { skipped: false, id: result.rows[0]?.id || null };
+  const id = result.rows[0]?.id || null;
+  await recordMemoryAction({ memoryId: id, actor: String(sourceAgent || "Agent"), action: "auto_create", note: reason, metadata });
+  return { skipped: false, id };
+}
+
+async function closeStaleAgentRuns() {
+  const result = await queryPostgres(
+    `UPDATE agent_runs
+     SET status = 'abandoned',
+         finished_at = COALESCE(finished_at, heartbeat_at),
+         props = COALESCE(props, '{}'::jsonb) || jsonb_build_object(
+           'auto_closed', true,
+           'auto_closed_reason', 'heartbeat_timeout',
+           'auto_closed_after_minutes', 10,
+           'auto_closed_at', now()
+         )
+     WHERE finished_at IS NULL
+       AND status IN ('running', 'doing')
+       AND heartbeat_at < now() - interval '10 minutes'
+     RETURNING id::text`,
+  );
+  return result.rows;
+}
+
+function buildMemoryReview(memories: Record<string, any>[]) {
+  const issues: Record<string, any>[] = [];
+  const fingerprints = new Map<string, Record<string, any>>();
+  for (const memory of memories) {
+    const tags = Array.isArray(memory.tags) ? memory.tags : [];
+    const metadata = memory.metadata && typeof memory.metadata === "object" ? memory.metadata : {};
+    const content = String(memory.content || "");
+    const title = String(memory.title || "").trim();
+    const fingerprint = createHash("sha1").update(normalizeMemoryText(`${title}\n${content}`)).digest("hex");
+    const previous = fingerprints.get(fingerprint);
+    if (previous) {
+      issues.push(memoryReviewIssue(memory, "high", "duplicate", "Похоже на полный дубль другой записи памяти.", `Сравнить с memory #${previous.id}; одну запись объединить или архивировать.`, [previous.id]));
+    } else {
+      fingerprints.set(fingerprint, memory);
+    }
+    if (!title || !content.trim()) issues.push(memoryReviewIssue(memory, "high", "empty_or_incomplete", "У записи пустой title или content.", "Уточнить запись или удалить, если она техническая."));
+    if (content.length > 4000) issues.push(memoryReviewIssue(memory, "normal", "oversized", "Запись слишком длинная для полезной памяти.", "Сжать до решения/факта/последствий; сырой лог вынести в artifact."));
+    if (looksLikeRawLog(content)) issues.push(memoryReviewIssue(memory, "normal", "raw_log", "Запись похожа на сырой лог или дамп выполнения.", "Переписать как короткий итог: что изменилось, почему, какие файлы затронуты."));
+    if ((tags.includes("agent-work") || metadata.recorded_via) && !(memory.project_id || metadata.project_id)) {
+      issues.push(memoryReviewIssue(memory, "high", "missing_project_id", "Agent-work memory не привязана к project_id.", "Добавить project_id в колонку или metadata, иначе агент не найдёт память в контексте проекта."));
+    }
+    if ((tags.includes("agent-work") || metadata.recorded_via) && !metadata.source_agent) {
+      issues.push(memoryReviewIssue(memory, "normal", "missing_source_agent", "Agent-work memory без metadata.source_agent.", "Добавить source_agent, чтобы было понятно, кто оставил факт."));
+    }
+    if (metadata.todo_id && !memory.todo_id) issues.push(memoryReviewIssue(memory, "low", "metadata_only_todo_link", "todo_id есть только в metadata, но не в колонке memories.todo_id.", "Продублировать связь в колонку для быстрых trail-запросов."));
+    if (metadata.agent_run_id && !memory.agent_run_id) issues.push(memoryReviewIssue(memory, "low", "metadata_only_run_link", "agent_run_id есть только в metadata, но не в колонке memories.agent_run_id.", "Продублировать связь в колонку для быстрых trail-запросов."));
+  }
+  const order: Record<string, number> = { high: 1, normal: 2, low: 3 };
+  issues.sort((a, b) => (order[a.severity] || 9) - (order[b.severity] || 9) || Number(a.memory_id) - Number(b.memory_id));
+  return { checked: memories.length, issues: issues.length, queue: issues };
+}
+
+function normalizeMemoryText(value: unknown) {
+  return String(value || "").toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+function looksLikeRawLog(content: unknown) {
+  const text = String(content || "");
+  const lines = text.split(/\r?\n/);
+  const jsonishLines = lines.filter((line) => /^\s*[{[]/.test(line)).length;
+  return /Traceback|UnhandledPromiseRejection|^\s*at\s+\S+\s+\(|npm ERR!|SQLSTATE|ERROR:/m.test(text)
+    || jsonishLines >= 5
+    || (lines.length > 80 && /error|warn|debug|info/i.test(text));
+}
+
+function memoryReviewIssue(memory: Record<string, any>, severity: string, type: string, reason: string, suggestion: string, related_ids: string[] = []) {
+  return { memory_id: memory.id, severity, type, title: memory.title, reason, suggestion, related_ids, updated_at: memory.updated_at };
+}
+
+function digestDocument({ title = "Document", content = "", maxFragments = 40, minChars = 80 }: { title?: unknown; content?: unknown; maxFragments?: unknown; minChars?: unknown } = {}) {
+  const sourceTitle = String(title || "Document").trim() || "Document";
+  const text = String(content || "").replace(/\r\n?/g, "\n").trim();
+  if (!text) return { title: sourceTitle, fragments: [], stats: { characters: 0, lines: 0 } };
+
+  const fragments: Record<string, any>[] = [];
+  const lines = text.split("\n");
+  const headingPath: string[] = [];
+  let block: string[] = [];
+  let blockKind = "paragraph";
+
+  const flush = () => {
+    const rawLines = block.map((line) => line.trim()).filter(Boolean);
+    block = [];
+    if (!rawLines.length) return;
+    const normalized = normalizeDigestBlock(rawLines, blockKind);
+    if (!normalized || normalized.length < Number(minChars || 0)) return;
+    const path = headingPath.filter(Boolean);
+    const fragmentTitle = path.length ? path.join(" / ") : sourceTitle;
+    fragments.push({
+      index: fragments.length + 1,
+      kind: blockKind,
+      title: fragmentTitle,
+      path,
+      content: normalized,
+      tags: ["digest", `kind:${blockKind}`, ...path.slice(-2).map((item) => `section:${slugDigestToken(item)}`)],
+      metadata: {
+        source_title: sourceTitle,
+        source_kind: "document_digest",
+        digest_index: fragments.length + 1,
+        digest_path: path,
+      },
+    });
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const heading = parseDigestHeading(trimmed);
+    if (heading) {
+      flush();
+      headingPath.length = Math.max(heading.level - 1, 0);
+      headingPath[heading.level - 1] = heading.text;
+      blockKind = "paragraph";
+      continue;
+    }
+    if (!trimmed) {
+      flush();
+      blockKind = "paragraph";
+      continue;
+    }
+    const kind = digestLineKind(trimmed);
+    if (block.length && kind !== blockKind) flush();
+    blockKind = kind;
+    block.push(trimmed);
+  }
+  flush();
+
+  return {
+    title: sourceTitle,
+    fragments: fragments.slice(0, Math.max(1, Math.min(Number(maxFragments || 40), 100))),
+    stats: { characters: text.length, lines: lines.length, generated_fragments: fragments.length },
+  };
+}
+
+function parseDigestHeading(line: string) {
+  const markdown = line.match(/^(#{1,6})\s+(.+)$/);
+  if (markdown) return { level: markdown[1].length, text: markdown[2].trim() };
+  const numbered = line.match(/^(\d+(?:\.\d+){0,4})[.)]\s+(.+)$/);
+  if (numbered && line.length < 120) return { level: Math.min(numbered[1].split(".").length, 6), text: numbered[2].trim() };
+  return null;
+}
+
+function digestLineKind(line: string) {
+  if (line.includes("|") && line.split("|").filter((cell) => cell.trim()).length >= 2) return "table";
+  if (line.includes("\t") && line.split("\t").filter((cell) => cell.trim()).length >= 2) return "table";
+  if (/^[-*+]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) return "list";
+  return "paragraph";
+}
+
+function normalizeDigestBlock(lines: string[], kind: string) {
+  if (kind === "table") return digestTable(lines);
+  if (kind === "list") return lines.map((line) => line.replace(/^[-*+]\s+/, "- ").replace(/^\d+[.)]\s+/, "- ")).join("\n");
+  return lines.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function digestTable(lines: string[]) {
+  const rows = lines
+    .map((line) => line.split(line.includes("|") ? "|" : "\t").map((cell) => cell.trim()).filter(Boolean))
+    .filter((row) => row.length >= 2 && !row.every((cell) => /^:?-{2,}:?$/.test(cell)));
+  if (!rows.length) return "";
+  const header = rows[0];
+  if (rows.length === 1) return header.join(" | ");
+  return rows.slice(1).map((row, index) => {
+    const pairs = row.map((cell, cellIndex) => `${header[cellIndex] || `col_${cellIndex + 1}`}: ${cell}`);
+    return `Row ${index + 1}: ${pairs.join("; ")}`;
+  }).join("\n");
+}
+
+function slugDigestToken(value: unknown) {
+  return String(value || "").toLowerCase().normalize("NFKC").replace(/[^a-z0-9а-яё]+/giu, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "section";
+}
+
+function buildMemoryHierarchy(memories: Record<string, any>[]) {
+  const root: Record<string, any> = { name: "root", path: "", count: 0, memory_ids: [], children: {} };
+  const paths = new Map<string, Record<string, any>>();
+  for (const memory of memories) {
+    const memoryPaths = hierarchyPathsForMemory(memory);
+    for (const path of memoryPaths) {
+      let node = root;
+      root.count += 1;
+      root.memory_ids.push(memory.id);
+      const parts = path.split("/").filter(Boolean);
+      const built: string[] = [];
+      for (const part of parts) {
+        built.push(part);
+        node.children[part] ||= { name: part, path: built.join("/"), count: 0, memory_ids: [], children: {} };
+        node = node.children[part];
+        node.count += 1;
+        node.memory_ids.push(memory.id);
+        paths.set(node.path, { path: node.path, count: node.count, memory_ids: node.memory_ids });
+      }
+    }
+  }
+  return { tree: compactHierarchyNode(root), paths: [...paths.values()].sort((a, b) => b.count - a.count || a.path.localeCompare(b.path)) };
+}
+
+function hierarchyPathsForMemory(memory: Record<string, any>) {
+  const metadata = memory.metadata && typeof memory.metadata === "object" ? memory.metadata : {};
+  const tags = Array.isArray(memory.tags) ? memory.tags.map(String).filter(Boolean) : [];
+  const paths: string[] = [];
+  if (Array.isArray(metadata.digest_path) && metadata.digest_path.length) paths.push(metadata.digest_path.map(slugDigestToken).join("/"));
+  for (const tag of tags) {
+    if (tag.includes("/")) paths.push(tag.split("/").map(slugDigestToken).join("/"));
+    else if (tag.includes(":")) {
+      const [group, ...rest] = tag.split(":");
+      paths.push([group, rest.join(":")].map(slugDigestToken).filter(Boolean).join("/"));
+    } else {
+      paths.push(slugDigestToken(tag));
+    }
+  }
+  return [...new Set(paths.filter(Boolean))];
+}
+
+function compactHierarchyNode(node: Record<string, any>): MemoryHierarchyNode {
+  return {
+    name: node.name,
+    path: node.path,
+    count: node.count,
+    memory_ids: [...new Set(node.memory_ids)].slice(0, 20),
+    children: Object.values(node.children).map((child) => compactHierarchyNode(child as Record<string, any>)).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+  };
+}
+
+function suggestMemoryHierarchy(input: Record<string, any>, memories: Array<MemoryEmbeddingRow & Record<string, any>>, limit = 8) {
+  const queryText = memoryEmbeddingText({
+    id: "",
+    title: String(input.title || ""),
+    content: String(input.content || ""),
+    tags: Array.isArray(input.tags) ? input.tags : [],
+    metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
+    updated_at: "",
+  });
+  const documents = memories.map((memory) => ({ id: memory.id, text: memoryEmbeddingText(memory) }));
+  const vectors = buildTfIdfIndex(documents);
+  const documentFrequency = new Map<string, number>();
+  for (const doc of documents) {
+    for (const token of new Set(tokenizeEmbeddingText(doc.text))) documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+  }
+  const queryVector = vectorFromText(queryText, documentFrequency, documents.length);
+  const byId = new Map(memories.map((memory) => [memory.id, memory]));
+  const similar = vectors
+    .map((vector) => ({ memory: byId.get(vector.id || ""), score: cosineSimilarity(queryVector, vector) }))
+    .filter((item) => item.memory && item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, Math.min(Number(limit || 8), 20)));
+  const tagScores = new Map<string, number>();
+  const pathScores = new Map<string, number>();
+  for (const item of similar) {
+    for (const tag of item.memory?.tags || []) tagScores.set(tag, (tagScores.get(tag) || 0) + item.score);
+    for (const path of hierarchyPathsForMemory(item.memory || {})) pathScores.set(path, (pathScores.get(path) || 0) + item.score);
+  }
+  return {
+    suggestions: {
+      tags: [...tagScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([tag, score]) => ({ tag, score: Number(score.toFixed(6)) })),
+      paths: [...pathScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([path, score]) => ({ path, score: Number(score.toFixed(6)) })),
+    },
+    similar: similar.map(({ memory, score }) => ({ ...compactMemoryRow(memory || {}, 220), score: Number(score.toFixed(6)) })),
+  };
 }
 
 async function currentUser(req: IncomingMessage) {
@@ -426,6 +706,7 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/agents") {
+            await closeStaleAgentRuns();
             const result = await queryPostgres<{
               name: string;
               kind: string;
@@ -530,6 +811,57 @@ function mboxDevApi() {
             return sendJson(res, 200, { ok: true, postgres: result.rows[0] });
           }
 
+          if (url.pathname === "/api/mbox/memory-links") {
+            if (req.method === "POST") {
+              const body = await readBody<Record<string, any>>(req);
+              const result = await queryPostgres(
+                `INSERT INTO memory_links(from_memory_id, to_memory_id, link_type, title, description, confidence, metadata)
+                 VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'related'), $4, $5, $6, $7)
+                 ON CONFLICT (from_memory_id, to_memory_id, link_type) DO UPDATE SET
+                   title = EXCLUDED.title,
+                   description = EXCLUDED.description,
+                   confidence = EXCLUDED.confidence,
+                   metadata = EXCLUDED.metadata
+                 RETURNING id::text, from_memory_id::text, to_memory_id::text, link_type, title, description, confidence, metadata, created_at::text`,
+                [
+                  body.from_memory_id,
+                  body.to_memory_id,
+                  String(body.link_type || ""),
+                  String(body.title || "").trim(),
+                  String(body.description || "").trim(),
+                  Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : 1,
+                  JSON.stringify(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+                ],
+              );
+              await recordMemoryAction({ memoryId: body.from_memory_id, actor: String(actorFromReq(req)), action: "link_create", note: `linked to memory ${body.to_memory_id}`, metadata: result.rows[0] || {} });
+              await recordMemoryAction({ memoryId: body.to_memory_id, actor: String(actorFromReq(req)), action: "link_create", note: `linked from memory ${body.from_memory_id}`, metadata: result.rows[0] || {} });
+              return sendJson(res, 201, { link: result.rows[0] });
+            }
+            const memoryId = url.searchParams.get("memory_id") || "";
+            const result = await queryPostgres(
+              `SELECT l.id::text, l.from_memory_id::text, fm.title AS from_title, l.to_memory_id::text, tm.title AS to_title,
+                      l.link_type, l.title, l.description, l.confidence, l.metadata, l.created_at::text
+               FROM memory_links l
+               JOIN memories fm ON fm.id = l.from_memory_id
+               JOIN memories tm ON tm.id = l.to_memory_id
+               WHERE $1 = '' OR l.from_memory_id::text = $1 OR l.to_memory_id::text = $1
+               ORDER BY l.created_at DESC
+               LIMIT 200`,
+              [memoryId],
+            );
+            return sendJson(res, 200, { links: result.rows });
+          }
+
+          const memoryLinkMatch = url.pathname.match(/^\/api\/mbox\/memory-links\/(\d+)$/);
+          if (memoryLinkMatch && req.method === "DELETE") {
+            const link = await queryPostgres<Record<string, any>>("DELETE FROM memory_links WHERE id = $1 RETURNING id::text, from_memory_id::text, to_memory_id::text, link_type", [memoryLinkMatch[1]]);
+            if (link.rows[0]) {
+              await recordMemoryAction({ memoryId: link.rows[0].from_memory_id, actor: String(actorFromReq(req)), action: "link_delete", note: `unlinked memory ${link.rows[0].to_memory_id}`, metadata: link.rows[0] });
+              await recordMemoryAction({ memoryId: link.rows[0].to_memory_id, actor: String(actorFromReq(req)), action: "link_delete", note: `unlinked memory ${link.rows[0].from_memory_id}`, metadata: link.rows[0] });
+            }
+            return sendJson(res, link.rows[0] ? 200 : 404, link.rows[0] ? { ok: true, link: link.rows[0] } : { error: "not_found" });
+          }
+
           if (url.pathname === "/api/mbox/memories") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
@@ -539,6 +871,7 @@ function mboxDevApi() {
                  RETURNING id::text`,
                 [body.project_id || null, body.todo_id || null, body.agent_run_id || null, String(body.title ?? "").trim(), String(body.content ?? ""), String(body.entity_type ?? ""), String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : [], JSON.stringify(body.metadata && typeof body.metadata === "object" ? body.metadata : {})],
               );
+              await recordMemoryAction({ memoryId: result.rows[0]?.id, actor: String(actorFromReq(req)), action: "create", note: "memory created via API", metadata: { title: String(body.title ?? "").trim() } });
               await refreshMemoryEmbeddings();
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
               return sendJson(res, 201, { memory: result.rows[0] });
@@ -617,6 +950,111 @@ function mboxDevApi() {
             return sendJson(res, 200, { query: search, memories });
           }
 
+          if (url.pathname === "/api/mbox/memories/review") {
+            const result = await queryPostgres<MemoryEmbeddingRow & Record<string, any>>(
+              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, tags, metadata,
+                      created_at::text, updated_at::text
+               FROM memories
+               ORDER BY updated_at DESC`,
+            );
+            return sendJson(res, 200, buildMemoryReview(result.rows));
+          }
+
+          if (url.pathname === "/api/mbox/memories/hierarchy") {
+            const result = await queryPostgres<Record<string, any>>(
+              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
+                      created_at::text, updated_at::text
+               FROM memories
+               ORDER BY updated_at DESC`,
+            );
+            return sendJson(res, 200, { checked: result.rows.length, ...buildMemoryHierarchy(result.rows) });
+          }
+
+          if (url.pathname === "/api/mbox/memories/suggest-hierarchy" && req.method === "POST") {
+            const body = await readBody<Record<string, any>>(req);
+            const projectId = String(body.project_id || "");
+            const result = await queryPostgres<MemoryEmbeddingRow & Record<string, any>>(
+              `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
+                      created_at::text, updated_at::text
+               FROM memories
+               WHERE $1 = '' OR project_id::text = $1 OR metadata->>'project_id' = $1
+               ORDER BY updated_at DESC`,
+              [projectId],
+            );
+            return sendJson(res, 200, suggestMemoryHierarchy(body, result.rows, body.limit));
+          }
+
+          if (url.pathname === "/api/mbox/memories/digest" && req.method === "POST") {
+            const body = await readBody<Record<string, any>>(req);
+            const digest = digestDocument({
+              title: body.title,
+              content: body.content,
+              maxFragments: body.max_fragments,
+              minChars: body.min_chars,
+            });
+            const baseTags = Array.isArray(body.tags) ? body.tags.map(String) : [];
+            const baseMetadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+            const dryRun = body.dry_run !== false;
+            if (dryRun) return sendJson(res, 200, { ...digest, dry_run: true });
+
+            const created: Record<string, any>[] = [];
+            for (const fragment of digest.fragments) {
+              const tags = [...new Set([...baseTags, ...fragment.tags])];
+              const metadata = {
+                ...baseMetadata,
+                ...fragment.metadata,
+                source_agent: actorFromReq(req),
+                source_content_bytes: Buffer.byteLength(String(body.content || ""), "utf8"),
+              };
+              const result = await queryPostgres(
+                `INSERT INTO memories(project_id, todo_id, agent_run_id, title, content, entity_type, access_level, tags, metadata)
+                 VALUES ($1, $2, $3, $4, $5, 'memory', COALESCE(NULLIF($6, ''), 'agents'), $7, $8)
+                 RETURNING id::text, title`,
+                [
+                  body.project_id || null,
+                  body.todo_id || null,
+                  body.agent_run_id || null,
+                  `${digest.title}: ${fragment.title}`.slice(0, 240),
+                  fragment.content,
+                  String(body.access_level || ""),
+                  tags,
+                  JSON.stringify(metadata),
+                ],
+              );
+              await recordMemoryAction({ memoryId: result.rows[0]?.id, actor: String(actorFromReq(req)), action: "digest_fragment_create", note: `fragment ${fragment.index}`, metadata });
+              created.push({ ...result.rows[0], fragment_index: fragment.index });
+            }
+            if (created.length) {
+              await refreshMemoryEmbeddings();
+              broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
+            }
+            return sendJson(res, 201, { ...digest, dry_run: false, created });
+          }
+
+          const memoryActionsMatch = url.pathname.match(/^\/api\/mbox\/memories\/(\d+)\/actions$/);
+          if (memoryActionsMatch) {
+            if (req.method === "POST") {
+              const body = await readBody<Record<string, any>>(req);
+              const action = await recordMemoryAction({
+                memoryId: memoryActionsMatch[1],
+                actor: String(actorFromReq(req)),
+                action: String(body.action || "note"),
+                note: String(body.note || ""),
+                metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : {},
+              });
+              return sendJson(res, 201, { action });
+            }
+            const result = await queryPostgres(
+              `SELECT id::text, memory_id::text, actor, action, note, metadata, created_at::text
+               FROM memory_actions
+               WHERE memory_id = $1
+               ORDER BY created_at DESC
+               LIMIT 100`,
+              [memoryActionsMatch[1]],
+            );
+            return sendJson(res, 200, { actions: result.rows });
+          }
+
           const memoryMatch = url.pathname.match(/^\/api\/mbox\/memories\/(\d+)$/);
           if (memoryMatch && req.method === "PATCH") {
             const body = await readBody<Record<string, unknown>>(req);
@@ -631,12 +1069,14 @@ function mboxDevApi() {
                RETURNING id::text`,
               [String(body.title ?? "").trim(), body.content ?? null, String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : null, memoryMatch[1]],
             );
+            if (result.rows[0]) await recordMemoryAction({ memoryId: result.rows[0].id, actor: String(actorFromReq(req)), action: "update", note: "memory updated via API", metadata: { fields: Object.keys(body || {}) } });
             if (result.rows[0]) await refreshMemoryEmbeddings();
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { memory: result.rows[0] } : { error: "not_found" });
           }
 
           if (memoryMatch && req.method === "DELETE") {
+            await recordMemoryAction({ memoryId: memoryMatch[1], actor: String(actorFromReq(req)), action: "delete", note: "memory deleted via API" });
             await queryPostgres("DELETE FROM memories WHERE id = $1", [memoryMatch[1]]);
             await refreshMemoryEmbeddings();
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
@@ -738,6 +1178,45 @@ function mboxDevApi() {
             return sendJson(res, 200, { ok: true });
           }
 
+          if (url.pathname === "/api/mbox/companies") {
+            if (req.method === "POST") {
+              const body = await readBody<Record<string, unknown>>(req);
+              const result = await queryPostgres(
+                `INSERT INTO companies(folder_id, name, status, props, color, access_level)
+                 VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'active'), $4, $5, COALESCE(NULLIF($6, ''), 'private'))
+                 RETURNING id::text`,
+                [body.folder_id || null, String(body.name ?? "").trim(), String(body.status ?? ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {}), String(body.color ?? "#2c2c2e"), String(body.access_level ?? "")],
+              );
+              broadcastRealtime(realtimeClients, "entity_changed", { entity: "companies" });
+              return sendJson(res, 201, { company: result.rows[0] });
+            }
+            const companies = await queryPostgres(
+              `SELECT id::text, folder_id::text, name, status, props, color, access_level,
+                      pg_column_size(companies)::int AS memory_bytes,
+                      created_at::text, updated_at::text
+               FROM companies
+               WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR status ILIKE '%' || $1 || '%' OR props::text ILIKE '%' || $1 || '%'
+               ORDER BY updated_at DESC
+               LIMIT 200`,
+              [q],
+            );
+            const relations = await queryPostgres(
+              `SELECT e.id::text, e.from_id::text AS company_id, c.name AS company_name,
+                      e.to_id::text AS project_id, p.name AS project_name, e.edge_type,
+                      e.title, e.description, e.owner, e.group_entity, e.strength, e.valid_until::text
+               FROM graph_edges e
+               JOIN companies c ON c.id = e.from_id AND e.from_entity = 'company'
+               JOIN projects p ON p.id = e.to_id AND e.to_entity = 'project'
+               ORDER BY e.created_at DESC`,
+            );
+            return sendJson(res, 200, {
+              companies: companies.rows.map((company) => ({
+                ...company,
+                projects: relations.rows.filter((edge) => edge.company_id === company.id),
+              })),
+            });
+          }
+
           if (url.pathname === "/api/mbox/projects") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
@@ -785,24 +1264,29 @@ function mboxDevApi() {
               const body = await readBody<Record<string, unknown>>(req);
               const fromId = String(body.from_id ?? "");
               const toId = String(body.to_id ?? "");
-              if (!fromId || !toId || fromId === toId) return sendJson(res, 400, { error: "invalid_edge" });
+              const fromEntity = String(body.from_entity || "project");
+              const toEntity = String(body.to_entity || "project");
+              if (!fromId || !toId || (fromEntity === toEntity && fromId === toId)) return sendJson(res, 400, { error: "invalid_edge" });
+              if (!["project", "company"].includes(fromEntity) || !["project", "company"].includes(toEntity)) return sendJson(res, 400, { error: "invalid_entity" });
               const result = await queryPostgres(
-                `INSERT INTO graph_edges(from_entity, from_id, to_entity, to_id, edge_type, score)
-                 VALUES ('project', $1, 'project', $2, COALESCE(NULLIF($3, ''), 'related'), 1)
+                `INSERT INTO graph_edges(from_entity, from_id, to_entity, to_id, edge_type, title, description, owner, group_entity, strength, valid_until, score)
+                 VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'related'), $6, $7, $8, $9, COALESCE($10, 1), $11, 1)
                  ON CONFLICT DO NOTHING
                  RETURNING id::text`,
-                [fromId, toId, String(body.edge_type ?? "")],
+                [fromEntity, fromId, toEntity, toId, String(body.edge_type ?? ""), String(body.title ?? ""), String(body.description ?? ""), String(body.owner ?? ""), String(body.group_entity ?? ""), Number(body.strength || 1), body.valid_until || null],
               );
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "graph_edges" });
               return sendJson(res, 201, { edge: result.rows[0] ?? null });
             }
             const result = await queryPostgres(
-              `SELECT e.id::text, e.from_entity, e.from_id::text, COALESCE(fp.name, e.from_entity || ' #' || e.from_id::text) AS from_label,
-                      e.to_entity, e.to_id::text, COALESCE(tp.name, e.to_entity || ' #' || e.to_id::text) AS to_label,
-                      e.edge_type
+              `SELECT e.id::text, e.from_entity, e.from_id::text, COALESCE(fp.name, fc.name, e.from_entity || ' #' || e.from_id::text) AS from_label,
+                      e.to_entity, e.to_id::text, COALESCE(tp.name, tc.name, e.to_entity || ' #' || e.to_id::text) AS to_label,
+                      e.edge_type, e.title, e.description, e.owner, e.group_entity, e.strength, e.valid_until::text
                FROM graph_edges e
                LEFT JOIN projects fp ON e.from_entity = 'project' AND fp.id = e.from_id
+               LEFT JOIN companies fc ON e.from_entity = 'company' AND fc.id = e.from_id
                LEFT JOIN projects tp ON e.to_entity = 'project' AND tp.id = e.to_id
+               LEFT JOIN companies tc ON e.to_entity = 'company' AND tc.id = e.to_id
                ORDER BY e.created_at DESC
                LIMIT 500`,
             );
@@ -813,6 +1297,34 @@ function mboxDevApi() {
           if (edgeMatch && req.method === "DELETE") {
             await queryPostgres("DELETE FROM graph_edges WHERE id = $1", [edgeMatch[1]]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "graph_edges" });
+            return sendJson(res, 200, { ok: true });
+          }
+
+          const companyMatch = url.pathname.match(/^\/api\/mbox\/companies\/(\d+)$/);
+          if (companyMatch && req.method === "PATCH") {
+            const body = await readBody<Record<string, unknown>>(req);
+            const color = String(body.color ?? "").trim();
+            if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return sendJson(res, 400, { error: "invalid_color" });
+            const result = await queryPostgres(
+              `UPDATE companies
+               SET folder_id = COALESCE($1, folder_id),
+                   name = COALESCE(NULLIF($2, ''), name),
+                   status = COALESCE(NULLIF($3, ''), status),
+                   props = COALESCE($4, props),
+                   color = COALESCE(NULLIF($5, ''), color),
+                   access_level = COALESCE(NULLIF($6, ''), access_level),
+                   updated_at = now()
+               WHERE id = $7
+               RETURNING id::text`,
+              [body.folder_id || null, String(body.name ?? "").trim(), String(body.status ?? ""), body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, color, String(body.access_level ?? ""), companyMatch[1]],
+            );
+            if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "companies" });
+            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { company: result.rows[0] } : { error: "not_found" });
+          }
+
+          if (companyMatch && req.method === "DELETE") {
+            await queryPostgres("DELETE FROM companies WHERE id = $1", [companyMatch[1]]);
+            broadcastRealtime(realtimeClients, "entity_changed", { entity: "companies" });
             return sendJson(res, 200, { ok: true });
           }
 
@@ -964,6 +1476,7 @@ function mboxDevApi() {
 
           // Расстановка узлов карты. Держать в паре с server/mbox-server.mjs.
           if (url.pathname === "/api/mbox/agent/context") {
+            await closeStaleAgentRuns();
             const projectName = url.searchParams.get("project") || "MBOX";
             const detail = url.searchParams.get("detail") === "full" ? "full" : "short";
             const projects = await queryPostgres<Record<string, any>>(
@@ -1163,6 +1676,7 @@ function mboxDevApi() {
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_runs" });
               return sendJson(res, 201, { run: result.rows[0], auto_memory });
             }
+            await closeStaleAgentRuns();
             const result = await queryPostgres(
               `SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props,
                       pg_column_size(agent_runs)::int AS memory_bytes,

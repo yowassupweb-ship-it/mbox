@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Link2, Maximize, Minus, Plus, Unlink } from "lucide-react";
 import { fetchJson, fetchOr } from "../lib/api";
-import { edgeTypeLabel } from "../lib/labels";
-import type { FolderRow, GraphEdge, Memory, Project } from "../types";
+import { edgeTypeLabel, todoPriorityLabel, todoStatusLabel } from "../lib/labels";
+import type { FolderRow, GraphEdge, Memory, Project, Todo } from "../types";
 
 type NodeKind = "project" | "todo" | "memory" | "folder";
 
@@ -15,6 +15,10 @@ type MapNode = {
   color: string;
   x: number;
   y: number;
+  status?: string;
+  priority?: string;
+  projectName?: string;
+  note?: string;
 };
 
 type Position = { entity_type: string; entity_id: string; x: number; y: number };
@@ -25,7 +29,7 @@ type Position = { entity_type: string; entity_id: string; x: number; y: number }
  */
 const NODE_W = 220;
 const ROW_STEP = 108;
-const CLUSTER_W = 620;
+const CLUSTER_W = 1180;
 const MARGIN_X = 140;
 const MARGIN_Y = 120;
 
@@ -35,6 +39,21 @@ const kindColor: Record<NodeKind, string> = {
   memory: "#7ee2a8",
   folder: "#c9a6ff",
 };
+
+const todoStatusOrder = ["doing", "next", "review", "blocked", "open"];
+const todoStatusColor: Record<string, string> = {
+  doing: "#7ee2a8",
+  next: "#8ab4ff",
+  review: "#c9a6ff",
+  blocked: "#ff8a8a",
+  open: "#ffd479",
+};
+const todoPriorityRank: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
+const todoPrioritySeverity: Record<string, string> = { urgent: "critical", high: "high", normal: "normal", low: "low" };
+
+function activeTodos(todos: Todo[]) {
+  return todos.filter((todo) => !["done", "archived"].includes(todo.status));
+}
 
 /**
  * Карта MBOX. Раньше это была декорация: координаты узлов зашиты процентами, а «связи»
@@ -87,7 +106,7 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         kind: "project",
         entityId: project.id,
         label: project.name,
-        sub: `${project.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length} активных задач`,
+        sub: `${activeTodos(project.todos).length} активных задач`,
         color: project.color || kindColor.project,
         ...point,
       });
@@ -95,26 +114,36 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
 
     if (showTodos) {
       projects.forEach((project, projectIndex) => {
-        project.todos
-          .filter((todo) => !["done", "archived"].includes(todo.status))
-          .slice(0, 12)
-          .forEach((todo, index) => {
+        const visibleTodos = activeTodos(project.todos).sort((a, b) => {
+          const leftStatus = todoStatusOrder.indexOf(a.status);
+          const rightStatus = todoStatusOrder.indexOf(b.status);
+          const statusDelta = (leftStatus === -1 ? 99 : leftStatus) - (rightStatus === -1 ? 99 : rightStatus);
+          return statusDelta || (todoPriorityRank[b.priority] || 0) - (todoPriorityRank[a.priority] || 0) || a.title.localeCompare(b.title);
+        });
+        for (const status of todoStatusOrder) {
+          visibleTodos.filter((todo) => todo.status === status).forEach((todo, index) => {
+            const statusColumn = todoStatusOrder.indexOf(status);
             const point = place(
               "todo",
               todo.id,
-              MARGIN_X + projectIndex * CLUSTER_W + (index % 2) * (NODE_W + 40),
-              MARGIN_Y + 150 + Math.floor(index / 2) * ROW_STEP,
+              MARGIN_X + projectIndex * CLUSTER_W + statusColumn * (NODE_W + 18),
+              MARGIN_Y + 150 + index * ROW_STEP,
             );
             list.push({
               key: `todo:${todo.id}`,
               kind: "todo",
               entityId: todo.id,
               label: todo.title,
-              sub: todo.status,
-              color: kindColor.todo,
+              sub: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}`,
+              color: todoStatusColor[todo.status] || kindColor.todo,
+              status: todo.status,
+              priority: todo.priority,
+              projectName: project.name,
+              note: todo.note,
               ...point,
             });
           });
+        }
       });
     }
 
@@ -278,6 +307,13 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         <button type="button" onClick={() => setView({ x: 0, y: 0, scale: 1 })} aria-label="Сбросить"><Crosshair size={15} /></button>
         <span className="map-scale">{Math.round(view.scale * 100)}%</span>
       </div>
+      <div className="map-legend" aria-label="Todo status legend">
+        {todoStatusOrder.map((status) => (
+          <span key={status} style={{ ["--legend-color" as string]: todoStatusColor[status] }}>
+            {todoStatusLabel(status)}
+          </span>
+        ))}
+      </div>
 
       <div
         className={linkFrom ? "map-canvas is-linking" : "map-canvas"}
@@ -350,7 +386,7 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
           {nodes.map((node) => (
             <div
               key={node.key}
-              className={`map-node kind-${node.kind}${selected?.key === node.key ? " is-selected" : ""}${linkFrom?.key === node.key ? " is-link-source" : ""}`}
+              className={`map-node kind-${node.kind}${selected?.key === node.key ? " is-selected" : ""}${linkFrom?.key === node.key ? " is-link-source" : ""}${node.priority ? ` priority-${todoPrioritySeverity[node.priority] || "normal"}` : ""}`}
               style={{ ["--node-x" as string]: `${node.x}px`, ["--node-y" as string]: `${node.y}px`, ["--node-color" as string]: node.color }}
               onPointerDown={(event) => onNodePointerDown(event, node)}
               onPointerMove={onNodePointerMove}
@@ -358,6 +394,7 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
             >
               <strong>{node.label}</strong>
               <span>{node.sub}</span>
+              {node.kind === "todo" && node.priority && <em>{todoPriorityLabel(node.priority)}</em>}
             </div>
           ))}
         </div>
@@ -375,6 +412,14 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
                   <button type="button" onClick={() => removeEdge(edge.id)} aria-label="Убрать связь"><Unlink size={14} /></button>
                 </div>
               ))}
+            </div>
+          )}
+          {selected.kind === "todo" && (
+            <div className="map-todo-detail">
+              {selected.projectName && <span>{selected.projectName}</span>}
+              {selected.status && <span>{todoStatusLabel(selected.status)}</span>}
+              {selected.priority && <span>{todoPriorityLabel(selected.priority)}</span>}
+              {selected.note && <p>{selected.note}</p>}
             </div>
           )}
         </aside>

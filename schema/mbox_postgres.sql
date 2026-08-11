@@ -59,6 +59,29 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS memory_links (
+  id BIGSERIAL PRIMARY KEY,
+  from_memory_id BIGINT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  to_memory_id BIGINT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  link_type TEXT NOT NULL DEFAULT 'related',
+  title TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  confidence DOUBLE PRECISION NOT NULL DEFAULT 1,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (from_memory_id <> to_memory_id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_actions (
+  id BIGSERIAL PRIMARY KEY,
+  memory_id BIGINT REFERENCES memories(id) ON DELETE SET NULL,
+  actor TEXT NOT NULL DEFAULT 'agent',
+  action TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE OR REPLACE FUNCTION update_memory_search_vector()
 RETURNS trigger AS $$
 BEGIN
@@ -91,11 +114,30 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS companies (
+  id BIGSERIAL PRIMARY KEY,
+  folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,
+  name TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'active',
+  props JSONB NOT NULL DEFAULT '{}',
+  color TEXT NOT NULL DEFAULT '#2c2c2e',
+  access_level TEXT NOT NULL DEFAULT 'private' CHECK (access_level IN ('private', 'agents', 'public')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS deploy_provider TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS deploy_target TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS props JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#2c2c2e';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS props JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#2c2c2e';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'private';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS todos (
   id BIGSERIAL PRIMARY KEY,
@@ -311,6 +353,12 @@ CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id, updated_
 CREATE INDEX IF NOT EXISTS idx_memories_todo ON memories(todo_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_agent_run ON memories(agent_run_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_embeddings_updated ON memory_embeddings(updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_links_unique ON memory_links(from_memory_id, to_memory_id, link_type);
+CREATE INDEX IF NOT EXISTS idx_memory_links_from ON memory_links(from_memory_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_links_to ON memory_links(to_memory_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_links_type ON memory_links(link_type);
+CREATE INDEX IF NOT EXISTS idx_memory_actions_memory ON memory_actions(memory_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_actions_actor ON memory_actions(actor, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_artifacts_folder ON artifacts(folder_id);
 CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id);
 CREATE INDEX IF NOT EXISTS idx_todos_claimed ON todos(claimed_by, claimed_until);
@@ -319,6 +367,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_todos_project_title ON todos(project_id, t
 CREATE INDEX IF NOT EXISTS idx_graph_edges_from ON graph_edges(from_entity, from_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_to ON graph_edges(to_entity, to_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_group ON graph_edges(group_entity);
+CREATE INDEX IF NOT EXISTS idx_companies_props ON companies USING GIN(props);
+CREATE INDEX IF NOT EXISTS idx_companies_access ON companies(access_level);
+CREATE INDEX IF NOT EXISTS idx_companies_folder ON companies(folder_id);
 CREATE INDEX IF NOT EXISTS idx_projects_props ON projects USING GIN(props);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_parent_name_safe ON folders((COALESCE(parent_id, 0)), name);
 CREATE INDEX IF NOT EXISTS idx_server_metrics_captured ON server_metrics(captured_at DESC);
@@ -378,6 +429,11 @@ CREATE TRIGGER trg_audit_projects
 AFTER INSERT OR UPDATE OR DELETE ON projects
 FOR EACH ROW EXECUTE FUNCTION write_audit_event();
 
+DROP TRIGGER IF EXISTS trg_audit_companies ON companies;
+CREATE TRIGGER trg_audit_companies
+AFTER INSERT OR UPDATE OR DELETE ON companies
+FOR EACH ROW EXECUTE FUNCTION write_audit_event();
+
 DROP TRIGGER IF EXISTS trg_audit_todos ON todos;
 CREATE TRIGGER trg_audit_todos
 AFTER INSERT OR UPDATE OR DELETE ON todos
@@ -401,6 +457,16 @@ FOR EACH ROW EXECUTE FUNCTION write_audit_event();
 DROP TRIGGER IF EXISTS trg_audit_decision_log ON decision_log;
 CREATE TRIGGER trg_audit_decision_log
 AFTER INSERT OR UPDATE OR DELETE ON decision_log
+FOR EACH ROW EXECUTE FUNCTION write_audit_event();
+
+DROP TRIGGER IF EXISTS trg_audit_memory_links ON memory_links;
+CREATE TRIGGER trg_audit_memory_links
+AFTER INSERT OR UPDATE OR DELETE ON memory_links
+FOR EACH ROW EXECUTE FUNCTION write_audit_event();
+
+DROP TRIGGER IF EXISTS trg_audit_memory_actions ON memory_actions;
+CREATE TRIGGER trg_audit_memory_actions
+AFTER INSERT OR UPDATE OR DELETE ON memory_actions
 FOR EACH ROW EXECUTE FUNCTION write_audit_event();
 
 INSERT INTO users(email, username, password_hash, role)

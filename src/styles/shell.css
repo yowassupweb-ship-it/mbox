@@ -200,6 +200,9 @@
      но уехавший раздел читается как нормальное поведение, а обрезанный — как поломка. */
   margin-right: calc(var(--chat-slot) + var(--space-2));
   width: auto;
+  /* Край прокрутки растворяется, а не рубит слово пополам: обрезанная посреди буквы «Сервер»
+     читается как поломка, а растворяющийся — как «дальше есть ещё, прокрути». */
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
