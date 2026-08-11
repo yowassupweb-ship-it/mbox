@@ -9,6 +9,19 @@
   min-height: 420px;
 }
 
+/*
+ * В полноэкранном режиме карта не считает высоту сама, а забирает всё, что дал контейнер.
+ * Отступы — здесь же: панель инструментов должна отойти от фиксированной шапки с поиском,
+ * иначе они наезжают друг на друга.
+ */
+.graph-mode .map {
+  height: 100%;
+  min-height: 0;
+  padding: calc(56px + env(safe-area-inset-top)) var(--space-4) var(--space-4);
+}
+
+.graph-mode .map-canvas { border-radius: var(--radius-xl); }
+
 .map-tools {
   display: flex;
   align-items: center;

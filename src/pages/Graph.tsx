@@ -251,6 +251,17 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     setView({ scale, x: box.width / 2 - ((Math.min(...xs) + Math.max(...xs)) / 2) * scale, y: box.height / 2 - ((Math.min(...ys) + Math.max(...ys)) / 2) * scale });
   }
 
+  // Первое появление карты вписывает содержимое само: иначе человек открывает Граф и видит
+  // пустое поле, потому что узлы стоят за краем экрана, а масштаб по умолчанию единица.
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (fitted.current || !nodes.length || !canvasRef.current) return;
+    fitted.current = true;
+    fitToContent();
+    // fitToContent намеренно не в зависимостях: вписываем ровно один раз за сессию карты.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes.length]);
+
   return (
     <section className="map" aria-label="Карта MBOX">
       <div className="map-tools">
@@ -272,11 +283,22 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         className={linkFrom ? "map-canvas is-linking" : "map-canvas"}
         ref={canvasRef}
         onWheel={(event) => {
-          const next = Math.min(2.4, Math.max(0.2, view.scale - event.deltaY * 0.0012));
-          setView((current) => ({ ...current, scale: next }));
+          // Зум к курсору, а не к началу координат. Раньше масштаб менялся вокруг левого верхнего
+          // угла мира, и содержимое уезжало из виду при каждом повороте колеса — отсюда ощущение,
+          // что карта живёт своей жизнью.
+          const box = event.currentTarget.getBoundingClientRect();
+          const px = event.clientX - box.left;
+          const py = event.clientY - box.top;
+          setView((current) => {
+            const next = Math.min(2.4, Math.max(0.2, current.scale - event.deltaY * 0.0012));
+            const k = next / current.scale;
+            return { scale: next, x: px - k * (px - current.x), y: py - k * (py - current.y) };
+          });
         }}
         onPointerDown={(event) => {
           if (event.target !== event.currentTarget && !(event.target as HTMLElement).classList.contains("map-world")) return;
+          // Захват указателя: панорама не обрывается, если палец или курсор ушёл за край карты.
+          event.currentTarget.setPointerCapture(event.pointerId);
           panRef.current = { startX: event.clientX, startY: event.clientY, originX: view.x, originY: view.y };
           setSelected(null);
         }}
@@ -285,8 +307,12 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
           if (!pan) return;
           setView((current) => ({ ...current, x: pan.originX + (event.clientX - pan.startX), y: pan.originY + (event.clientY - pan.startY) }));
         }}
-        onPointerUp={() => { panRef.current = null; }}
-        onPointerLeave={() => { panRef.current = null; dragRef.current = null; }}
+        onPointerUp={(event) => {
+          panRef.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => { panRef.current = null; dragRef.current = null; }}
+        onDoubleClick={fitToContent}
       >
         <div className="map-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
           <svg className="map-links">
