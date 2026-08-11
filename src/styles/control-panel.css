@@ -115,6 +115,10 @@
 }
 
 .control-body-head .muted { font-size: var(--text-sm); }
+.control-body-head .ghost-action { margin-left: auto; }
+
+.danger-text { color: var(--state-danger); }
+.danger-text svg { color: var(--state-danger); }
 
 /* Перетаскивание карточек */
 

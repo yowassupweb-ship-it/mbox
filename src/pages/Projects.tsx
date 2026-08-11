@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderPlus, Folder, ListTodo } from "lucide-react";
+import { FolderPlus, Folder, ListTodo, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
 import { formatBytes } from "../lib/format";
@@ -56,6 +56,14 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   const activeTodos = project.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
   const projectFolders = folders.filter((folder) => folder.project_id === project.id);
   const openFolder = view.startsWith("folder:") ? projectFolders.find((folder) => folder.id === view.slice(7)) : undefined;
+
+  /** Папку, созданную здесь же, здесь же надо и удалять: контекстное меню дерева до неё не достаёт. */
+  async function deleteFolder(folder: FolderRow) {
+    if (!window.confirm(`Удалить папку «${folder.name}»? Сама папка исчезнет, содержимое проекта останется.`)) return;
+    await fetchJson(`/api/mbox/folders/${folder.id}`, { method: "DELETE" });
+    go(project.id, "todo");
+    onSaved();
+  }
 
   async function createFolder() {
     const name = window.prompt("Название новой папки проекта");
@@ -147,6 +155,12 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
           <span className="muted">
             {view === "todo" ? `${activeTodos} активно · ${project.todos.length} всего` : openFolder ? formatBytes(openFolder.memory_bytes) : formatBytes(project.memory_bytes)}
           </span>
+          {openFolder && (
+            <button className="ghost-action danger-text" type="button" onClick={() => void deleteFolder(openFolder)}>
+              <Trash2 size={15} />
+              <span>Удалить папку</span>
+            </button>
+          )}
         </header>
         {view === "todo" ? (
           <>

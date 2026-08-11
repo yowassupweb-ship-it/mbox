@@ -21,10 +21,22 @@ export function PropsEditor({ project, onSaved }: { project: Project; onSaved: (
   const [rows, setRows] = useState<Row[]>(() => toRows(project.props));
   const [state, setState] = useState<SaveState>("idle");
 
+  /*
+   * Сравниваем содержимое, а не ссылку.
+   *
+   * Данные перезагружаются раз в пять секунд по тику сервера, и project.props каждый раз приходит
+   * новым объектом с тем же содержимым. Эффект, завязанный на саму ссылку, срабатывал на каждой
+   * перезагрузке и сбрасывал строки на серверные — только что добавленная пустая строка исчезала
+   * раньше, чем в неё успевали дописать ключ. Со стороны это выглядело как «свойства не добавляются».
+   */
+  const serverProps = JSON.stringify(project.props || {});
+
   useEffect(() => {
-    setRows(toRows(project.props));
+    setRows(toRows(project.props ?? {}));
     setState("idle");
-  }, [project.id, project.props]);
+    // project.props намеренно не в зависимостях: сброс делает только смена содержимого.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, serverProps]);
 
   function update(id: number, patch: Partial<Row>) {
     setRows((current) => current.map((row) => row.id === id ? { ...row, ...patch } : row));

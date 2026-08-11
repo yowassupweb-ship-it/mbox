@@ -43,10 +43,15 @@ export function StackPanel({ project, onSaved }: { project: Project; onSaved: ()
   const [draft, setDraft] = useState("");
   const { state, setState, save } = useSave(project, onSaved);
 
+  // По содержимому, а не по ссылке: перезагрузка раз в пять секунд приносит новый массив с тем же
+  // содержимым и иначе стирала бы недописанное. См. подробный разбор в PropsEditor.
+  const serverStack = project.stack.join("\0");
+
   useEffect(() => {
     setItems(project.stack);
     setDraft("");
-  }, [project.id, project.stack]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, serverStack]);
 
   const dirty = items.join("\0") !== project.stack.join("\0");
 
@@ -178,11 +183,13 @@ export function PhilosophyPanel({ project, onSaved }: { project: Project; onSave
   const [principles, setPrinciples] = useState(saved.principles);
   const { state, setState, save } = useSave(project, onSaved);
 
+  // Тоже по содержимому: иначе тик сервера затирал недописанный текст. См. PropsEditor.
   useEffect(() => {
-    setPhilosophy(project.props?.philosophy || "");
-    setPrinciples(project.props?.principles || "");
-    setEditing(!project.props?.philosophy && !project.props?.principles);
-  }, [project.id, project.props]);
+    setPhilosophy(saved.philosophy);
+    setPrinciples(saved.principles);
+    setEditing(!saved.philosophy && !saved.principles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, saved.philosophy, saved.principles]);
 
   const principleList = saved.principles.split(/\r?\n/).map((line) => line.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
 
