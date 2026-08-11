@@ -1,4 +1,5 @@
 import { AgentAvatar, agentIdentity } from "../../components/AgentAvatar";
+import { effectiveStatus, isAgentWorking, liveRunOf, liveRuns } from "../../lib/agents";
 import { baseName, formatSince } from "../../lib/format";
 import { agentStatusLabels, runStatusLabels } from "../../lib/labels";
 import type { AgentActivity, AgentInboxItem, AgentRun, DecisionEntry } from "../../types";
@@ -14,18 +15,19 @@ function ActivityBars() {
 
 function AgentCard({ agent, runs, decisions }: { agent: AgentActivity; runs: AgentRun[]; decisions: DecisionEntry[] }) {
   const mine = runs.filter((run) => run.agent_name === agent.name);
-  const liveRun = mine.find((run) => ["running", "doing"].includes(run.status));
-  const lastRun = liveRun || mine[0];
+  const live = liveRunOf(runs, agent.name);
+  const lastRun = live || mine[0];
   const lastDecision = decisions.find((decision) => decision.actor === agent.name);
   const files = (Array.isArray(lastRun?.touched_files) ? (lastRun!.touched_files as string[]) : []).slice(0, 5);
-  const working = agent.live_runs > 0;
-  const stateKey = working ? "working" : agent.status;
-  const stateLabel = working ? "в работе" : agentStatusLabels[agent.status] || agent.status;
+  const working = Boolean(live);
+  const status = effectiveStatus(agent);
+  const stateKey = working ? "working" : status;
+  const stateLabel = working ? "в работе" : agentStatusLabels[status] || status;
 
   return (
     <article className={`agent-card ${stateKey}`} style={{ ["--agent-accent" as string]: agentIdentity(agent.name).accent }}>
       <div className="agent-card-top">
-        <AgentAvatar name={agent.name} status={agent.status} live={working} size={46} />
+        <AgentAvatar name={agent.name} status={status} live={working} size={46} />
         <div className="agent-card-id">
           <strong>{agent.name}</strong>
           <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""}</span>
@@ -73,9 +75,9 @@ function StreamRow({ actor, title, tag }: { actor: string; title: string; tag?: 
 }
 
 export function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
-  const online = agents.filter((agent) => agent.status === "active").length;
-  const working = agents.filter((agent) => agent.live_runs > 0).length;
-  const activeRuns = runs.filter((run) => ["running", "doing"].includes(run.status));
+  const online = agents.filter((agent) => effectiveStatus(agent) === "active").length;
+  const working = agents.filter((agent) => isAgentWorking(agent, runs)).length;
+  const activeRuns = liveRuns(runs);
   const visibleRuns = (activeRuns.length ? activeRuns : runs).slice(0, 5);
   const openInbox = inbox.filter((item) => item.status !== "done").slice(0, 5);
 

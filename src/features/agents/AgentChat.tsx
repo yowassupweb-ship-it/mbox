@@ -11,20 +11,25 @@ import {
 } from "@chatscope/chat-ui-kit-react";
 import { ArrowUp, MessageSquare, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
+import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
+import { countUnseen, markAllSeen, onSeenChange } from "../../lib/seen";
 import type { AgentActivity, AgentInboxItem, AgentRun } from "../../types";
 
 const HUMAN = "Человек";
 const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_response", "chat"]);
 
-/** Что агент делает прямо сейчас. Считается из живых сессий и присутствия, а не выдумывается. */
+/**
+ * Что агент делает прямо сейчас. Считается из живых сессий и присутствия, а не выдумывается.
+ * Живой = по сессии стучит heartbeat; брошенный running не выдаётся за работу (см. lib/agents).
+ */
 function agentState(agent: AgentActivity, runs: AgentRun[]) {
-  const live = runs.find((run) => run.agent_name === agent.name && ["running", "doing"].includes(run.status));
+  const live = liveRunOf(runs, agent.name);
   if (live) return { key: "working", label: "работает", detail: live.goal };
-  if (agent.live_runs > 0) return { key: "working", label: "работает", detail: "" };
-  if (agent.status === "active") return { key: "thinking", label: "на связи", detail: "ждёт задачу" };
-  if (agent.status === "idle") return { key: "idle", label: "ожидает", detail: formatSince(agent.last_seen) };
+  const status = effectiveStatus(agent);
+  if (status === "active") return { key: "thinking", label: "на связи", detail: "ждёт задачу" };
+  if (status === "idle") return { key: "idle", label: "ожидает", detail: formatSince(agent.last_seen) };
   return { key: "offline", label: "отключён", detail: formatSince(agent.last_seen) };
 }
 
@@ -59,7 +64,22 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
 
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
-  const unread = inbox.filter((item) => item.status !== "done" && item.agent_name !== HUMAN).length;
+
+  // Счётчик у кнопки — это непрочитанные реплики агентов, а не все незакрытые записи ящика.
+  // Раньше сюда попадали уведомления, предложения и заявки на решение человека, поэтому число
+  // жило своей жизнью и не сбрасывалось, сколько чат ни открывай.
+  const marks = useMemo(
+    () => conversation.filter((item) => item.agent_name !== HUMAN).map((item) => ({ key: `agent_inbox:${item.id}`, bytes: (item.body || item.title || "").length })),
+    [conversation],
+  );
+  const [seenTick, setSeenTick] = useState(0);
+  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
+  const unread = useMemo(() => countUnseen(marks), [marks, seenTick]);
+
+  // Открытый чат — это и есть прочтение.
+  useEffect(() => {
+    if (open && unread > 0) markAllSeen(marks);
+  }, [open, unread, marks]);
 
   async function send() {
     const raw = text.trim();

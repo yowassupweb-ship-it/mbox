@@ -21,6 +21,7 @@ import { BottomNav } from "./components/BottomNav";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
 import { TopBar, type AgentRosterEntry } from "./components/TopBar";
 import { AgentAvatar } from "./components/AgentAvatar";
+import { RUN_STALE_MS, effectiveStatus, isAgentWorking, liveRunOf } from "./lib/agents";
 import { fetchJson, saveEntity } from "./lib/api";
 import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
 import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
@@ -37,10 +38,9 @@ import { ProjectsBoard } from "./pages/Projects";
 import { GraphBoard } from "./pages/Graph";
 import { AgentChat } from "./features/agents/AgentChat";
 import { AddTodoForm, TodoCardGrid } from "./features/projects/TodoCards";
-import { PropsEditor } from "./features/projects/PropsEditor";
-import { RelationsPanel } from "./features/projects/RelationsPanel";
+import { ProjectEntityView } from "./features/projects/EntityPanels";
 import type { ProjectEntityKind } from "./features/tree/entityKinds";
-import { EmptyState, ManualForm, Panel, saveLabel } from "./ui";
+import { EmptyState, ManualForm, Panel } from "./ui";
 import { bootstrapSeen, countUnseen, loadSeen, onSeenChange } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
@@ -81,13 +81,15 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     if (realtime.state === "offline") return "Нет связи с сервером";
     if (realtime.state === "connecting") return realtime.label;
 
-    const active = data.agents.filter((agent) => agent.status === "active");
-    const working = active.filter((agent) => agent.live_runs > 0);
+    // Живость берётся из свежести heartbeat: колонка live_runs считает и брошенные running-сессии.
+    const active = data.agents.filter((agent) => effectiveStatus(agent) === "active");
+    const working = data.agents.filter((agent) => isAgentWorking(agent, data.runs));
     const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
     const onReview = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "review").length, 0);
     const blocked = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "blocked").length, 0);
     const leased = data.projects.flatMap((project) => project.todos).filter((todo) => todo.claimed_by && todo.claimed_until && new Date(todo.claimed_until) > new Date());
-    const failedRun = data.runs.find((run) => run.status === "failed");
+    // Упавшая сессия интересна, пока свежая: недельной давности падение — это уже история, а не статус.
+    const failedRun = data.runs.find((run) => run.status === "failed" && Date.now() - Date.parse(run.heartbeat_at || run.started_at) < RUN_STALE_MS);
 
     if (needsHuman.length) return `Нужен ты: ${needsHuman[0].title}`;
     if (failedRun) return `${failedRun.agent_name}: сессия упала`;
@@ -95,7 +97,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     if (onReview) return `${onReview} ${plural(onReview, "задача ждёт", "задачи ждут", "задач ждут")} проверки`;
 
     if (working.length === 1) {
-      const goal = data.runs.find((run) => run.agent_name === working[0].name && ["running", "doing"].includes(run.status))?.goal;
+      const goal = liveRunOf(data.runs, working[0].name)?.goal;
       return goal ? `${working[0].name}: ${goal}` : `${working[0].name} в работе`;
     }
     if (working.length > 1) return `${working.length} агента в работе: ${working.map((agent) => agent.name).join(", ")}`;
@@ -110,26 +112,22 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   const headerState = useMemo<"connecting" | "connected" | "working" | "offline">(() => {
     if (realtime.state === "offline") return "offline";
     if (realtime.state === "connecting") return "connecting";
-    if (data.agents.some((agent) => agent.live_runs > 0)) return "working";
+    if (data.agents.some((agent) => isAgentWorking(agent, data.runs))) return "working";
     return "connected";
-  }, [realtime.state, data.agents]);
-  const agentRoster = useMemo<AgentRosterEntry[]>(() => {
-    const goalByAgent = new Map<string, string>();
-    for (const run of data.runs) {
-      if (["running", "doing"].includes(run.status) && !goalByAgent.has(run.agent_name)) {
-        goalByAgent.set(run.agent_name, run.goal);
-      }
-    }
-    return data.agents.map((agent) => ({
+  }, [realtime.state, data.agents, data.runs]);
+  const agentRoster = useMemo<AgentRosterEntry[]>(() => data.agents.map((agent) => {
+    const status = effectiveStatus(agent);
+    const live = liveRunOf(data.runs, agent.name);
+    return {
       id: agent.id,
       name: agent.name,
-      status: agent.status,
-      live: agent.live_runs > 0,
-      statusLabel: agentStatusLabels[agent.status] || agent.status,
-      detail: goalByAgent.get(agent.name),
+      status,
+      live: Boolean(live),
+      statusLabel: agentStatusLabels[status] || status,
+      detail: live?.goal,
       since: formatSince(agent.last_seen),
-    }));
-  }, [data.agents, data.runs]);
+    };
+  }), [data.agents, data.runs]);
 
   const [seenTick, setSeenTick] = useState(0);
   useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
@@ -183,11 +181,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
-        {section === "projects" && <ProjectsBoard projects={data.projects} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => {
-          if (kind === "properties") return <PropsEditor project={project} onSaved={data.reload} />;
-          if (kind === "relations") return <RelationsPanel project={project} projects={data.projects} onSaved={data.reload} />;
-          return <ProjectEntityEditor project={project} projects={data.projects} kind={kind} onSaved={data.reload} />;
-        }} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
+        {section === "projects" && <ProjectsBoard projects={data.projects} folders={data.folders} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
         {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
@@ -202,7 +196,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
 function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSaved }: { node: FolderTreeNode | null; projects: Project[]; fallbackProject?: Project; onColorChange: (projectId: string, color: string) => void; onSaved: () => void }) {
   if (node?.type === "project_entity" && node.id && node.entityKind) {
     const project = projects.find((item) => item.id === node.id);
-    if (project) return <ProjectEntityEditor project={project} projects={projects} kind={node.entityKind} onSaved={onSaved} />;
+    if (project) return <ProjectEntityView project={project} projects={projects} kind={node.entityKind} onSaved={onSaved} />;
   }
 
   if (node?.type === "todo" && node.id) {
@@ -223,130 +217,6 @@ function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSa
 
   if (node) return <EntityPreview node={node} />;
   return <ProjectTodoNotes project={fallbackProject} projects={projects} onColorChange={onColorChange} onSaved={onSaved} />;
-}
-function ProjectEntityEditor({ project, projects, kind, onSaved }: { project: Project; projects: Project[]; kind: NonNullable<FolderTreeNode["entityKind"]>; onSaved: () => void }) {
-  const [stack, setStack] = useState(project.stack.join("\n"));
-  const [gitUrl, setGitUrl] = useState(project.git_url || "");
-  const [deployProvider, setDeployProvider] = useState(project.deploy_provider || "");
-  const [deployTarget, setDeployTarget] = useState(project.deploy_target || "");
-  const [accessLevel, setAccessLevel] = useState(project.access_level || "private");
-  const [propsText, setPropsText] = useState(formatProps(project.props || {}));
-  const [philosophy, setPhilosophy] = useState(project.props?.philosophy || "");
-  const [principles, setPrinciples] = useState(project.props?.principles || "");
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-
-  useEffect(() => {
-    setStack(project.stack.join("\n"));
-    setGitUrl(project.git_url || "");
-    setDeployProvider(project.deploy_provider || "");
-    setDeployTarget(project.deploy_target || "");
-    setAccessLevel(project.access_level || "private");
-    setPropsText(formatProps(project.props || {}));
-    setPhilosophy(project.props?.philosophy || "");
-    setPrinciples(project.props?.principles || "");
-    setSaveState("idle");
-  }, [project, kind]);
-
-  const titles: Record<NonNullable<FolderTreeNode["entityKind"]>, string> = {
-    relations: "Связи",
-    properties: "Свойства",
-    philosophy: "Философия",
-    deploy: "Деплой",
-    stack: "Стек",
-    access: "Доступ",
-    git: "Git",
-  };
-
-  async function saveProject(payload: Partial<Project>) {
-    setSaveState("saving");
-    try {
-      await fetchJson(`/api/mbox/projects/${project.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      setSaveState("saved");
-      onSaved();
-    } catch {
-      setSaveState("error");
-    }
-  }
-
-  return (
-    <div className="project-entity-editor">
-      <div className="entity-line">
-        <strong>{titles[kind]} · {project.name}</strong>
-        <span>{formatBytes(project.memory_bytes)}</span>
-      </div>
-      {kind === "relations" && <ProjectRelationForm project={project} projects={projects} onSaved={onSaved} />}
-      {kind === "properties" && (
-        <>
-          <textarea value={propsText} onChange={(event) => {
-            setPropsText(event.target.value);
-            setSaveState("idle");
-          }} placeholder={"ключ: значение\nкомпания: Вокруг света\nтип: рабочий"} />
-          <button className="primary-action compact-submit" type="button" disabled={saveState === "saving"} onClick={() => saveProject({ props: parseProps(propsText) } as Partial<Project>)}>{saveLabel(saveState, "Сохранить свойства")}</button>
-        </>
-      )}
-      {kind === "philosophy" && (
-        <>
-          <textarea value={philosophy} onChange={(event) => {
-            setPhilosophy(event.target.value);
-            setSaveState("idle");
-          }} placeholder="Зачем существует проект, какой вкус решений, что важно не потерять" />
-          <textarea value={principles} onChange={(event) => {
-            setPrinciples(event.target.value);
-            setSaveState("idle");
-          }} placeholder="Принципы через строки или короткие пункты" />
-          <button className="primary-action compact-submit" type="button" disabled={saveState === "saving"} onClick={() => saveProject({ props: { ...(project.props || {}), philosophy, principles } } as Partial<Project>)}>{saveLabel(saveState, "Сохранить философию")}</button>
-        </>
-      )}
-      {kind === "stack" && (
-        <>
-          <textarea value={stack} onChange={(event) => {
-            setStack(event.target.value);
-            setSaveState("idle");
-          }} placeholder={"React\nPostgreSQL\nDocker"} />
-          <button className="primary-action compact-submit" type="button" disabled={saveState === "saving"} onClick={() => saveProject({ stack: stack.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean) } as Partial<Project>)}>{saveLabel(saveState, "Сохранить стек")}</button>
-        </>
-      )}
-      {kind === "git" && (
-        <>
-          <input value={gitUrl} onChange={(event) => {
-            setGitUrl(event.target.value);
-            setSaveState("idle");
-          }} placeholder="Git URL" />
-          <button className="primary-action compact-submit" type="button" disabled={saveState === "saving"} onClick={() => saveProject({ git_url: gitUrl } as Partial<Project>)}>{saveLabel(saveState, "Сохранить Git")}</button>
-        </>
-      )}
-      {kind === "deploy" && (
-        <>
-          <input value={deployProvider} onChange={(event) => {
-            setDeployProvider(event.target.value);
-            setSaveState("idle");
-          }} placeholder="Docker, Vercel, bare metal" />
-          <input value={deployTarget} onChange={(event) => {
-            setDeployTarget(event.target.value);
-            setSaveState("idle");
-          }} placeholder="Сервер, домен или окружение" />
-          <button className="primary-action compact-submit" type="button" disabled={saveState === "saving"} onClick={() => saveProject({ deploy_provider: deployProvider, deploy_target: deployTarget } as Partial<Project>)}>{saveLabel(saveState, "Сохранить деплой")}</button>
-        </>
-      )}
-      {kind === "access" && (
-        <>
-          <select value={accessLevel} onChange={(event) => {
-            setAccessLevel(event.target.value);
-            setSaveState("idle");
-          }}>
-            <option value="private">private</option>
-            <option value="agents">agents</option>
-            <option value="public">public</option>
-          </select>
-          <button className="primary-action compact-submit" type="button" disabled={saveState === "saving"} onClick={() => saveProject({ access_level: accessLevel } as Partial<Project>)}>{saveLabel(saveState, "Сохранить доступ")}</button>
-        </>
-      )}
-    </div>
-  );
 }
 function ProjectTodoNotes({ project, projects, onColorChange, onSaved }: { project?: Project; projects: Project[]; onColorChange: (projectId: string, color: string) => void; onSaved: () => void }) {
   const [note, setNote] = useState("");
@@ -842,21 +712,25 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
       </Panel>
       <Panel title="Агенты" icon={GitBranch}>
         <div className="entity-list">
-          {agents.length ? agents.map((agent) => (
-            <div className="agent-row" key={agent.id}>
-              <div className="agent-row-id">
-                <AgentAvatar name={agent.name} status={agent.status} live={agent.live_runs > 0} size={40} />
-                <div>
-                  <strong>{agent.name}</strong>
-                  <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""} · {agent.scope}</span>
+          {agents.length ? agents.map((agent) => {
+            const status = effectiveStatus(agent);
+            const working = isAgentWorking(agent, runs);
+            return (
+              <div className="agent-row" key={agent.id}>
+                <div className="agent-row-id">
+                  <AgentAvatar name={agent.name} status={status} live={working} size={40} />
+                  <div>
+                    <strong>{agent.name}</strong>
+                    <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""} · {agent.scope}</span>
+                  </div>
+                </div>
+                <div className="agent-status">
+                  <span className={`agent-state ${working ? "working" : status}`}>{working ? "в работе" : agentStatusLabels[status] || status}</span>
+                  <small>{agent.active_sessions} сессий · {agent.events} действий · {formatSince(agent.last_seen)}</small>
                 </div>
               </div>
-              <div className="agent-status">
-                <span className={`agent-state ${agent.live_runs > 0 ? "working" : agent.status}`}>{agent.live_runs > 0 ? "в работе" : agentStatusLabels[agent.status] || agent.status}</span>
-                <small>{agent.active_sessions} сессий · {agent.events} действий · {formatSince(agent.last_seen)}</small>
-              </div>
-            </div>
-          )) : <EmptyState text="Агенты пока не подключались" />}
+            );
+          }) : <EmptyState text="Агенты пока не подключались" />}
         </div>
       </Panel>
       <Panel title="Inbox агента" icon={BookOpen}>

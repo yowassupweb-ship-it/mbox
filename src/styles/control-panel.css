@@ -376,6 +376,134 @@
 
 .relation-add-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 
+/* Постоянные сущности проекта. У каждой своя форма, а не общая textarea. */
+
+.entity-panel { display: grid; gap: var(--space-4); justify-items: start; }
+.entity-panel > .field { width: min(100%, 520px); }
+.entity-panel .empty-state { margin: 0; }
+
+.fact-rows { display: grid; gap: var(--space-2); width: min(100%, 560px); }
+
+.fact-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 160px) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+}
+
+.fact-row span { color: var(--text-muted); font-size: var(--text-sm); }
+.fact-row strong { overflow-wrap: anywhere; font-weight: var(--weight-medium); }
+.fact-caption { color: var(--text-muted); font-size: var(--text-xs); }
+
+/* Стек */
+
+.stack-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.stack-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  border: var(--border-width) solid color-mix(in srgb, #7cd8e8 26%, var(--border-color));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, #7cd8e8 10%, var(--element-bg));
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.stack-chip button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.stack-chip button:hover { background: rgba(255, 255, 255, .09); color: var(--state-danger); }
+
+.stack-add { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; width: min(100%, 520px); }
+.stack-add input { flex: 1 1 220px; min-width: 0; }
+
+/* Git */
+
+.git-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid color-mix(in srgb, #7ee2a8 26%, var(--border-color));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, #7ee2a8 8%, var(--element-bg));
+  color: var(--text-main);
+  text-decoration: none;
+}
+
+.git-link:hover { border-color: color-mix(in srgb, #7ee2a8 55%, var(--border-color)); }
+.git-link svg { color: #7ee2a8; flex: none; }
+.git-repo { font-family: "SF Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
+.git-host { color: var(--text-muted); font-size: var(--text-sm); }
+
+/* Деплой */
+
+.deploy-steps { display: grid; gap: var(--space-1); width: min(100%, 560px); }
+.deploy-steps p { margin: 0; color: #d8dfeb; font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+
+/* Философия */
+
+.philosophy-text { display: grid; gap: var(--space-3); max-width: 68ch; }
+.philosophy-text p { margin: 0; font-size: var(--text-md); line-height: var(--leading-normal); }
+
+.principle-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; max-width: 68ch; }
+
+.principle-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  color: #d8dfeb;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.principle-list svg { color: #ffd479; margin-top: 2px; }
+
+/* Доступ */
+
+.access-levels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.access-level {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  text-align: left;
+}
+
+.access-level b { font-family: "SF Mono", ui-monospace, monospace; font-size: var(--text-md); }
+.access-level small { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; }
+
+.access-level.is-active {
+  border-color: color-mix(in srgb, #f2a0c0 55%, var(--border-color));
+  background: color-mix(in srgb, #f2a0c0 12%, var(--element-bg));
+}
+
+.access-level.is-active small { color: #e8d3dc; }
+
 /* Очередь проверки на Обзоре */
 
 .review-panel { border-color: color-mix(in srgb, var(--state-warn) 30%, var(--border-color)); }
