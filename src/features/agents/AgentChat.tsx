@@ -14,10 +14,10 @@ import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
-import { countUnseen, markAllSeen, onSeenChange } from "../../lib/seen";
 import type { AgentActivity, AgentInboxItem, AgentRun } from "../../types";
 
 const HUMAN = "Человек";
+const READ_KEY = "mbox.chat.readAt";
 const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_response", "chat"]);
 
 /**
@@ -65,21 +65,33 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
 
-  // Счётчик у кнопки — это непрочитанные реплики агентов, а не все незакрытые записи ящика.
-  // Раньше сюда попадали уведомления, предложения и заявки на решение человека, поэтому число
-  // жило своей жизнью и не сбрасывалось, сколько чат ни открывай.
-  const marks = useMemo(
-    () => conversation.filter((item) => item.agent_name !== HUMAN).map((item) => ({ key: `agent_inbox:${item.id}`, bytes: (item.body || item.title || "").length })),
-    [conversation],
-  );
-  const [seenTick, setSeenTick] = useState(0);
-  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
-  const unread = useMemo(() => countUnseen(marks), [marks, seenTick]);
+  // Счётчик у кнопки — реплики агентов, пришедшие после последнего чтения.
+  //
+  // Считать «всё, что не отмечено просмотренным» нельзя: у отметок нет прошлого, и в первый же
+  // заход вся переписка целиком объявлялась непрочитанной — на кнопке висели десятки при полном
+  // отсутствии новых сообщений. Поэтому граница — момент времени, и на первом запуске это «сейчас»:
+  // история, которую человек уже видел, новой не считается.
+  const [readAt, setReadAt] = useState(() => {
+    const stored = window.localStorage.getItem(READ_KEY);
+    if (stored) return stored;
+    const now = new Date().toISOString();
+    window.localStorage.setItem(READ_KEY, now);
+    return now;
+  });
 
-  // Открытый чат — это и есть прочтение.
+  const unreadItems = useMemo(
+    () => conversation.filter((item) => item.agent_name !== HUMAN && item.created_at > readAt),
+    [conversation, readAt],
+  );
+  const unread = unreadItems.length;
+
+  // Открытый чат — это и есть прочтение, в том числе для сообщений, пришедших при открытом окне.
   useEffect(() => {
-    if (open && unread > 0) markAllSeen(marks);
-  }, [open, unread, marks]);
+    if (!open || !unread) return;
+    const last = unreadItems[unreadItems.length - 1].created_at;
+    window.localStorage.setItem(READ_KEY, last);
+    setReadAt(last);
+  }, [open, unread, unreadItems]);
 
   async function send() {
     const raw = text.trim();

@@ -49,6 +49,55 @@
   line-height: var(--leading-normal);
 }
 
+/*
+ * Сами поля. Раньше стили были только у частных случаев (.env-row input, .relation-add textarea),
+ * поэтому любое новое поле через Field/TextInput/TextArea выходило голым системным прямоугольником
+ * с угловатой рамкой и штатной уголковой ручкой — и не походило на остальной интерфейс.
+ */
+
+.field > input,
+.field > select,
+.field > textarea,
+.entity-panel > input,
+.entity-panel > select,
+.entity-panel > textarea,
+.stack-add input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px var(--space-3);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+  color: var(--text-main);
+  font-size: var(--text-md);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.field > input,
+.field > select,
+.stack-add input { min-height: 42px; }
+
+.field > textarea,
+.entity-panel > textarea {
+  min-height: 104px;
+  line-height: var(--leading-normal);
+  /* Только по вертикали: горизонтальная растяжка ломает сетку страницы. */
+  resize: vertical;
+}
+
+.field > input::placeholder,
+.field > textarea::placeholder { color: var(--text-muted); }
+
+.field > input:focus-visible,
+.field > select:focus-visible,
+.field > textarea:focus-visible,
+.entity-panel > textarea:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-color) 60%, var(--border-color));
+  box-shadow: var(--container-inset), 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
