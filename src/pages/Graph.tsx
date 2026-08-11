@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Link2, Maximize, Minus, Plus, Unlink } from "lucide-react";
 import { fetchJson, fetchOr } from "../lib/api";
+import { edgeTypeLabel } from "../lib/labels";
 import type { FolderRow, GraphEdge, Memory, Project } from "../types";
 
 type NodeKind = "project" | "todo" | "memory" | "folder";
@@ -224,6 +225,13 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     onSaved();
   }
 
+  /** Удаление связи кликом по ней на карте. Спрашиваем подтверждение: промахнуться по линии легко. */
+  async function removeEdgeByLink(link: { key: string; from: MapNode; to: MapNode }) {
+    const edgeId = link.key.slice("edge:".length);
+    if (!window.confirm(`Убрать связь «${link.from.label}» и «${link.to.label}»?`)) return;
+    await removeEdge(edgeId);
+  }
+
   /** Сброс ручной расстановки: узлы возвращаются к кластерной сетке. */
   function relayout() {
     if (!window.confirm("Расставить узлы заново? Ручная расстановка будет потеряна.")) return;
@@ -281,17 +289,36 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         onPointerLeave={() => { panRef.current = null; dragRef.current = null; }}
       >
         <div className="map-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
-          <svg className="map-links" aria-hidden="true">
-            {links.map((link) => (
-              <line
-                key={link.key}
-                className={link.real ? "map-link is-real" : "map-link"}
-                x1={link.from.x + 110}
-                y1={link.from.y + 32}
-                x2={link.to.x + 110}
-                y2={link.to.y + 32}
-              />
-            ))}
+          <svg className="map-links">
+            {links.map((link) => {
+              const x1 = link.from.x + 110;
+              const y1 = link.from.y + 32;
+              const x2 = link.to.x + 110;
+              const y2 = link.to.y + 32;
+              return (
+                <g key={link.key} className={link.real ? "map-link-group is-real" : "map-link-group"}>
+                  <line className={link.real ? "map-link is-real" : "map-link"} x1={x1} y1={y1} x2={x2} y2={y2} />
+                  {/* Настоящую связь можно убрать прямо с карты: тонкую линию мышкой не поймать,
+                      поэтому поверх лежит широкая прозрачная — она и ловит клик. */}
+                  {link.real && (
+                    <>
+                      <line
+                        className="map-link-hit"
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => void removeEdgeByLink(link)}
+                      >
+                        <title>{`${link.from.label} → ${link.to.label}: ${edgeTypeLabel(link.label)}. Клик — убрать связь`}</title>
+                      </line>
+                      <text className="map-link-label" x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6}>{edgeTypeLabel(link.label)}</text>
+                    </>
+                  )}
+                </g>
+              );
+            })}
           </svg>
 
           {nodes.map((node) => (

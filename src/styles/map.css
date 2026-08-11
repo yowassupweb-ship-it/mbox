@@ -70,10 +70,13 @@
   width: 12000px;
   height: 12000px;
   overflow: visible;
+  /* Само полотно связей клики не ловит, иначе оно перекрыло бы панорамирование.
+     Ловят только настоящие рёбра — им pointer-events возвращается точечно. */
   pointer-events: none;
 }
 
-.map-links line { transform: translate(4000px, 4000px); }
+.map-links line,
+.map-links text { transform: translate(4000px, 4000px); }
 
 .map-link {
   stroke: rgba(255, 255, 255, .1);
@@ -86,6 +89,30 @@
   stroke-width: 2;
   stroke-dasharray: none;
 }
+
+/* Широкая прозрачная линия поверх тонкой: попасть по ребру в два пикселя невозможно. */
+.map-link-hit {
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.map-link-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.map-link-group.is-real:hover .map-link {
+  stroke: var(--state-danger);
+  stroke-width: 3;
+}
+
+.map-link-group.is-real:hover .map-link-label { opacity: 1; fill: var(--state-danger); }
 
 .map-node {
   position: absolute;

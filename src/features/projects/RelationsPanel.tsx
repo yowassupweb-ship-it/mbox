@@ -1,20 +1,11 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftRight, Link2, Plus, Trash2 } from "lucide-react";
 import { fetchJson } from "../../lib/api";
+import { edgeTypeLabel, edgeTypeLabels } from "../../lib/labels";
 import type { Project } from "../../types";
 import { Button, EmptyState, Select, TextArea, TextInput } from "../../ui";
 
-const edgeTypes = [
-  { value: "related", label: "связан с" },
-  { value: "depends_on", label: "зависит от" },
-  { value: "part_of", label: "часть" },
-  { value: "shares_infra", label: "общая инфраструктура" },
-  { value: "shares_team", label: "общая команда" },
-];
-
-function edgeTypeLabel(value: string) {
-  return edgeTypes.find((type) => type.value === value)?.label ?? value;
-}
+const edgeTypes = Object.entries(edgeTypeLabels).map(([value, label]) => ({ value, label }));
 
 export function RelationsPanel({ project, projects, onSaved }: { project: Project; projects: Project[]; onSaved: () => void }) {
   const available = projects.filter((item) => item.id !== project.id);

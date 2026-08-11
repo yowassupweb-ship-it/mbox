@@ -43,6 +43,19 @@ export const runStatusLabels: Record<string, string> = {
   blocked: "блок",
 };
 
+/** Типы связей проектов. Словами: на карте и в панели связей должно читаться одинаково. */
+export const edgeTypeLabels: Record<string, string> = {
+  related: "связан с",
+  depends_on: "зависит от",
+  part_of: "часть",
+  shares_infra: "общая инфраструктура",
+  shares_team: "общая команда",
+};
+
+export function edgeTypeLabel(value: string) {
+  return edgeTypeLabels[value] ?? value;
+}
+
 export const auditActionLabels: Record<string, string> = {
   create: "добавил",
   update: "отредактировал",
