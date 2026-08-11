@@ -1,11 +1,15 @@
 /* Оболочка: app, рельс, навигация, топбар, поиск, статус агентов */
 
 .app {
-  min-height: 100vh;
+  min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
-  padding: 18px 18px 126px;
+  padding:
+    calc(18px + env(safe-area-inset-top))
+    calc(18px + env(safe-area-inset-right))
+    calc(126px + env(safe-area-inset-bottom))
+    calc(18px + env(safe-area-inset-left));
   background: var(--bg-color);
   transition: background .18s ease, color .18s ease;
 }
@@ -169,7 +173,13 @@
   z-index: 50;
   transform: none;
   width: 100%;
-  padding: 12px 18px;
+  /* Домашняя полоска и боковые вырезы: в альбомной ориентации iPhone чёлка уходит вбок,
+     поэтому безопасные отступы нужны со всех сторон, а не только снизу. */
+  padding:
+    12px
+    calc(18px + env(safe-area-inset-right))
+    calc(12px + env(safe-area-inset-bottom))
+    calc(18px + env(safe-area-inset-left));
   border-top: var(--border-width) solid var(--border-color);
   background: rgba(28, 28, 30, .86);
   box-shadow: 0 -12px 34px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.08);
@@ -234,13 +244,14 @@
 }
 
 .graph-app {
-  padding: 0 0 92px;
+  padding: 0 0 calc(92px + env(safe-area-inset-bottom));
   overflow: hidden;
 }
 
 .graph-mode {
   position: fixed;
-  inset: 0 0 92px;
+  /* Карта занимает всё, кроме нижней навигации; на iPhone к ней добавляется домашняя полоска. */
+  inset: 0 0 calc(92px + env(safe-area-inset-bottom));
   padding: 0;
   display: block;
   overflow: hidden;
@@ -262,7 +273,7 @@
 
 .graph-mode .topbar {
   position: fixed;
-  top: 4px;
+  top: calc(4px + env(safe-area-inset-top));
   left: 0;
   right: 0;
   z-index: 20;

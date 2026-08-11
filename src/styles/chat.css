@@ -278,7 +278,8 @@
     right: 10px;
     bottom: calc(68px + env(safe-area-inset-bottom));
     width: auto;
-    height: calc(100svh - 92px - env(safe-area-inset-bottom));
+    /* Сверху вычитается ещё и чёлка: без этого шапка чата уезжает под неё. */
+    height: calc(100svh - 92px - env(safe-area-inset-bottom) - env(safe-area-inset-top));
     max-height: none;
   }
 

@@ -650,11 +650,6 @@
   border-radius: var(--radius-md);
 }
 
-@media (max-width: 720px) {
-  .agent-chat { left: 12px; right: 12px; width: auto; }
-  .agent-chat-panel { height: min(76svh, 620px); }
-}
-
 .chat-tabs {
   display: flex;
   gap: var(--space-1);

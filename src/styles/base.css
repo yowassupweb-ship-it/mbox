@@ -30,7 +30,18 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  /* svh, а не vh: на iPhone панель Safari то появляется, то уезжает, и 100vh выше видимой области. */
+  min-height: 100svh;
+  /* Safari в альбомной ориентации сам раздувает шрифты, если не запретить. */
+  -webkit-text-size-adjust: 100%;
+  /* Горизонтальному скроллу страницы взяться неоткуда: широкое содержимое крутится внутри себя. */
+  overflow-x: hidden;
+}
+
+button,
+a,
+.nav-item {
+  -webkit-tap-highlight-color: transparent;
 }
 
 button,

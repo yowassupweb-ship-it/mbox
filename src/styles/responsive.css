@@ -24,14 +24,20 @@
 @media (max-width: 720px) {
   .app {
     min-height: 100svh;
-    padding: 10px 10px calc(104px + env(safe-area-inset-bottom));
+    padding:
+      10px
+      calc(10px + env(safe-area-inset-right))
+      calc(104px + env(safe-area-inset-bottom))
+      calc(10px + env(safe-area-inset-left));
     gap: 10px;
   }
 
   .workspace {
     gap: 10px;
     min-height: calc(100svh - 106px - env(safe-area-inset-bottom));
-    padding-top: 56px;
+    /* Шапка на телефоне висит фиксированно и уезжает вниз на высоту чёлки — контент должен
+       начинаться под ней, иначе первый экран прячется за поиском. */
+    padding-top: calc(56px + env(safe-area-inset-top));
   }
 
   .topbar,
@@ -305,4 +311,153 @@
   time {
     white-space: normal;
   }
+}
+
+/*
+ * iPhone.
+ *
+ * Три вещи, которые ломают именно Safari на телефоне, а не «узкий экран вообще»:
+ *
+ * 1. Шрифт в поле меньше 16px — Safari при фокусе зумит всю страницу и обратно не отъезжает.
+ *    Поэтому у всех полей ввода на телефоне ровно 16px, как бы мелко ни выглядело в макете.
+ * 2. Палец — не курсор: цель меньше 44px промахивается. Apple называет 44pt, и это не рекомендация.
+ * 3. Безопасные зоны работают только при viewport-fit=cover в index.html. Он там теперь есть,
+ *    и env(safe-area-inset-*) наконец что-то значит.
+ */
+
+@media (max-width: 720px) {
+  /* Ничто не должно уезжать вбок: широкое крутится внутри своего контейнера. */
+  .workspace,
+  .control-panel,
+  .control-body,
+  .panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* 16px, иначе Safari зумит страницу при фокусе. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .search-shell input { font-size: 16px; }
+
+  /* Палец: минимальная цель 44px. */
+  .entity-tile,
+  .project-pill,
+  .access-level,
+  .chat-roster button,
+  .map-tools button,
+  .nav-item,
+  .primary-action,
+  .ghost-action,
+  .icon-button {
+    min-height: 44px;
+  }
+
+  .env-remove,
+  .stack-chip button,
+  .relation-card header button,
+  .map-edge-row button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  /* Страница Проекты. Рельс проектов и плитки разделов — горизонтальная прокрутка вместо переноса:
+     на 360px восемь плиток в сетке превращаются в четыре ряда огрызков. */
+  .control-panel { gap: var(--space-3); }
+
+  .project-rail {
+    margin-inline: -10px;
+    padding-inline: 10px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .project-pill { scroll-snap-align: start; }
+
+  .entity-strip {
+    display: flex;
+    gap: var(--space-2);
+    margin-inline: -10px;
+    padding: 0 10px var(--space-1);
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .entity-strip::-webkit-scrollbar { display: none; }
+
+  .entity-tile {
+    flex: 0 0 auto;
+    width: 150px;
+    scroll-snap-align: start;
+  }
+
+  .control-body-head h2 { font-size: var(--text-lg); }
+
+  /* Сущности проекта */
+  .entity-panel > .field,
+  .fact-rows,
+  .deploy-steps,
+  .stack-add { width: 100%; }
+
+  .fact-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+
+  .stack-add input { flex: 1 1 100%; }
+
+  .access-levels { grid-template-columns: 1fr; }
+
+  .git-link { width: 100%; flex-wrap: wrap; }
+
+  .philosophy-text p { font-size: var(--text-sm); }
+
+  /* Карта. Панель инструментов не влезает в строку — пусть прокручивается, а не рвёт вёрстку. */
+  .map-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .map-tools::-webkit-scrollbar { display: none; }
+  .map-tools button { flex: 0 0 auto; }
+
+  .map-inspector {
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: 40svh;
+    overflow: auto;
+  }
+
+  /* Ребро пальцем не поймать даже шириной 16px. */
+  .map-link-hit { stroke-width: 28; }
+  .map-link-label { opacity: 1; }
+
+  /* Чат разворачивается почти на весь экран — иначе на 360px это щель. */
+  .chat-roster { gap: 5px; padding: var(--space-2) var(--space-3); }
+  .chat-composer textarea { font-size: 16px; }
+}
+
+/*
+ * Альбомная ориентация телефона. Ширина уходит за 720px (iPhone 14 — 844), поэтому телефонные
+ * правила выше не срабатывают, а высоты остаётся меньше 450px и чёлка переезжает вбок.
+ */
+@media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+  .app {
+    padding-top: calc(10px + env(safe-area-inset-top));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .topbar { position: static; }
+
+  .map { height: calc(100svh - 150px); }
+
+  .agent-chat-shell { height: calc(100svh - 76px - env(safe-area-inset-bottom)); }
+
+  .bottom-nav { padding-block: 6px; }
+  .bottom-nav .nav-item { min-height: 38px; }
 }

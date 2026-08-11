@@ -2,11 +2,17 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f7fb" />
+    <!-- viewport-fit=cover обязателен: без него env(safe-area-inset-*) на iPhone всегда 0,
+         и весь расчёт отступов под чёлку и домашнюю полоску, написанный в стилях, не работает. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MBOX" />
     <title>MBOX</title>
-    <script type="module" crossorigin src="/assets/index-DU1K0d5G.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CAmjMYrp.css">
+    <script type="module" crossorigin src="/assets/index-BfYSHFu4.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CQ60FSG5.css">
   </head>
   <body>
     <div id="root"></div>
