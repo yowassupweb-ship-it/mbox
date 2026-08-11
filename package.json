@@ -15,6 +15,7 @@
     "mbox:cleanup": "node scripts/mbox-maintenance.mjs cleanup",
     "mbox:sort": "node scripts/mbox-maintenance.mjs sort",
     "mbox:index": "node scripts/mbox-maintenance.mjs index",
+    "mbox:codex-watch": "node scripts/codex-inbox-watcher.mjs",
     "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export"
   },
   "dependencies": {

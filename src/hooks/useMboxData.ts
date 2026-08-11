@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchOr } from "../lib/api";
+import { AuthError, fetchOr } from "../lib/api";
 import type {
   AgentActivity,
   AgentInboxItem,
@@ -16,7 +16,7 @@ import type {
 
 export type MboxData = ReturnType<typeof useMboxData>;
 
-export function useMboxData(query: string) {
+export function useMboxData(query: string, onAuthExpired?: () => void) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -60,27 +60,37 @@ export function useMboxData(query: string) {
       load<{ inbox: AgentInboxItem[] }>("/api/mbox/agent/inbox", { inbox: [] }),
       load<{ runs: AgentRun[] }>("/api/mbox/agent/runs", { runs: [] }),
       load<{ decisions: DecisionEntry[] }>("/api/mbox/decisions", { decisions: [] }),
-    ]).then(([memoryData, artifactData, projectData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
-      if (!alive) return;
-      setMemories(memoryData.memories);
-      setArtifacts(artifactData.artifacts);
-      setProjects(projectData.projects);
-      setFolders(folderData.folders);
-      setSecrets(secretData.secrets);
-      setAuditEvents(historyData.events);
-      setAgents(agentData.agents);
-      setGraphEdges(edgeData.edges);
-      setInbox(inboxData.inbox);
-      setRuns(runsData.runs);
-      setDecisions(decisionData.decisions);
-      setOffline(failed === 11);
-      setLoading(false);
-    });
+    ])
+      .then(([memoryData, artifactData, projectData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
+        if (!alive) return;
+        setMemories(memoryData.memories);
+        setArtifacts(artifactData.artifacts);
+        setProjects(projectData.projects);
+        setFolders(folderData.folders);
+        setSecrets(secretData.secrets);
+        setAuditEvents(historyData.events);
+        setAgents(agentData.agents);
+        setGraphEdges(edgeData.edges);
+        setInbox(inboxData.inbox);
+        setRuns(runsData.runs);
+        setDecisions(decisionData.decisions);
+        setOffline(failed === 11);
+        setLoading(false);
+      })
+      .catch((cause) => {
+        if (!alive) return;
+        if (cause instanceof AuthError) {
+          onAuthExpired?.();
+          return;
+        }
+        setOffline(true);
+        setLoading(false);
+      });
 
     return () => {
       alive = false;
     };
-  }, [query, revision]);
+  }, [query, revision, onAuthExpired]);
 
   return { memories, artifacts, projects, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload };
 }

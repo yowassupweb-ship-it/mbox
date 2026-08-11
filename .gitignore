@@ -28,3 +28,4 @@ Thumbs.db
 *.tmp
 *.sql
 !schema/*.sql
+.codex-inbox-watcher.*.log

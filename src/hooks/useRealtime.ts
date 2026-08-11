@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatClock } from "../lib/format";
 
 export type RealtimeState = "connecting" | "connected" | "thinking" | "working" | "offline";
@@ -10,12 +10,23 @@ export function useRealtime(onEntityChanged: () => void) {
   const [label, setLabel] = useState("Агент подключается");
   const [notice, setNotice] = useState("");
   const [notices, setNotices] = useState<RealtimeNotice[]>([]);
+  const onEntityChangedRef = useRef(onEntityChanged);
+
+  useEffect(() => {
+    onEntityChangedRef.current = onEntityChanged;
+  }, [onEntityChanged]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
     let reconnectTimer = 0;
     let noticeTimer = 0;
+    let reloadTimer = 0;
     let closed = false;
+
+    function scheduleReload() {
+      window.clearTimeout(reloadTimer);
+      reloadTimer = window.setTimeout(() => onEntityChangedRef.current(), 120);
+    }
 
     function announce(toast: string) {
       setNotice(toast);
@@ -37,18 +48,20 @@ export function useRealtime(onEntityChanged: () => void) {
         try {
           const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string };
           if (message.type === "entity_changed") {
-            onEntityChanged();
+            scheduleReload();
             announce(message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`);
           }
           if (message.type === "agent_presence") {
-            onEntityChanged();
+            scheduleReload();
             announce(`Агент ${message.agent || "Agent"} подключился`);
           }
           if (message.type === "server_tick") {
             setPulse((value) => value + 1);
+            scheduleReload();
           }
         } catch {
           setPulse((value) => value + 1);
+          scheduleReload();
         }
       };
 
@@ -67,9 +80,10 @@ export function useRealtime(onEntityChanged: () => void) {
       closed = true;
       window.clearTimeout(reconnectTimer);
       window.clearTimeout(noticeTimer);
+      window.clearTimeout(reloadTimer);
       socket?.close();
     };
-  }, [onEntityChanged]);
+  }, []);
 
   return { pulse, state, label, notice, notices };
 }

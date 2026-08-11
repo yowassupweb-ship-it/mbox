@@ -182,6 +182,7 @@
   justify-content: flex-start;
   align-items: center;
   gap: 10px;
+  padding-right: 150px;
   overflow: hidden;
   scrollbar-width: none;
 }

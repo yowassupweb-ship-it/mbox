@@ -127,7 +127,8 @@
 
   .bottom-nav-inner {
     max-width: 100%;
-    padding: 0;
+    box-sizing: border-box;
+    padding: 0 118px 0 0;
     gap: 6px;
     overflow-x: auto;
     overflow-y: hidden;

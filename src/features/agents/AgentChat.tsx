@@ -10,13 +10,13 @@ import {
   TypingIndicator,
 } from "@chatscope/chat-ui-kit-react";
 import { ArrowUp, MessageSquare, X } from "lucide-react";
-import { agentIdentity } from "../../components/AgentAvatar";
+import { AgentAvatar } from "../../components/AgentAvatar";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun } from "../../types";
 
 const HUMAN = "Человек";
-const CONVERSATION = new Set(["question", "answer", "agent_message", "chat"]);
+const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_response", "chat"]);
 
 /** Что агент делает прямо сейчас. Считается из живых сессий и присутствия, а не выдумывается. */
 function agentState(agent: AgentActivity, runs: AgentRun[]) {
@@ -114,7 +114,7 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
                 onClick={() => setTarget(target === agent.name ? "" : agent.name)}
                 title={state.detail}
               >
-                <i className={`chat-dot state-${state.key}`} />
+                <AgentAvatar name={agent.name} status={agent.status} live={state.key === "working"} size={18} />
                 {agent.name}
                 <em>{state.label}</em>
               </button>
@@ -160,9 +160,7 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
                     >
                       {!mine && (
                         <Avatar name={item.agent_name}>
-                          <span className="chat-avatar" style={{ background: agentIdentity(item.agent_name).accent }}>
-                            {item.agent_name.slice(0, 2).toUpperCase()}
-                          </span>
+                          <AgentAvatar name={item.agent_name} status={states.find((entry) => entry.agent.name === item.agent_name)?.agent.status ?? "idle"} size={30} />
                         </Avatar>
                       )}
                       <Message.Header sender={mine ? "Ты" : item.agent_name} sentTime={formatSince(item.created_at)} />

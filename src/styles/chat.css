@@ -5,8 +5,8 @@
 
 .agent-chat {
   position: fixed;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: calc(96px + env(safe-area-inset-bottom));
+  right: max(18px, env(safe-area-inset-right));
+  bottom: calc(12px + env(safe-area-inset-bottom));
   z-index: 60;
   display: grid;
   gap: var(--space-2);
@@ -15,7 +15,8 @@
 
 .agent-chat-shell {
   width: min(560px, calc(100vw - 32px));
-  height: min(72vh, 680px);
+  height: min(86vh, 820px);
+  max-height: calc(100svh - 88px - env(safe-area-inset-bottom));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   border: var(--border-width) solid var(--border-color);
@@ -171,17 +172,9 @@
 
 .agent-chat-shell .cs-avatar { width: 30px; height: 30px; }
 
-.chat-avatar {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  color: #06121f;
-  font-size: 11px;
-  font-weight: var(--weight-bold);
-  box-shadow: 0 0 0 2px var(--container-bg), 0 0 0 3px rgba(255, 255, 255, .06);
-}
+/* Аватар в чате — общий компонент приложения, чтобы знаки агентов совпадали везде. */
+.agent-chat-shell .cs-avatar .agent-avatar { width: 30px; height: 30px; }
+.chat-roster .agent-avatar { flex: none; }
 
 .agent-chat-shell .cs-typing-indicator { background: transparent; }
 .agent-chat-shell .cs-typing-indicator {
@@ -250,14 +243,16 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
+  min-height: 44px;
+  padding: 0 var(--space-5);
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-pill);
-  background: var(--container-bg);
+  background: rgba(44, 44, 46, .82);
   box-shadow: var(--chin-shadow);
   color: var(--text-main);
-  font-size: var(--text-md);
-  font-weight: var(--weight-medium);
+  font-size: 14px;
+  font-weight: 760;
+  backdrop-filter: blur(18px) saturate(150%);
 }
 
 .agent-chat-toggle b {
@@ -271,8 +266,32 @@
 }
 
 @media (max-width: 720px) {
-  .agent-chat { left: 12px; right: 12px; }
-  .agent-chat-shell { width: 100%; height: min(76svh, 620px); }
+  .agent-chat {
+    left: auto;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .agent-chat-shell {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    width: auto;
+    height: calc(100svh - 92px - env(safe-area-inset-bottom));
+    max-height: none;
+  }
+
+  .agent-chat-toggle {
+    min-height: 44px;
+    padding: 0 13px;
+  }
+
+  .agent-chat-toggle span {
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /*

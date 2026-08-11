@@ -58,6 +58,7 @@ function App() {
   useEffect(() => {
     fetchJson<Me>("/api/mbox/auth/me")
       .then(setMe)
+      .catch(() => setMe({ user: null }))
       .finally(() => setAuthChecked(true));
   }, []);
 
@@ -69,7 +70,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   const [section, setSectionState] = useState<SectionKey>(() => sectionFromLocation());
   const [query, setQueryState] = useState(() => queryFromLocation());
   const [selectedNodeKey, setSelectedNodeKeyState] = useState(() => nodeFromLocation());
-  const data = useMboxData(query);
+  const data = useMboxData(query, onLogout);
   const realtime = useRealtime(data.reload);
   const agentNotices = useMemo(
     () => [...realtime.notices, ...data.auditEvents.slice(0, 12).map(auditNotice)].slice(0, 12),
