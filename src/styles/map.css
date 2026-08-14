@@ -22,13 +22,15 @@
 /* Тулбар парит над холстом стеклянной пилюлей — без рамок-фреймов. */
 .map-tools {
   position: absolute;
-  top: calc(54px + env(safe-area-inset-top));
+  /* На одной высоте с плавающим поиском; поиск (220px по центру) в приоритете —
+     тулбар слева и не залезает в его зону, лишнее прячется в горизонтальный скролл. */
+  top: calc(4px + env(safe-area-inset-top));
   left: var(--space-4);
   z-index: 6;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: calc(100% - var(--space-4) * 2);
+  max-width: max(160px, calc(50% - 130px));
   padding: 5px;
   border-radius: var(--radius-pill);
   background: var(--glass);
