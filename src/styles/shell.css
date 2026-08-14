@@ -176,9 +176,9 @@
   /* Домашняя полоска и боковые вырезы: в альбомной ориентации iPhone чёлка уходит вбок,
      поэтому безопасные отступы нужны со всех сторон, а не только снизу. */
   padding:
-    12px
+    7px
     calc(18px + env(safe-area-inset-right))
-    calc(12px + env(safe-area-inset-bottom))
+    calc(7px + env(safe-area-inset-bottom))
     calc(18px + env(safe-area-inset-left));
   border-top: var(--border-width) solid var(--border-color);
   background: rgba(28, 28, 30, .86);
@@ -221,6 +221,7 @@
   width: auto;
   min-width: 84px;
   max-width: 136px;
+  min-height: 36px;
 }
 
 .bottom-nav .nav-item span {
@@ -259,14 +260,14 @@
 }
 
 .graph-app {
-  padding: 0 0 calc(92px + env(safe-area-inset-bottom));
+  padding: 0 0 calc(64px + env(safe-area-inset-bottom));
   overflow: hidden;
 }
 
 .graph-mode {
   position: fixed;
   /* Карта занимает всё, кроме нижней навигации; на iPhone к ней добавляется домашняя полоска. */
-  inset: 0 0 calc(92px + env(safe-area-inset-bottom));
+  inset: 0 0 calc(64px + env(safe-area-inset-bottom));
   padding: 0;
   /* Сетка в одну строку: карта растягивается на всю оставшуюся высоту.
      Раньше здесь был block, карта считала себе высоту сама (100svh минус выдуманное число)

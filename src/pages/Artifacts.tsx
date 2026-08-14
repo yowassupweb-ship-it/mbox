@@ -5,7 +5,7 @@ import { EntityPreview, TreeContextMenu, type TreeMenuState } from "../features/
 import { saveEntity } from "../lib/api";
 import { findNodeByRouteKey, nodeRouteKey } from "../lib/routing";
 import { buildArtifactTree, filterTree } from "../lib/tree";
-import type { Artifact, FolderRow } from "../types";
+import type { Artifact, FolderRow, Project } from "../types";
 import { Button, EmptyState, ManualForm, Panel, Select, TextArea, TextInput } from "../ui";
 
 const accessOptions = [
@@ -16,7 +16,7 @@ const accessOptions = [
 
 const entityTypeOptions = ["artifact", "project", "memory", "todo", "script", "agent_scope"].map((value) => ({ value, label: value }));
 
-export function ArtifactsBoard({ artifacts, folders, query, selectedNodeKey, onSelectedNodeKey, onSaved }: { artifacts: Artifact[]; folders: FolderRow[]; query: string; selectedNodeKey: string; onSelectedNodeKey: (key: string) => void; onSaved: () => void }) {
+export function ArtifactsBoard({ artifacts, folders, projects, query, selectedNodeKey, onSelectedNodeKey, onSaved }: { artifacts: Artifact[]; folders: FolderRow[]; projects: Project[]; query: string; selectedNodeKey: string; onSelectedNodeKey: (key: string) => void; onSaved: () => void }) {
   const roots = useMemo(() => filterTree(buildArtifactTree(artifacts, folders), query), [artifacts, folders, query]);
   const [menu, setMenu] = useState<TreeMenuState | null>(null);
   const [selectedNode, setSelectedNode] = useState<FolderTreeNode | null>(null);
@@ -52,7 +52,7 @@ export function ArtifactsBoard({ artifacts, folders, query, selectedNodeKey, onS
         icon={Archive}
         actions={selectedNode ? <Button className="pane-back" variant="ghost" icon={ChevronLeft} onClick={backToTree}>К дереву</Button> : undefined}
       >
-        <ArtifactForm folders={folders} artifacts={artifacts} onSaved={onSaved} />
+        <ArtifactForm folders={folders} artifacts={artifacts} projects={projects} onSaved={onSaved} />
         {selectedNode ? <EntityPreview node={selectedNode} /> : <EmptyState text="Выбери папку или артефакт в дереве" />}
       </Panel>
       {menu && <TreeContextMenu state={menu} projects={[]} onClose={() => setMenu(null)} onSaved={onSaved} />}
@@ -104,9 +104,10 @@ function FolderForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () =>
   );
 }
 
-function ArtifactForm({ folders, artifacts, onSaved }: { folders: FolderRow[]; artifacts: Artifact[]; onSaved: () => void }) {
+function ArtifactForm({ folders, artifacts, projects, onSaved }: { folders: FolderRow[]; artifacts: Artifact[]; projects: Project[]; onSaved: () => void }) {
   const [id, setId] = useState("");
   const [folderId, setFolderId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Code");
   const [version, setVersion] = useState("v1");
@@ -119,6 +120,7 @@ function ArtifactForm({ folders, artifacts, onSaved }: { folders: FolderRow[]; a
     const artifact = artifacts.find((item) => item.id === nextId);
     setName(artifact?.name ?? "");
     setFolderId(artifact?.folder_id ?? "");
+    setProjectId(artifact?.project_id ?? "");
     setCategory(artifact?.category ?? "Code");
     setVersion(artifact?.version ?? "v1");
     setStatus(artifact?.status ?? "created");
@@ -127,7 +129,7 @@ function ArtifactForm({ folders, artifacts, onSaved }: { folders: FolderRow[]; a
 
   return (
     <ManualForm title="Артефакт: создать или изменить" onSubmit={async () => {
-      await saveEntity("/api/mbox/artifacts", id, { folder_id: folderId || null, name, category, version, status, content, access_level: "agents" });
+      await saveEntity("/api/mbox/artifacts", id, { folder_id: folderId || null, project_id: projectId || null, name, category, version, status, content, access_level: "agents" });
       pick("");
       onSaved();
     }}>
@@ -143,6 +145,10 @@ function ArtifactForm({ folders, artifacts, onSaved }: { folders: FolderRow[]; a
       <Select label="Папка" value={folderId} onChange={(event) => setFolderId(event.target.value)}>
         <option value="">Без папки</option>
         {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+      </Select>
+      <Select label="Проект" hint="Необязательно — привязать артефакт к проекту" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+        <option value="">— без проекта —</option>
+        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
       </Select>
       <TextArea label="Содержимое" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Текст артефакта" rows={6} />
     </ManualForm>

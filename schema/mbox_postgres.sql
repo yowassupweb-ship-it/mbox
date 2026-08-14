@@ -164,6 +164,7 @@ ALTER TABLE todos ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS artifacts (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,
+  project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
   version TEXT NOT NULL DEFAULT 'v1',
@@ -359,7 +360,9 @@ CREATE INDEX IF NOT EXISTS idx_memory_links_to ON memory_links(to_memory_id, cre
 CREATE INDEX IF NOT EXISTS idx_memory_links_type ON memory_links(link_type);
 CREATE INDEX IF NOT EXISTS idx_memory_actions_memory ON memory_actions(memory_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_actions_actor ON memory_actions(actor, created_at DESC);
+ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_artifacts_folder ON artifacts(folder_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
 CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id);
 CREATE INDEX IF NOT EXISTS idx_todos_claimed ON todos(claimed_by, claimed_until);
 CREATE INDEX IF NOT EXISTS idx_todos_props ON todos USING GIN(props);

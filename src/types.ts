@@ -18,6 +18,7 @@ export type Memory = {
 export type Artifact = {
   id: string;
   folder_id: string | null;
+  project_id?: string | null;
   name: string;
   category: string;
   version: string;

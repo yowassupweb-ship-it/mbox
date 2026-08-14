@@ -1137,16 +1137,16 @@ function mboxDevApi() {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
-                `INSERT INTO artifacts(folder_id, name, category, version, status, content, access_level)
-                 VALUES ($1, $2, $3, $4, $5, $6, COALESCE(NULLIF($7, ''), 'agents'))
+                `INSERT INTO artifacts(folder_id, project_id, name, category, version, status, content, access_level)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(NULLIF($8, ''), 'agents'))
                  RETURNING id::text`,
-                [body.folder_id || null, String(body.name ?? "").trim(), String(body.category ?? "Code"), String(body.version ?? "v1"), String(body.status ?? "created"), String(body.content ?? ""), String(body.access_level ?? "")],
+                [body.folder_id || null, body.project_id || null, String(body.name ?? "").trim(), String(body.category ?? "Code"), String(body.version ?? "v1"), String(body.status ?? "created"), String(body.content ?? ""), String(body.access_level ?? "")],
               );
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "artifacts" });
               return sendJson(res, 201, { artifact: result.rows[0] });
             }
             const result = await queryPostgres(
-              `SELECT id::text, folder_id::text, name, category, version, status, content, access_level, pg_column_size(artifacts)::int AS memory_bytes
+              `SELECT id::text, folder_id::text, project_id::text, name, category, version, status, content, access_level, pg_column_size(artifacts)::int AS memory_bytes
                FROM artifacts
                WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%'
                ORDER BY category, name
@@ -1162,15 +1162,16 @@ function mboxDevApi() {
             const result = await queryPostgres(
               `UPDATE artifacts SET
                  folder_id = $1,
-                 name = COALESCE(NULLIF($2, ''), name),
-                 category = COALESCE(NULLIF($3, ''), category),
-                 version = COALESCE(NULLIF($4, ''), version),
-                 status = COALESCE(NULLIF($5, ''), status),
-                 content = COALESCE($6, content),
+                 project_id = $2,
+                 name = COALESCE(NULLIF($3, ''), name),
+                 category = COALESCE(NULLIF($4, ''), category),
+                 version = COALESCE(NULLIF($5, ''), version),
+                 status = COALESCE(NULLIF($6, ''), status),
+                 content = COALESCE($7, content),
                  updated_at = now()
-               WHERE id = $7
+               WHERE id = $8
                RETURNING id::text`,
-              [body.folder_id || null, String(body.name ?? "").trim(), String(body.category ?? ""), String(body.version ?? ""), String(body.status ?? ""), body.content ?? null, artifactMatch[1]],
+              [body.folder_id || null, body.project_id || null, String(body.name ?? "").trim(), String(body.category ?? ""), String(body.version ?? ""), String(body.status ?? ""), body.content ?? null, artifactMatch[1]],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "artifacts" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { artifact: result.rows[0] } : { error: "not_found" });
