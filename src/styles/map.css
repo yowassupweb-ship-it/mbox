@@ -2,9 +2,6 @@
 
 .map {
   position: relative;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: var(--space-3);
   height: calc(100svh - 190px);
   min-height: 420px;
 }
@@ -16,88 +13,70 @@
  */
 /* Полноэкранный граф: во всю ширину и высоту, кроме нижней навигации. Отступ сверху —
    только чтобы инструменты не залезли под плавающую шапку; по бокам и снизу — впритык. */
+/* Полноэкранный граф: холст во всю ширину и высоту, кроме нижней навигации. */
 .graph-mode .map {
   height: 100%;
   min-height: 0;
-  padding: calc(52px + env(safe-area-inset-top)) 0 0;
-  gap: var(--space-2);
 }
 
-.graph-mode .map-tools,
-.graph-mode .map-legend { padding-inline: var(--space-4); }
-
-.graph-mode .map-canvas { border-radius: 0; border-width: 0; }
-
+/* Тулбар парит над холстом стеклянной пилюлей — без рамок-фреймов. */
 .map-tools {
-  display: flex;
+  position: absolute;
+  top: calc(54px + env(safe-area-inset-top));
+  left: var(--space-4);
+  z-index: 6;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  gap: 4px;
+  max-width: calc(100% - var(--space-4) * 2);
+  padding: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  border: var(--border-width) solid var(--glass-brd);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(1.4);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.map-tools::-webkit-scrollbar { display: none; }
 
 .map-tools button {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 34px;
+  min-height: 32px;
   padding: 0 var(--space-3);
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--container-bg);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--text-muted);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
-.map-tools button:disabled { opacity: .45; }
+.map-tools button:hover:not(:disabled) { color: var(--text-main); background: rgba(255, 255, 255, .06); }
+.map-tools button:disabled { opacity: .4; }
 .map-tools button.is-active {
   color: var(--text-main);
   background: var(--element-bg);
-  border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+  box-shadow: var(--chin-shadow);
 }
 
-.map-tools-gap { flex: 1; }
-.map-scale { color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
-
-.map-legend {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.map-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 26px;
-  padding: 0 var(--space-2);
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--container-bg);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-}
-
-.map-legend span::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--legend-color, var(--accent-color));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--legend-color, var(--accent-color)) 18%, transparent);
-}
+.map-tools-gap { display: none; }
+.map-scale { color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; padding: 0 var(--space-2); }
 
 .map-canvas {
-  position: relative;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-xl);
+  border: 0;
+  border-radius: 0;
   background:
     radial-gradient(circle at 1px 1px, rgba(255, 255, 255, .07) 1px, transparent 0) 0 0 / 26px 26px,
-    var(--container-bg);
-  box-shadow: var(--container-inset);
+    var(--bg-color);
   cursor: grab;
   touch-action: none;
 }

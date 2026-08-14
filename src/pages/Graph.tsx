@@ -168,6 +168,41 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
       list.push({ key: `folder:${folder.id}`, kind: "folder", entityId: folder.id, label: folder.name, sub: folder.entity_type, color: folder.color || kindColor.folder, ...point });
     });
 
+    // Расстановка «толпой», но без наездов: раздвигаем только перекрывающиеся карточки по оси
+    // наименьшего проникновения (AABB). Форма толпы сохраняется — двигаются лишь те, кто налез.
+    // Закреплённые вручную (есть сохранённая позиция) остаются на месте — их толкают соседи.
+    const PW = 240; // минимальное расстояние между центрами по X (ширина карточки + зазор)
+    const PH = 96;  // по Y (высота карточки + зазор)
+    const pinned = (node: MapNode) => Boolean(positions[node.key]);
+    for (let iter = 0; iter < 160; iter += 1) {
+      let moved = false;
+      for (let i = 0; i < list.length; i += 1) {
+        for (let j = i + 1; j < list.length; j += 1) {
+          const a = list[i];
+          const b = list[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const overlapX = PW - Math.abs(dx);
+          const overlapY = PH - Math.abs(dy);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          const aMovable = !pinned(a);
+          const bMovable = !pinned(b);
+          if (!aMovable && !bMovable) continue;
+          if (overlapX < overlapY) {
+            const dir = dx === 0 ? (i % 2 ? 1 : -1) : Math.sign(dx);
+            const push = dir * (overlapX / 2 + 0.5);
+            if (aMovable && bMovable) { a.x -= push; b.x += push; } else if (aMovable) { a.x -= push * 2; } else { b.x += push * 2; }
+          } else {
+            const dir = dy === 0 ? (i % 2 ? 1 : -1) : Math.sign(dy);
+            const push = dir * (overlapY / 2 + 0.5);
+            if (aMovable && bMovable) { a.y -= push; b.y += push; } else if (aMovable) { a.y -= push * 2; } else { b.y += push * 2; }
+          }
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
     return list;
   }, [projects, memories, folders, positions, showTodos, showMemories]);
 
@@ -343,14 +378,6 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         <button type="button" onClick={() => setView({ x: 0, y: 0, scale: 1 })} aria-label="Сбросить"><Crosshair size={15} /></button>
         <span className="map-scale">{Math.round(view.scale * 100)}%</span>
       </div>
-      <div className="map-legend" aria-label="Todo status legend">
-        {todoStatusOrder.map((status) => (
-          <span key={status} style={{ ["--legend-color" as string]: todoStatusColor[status] }}>
-            {todoStatusLabel(status)}
-          </span>
-        ))}
-      </div>
-
       <div
         className={linkFrom ? "map-canvas is-linking" : "map-canvas"}
         ref={canvasRef}
