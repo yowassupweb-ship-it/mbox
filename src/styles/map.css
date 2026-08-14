@@ -124,25 +124,33 @@
   pointer-events: none;
 }
 
-.map-links line,
-.map-links text { transform: translate(4000px, 4000px); }
+/* Смещение полотна компенсируем на самих связях; маркер-стрелку (в defs) не трогаем. */
+.map-links g path,
+.map-links g text { transform: translate(4000px, 4000px); }
+
+#map-arrow path { fill: color-mix(in srgb, var(--accent-color) 78%, #fff 10%); }
 
 .map-link {
+  fill: none;
   stroke: rgba(255, 255, 255, .1);
   stroke-width: 1.5;
   stroke-dasharray: 4 6;
+  transition: opacity var(--duration-fast) var(--ease-out), stroke var(--duration-fast) var(--ease-out);
 }
 
 .map-link.is-real {
-  stroke: color-mix(in srgb, var(--accent-color) 65%, transparent);
-  stroke-width: 2;
+  stroke: color-mix(in srgb, var(--accent-color) 70%, transparent);
+  stroke-width: 2.2;
   stroke-dasharray: none;
 }
 
+.map-link-group.is-dim { opacity: .16; }
+
 /* Широкая прозрачная линия поверх тонкой: попасть по ребру в два пикселя невозможно. */
 .map-link-hit {
+  fill: none;
   stroke: transparent;
-  stroke-width: 16;
+  stroke-width: 18;
   pointer-events: stroke;
   cursor: pointer;
 }
@@ -180,8 +188,10 @@
   cursor: grab;
   user-select: none;
   touch-action: none;
+  transition: opacity var(--duration-base) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 
+.map-node:hover { border-color: color-mix(in srgb, var(--node-color, #8ab4ff) 45%, var(--border-color)); }
 .map-node:active { cursor: grabbing; }
 
 .map-node strong {
@@ -219,6 +229,14 @@
   border-color: var(--accent-color);
   box-shadow: var(--chin-shadow), 0 0 0 2px color-mix(in srgb, var(--accent-color) 40%, transparent);
 }
+
+/* Подсветка соседей / гашение остального при выборе узла */
+.map-node.is-neighbor {
+  border-color: color-mix(in srgb, var(--node-color, #8ab4ff) 55%, var(--border-color));
+  box-shadow: var(--chin-shadow), 0 0 0 1px color-mix(in srgb, var(--node-color, #8ab4ff) 30%, transparent);
+}
+.map-node.is-dim { opacity: .28; }
+.map-node.is-dim:hover { opacity: .6; }
 
 .map-node.is-link-source { border-color: var(--state-warn); }
 .map-node.kind-todo { width: 190px; padding-right: 56px; }

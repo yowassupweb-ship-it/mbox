@@ -28,8 +28,8 @@ type Position = { entity_type: string; entity_id: string; x: number; y: number }
  * заведомо больше высоты карточки, а колонки проектов разнесены на ширину кластера.
  */
 const NODE_W = 220;
-const ROW_STEP = 108;
-const CLUSTER_W = 1180;
+const ROW_STEP = 104;
+const CLUSTER_W = 760;
 const MARGIN_X = 140;
 const MARGIN_Y = 120;
 
@@ -88,19 +88,23 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     });
   }, []);
 
-  // Узлы без сохранённой позиции раскладываются сеткой по видам — детерминированно, чтобы карта
-  // не прыгала между перезагрузками.
+  // Радиальная раскладка: каждый проект — хаб, его задачи орбитой вокруг; кластеры стоят сеткой.
+  // Позиции без сохранённых считаются детерминированно, чтобы карта не прыгала между загрузками.
   const nodes = useMemo<MapNode[]>(() => {
     const list: MapNode[] = [];
-    // Каждый проект — свой кластер: сам проект сверху, его задачи столбцом под ним.
-    // Кластеры стоят в ряд с большим просветом, поэтому чужие задачи не наезжают.
-    const place = (kind: NodeKind, entityId: string, x: number, y: number) => {
-      const saved = positions[`${kind}:${entityId}`];
-      return saved ?? { x, y };
-    };
+    const place = (kind: NodeKind, entityId: string, x: number, y: number) => positions[`${kind}:${entityId}`] ?? { x, y };
+    // center: узел позиционируется левым-верхним углом, а центр карточки = (x+110, y+32).
+    const atCenter = (kind: NodeKind, id: string, cx: number, cy: number) => place(kind, id, cx - 110, cy - 32);
+
+    const cols = Math.max(1, Math.ceil(Math.sqrt(projects.length)));
+    const centers = new Map<string, { cx: number; cy: number }>();
 
     projects.forEach((project, index) => {
-      const point = place("project", project.id, MARGIN_X + index * CLUSTER_W, MARGIN_Y);
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const cx = MARGIN_X + 300 + col * CLUSTER_W;
+      const cy = MARGIN_Y + 300 + row * CLUSTER_W;
+      centers.set(project.id, { cx, cy });
       list.push({
         key: `project:${project.id}`,
         kind: "project",
@@ -108,54 +112,57 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         label: project.name,
         sub: `${activeTodos(project.todos).length} активных задач`,
         color: project.color || kindColor.project,
-        ...point,
+        ...atCenter("project", project.id, cx, cy),
       });
     });
 
     if (showTodos) {
-      projects.forEach((project, projectIndex) => {
+      projects.forEach((project) => {
+        const center = centers.get(project.id);
+        if (!center) return;
         const visibleTodos = activeTodos(project.todos).sort((a, b) => {
           const leftStatus = todoStatusOrder.indexOf(a.status);
           const rightStatus = todoStatusOrder.indexOf(b.status);
           const statusDelta = (leftStatus === -1 ? 99 : leftStatus) - (rightStatus === -1 ? 99 : rightStatus);
           return statusDelta || (todoPriorityRank[b.priority] || 0) - (todoPriorityRank[a.priority] || 0) || a.title.localeCompare(b.title);
         });
-        for (const status of todoStatusOrder) {
-          visibleTodos.filter((todo) => todo.status === status).forEach((todo, index) => {
-            const statusColumn = todoStatusOrder.indexOf(status);
-            const point = place(
-              "todo",
-              todo.id,
-              MARGIN_X + projectIndex * CLUSTER_W + statusColumn * (NODE_W + 18),
-              MARGIN_Y + 150 + index * ROW_STEP,
-            );
-            list.push({
-              key: `todo:${todo.id}`,
-              kind: "todo",
-              entityId: todo.id,
-              label: todo.title,
-              sub: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}`,
-              color: todoStatusColor[todo.status] || kindColor.todo,
-              status: todo.status,
-              priority: todo.priority,
-              projectName: project.name,
-              note: todo.note,
-              ...point,
-            });
+        const perRing = 8;
+        visibleTodos.forEach((todo, index) => {
+          const ring = Math.floor(index / perRing);
+          const idxInRing = index % perRing;
+          const inThisRing = Math.min(perRing, visibleTodos.length - ring * perRing);
+          const radius = 165 + ring * 125;
+          const angle = -Math.PI / 2 + (idxInRing / inThisRing) * Math.PI * 2;
+          const tx = center.cx + Math.cos(angle) * radius;
+          const ty = center.cy + Math.sin(angle) * radius;
+          list.push({
+            key: `todo:${todo.id}`,
+            kind: "todo",
+            entityId: todo.id,
+            label: todo.title,
+            sub: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}`,
+            color: todoStatusColor[todo.status] || kindColor.todo,
+            status: todo.status,
+            priority: todo.priority,
+            projectName: project.name,
+            note: todo.note,
+            ...atCenter("todo", todo.id, tx, ty),
           });
-        }
+        });
       });
     }
 
+    // Память и папки — отдельная зона справа от всех кластеров, аккуратной колонной-сеткой.
+    const zoneX = MARGIN_X + cols * CLUSTER_W + 120;
+
     if (showMemories) {
-      const memoryBaseX = MARGIN_X + projects.length * CLUSTER_W;
       memories.slice(0, 24).forEach((memory, index) => {
-        const point = place("memory", memory.id, memoryBaseX + (index % 2) * (NODE_W + 40), MARGIN_Y + Math.floor(index / 2) * ROW_STEP);
+        const point = place("memory", memory.id, zoneX + (index % 2) * (NODE_W + 48), MARGIN_Y + Math.floor(index / 2) * ROW_STEP);
         list.push({ key: `memory:${memory.id}`, kind: "memory", entityId: memory.id, label: memory.title, sub: "память", color: kindColor.memory, ...point });
       });
     }
 
-    const folderBaseX = MARGIN_X + projects.length * CLUSTER_W + (showMemories ? 2 * (NODE_W + 40) + 80 : 0);
+    const folderBaseX = zoneX + (showMemories ? 2 * (NODE_W + 48) + 100 : 0);
     folders.slice(0, 16).forEach((folder, index) => {
       const point = place("folder", folder.id, folderBaseX, MARGIN_Y + index * ROW_STEP);
       list.push({ key: `folder:${folder.id}`, kind: "folder", entityId: folder.id, label: folder.name, sub: folder.entity_type, color: folder.color || kindColor.folder, ...point });
@@ -189,6 +196,28 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
 
     return result;
   }, [edges, byKey, projects, showTodos]);
+
+  // При выборе узла подсвечиваем его и соседей, остальное гасим — сразу видно, с чем он связан.
+  const activeKeys = useMemo(() => {
+    if (!selected) return null;
+    const set = new Set<string>([selected.key]);
+    for (const link of links) {
+      if (link.from.key === selected.key) set.add(link.to.key);
+      if (link.to.key === selected.key) set.add(link.from.key);
+    }
+    return set;
+  }, [selected, links]);
+
+  // Esc снимает выбор и режим связывания — привычный выход без мыши.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setLinkFrom(null);
+      setSelected(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const savePosition = useCallback((kind: NodeKind, entityId: string, x: number, y: number) => {
     setPositions((current) => ({ ...current, [`${kind}:${entityId}`]: { x, y } }));
@@ -268,16 +297,21 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     void fetch("/api/mbox/graph/positions", { method: "DELETE" }).catch(() => undefined);
   }
 
-  function fitToContent() {
-    if (!nodes.length) return;
-    const xs = nodes.map((node) => node.x);
-    const ys = nodes.map((node) => node.y);
+  function fitToContent(subset?: MapNode[]) {
+    const target = subset && subset.length ? subset : nodes;
+    if (!target.length) return;
     const box = canvasRef.current?.getBoundingClientRect();
     if (!box) return;
-    const width = Math.max(...xs) - Math.min(...xs) + 320;
-    const height = Math.max(...ys) - Math.min(...ys) + 220;
-    const scale = Math.min(1.4, Math.max(0.25, Math.min(box.width / width, box.height / height)));
-    setView({ scale, x: box.width / 2 - ((Math.min(...xs) + Math.max(...xs)) / 2) * scale, y: box.height / 2 - ((Math.min(...ys) + Math.max(...ys)) / 2) * scale });
+    const xs = target.map((node) => node.x);
+    const ys = target.map((node) => node.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs) + NODE_W;
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys) + 64;
+    const width = maxX - minX + 220;
+    const height = maxY - minY + 200;
+    const scale = Math.min(1.2, Math.max(0.4, Math.min(box.width / width, box.height / height)));
+    setView({ scale, x: box.width / 2 - ((minX + maxX) / 2) * scale, y: box.height / 2 - ((minY + maxY) / 2) * scale });
   }
 
   // Первое появление карты вписывает содержимое само: иначе человек открывает Граф и видит
@@ -286,7 +320,9 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
   useEffect(() => {
     if (fitted.current || !nodes.length || !canvasRef.current) return;
     fitted.current = true;
-    fitToContent();
+    // Первый кадр кадрируем по кластерам (проекты и задачи), а не по дальней зоне памяти —
+    // иначе масштаб уезжает в 25% и узлы нечитаемы.
+    fitToContent(nodes.filter((node) => node.kind === "project" || node.kind === "todo"));
     // fitToContent намеренно не в зависимостях: вписываем ровно один раз за сессию карты.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length]);
@@ -303,7 +339,7 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         <span className="map-tools-gap" />
         <button type="button" onClick={() => setView((current) => ({ ...current, scale: Math.max(0.2, current.scale - 0.15) }))} aria-label="Отдалить"><Minus size={15} /></button>
         <button type="button" onClick={() => setView((current) => ({ ...current, scale: Math.min(2.4, current.scale + 0.15) }))} aria-label="Приблизить"><Plus size={15} /></button>
-        <button type="button" onClick={fitToContent} aria-label="Вписать"><Maximize size={15} /></button>
+        <button type="button" onClick={() => fitToContent()} aria-label="Вписать"><Maximize size={15} /></button>
         <button type="button" onClick={() => setView({ x: 0, y: 0, scale: 1 })} aria-label="Сбросить"><Crosshair size={15} /></button>
         <span className="map-scale">{Math.round(view.scale * 100)}%</span>
       </div>
@@ -348,34 +384,41 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
         }}
         onPointerCancel={() => { panRef.current = null; dragRef.current = null; }}
-        onDoubleClick={fitToContent}
+        onDoubleClick={() => fitToContent()}
       >
         <div className="map-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
           <svg className="map-links">
+            <defs>
+              <marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" />
+              </marker>
+            </defs>
             {links.map((link) => {
               const x1 = link.from.x + 110;
               const y1 = link.from.y + 32;
               const x2 = link.to.x + 110;
               const y2 = link.to.y + 32;
+              // Плавная S-кривая: горизонтальные управляющие точки в середине — линии не пересекают
+              // узлы под прямым углом и читаются как связи, а не как сетка.
+              const mx = (x1 + x2) / 2;
+              const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+              const dim = activeKeys ? !(activeKeys.has(link.from.key) && activeKeys.has(link.to.key)) : false;
               return (
-                <g key={link.key} className={link.real ? "map-link-group is-real" : "map-link-group"}>
-                  <line className={link.real ? "map-link is-real" : "map-link"} x1={x1} y1={y1} x2={x2} y2={y2} />
+                <g key={link.key} className={`${link.real ? "map-link-group is-real" : "map-link-group"}${dim ? " is-dim" : ""}`}>
+                  <path className={link.real ? "map-link is-real" : "map-link"} d={d} markerEnd={link.real ? "url(#map-arrow)" : undefined} />
                   {/* Настоящую связь можно убрать прямо с карты: тонкую линию мышкой не поймать,
                       поэтому поверх лежит широкая прозрачная — она и ловит клик. */}
                   {link.real && (
                     <>
-                      <line
+                      <path
                         className="map-link-hit"
-                        x1={x1}
-                        y1={y1}
-                        x2={x2}
-                        y2={y2}
+                        d={d}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={() => void removeEdgeByLink(link)}
                       >
                         <title>{`${link.from.label} → ${link.to.label}: ${edgeTypeLabel(link.label)}. Клик — убрать связь`}</title>
-                      </line>
-                      <text className="map-link-label" x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6}>{edgeTypeLabel(link.label)}</text>
+                      </path>
+                      <text className="map-link-label" x={mx} y={(y1 + y2) / 2 - 6}>{edgeTypeLabel(link.label)}</text>
                     </>
                   )}
                 </g>
@@ -386,7 +429,7 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
           {nodes.map((node) => (
             <div
               key={node.key}
-              className={`map-node kind-${node.kind}${selected?.key === node.key ? " is-selected" : ""}${linkFrom?.key === node.key ? " is-link-source" : ""}${node.priority ? ` priority-${todoPrioritySeverity[node.priority] || "normal"}` : ""}`}
+              className={`map-node kind-${node.kind}${selected?.key === node.key ? " is-selected" : ""}${linkFrom?.key === node.key ? " is-link-source" : ""}${node.priority ? ` priority-${todoPrioritySeverity[node.priority] || "normal"}` : ""}${activeKeys && !activeKeys.has(node.key) ? " is-dim" : ""}${activeKeys && activeKeys.has(node.key) && selected?.key !== node.key ? " is-neighbor" : ""}`}
               style={{ ["--node-x" as string]: `${node.x}px`, ["--node-y" as string]: `${node.y}px`, ["--node-color" as string]: node.color }}
               onPointerDown={(event) => onNodePointerDown(event, node)}
               onPointerMove={onNodePointerMove}
