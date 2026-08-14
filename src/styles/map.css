@@ -300,3 +300,22 @@
   .map-node { width: 168px; }
   .map-node.kind-todo { width: 168px; }
 }
+
+/* Проекты-хабы светятся своим цветом — сразу видно их среди задач-спутников. */
+.map-node.kind-project {
+  border-color: color-mix(in srgb, var(--node-color, #8ab4ff) 42%, var(--border-color));
+  border-left-width: 3px;
+  box-shadow:
+    var(--chin-shadow),
+    0 0 0 1px color-mix(in srgb, var(--node-color, #8ab4ff) 32%, transparent),
+    0 0 34px -4px color-mix(in srgb, var(--node-color, #8ab4ff) 62%, transparent);
+}
+
+.map-node.kind-project strong { font-size: var(--text-md); }
+
+.map-node.kind-project.is-selected {
+  box-shadow:
+    var(--chin-shadow),
+    0 0 0 2px color-mix(in srgb, var(--accent-color) 50%, transparent),
+    0 0 40px -2px color-mix(in srgb, var(--node-color, #8ab4ff) 75%, transparent);
+}
