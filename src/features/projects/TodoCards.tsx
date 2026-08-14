@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { CheckCheck, ChevronDown, Maximize2, Trash2, X } from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
+import { CheckCheck, ChevronDown, Maximize2, Plus, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
@@ -7,7 +7,7 @@ import { countUnseen, formatDelta, markAllSeen, markSeen, seenDelta } from "../.
 import { todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "../../lib/labels";
 import { orderTodos, positionBetween, todoPosition } from "../../lib/tree";
 import type { Project, Todo } from "../../types";
-import { Button, EmptyState, ManualForm, SaveButton, Select, TextArea, TextInput, type SaveState } from "../../ui";
+import { Button, EmptyState, ErrorText, ManualForm, SaveButton, Select, TextArea, TextInput, type SaveState } from "../../ui";
 
 const statusOptions = Object.entries(todoStatusLabels).map(([value, label]) => ({ value, label }));
 const priorityOptions = Object.entries(todoPriorityLabels).map(([value, label]) => ({ value, label }));
@@ -269,25 +269,49 @@ function TodoModal({ todo, projectName, onClose, onSaved }: { todo: Todo; projec
 
 /** Только добавление. Правка живёт в карточке — искать задачу по id человек не должен. */
 export function AddTodoForm({ project, onSaved }: { project: Project; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
   const [priority, setPriority] = useState("normal");
   const [status, setStatus] = useState("open");
+  const [state, setState] = useState<SaveState>("idle");
+  const [error, setError] = useState("");
 
-  return (
-    <ManualForm title="Добавить задачу" submitLabel="Создать" onSubmit={async () => {
-      if (!title.trim()) throw new Error("empty_title");
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!title.trim()) { setError("Название не может быть пустым"); return; }
+    setState("saving");
+    setError("");
+    try {
       await saveEntity("/api/mbox/todos", "", { project_id: project.id, title: title.trim(), note, status, priority, access_level: "private" });
       setTitle("");
       setNote("");
+      setStatus("open");
+      setPriority("normal");
+      setState("idle");
+      setOpen(false);
       onSaved();
-    }}>
-      <TextInput label="Название" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Что нужно сделать" />
-      <TextArea label="Заметка" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Подробности, ссылки, критерий готовности" rows={4} />
-      <div className="todo-modal-controls">
-        <Select label="Статус" hint={todoStatusHint[status]} value={status} onChange={(event) => setStatus(event.target.value)} options={statusOptions} />
-        <Select label="Приоритет" value={priority} onChange={(event) => setPriority(event.target.value)} options={priorityOptions} />
-      </div>
-    </ManualForm>
+    } catch {
+      setState("error");
+      setError("Не удалось создать");
+    }
+  }
+
+  return (
+    <div className="todo-quick-box">
+      <Button className="add-secret-action" icon={Plus} onClick={() => setOpen((value) => !value)} aria-expanded={open}>Добавить задачу</Button>
+      {open && (
+        <form className="todo-quick" onSubmit={submit}>
+          <TextInput label="Название" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Что нужно сделать" autoFocus />
+          <TextArea label="Заметка" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Подробности, критерий готовности" rows={2} />
+          <div className="todo-quick-controls">
+            <Select label="Статус" hint={todoStatusHint[status]} value={status} onChange={(event) => setStatus(event.target.value)} options={statusOptions} />
+            <Select label="Приоритет" value={priority} onChange={(event) => setPriority(event.target.value)} options={priorityOptions} />
+            <SaveButton state={state} idleLabel="Создать" type="submit" className="todo-quick-submit" />
+          </div>
+          {error && <ErrorText>{error}</ErrorText>}
+        </form>
+      )}
+    </div>
   );
 }

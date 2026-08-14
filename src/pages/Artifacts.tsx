@@ -52,7 +52,7 @@ export function ArtifactsBoard({ artifacts, folders, query, selectedNodeKey, onS
         icon={Archive}
         actions={selectedNode ? <Button className="pane-back" variant="ghost" icon={ChevronLeft} onClick={backToTree}>К дереву</Button> : undefined}
       >
-        <ArtifactForm folders={folders} onSaved={onSaved} />
+        <ArtifactForm folders={folders} artifacts={artifacts} onSaved={onSaved} />
         {selectedNode ? <EntityPreview node={selectedNode} /> : <EmptyState text="Выбери папку или артефакт в дереве" />}
       </Panel>
       {menu && <TreeContextMenu state={menu} projects={[]} onClose={() => setMenu(null)} onSaved={onSaved} />}
@@ -68,14 +68,27 @@ function FolderForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () =>
   const [accessLevel, setAccessLevel] = useState("agents");
   const [color, setColor] = useState("#2c2c2e");
 
+  // Выбор существующей папки из списка вместо ввода id наугад — поля подставляются сами.
+  function pick(nextId: string) {
+    setId(nextId);
+    const folder = folders.find((item) => item.id === nextId);
+    setName(folder?.name ?? "");
+    setParentId(folder?.parent_id ?? "");
+    setEntityType(folder?.entity_type ?? "artifact");
+    setAccessLevel(folder?.access_level ?? "agents");
+    setColor(folder?.color ?? "#2c2c2e");
+  }
+
   return (
-    <ManualForm title="Добавить или править папку" onSubmit={async () => {
+    <ManualForm title="Папка: создать или изменить" onSubmit={async () => {
       await saveEntity("/api/mbox/folders", id, { parent_id: parentId || null, name, entity_type: entityType, access_level: accessLevel, color });
-      setId("");
-      setName("");
+      pick("");
       onSaved();
     }}>
-      <TextInput label="ID" hint="Пусто — создастся новая папка" value={id} onChange={(event) => setId(event.target.value)} placeholder="например 7" />
+      <Select label="Что редактируем" value={id} onChange={(event) => pick(event.target.value)}>
+        <option value="">— новая папка —</option>
+        {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+      </Select>
       <TextInput label="Название" value={name} onChange={(event) => setName(event.target.value)} placeholder="Название папки" />
       <Select label="Родитель" value={parentId} onChange={(event) => setParentId(event.target.value)}>
         <option value="">Без родителя</option>
@@ -91,7 +104,7 @@ function FolderForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () =>
   );
 }
 
-function ArtifactForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () => void }) {
+function ArtifactForm({ folders, artifacts, onSaved }: { folders: FolderRow[]; artifacts: Artifact[]; onSaved: () => void }) {
   const [id, setId] = useState("");
   const [folderId, setFolderId] = useState("");
   const [name, setName] = useState("");
@@ -100,15 +113,28 @@ function ArtifactForm({ folders, onSaved }: { folders: FolderRow[]; onSaved: () 
   const [status, setStatus] = useState("created");
   const [content, setContent] = useState("");
 
+  // Выбор существующего артефакта из списка вместо ввода id наугад.
+  function pick(nextId: string) {
+    setId(nextId);
+    const artifact = artifacts.find((item) => item.id === nextId);
+    setName(artifact?.name ?? "");
+    setFolderId(artifact?.folder_id ?? "");
+    setCategory(artifact?.category ?? "Code");
+    setVersion(artifact?.version ?? "v1");
+    setStatus(artifact?.status ?? "created");
+    setContent(artifact?.content ?? "");
+  }
+
   return (
-    <ManualForm title="Добавить или править артефакт" onSubmit={async () => {
+    <ManualForm title="Артефакт: создать или изменить" onSubmit={async () => {
       await saveEntity("/api/mbox/artifacts", id, { folder_id: folderId || null, name, category, version, status, content, access_level: "agents" });
-      setId("");
-      setName("");
-      setContent("");
+      pick("");
       onSaved();
     }}>
-      <TextInput label="ID" hint="Пусто — создастся новый артефакт" value={id} onChange={(event) => setId(event.target.value)} placeholder="например 12" />
+      <Select label="Что редактируем" value={id} onChange={(event) => pick(event.target.value)}>
+        <option value="">— новый артефакт —</option>
+        {artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.name} · {artifact.category}</option>)}
+      </Select>
       <TextInput label="Название" value={name} onChange={(event) => setName(event.target.value)} placeholder="Название" />
       {/* Дерево группирует артефакты по category, а не по папке — folder_id у всех NULL. */}
       <TextInput label="Категория" hint="По ней артефакт попадёт в ветку дерева" value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Code" />

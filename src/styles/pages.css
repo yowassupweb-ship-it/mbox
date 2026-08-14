@@ -1352,3 +1352,160 @@ time {
 }
 
 .dark .timeline-item span { color: #aeb8c8; }
+
+/* Живая память: чипы связей в таблице памяти */
+.memory-links-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 340px;
+}
+
+.memory-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px 2px 6px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #cdd8ea;
+  background: rgba(255, 255, 255, .05);
+  border-left: 2px solid var(--chip-accent, #7cc6ff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-link-chip.out { --chip-accent: #7cc6ff; }
+.memory-link-chip.in { --chip-accent: #a7d79b; }
+.memory-link-chip em { font-style: normal; color: var(--text-muted); font-size: 10.5px; }
+.memory-link-chip svg { flex: none; opacity: .7; }
+
+.memory-link-more {
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* История как консоль — терминальный журнал аудита */
+.console {
+  border-radius: var(--radius-lg);
+  border: var(--border-width) solid var(--border-color);
+  background: #0c0c0e;
+  box-shadow: var(--container-inset);
+  overflow: hidden;
+}
+
+.console-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: #17171a;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+
+.console-dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.console-dot.r { background: #ff5f57; }
+.console-dot.y { background: #febc2e; }
+.console-dot.g { background: #28c840; }
+
+.console-title {
+  margin-left: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.console-count { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+
+.console-body {
+  padding: 10px 0;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.console-line {
+  display: grid;
+  grid-template-columns: 68px 96px 74px minmax(90px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 1px 16px;
+  white-space: nowrap;
+}
+.console-line:hover { background: rgba(255, 255, 255, .03); }
+
+.c-time { color: #6b7280; }
+.c-actor { color: #cdd8ea; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.c-act { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.c-entity { color: #8a9bb8; overflow: hidden; text-overflow: ellipsis; }
+.c-msg { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
+
+/* цвет по действию — читается сразу, как в настоящем логе */
+.act-create  .c-act { color: #35c759; }
+.act-update  .c-act { color: #7cc6ff; }
+.act-delete  .c-act { color: #ff5f57; }
+.act-claim   .c-act { color: #febc2e; }
+.act-finish  .c-act { color: #58d977; }
+.act-heartbeat .c-act { color: #6b7280; }
+.act-heartbeat { opacity: .72; }
+
+@media (max-width: 640px) {
+  .console-line { grid-template-columns: 60px 1fr; grid-auto-flow: row; white-space: normal; row-gap: 0; }
+  .c-entity, .c-act, .c-actor { grid-column: 2; }
+}
+
+/* SQL-действия из триггеров аудита (INSERT/UPDATE/DELETE) */
+.act-insert .c-act { color: #35c759; }
+.act-update .c-act { color: #7cc6ff; }
+.act-delete .c-act { color: #ff5f57; }
+
+/* Редактор сущностей — правка выбором строки, без ввода id */
+.entity-editor {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  border: var(--border-width) solid var(--border-color);
+  box-shadow: var(--chin-shadow);
+}
+.entity-editor.editing {
+  box-shadow: var(--chin-shadow), 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent);
+}
+.entity-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.entity-editor-head strong { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-lg); }
+
+.memory-table .row-actions { text-align: right; width: 1%; white-space: nowrap; }
+.memory-table tr.row-editing { background: color-mix(in srgb, var(--accent-color) 10%, transparent); }
+
+/* Компактная форма создания задачи */
+.todo-quick-box { display: grid; gap: 10px; margin-bottom: 12px; }
+.todo-quick {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  border: var(--border-width) solid var(--border-color);
+  background: var(--container-bg);
+  box-shadow: var(--container-inset);
+}
+.todo-quick-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.todo-quick-submit { align-self: end; min-height: 40px; }
+@media (max-width: 560px) {
+  .todo-quick-controls { grid-template-columns: 1fr 1fr; }
+  .todo-quick-submit { grid-column: 1 / -1; }
+}

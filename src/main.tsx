@@ -516,22 +516,35 @@ function RelationsBoard({ edges, projects, onSaved }: { edges: GraphEdge[]; proj
     </div>
   );
 }
+function consoleTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function HistoryBoard({ events }: { events: AuditEvent[] }) {
   return (
     <Panel title="История" icon={History}>
-      {events.length ? (
-        <div className="timeline-list">
-          {events.map((event) => (
-            <article className="timeline-item" key={event.id}>
-              <div>
-                <strong>{event.summary || `${event.entity_type} #${event.entity_id ?? ""}`}</strong>
-                <span>{event.actor || "system"} · {event.action} · {event.entity_type}{event.entity_id ? ` #${event.entity_id}` : ""} · {formatBytes(event.memory_bytes)}</span>
-              </div>
-              <time>{formatDateTime(event.created_at)}</time>
-            </article>
-          ))}
+      <div className="console" role="log" aria-label="Журнал аудита">
+        <div className="console-bar">
+          <span className="console-dot r" />
+          <span className="console-dot y" />
+          <span className="console-dot g" />
+          <span className="console-title">mbox — журнал аудита</span>
+          <span className="console-count">{events.length} {plural(events.length, "событие", "события", "событий")}</span>
         </div>
-      ) : <EmptyState text="История пока пуста" />}
+        <div className="console-body">
+          {events.length ? events.map((event) => (
+            <div className={`console-line act-${(event.action || "").toLowerCase()}`} key={event.id}>
+              <span className="c-time">{consoleTime(event.created_at)}</span>
+              <span className="c-actor">{event.actor || "system"}</span>
+              <span className="c-act">{event.action}</span>
+              <span className="c-entity">{event.entity_type}{event.entity_id ? `#${event.entity_id}` : ""}</span>
+              <span className="c-msg">{event.summary || "—"}</span>
+            </div>
+          )) : <div className="console-line muted"><span className="c-msg">— журнал пуст —</span></div>}
+        </div>
+      </div>
     </Panel>
   );
 }
