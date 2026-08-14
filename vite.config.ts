@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Client, type QueryResult, type QueryResultRow } from "pg";
+import { Pool, type QueryResult, type QueryResultRow } from "pg";
 import { WebSocket, WebSocketServer } from "ws";
 
 function loadLocalEnv() {
@@ -219,16 +219,22 @@ function getCookie(req: IncomingMessage, name: string) {
   return cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? "";
 }
 
-async function queryPostgres<T extends QueryResultRow>(sql: string, values: unknown[] = []): Promise<QueryResult<T>> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  try {
-    return await client.query<T>(sql, values);
-  } finally {
-    await client.end();
+// Пул держит соединения тёплыми. Через SSH-туннель к прод-БД установка нового соединения стоит
+// ~2с (несколько round-trip'ов), и 11 параллельных запросов на загрузке экрана топили самодельный
+// форвардер — экран висел или отдавал нули. С пулом handshake один раз, дальше переиспользование.
+let pgPool: Pool | null = null;
+function getPool(): Pool {
+  if (!pgPool) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
+    pgPool = new Pool({ connectionString: databaseUrl, max: 8, idleTimeoutMillis: 30_000, keepAlive: true });
+    pgPool.on("error", () => { /* соединение умерло в простое — пул заменит его сам */ });
   }
+  return pgPool;
+}
+
+async function queryPostgres<T extends QueryResultRow>(sql: string, values: unknown[] = []): Promise<QueryResult<T>> {
+  return getPool().query<T>(sql, values);
 }
 
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) {
@@ -740,8 +746,6 @@ function mboxDevApi() {
                ),
                names AS (
                  SELECT name FROM presence
-                 UNION SELECT name FROM audited
-                 UNION SELECT name FROM ran
                )
                SELECT n.name,
                       COALESCE(p.kind, 'ai_agent') AS kind,
