@@ -58,7 +58,7 @@ const agentStructure = {
     "Call /api/mbox/projects and read props, relations, todos, git and deploy before changing code.",
     "Treat graph_edges as explicit truth about which projects belong to one larger entity.",
     "Call /api/mbox/agent/context?project=MBOX to get a full compact snapshot.",
-    "Call /api/mbox/agent/next-task?project=MBOX&agent=Codex to pick and claim work.",
+    "Call /api/mbox/agent/next-task?project=MBOX&agent=Codex to pick work, then /api/mbox/todos/:id/claim before editing.",
     "Update todos through PATCH /api/mbox/todos/:id; keep notes concise and put structured facts into todo props.",
     "Create graph edges when the task reveals a project relation.",
     "Use /api/mbox/history, /api/mbox/agent/inbox, /api/mbox/agent/runs and /api/mbox/decisions to understand recent work.",
@@ -75,7 +75,7 @@ const agentStructure = {
     before_work: ["describe_structure", "list_project_context", "get_next_task"],
     during_work: ["write important decisions to project props or memory", "create relations when context links projects", "keep todo note current"],
     after_work: [
-      "set task status",
+      "prefer finish_task in MCP, or set task status plus record memory plus create agent run manually",
       "record a memory for significant work with source_agent, project_id, todo_id and touched_files in metadata",
       "server auto-creates an agent-work memory when a todo becomes done or an agent_run finishes; manual record_memory for the same todo_id/agent_run_id prevents duplicates",
       "use /api/mbox/todos/:id/trail to inspect the task -> decision -> change -> memory chain",
@@ -187,6 +187,27 @@ function compactMemoryRow(memory, limit = 400) {
   };
 }
 
+function memoryProject(memory) {
+  const projectId = memory.project_id || memory.metadata?.project_id || null;
+  return memory.project_name || memory.metadata?.project || projectId || "";
+}
+
+function compactRecallMemoryRow(memory, limit = 140) {
+  const metadata = memory.metadata && typeof memory.metadata === "object" ? memory.metadata : {};
+  return {
+    id: memory.id,
+    title: memory.title,
+    summary: textPreview(metadata.summary || memory.summary || memory.content, limit),
+    score: typeof memory.score === "number" ? Number(memory.score.toFixed(6)) : 0,
+    project: memoryProject(memory),
+    project_id: memory.project_id || metadata.project_id || null,
+    todo_id: memory.todo_id || metadata.todo_id || null,
+    tags: memory.tags || [],
+    source_agent: metadata.source_agent || "",
+    updated_at: memory.updated_at,
+  };
+}
+
 function tokenizeEmbeddingText(value) {
   return String(value || "")
     .toLowerCase()
@@ -201,6 +222,26 @@ function memoryEmbeddingText(memory) {
     Array.isArray(memory.tags) ? memory.tags.join(" ") : "",
     memory.metadata && typeof memory.metadata === "object" ? Object.values(memory.metadata).join(" ") : "",
   ].join(" ");
+}
+
+function tokenizeRecallText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .match(/[\p{L}\p{N}]{2,}/gu) || [];
+}
+
+function expandRecallText(value) {
+  const text = String(value || "");
+  const synonyms = {
+    "деплой": "deploy deployment vercel production",
+    "прод": "prod production боевой",
+    "боевой": "prod production live",
+    "релиз": "release deploy",
+  };
+  const tokens = tokenizeRecallText(text);
+  const expanded = tokens.flatMap((token) => [token, synonyms[token] || ""]);
+  return `${text} ${expanded.join(" ")}`;
 }
 
 function buildTfIdfIndex(documents) {
@@ -246,6 +287,25 @@ function cosineSimilarity(left, right) {
     if (large[token]) dot += weight * large[token];
   }
   return dot / (left.norm * right.norm);
+}
+
+function recallLexicalScore(queryText, memory) {
+  const expandedQuery = expandRecallText(queryText);
+  const queryTokens = [...new Set(tokenizeRecallText(expandedQuery))];
+  if (!queryTokens.length) return { lexical: 0, title: 0, tags: 0, exact: 0 };
+  const titleTokens = new Set(tokenizeRecallText(expandRecallText(memory.title)));
+  const tagTokens = new Set(tokenizeRecallText(expandRecallText((memory.tags || []).join(" "))));
+  const allTokens = new Set(tokenizeRecallText(expandRecallText(memoryEmbeddingText(memory))));
+  const matched = queryTokens.filter((token) => allTokens.has(token)).length;
+  const titleMatched = queryTokens.filter((token) => titleTokens.has(token)).length;
+  const tagMatched = queryTokens.filter((token) => tagTokens.has(token)).length;
+  const haystack = expandRecallText(`${memory.title || ""}\n${memory.content || ""}`).toLowerCase();
+  return {
+    lexical: matched / queryTokens.length,
+    title: titleMatched / queryTokens.length,
+    tags: tagMatched / queryTokens.length,
+    exact: haystack.includes(String(queryText || "").toLowerCase().trim()) ? 1 : 0,
+  };
 }
 
 async function refreshMemoryEmbeddings() {
@@ -893,19 +953,31 @@ async function handleApiWithContext(req, res, url) {
   if (url.pathname === "/api/mbox/memories/search") {
     const search = url.searchParams.get("q")?.trim() || "";
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 20), 1), 100);
+    const detail = detailMode(url, "short");
+    const minScore = Math.max(0, Number(url.searchParams.get("min_score") || (search ? 0.05 : 0)));
+    const project = url.searchParams.get("project")?.trim() || "";
+    const projectId = url.searchParams.get("project_id")?.trim() || "";
+    const tags = (url.searchParams.get("tags") || "").split(",").map((tag) => tag.trim()).filter(Boolean);
+    const recencyDays = Number(url.searchParams.get("recency_days") || 0);
     if (!search) {
       const recent = await query(
-        `SELECT m.id::text, m.project_id::text, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+        `SELECT m.id::text, m.project_id::text, p.name AS project_name, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
                 pg_column_size(m)::int AS memory_bytes,
                 m.created_at::text, m.updated_at::text,
                 e.dimension, e.encoding_source, e.updated_at::text AS embedding_updated_at
          FROM memories m
+         LEFT JOIN projects p ON p.id = m.project_id
          LEFT JOIN memory_embeddings e ON e.memory_id = m.id
+         WHERE ($2 = '' OR m.project_id::text = $2 OR m.metadata->>'project_id' = $2)
+           AND ($3 = '' OR p.name = $3 OR m.metadata->>'project' = $3)
+           AND ($4::text[] = '{}'::text[] OR m.tags && $4::text[])
+           AND ($5::int <= 0 OR m.updated_at >= now() - ($5::int * interval '1 day'))
          ORDER BY m.updated_at DESC
          LIMIT $1`,
-        [limit],
+        [limit, projectId, project, tags, recencyDays],
       );
-      return sendJson(res, 200, { query: search, memories: recent.rows.map((memory) => ({ ...memory, score: 0 })) });
+      const memories = recent.rows.map((memory) => ({ ...memory, score: 0 }));
+      return sendJson(res, 200, { query: search, detail, memories: detail === "full" ? memories : memories.map((memory) => compactRecallMemoryRow(memory)) });
     }
 
     const { documents } = await refreshMemoryEmbeddings();
@@ -917,23 +989,36 @@ async function handleApiWithContext(req, res, url) {
     }
     const queryVector = vectorFromText(search, documentFrequency, documents.length);
     const result = await query(
-      `SELECT m.id::text, m.project_id::text, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+      `SELECT m.id::text, m.project_id::text, p.name AS project_name, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
               pg_column_size(m)::int AS memory_bytes,
               m.created_at::text, m.updated_at::text,
               e.representation, e.dimension, e.encoding_source, e.updated_at::text AS embedding_updated_at
        FROM memories m
-       JOIN memory_embeddings e ON e.memory_id = m.id`,
+       JOIN memory_embeddings e ON e.memory_id = m.id
+       LEFT JOIN projects p ON p.id = m.project_id
+       WHERE ($1 = '' OR m.project_id::text = $1 OR m.metadata->>'project_id' = $1)
+         AND ($2 = '' OR p.name = $2 OR m.metadata->>'project' = $2)
+         AND ($3::text[] = '{}'::text[] OR m.tags && $3::text[])
+         AND ($4::int <= 0 OR m.updated_at >= now() - ($4::int * interval '1 day'))`,
+      [projectId, project, tags, recencyDays],
     );
     const memories = result.rows
-      .map((memory) => ({
-        ...memory,
-        score: cosineSimilarity(queryVector, memory.representation || {}),
-      }))
-      .filter((memory) => memory.score > 0)
+      .map((memory) => {
+        const lexical = recallLexicalScore(search, memory);
+        const vectorScore = cosineSimilarity(queryVector, memory.representation || {});
+        const score = (vectorScore * 0.65) + (lexical.lexical * 0.25) + (lexical.title * 0.25) + (lexical.tags * 0.15) + (lexical.exact * 0.2);
+        return { ...memory, score };
+      })
+      .filter((memory) => memory.score >= minScore)
       .sort((a, b) => b.score - a.score || new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, limit)
       .map(({ representation, ...memory }) => ({ ...memory, score: Number(memory.score.toFixed(6)) }));
-    return sendJson(res, 200, { query: search, memories });
+    return sendJson(res, 200, {
+      query: search,
+      detail,
+      filters: { project: project || null, project_id: projectId || null, tags, recency_days: recencyDays || null, min_score: minScore },
+      memories: detail === "full" ? memories : memories.map((memory) => compactRecallMemoryRow(memory)),
+    });
   }
 
   if (url.pathname === "/api/mbox/memories/review") {
@@ -1043,6 +1128,20 @@ async function handleApiWithContext(req, res, url) {
   }
 
   const memoryMatch = url.pathname.match(/^\/api\/mbox\/memories\/(\d+)$/);
+  if (memoryMatch && req.method === "GET") {
+    const result = await query(
+      `SELECT m.id::text, m.folder_id::text, m.project_id::text, p.name AS project_name, m.todo_id::text, m.agent_run_id::text,
+              m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+              pg_column_size(m)::int AS memory_bytes,
+              m.created_at::text, m.updated_at::text
+       FROM memories m
+       LEFT JOIN projects p ON p.id = m.project_id
+       WHERE m.id = $1`,
+      [memoryMatch[1]],
+    );
+    return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { memory: result.rows[0] } : { error: "not_found" });
+  }
+
   if (memoryMatch && req.method === "PATCH") {
     const body = await readBody(req);
     const result = await query(
@@ -1239,6 +1338,8 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/projects") {
     const detail = detailMode(url);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 200), 1), 200);
+    const offset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
     if (req.method === "POST") {
       const body = await readBody(req);
       const result = await query(
@@ -1256,8 +1357,8 @@ async function handleApiWithContext(req, res, url) {
        FROM projects
        WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR git_url ILIKE '%' || $1 || '%' OR deploy_target ILIKE '%' || $1 || '%' OR stack::text ILIKE '%' || $1 || '%'
        ORDER BY updated_at DESC
-       LIMIT 200`,
-      [q],
+       LIMIT $2 OFFSET $3`,
+      [q, limit, offset],
     );
     const todos = await query("SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text, pg_column_size(todos)::int AS memory_bytes FROM todos ORDER BY updated_at DESC");
     const relations = await query(
@@ -1271,6 +1372,7 @@ async function handleApiWithContext(req, res, url) {
        ORDER BY e.created_at DESC`,
     );
     return sendJson(res, 200, {
+      page: { limit, offset, count: projects.rows.length },
       projects: projects.rows.map((project) => ({
         ...project,
         todos: todos.rows

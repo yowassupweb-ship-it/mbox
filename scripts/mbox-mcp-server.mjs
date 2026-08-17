@@ -92,9 +92,11 @@ async function pendingMessages() {
 /** Обёртка вокруг ответа инструмента: добавляет непрочитанное человеком. */
 async function withPush(result) {
   const push = await pendingMessages();
-  if (!push) return result;
   const content = result.content || [];
-  return { ...result, content: [...content, { type: "text", text: push }] };
+  const reminder = "MBOX workflow reminder: use get_agent_context before work, claim_task before editing, set_task_status/finish_task when pausing or finishing, and record_memory after meaningful work.";
+  const extra = [{ type: "text", text: reminder }];
+  if (push) extra.push({ type: "text", text: push });
+  return { ...result, content: [...content, ...extra] };
 }
 
 const server = new McpServer({ name: "mbox-prod", version: "1.0.0" });
@@ -129,7 +131,7 @@ server.registerTool(
   "get_agent_context",
   {
     title: "Get MBOX agent context snapshot",
-    description: "Return one project snapshot. Defaults to compact short detail; pass detail=full only when full bodies are needed.",
+    description: "START HERE before work. Return one project snapshot with open todos, recent runs, decisions and compact recall. For vstest pass project='vstest'. Defaults to short detail.",
     inputSchema: { project: z.string().default("MBOX"), detail: z.enum(["short", "full"]).default("short") },
   },
   async ({ project, detail }) => {
@@ -142,15 +144,17 @@ server.registerTool(
   "list_project_context",
   {
     title: "List MBOX project context",
-    description: "Return projects with todos, props and explicit relations. Defaults to short todo note previews; pass detail=full only when editing todo bodies.",
-    inputSchema: { query: z.string().default(""), detail: z.enum(["short", "full"]).default("short") },
+    description: "Paginated project listing. Use get_agent_context for the active project first; use this for scanning projects without blowing the context window.",
+    inputSchema: { query: z.string().default(""), detail: z.enum(["short", "full"]).default("short"), limit: z.number().default(25), offset: z.number().default(0) },
   },
-  async ({ query, detail }) => {
+  async ({ query, detail, limit, offset }) => {
     const params = new URLSearchParams();
     if (query) params.set("q", query);
     params.set("detail", detail);
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
     const data = await mboxFetch(`/api/mbox/projects?${params.toString()}`);
-    return withPush({ content: [{ type: "text", text: JSON.stringify(data.projects, null, 2) }] });
+    return withPush({ content: [{ type: "text", text: JSON.stringify({ page: data.page, projects: data.projects }, null, 2) }] });
   },
 );
 
@@ -186,7 +190,7 @@ server.registerTool(
   "claim_task",
   {
     title: "Claim MBOX task",
-    description: "Claim a todo lease so another agent does not work on it at the same time.",
+    description: "MANDATORY before editing for a todo. Claim a lease so another agent does not work on it at the same time.",
     inputSchema: { id: z.string(), minutes: z.number().default(45) },
   },
   async ({ id, minutes }) => {
@@ -240,7 +244,7 @@ server.registerTool(
   "create_agent_run",
   {
     title: "Create MBOX agent run",
-    description: "Start or record an agent work session.",
+    description: "Record the work session in MBOX. Use when starting substantial work and again when reporting the final result.",
     inputSchema: {
       project: z.string().default("MBOX"),
       todo_id: z.string().optional(),
@@ -291,7 +295,7 @@ server.registerTool(
   "set_task_status",
   {
     title: "Set MBOX task status",
-    description: "Update a todo status and optional note in MBOX.",
+    description: "MANDATORY when pausing, blocking, sending to review or finishing. Update a todo status and note in MBOX.",
     inputSchema: {
       id: z.string(),
       status: z.enum(["open", "next", "doing", "blocked", "review", "done", "archived"]),
@@ -304,6 +308,59 @@ server.registerTool(
       body: JSON.stringify({ status, note }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "finish_task",
+  {
+    title: "Finish MBOX task atomically",
+    description: "Preferred end-of-work tool: records final memory, agent run, inbox report, and sets task status in one call so agents cannot forget MBOX bookkeeping.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      todo_id: z.string(),
+      status: z.enum(["review", "done", "blocked"]).default("review"),
+      note: z.string(),
+      memory_title: z.string(),
+      memory_content: z.string(),
+      touched_files: z.array(z.string()).default([]),
+      inbox_title: z.string().default(""),
+      inbox_body: z.string().default(""),
+    },
+  },
+  async ({ project, todo_id, status, note, memory_title, memory_content, touched_files, inbox_title, inbox_body }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    if (!target) throw new Error(`Project not found: ${project}`);
+    const memory = await mboxFetch("/api/mbox/memories", {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: target.id,
+        todo_id,
+        title: memory_title,
+        content: memory_content,
+        entity_type: "memory",
+        access_level: "agents",
+        tags: ["agent-work", "finish-task"],
+        metadata: { source_agent: agentName, project, project_id: target.id, todo_id, touched_files, recorded_via: "mbox MCP finish_task" },
+      }),
+    });
+    const run = await mboxFetch("/api/mbox/agent/runs", {
+      method: "POST",
+      body: JSON.stringify({ project_id: target.id, todo_id, agent_name: agentName, goal: memory_title, status, touched_files, result: memory_content }),
+    });
+    const todo = await mboxFetch(`/api/mbox/todos/${todo_id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, note }),
+    });
+    let inbox = null;
+    if (inbox_title || inbox_body) {
+      inbox = await mboxFetch("/api/mbox/agent/inbox", {
+        method: "POST",
+        body: JSON.stringify({ project_id: target.id, agent_name: agentName, title: inbox_title || `Finished #${todo_id}`, body: inbox_body || note, item_type: "notice", priority: "normal", requires_human: false }),
+      });
+    }
+    return withPush({ content: [{ type: "text", text: JSON.stringify({ todo, memory: memory.memory, run: run.run, inbox: inbox?.inbox_item || null }, null, 2) }] });
   },
 );
 
@@ -336,7 +393,7 @@ server.registerTool(
   "record_memory",
   {
     title: "Record MBOX memory",
-    description: "Write a durable memory after significant agent work. Include what changed, why it matters, and how future agents should use it.",
+    description: "MANDATORY after every meaningful chunk of work. Write what changed, why it matters, files touched, project_id/todo_id and how future agents should use it.",
     inputSchema: {
       project: z.string().default("MBOX"),
       todo_id: z.string().default(""),
@@ -396,18 +453,43 @@ server.registerTool(
   "search_memory",
   {
     title: "Search MBOX memory",
-    description: "Search memories by local TF-IDF similarity. Use this for semantic memory lookup instead of substring-only filtering.",
+    description: "Compact semantic recall. Returns id, title, one-line summary, score and project; call get_memory for full content.",
     inputSchema: {
       query: z.string(),
       limit: z.number().default(10),
+      project: z.string().default(""),
+      project_id: z.string().default(""),
+      tags: z.array(z.string()).default([]),
+      recency_days: z.number().default(0),
+      min_score: z.number().default(0.05),
+      detail: z.enum(["short", "full"]).default("short"),
     },
   },
-  async ({ query, limit }) => {
+  async ({ query, limit, project, project_id, tags, recency_days, min_score, detail }) => {
     const params = new URLSearchParams();
     params.set("q", query);
     params.set("limit", String(limit));
+    params.set("detail", detail);
+    params.set("min_score", String(min_score));
+    if (project) params.set("project", project);
+    if (project_id) params.set("project_id", project_id);
+    if (tags.length) params.set("tags", tags.join(","));
+    if (recency_days) params.set("recency_days", String(recency_days));
     const data = await mboxFetch(`/api/mbox/memories/search?${params.toString()}`);
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.memories, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "get_memory",
+  {
+    title: "Get full MBOX memory",
+    description: "Return one full memory by id, including content. Use after search_memory compact recall points to a relevant id.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const data = await mboxFetch(`/api/mbox/memories/${encodeURIComponent(id)}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.memory, null, 2) }] });
   },
 );
 
