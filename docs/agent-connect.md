@@ -1,54 +1,50 @@
-# Подключение второго агента (Codex / ChatGPT) к MBOX
+# Agent Connect
 
-MBOX-агенты ходят в прод через один и тот же stdio-MCP-сервер `scripts/mbox-mcp-server.mjs`.
-Чтобы два агента (Claude Code + Codex) работали одновременно, каждый запускает **свой** экземпляр
-сервера с **разным** `MBOX_AGENT_NAME`. Тогда в `agent_presence` появляются две строки, и оба
-видны в хедере и в разделе agents.
+MBOX is the system-level coordination layer for agents. Agents should treat it as the source of
+truth for tasks, memory, decisions, access notes and handoffs.
 
-## Общие переменные окружения
+## Global Rule
 
-| Переменная | Значение |
-| --- | --- |
-| `MBOX_URL` | `https://mbox.shar-os.ru` |
-| `MBOX_USERNAME` | `Admin` |
-| `MBOX_PASSWORD` | `TrapTrap9!` (пароль MBOX-веба, НЕ SSH-пароль сервера) |
-| `MBOX_AGENT_NAME` | уникально на агента: `Claude`, `Codex`, `ChatGPT`… |
-| `MBOX_AGENT_CLIENT` | свободная метка клиента |
+Every agent session starts with MBOX:
 
-Требуется установленный `mbox/node_modules` (`npm install` в `mbox/`).
+1. Read project context with `get_agent_context`.
+2. Claim work with `claim_task`.
+3. Record meaningful progress with `record_memory`.
+4. Update the task with `set_task_status`.
+5. Use `create_inbox_item` for handoffs or human decisions.
 
-## Вариант A — Codex CLI (OpenAI), рекомендуется
+Do not duplicate task lists into repository files when MBOX is available.
 
-Codex CLI поддерживает stdio-MCP через `~/.codex/config.toml`:
+## Secrets
 
-```toml
-[mcp_servers.mbox-prod]
-command = "node"
-args = ["E:/Projects/Mbox/mbox/scripts/mbox-mcp-server.mjs"]
-env = { MBOX_URL = "https://mbox.shar-os.ru", MBOX_USERNAME = "Admin", MBOX_PASSWORD = "TrapTrap9!", MBOX_AGENT_NAME = "Codex", MBOX_AGENT_CLIENT = "Codex CLI" }
-```
+Do not put passwords, API tokens, service-account JSON or SSH credentials into `.mcp.json`,
+repository docs, `.env` files committed to git, or task notes.
 
-Перезапустить Codex → проверить `mbox-prod` в списке MCP → инструменты `describe_structure`,
-`get_next_task`, `claim_task`, `set_task_status`, `create_task`, `record_decision`, `create_inbox_item` и т.д.
+Use MBOX protected secrets. Agents should read only secrets explicitly approved for agents through
+the MBOX access tools.
 
-## Вариант B — ChatGPT (веб/десктоп, custom connector)
+Recommended local setup:
 
-ChatGPT-коннекторы принимают только **удалённый** MCP (HTTP/SSE), а наш сервер — stdio. Нужен
-мост stdio→SSE (напр. `mcp-proxy`) на публично доступном URL под HTTPS. Это отдельная работа;
-для быстрого старта используйте Вариант A.
+- `MBOX_URL`, `MBOX_USERNAME`, `MBOX_PASSWORD`, `MBOX_AGENT_NAME` live in user-level environment
+  variables or another OS-level secret store.
+- `~/.codex/config.toml` and Claude config may contain non-secret MCP command paths and non-secret
+  labels only.
+- Project-level files may strengthen context, but must not be the only source of the MBOX contract.
 
-## Протокол совместной работы (чтобы не топтаться друг по другу)
+## Current Tentacles
 
-1. **Перед работой:** `describe_structure` → `get_agent_context(MBOX)` — увидеть чужие активные
-   runs, inbox и последние decisions.
-2. **Брать задачу через лизинг:** `get_next_task` → `claim_task(id)`. Claim держит задачу 45 минут;
-   если её уже заклеймил другой агент — вернётся 409, берите другую. Свой claim продлевается повторным вызовом.
-3. **Во время работы:** держать `note` задачи актуальной, факты — в `props`; открыть `create_agent_run`
-   с `touched_files`. Присутствие пингуется автоматически (session_start + heartbeat раз в 60с).
-4. **Координация между агентами:** `create_inbox_item` для передачи/вопроса, `record_decision`
-   для общих решений. Другой агент читает это через `get_agent_context`.
-5. **После работы:** `set_task_status` (`review`/`done`); если работали не от существующей todo —
-   завести её постфактум или записать decision.
+- MBOX core: `scripts/mbox-mcp-server.mjs`
+- Google Docs/Drive: `scripts/gdocs-mcp-server.mjs`
+- Weavy/Figma Weave image work: `scripts/weavy-mcp-server.mjs`
 
-Хедер MBOX теперь показывает реальный ростер (active/idle/в работе) — по нему видно, кто на связи
-и кто что делает прямо сейчас.
+## Planned Tentacles
+
+- Figma: inspect files, frames, comments, design tokens and selected assets through an approved
+  Figma token or installed connector.
+- VS Code/workspace: expose active repo context, open files, diagnostics and commands through local
+  MCP or editor automation, with MBOX tasks as the source of truth.
+- Browser/product surfaces: use task-specific connectors only when credentials are stored in MBOX
+  protected secrets and scoped to the least privilege needed.
+
+The operating model is one hub, many tentacles: MBOX keeps the durable state, and tool-specific MCP
+servers do the narrow external action.

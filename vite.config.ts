@@ -1346,11 +1346,48 @@ function mboxDevApi() {
               return sendJson(res, 201, { project: result.rows[0] });
             }
             const projects = await queryPostgres(
-              `SELECT id::text, name, status, stack, git_url, deploy_target, deploy_provider, props, color, access_level,
-                      pg_column_size(projects)::int AS memory_bytes
-               FROM projects
-               WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR git_url ILIKE '%' || $1 || '%' OR deploy_target ILIKE '%' || $1 || '%' OR stack::text ILIKE '%' || $1 || '%'
-               ORDER BY updated_at DESC
+              `SELECT p.id::text, p.name, p.status, p.stack, p.git_url, p.deploy_target, p.deploy_provider, p.props, p.color, p.access_level,
+                      pg_column_size(p)::int AS memory_bytes
+               FROM projects p
+               WHERE $1 = ''
+                  OR p.name ILIKE '%' || $1 || '%'
+                  OR p.status ILIKE '%' || $1 || '%'
+                  OR p.git_url ILIKE '%' || $1 || '%'
+                  OR p.deploy_target ILIKE '%' || $1 || '%'
+                  OR p.deploy_provider ILIKE '%' || $1 || '%'
+                  OR p.stack::text ILIKE '%' || $1 || '%'
+                  OR p.props::text ILIKE '%' || $1 || '%'
+                  OR EXISTS (
+                    SELECT 1 FROM todos t
+                    WHERE t.project_id = p.id
+                      AND (t.title ILIKE '%' || $1 || '%' OR t.note ILIKE '%' || $1 || '%' OR t.status ILIKE '%' || $1 || '%' OR t.priority ILIKE '%' || $1 || '%' OR t.props::text ILIKE '%' || $1 || '%')
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM memories m
+                    WHERE m.project_id = p.id
+                      AND (m.title ILIKE '%' || $1 || '%' OR m.content ILIKE '%' || $1 || '%' OR m.tags::text ILIKE '%' || $1 || '%' OR m.metadata::text ILIKE '%' || $1 || '%')
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM decision_log d
+                    WHERE d.project_id = p.id
+                      AND (d.title ILIKE '%' || $1 || '%' OR d.decision ILIKE '%' || $1 || '%' OR d.rationale ILIKE '%' || $1 || '%' OR d.impact ILIKE '%' || $1 || '%')
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM folders f
+                    WHERE f.project_id = p.id
+                      AND f.name ILIKE '%' || $1 || '%'
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM protected_secrets s
+                    WHERE s.project_id = p.id
+                      AND (s.title ILIKE '%' || $1 || '%' OR s.login ILIKE '%' || $1 || '%' OR s.url ILIKE '%' || $1 || '%' OR s.agent_share_state ILIKE '%' || $1 || '%')
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM graph_edges e
+                    WHERE ((e.from_entity = 'project' AND e.from_id = p.id) OR (e.to_entity = 'project' AND e.to_id = p.id))
+                      AND (e.edge_type ILIKE '%' || $1 || '%' OR e.title ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.owner ILIKE '%' || $1 || '%' OR e.group_entity ILIKE '%' || $1 || '%')
+                  )
+               ORDER BY p.updated_at DESC
                LIMIT $2 OFFSET $3`,
               [q, limit, offset],
             );

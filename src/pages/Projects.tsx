@@ -13,6 +13,39 @@ type View = "todo" | ProjectEntityKind | `folder:${string}`;
 
 const entityOrder: ProjectEntityKind[] = ["git", "stack", "properties", "relations", "philosophy", "deploy", "access"];
 
+function searchValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return value.map(searchValue).join(" ");
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).map(searchValue).join(" ");
+  return String(value);
+}
+
+function projectMemoryMatches(memory: Memory, project: Project, todoIds: Set<string>) {
+  const metadataProject = typeof memory.metadata?.project_id === "string" ? memory.metadata.project_id : "";
+  const metadataTodo = typeof memory.metadata?.todo_id === "string" ? memory.metadata.todo_id : "";
+  return memory.project_id === project.id || metadataProject === project.id || (!!metadataTodo && todoIds.has(metadataTodo));
+}
+
+function projectSearchText(project: Project, memories: Memory[], decisions: DecisionEntry[]) {
+  const todoIds = new Set(project.todos.map((todo) => todo.id));
+  const projectMemories = memories.filter((memory) => projectMemoryMatches(memory, project, todoIds));
+  const projectDecisions = decisions.filter((decision) => decision.project_id === project.id);
+  return [
+    project.name,
+    project.status,
+    project.git_url,
+    project.deploy_provider,
+    project.deploy_target,
+    project.access_level,
+    project.stack.join(" "),
+    searchValue(project.props),
+    project.relations.map(searchValue).join(" "),
+    project.todos.map((todo) => [todo.title, todo.note, todo.status, todo.priority, searchValue(todo.props)].join(" ")).join(" "),
+    projectMemories.map((memory) => [memory.title, memory.content, memory.entity_type, memory.tags.join(" "), searchValue(memory.metadata)].join(" ")).join(" "),
+    projectDecisions.map((decision) => [decision.title, decision.decision, decision.rationale, decision.impact, decision.actor].join(" ")).join(" "),
+  ].join(" ").toLowerCase();
+}
+
 /** Ключ маршрута этой страницы: <projectId>:<view>. Держит выбор в URL, как и раньше делало дерево. */
 function parseRoute(key: string): { projectId?: string; view: View } {
   const [projectId, view, folderId] = key.split(":");
@@ -36,9 +69,14 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
 }) {
   const route = parseRoute(selectedNodeKey);
   const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return needle ? projects.filter((project) => project.name.toLowerCase().includes(needle)) : projects;
-  }, [projects, query]);
+    const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return tokens.length
+      ? projects.filter((project) => {
+        const haystack = projectSearchText(project, memories, decisions);
+        return tokens.every((token) => haystack.includes(token));
+      })
+      : projects;
+  }, [projects, query, memories, decisions]);
 
   const [projectId, setProjectId] = useState(route.projectId || visible[0]?.id);
   const view = route.view;
@@ -181,12 +219,6 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
       </section>
     </div>
   );
-}
-
-function projectMemoryMatches(memory: Memory, project: Project, todoIds: Set<string>) {
-  const metadataProject = typeof memory.metadata?.project_id === "string" ? memory.metadata.project_id : "";
-  const metadataTodo = typeof memory.metadata?.todo_id === "string" ? memory.metadata.todo_id : "";
-  return memory.project_id === project.id || metadataProject === project.id || (!!metadataTodo && todoIds.has(metadataTodo));
 }
 
 function previewText(value: string, limit = 170) {
