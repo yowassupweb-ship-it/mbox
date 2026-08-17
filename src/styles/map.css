@@ -299,6 +299,11 @@
   .map { height: calc(100svh - 210px); }
   .map-node { width: 168px; }
   .map-node.kind-todo { width: 168px; }
+  .map-inspector {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    max-height: min(46svh, 360px);
+    overflow: auto;
+  }
 }
 
 /* Проекты-хабы светятся своим цветом — сразу видно их среди задач-спутников. */

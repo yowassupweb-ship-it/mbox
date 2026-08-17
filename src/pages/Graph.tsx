@@ -345,7 +345,8 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     const maxY = Math.max(...ys) + 64;
     const width = maxX - minX + 220;
     const height = maxY - minY + 200;
-    const scale = Math.min(1.2, Math.max(0.4, Math.min(box.width / width, box.height / height)));
+    const minScale = box.width < 560 ? 0.18 : 0.4;
+    const scale = Math.min(1.2, Math.max(minScale, Math.min(box.width / width, box.height / height)));
     setView({ scale, x: box.width / 2 - ((minX + maxX) / 2) * scale, y: box.height / 2 - ((minY + maxY) / 2) * scale });
   }
 
