@@ -975,21 +975,31 @@ async function replyAsJarvis(item) {
       + "что-то другое, для чего нет функции — честно скажи, что не умеешь этого делать, а не притворяйся, что "
       + "сделал. Известные проекты: "
       + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
-    const message = await groqComplete([
+    // Однократный запрос с несколькими действиями ("удали Тест и Тест 2") ненадёжен — модель
+    // часто возвращает только один tool_call за раз, даже когда попросили вызывать функцию на
+    // каждое действие. Вместо надежды на параллельные tool_calls гоняем обычный agentic-цикл:
+    // выполняем то, что модель попросила, отдаём результат обратно и спрашиваем снова, пока она
+    // не перестанет вызывать функции (или не упрёмся в потолок шагов).
+    const messages = [
       { role: "system", content: systemPrompt },
       { role: "user", content: item.body || item.title },
-    ], JARVIS_TOOLS);
-
-    let reply;
-    if (message.tool_calls?.length) {
-      const results = [];
-      for (const call of message.tool_calls) {
-        results.push(await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList));
+    ];
+    const actionLog = [];
+    let reply = "";
+    for (let step = 0; step < 5; step += 1) {
+      const message = await groqComplete(messages, JARVIS_TOOLS);
+      if (!message.tool_calls?.length) {
+        reply = message.content || "";
+        break;
       }
-      reply = results.join("; ");
-    } else {
-      reply = message.content || "";
+      messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
+      for (const call of message.tool_calls) {
+        const result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+        actionLog.push(result);
+        messages.push({ role: "tool", tool_call_id: call.id, content: result });
+      }
     }
+    if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
 
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)

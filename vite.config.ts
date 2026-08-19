@@ -355,7 +355,12 @@ const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-type GroqMessage = { role: string; content: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> };
+type GroqMessage = {
+  role: string;
+  content: string | null;
+  tool_call_id?: string;
+  tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
+};
 
 async function groqComplete(messages: GroqMessage[], tools?: unknown[]): Promise<GroqMessage> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -594,21 +599,29 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "сделал. Известные проекты: "
         + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
 
-      const message = await groqComplete([
+      // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — см. комментарий
+      // в server/mbox-server.mjs. Модель часто выполняет только первое из нескольких запрошенных
+      // действий за раз; цикл даёт ей шанс продолжить следующим шагом.
+      const messages: GroqMessage[] = [
         { role: "system", content: systemPrompt },
         { role: "user", content: String(item.body || item.title || "") },
-      ], JARVIS_TOOLS);
-
-      let reply: string;
-      if (message.tool_calls?.length) {
-        const results: string[] = [];
-        for (const call of message.tool_calls) {
-          results.push(await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList));
+      ];
+      const actionLog: string[] = [];
+      let reply = "";
+      for (let step = 0; step < 5; step += 1) {
+        const message = await groqComplete(messages, JARVIS_TOOLS);
+        if (!message.tool_calls?.length) {
+          reply = message.content || "";
+          break;
         }
-        reply = results.join("; ");
-      } else {
-        reply = message.content || "";
+        messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
+        for (const call of message.tool_calls) {
+          const result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+          actionLog.push(result);
+          messages.push({ role: "tool", tool_call_id: call.id, content: result });
+        }
       }
+      if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
 
       await client.query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)

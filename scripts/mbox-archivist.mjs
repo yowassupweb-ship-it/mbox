@@ -326,31 +326,44 @@ async function respondToRequests() {
   let answered = 0;
   for (const item of mine) {
     try {
-      const message = await groqChat([
-        {
-          role: "system",
-          content: `Ты Джарвис — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
-            + `Ты работаешь не как обычный чат-агент в сессии, а как cron-задача: просыпаешься по таймеру `
-            + `(сейчас — раз в ${TIMER_MINUTES_HINT} минуту), проверяешь новые сообщения и снова засыпаешь — `
-            + `отсюда задержка ответа, и это нормально, а не баг. Модель, на которой ты работаешь — ${groqModel} `
-            + `через Groq API (бесплатный тир). Если спросят, какая ты модель — отвечай честно этим названием, `
-            + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
-            + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
-            + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
-            + "record_memory (записать долгоживущий факт — предпочтение пользователя, удачный/неудачный "
-            + "подход, важное решение). Если просят одно из этого — вызови функцию, не пиши текстом, что "
-            + "сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
-            + "проекта) — вызови функцию для КАЖДОГО действия по отдельности в этом же ответе, не только для "
-            + "первого. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
-            + "делать, а не притворяйся, что сделал. Известные "
-            + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`,
-        },
-        { role: "user", content: item.body || item.title },
-      ], { tools: JARVIS_TOOLS });
+      const systemPrompt = `Ты Джарвис — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+        + `Ты работаешь не как обычный чат-агент в сессии, а как cron-задача: просыпаешься по таймеру `
+        + `(сейчас — раз в ${TIMER_MINUTES_HINT} минуту), проверяешь новые сообщения и снова засыпаешь — `
+        + `отсюда задержка ответа, и это нормально, а не баг. Модель, на которой ты работаешь — ${groqModel} `
+        + `через Groq API (бесплатный тир). Если спросят, какая ты модель — отвечай честно этим названием, `
+        + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
+        + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
+        + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
+        + "record_memory (записать долгоживущий факт — предпочтение пользователя, удачный/неудачный "
+        + "подход, важное решение). Если просят одно из этого — вызови функцию, не пиши текстом, что "
+        + "сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
+        + "проекта) — вызови функцию для КАЖДОГО действия по отдельности в этом же ответе, не только для "
+        + "первого. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
+        + "делать, а не притворяйся, что сделал. Известные "
+        + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
 
-      const reply = message.tool_calls?.length
-        ? (await Promise.all(message.tool_calls.map((call) => runJarvisTool(call.function?.name, call.function?.arguments, projectList)))).join("; ")
-        : (message.content || "");
+      // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — модель часто
+      // выполняет только первое из нескольких запрошенных действий; цикл даёт ей шанс продолжить.
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: item.body || item.title },
+      ];
+      const actionLog = [];
+      let reply = "";
+      for (let step = 0; step < 5; step += 1) {
+        const message = await groqChat(messages, { tools: JARVIS_TOOLS });
+        if (!message.tool_calls?.length) {
+          reply = message.content || "";
+          break;
+        }
+        messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
+        for (const call of message.tool_calls) {
+          const result = await runJarvisTool(call.function?.name, call.function?.arguments, projectList);
+          actionLog.push(result);
+          messages.push({ role: "tool", tool_call_id: call.id, content: result });
+        }
+      }
+      if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
 
       await mboxFetch("/api/mbox/agent/inbox", {
         method: "POST",
