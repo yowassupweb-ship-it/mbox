@@ -4,6 +4,7 @@ import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
 import { projectMemoryMatches } from "../lib/memory";
 import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
+import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, Memory, Project } from "../types";
 import { Button, EmptyState, ErrorText, Panel, SaveButton, Select, type SaveState, TableWrap, TextArea, TextInput } from "../ui";
 
@@ -71,6 +72,34 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
 
   const count = visibleMemories.length;
 
+  const orderedProjects = useMemo(
+    () => [...projects].sort((a, b) => projectPosition(a, projects.indexOf(a)) - projectPosition(b, projects.indexOf(b))),
+    [projects],
+  );
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+
+  async function reorderProject(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    const rest = orderedProjects.filter((item) => item.id !== draggedId);
+    const targetIndex = rest.findIndex((item) => item.id === targetId);
+    if (targetIndex === -1) return;
+    const before = rest[targetIndex - 1];
+    const after = rest[targetIndex];
+    const newPosition = positionBetween(
+      before ? projectPosition(before, projects.indexOf(before)) : undefined,
+      after ? projectPosition(after, projects.indexOf(after)) : undefined,
+    );
+    const dragged = orderedProjects.find((item) => item.id === draggedId);
+    if (!dragged) return;
+    await fetchJson(`/api/mbox/projects/${draggedId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ props: { ...dragged.props, position: newPosition } }),
+    });
+    onSaved();
+  }
+
   return (
     <>
       {projects.length > 0 && (
@@ -84,14 +113,29 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
             <span className="project-pill-name">Все проекты</span>
             <span className="project-pill-count">{memories.length}</span>
           </button>
-          {projects.map((project) => (
+          {orderedProjects.map((project) => (
             <button
               key={project.id}
               role="tab"
               aria-selected={projectId === project.id}
-              className={projectId === project.id ? "project-pill is-active" : "project-pill"}
+              className={[
+                projectId === project.id ? "project-pill is-active" : "project-pill",
+                draggedProjectId === project.id ? "is-dragging" : "",
+                dropTargetId === project.id && draggedProjectId && draggedProjectId !== project.id ? "is-drop-target" : "",
+              ].filter(Boolean).join(" ")}
               style={{ ["--project-color" as string]: project.color || "#2c2c2e" }}
               onClick={() => setProjectId(project.id)}
+              draggable
+              onDragStart={(event) => { setDraggedProjectId(project.id); event.dataTransfer.setData("text/plain", project.id); event.dataTransfer.effectAllowed = "move"; }}
+              onDragOver={(event) => { if (draggedProjectId && draggedProjectId !== project.id) { event.preventDefault(); setDropTargetId(project.id); } }}
+              onDragLeave={() => setDropTargetId((current) => (current === project.id ? null : current))}
+              onDrop={(event) => {
+                event.preventDefault();
+                const draggedId = event.dataTransfer.getData("text/plain") || draggedProjectId;
+                setDropTargetId(null);
+                if (draggedId) reorderProject(draggedId, project.id);
+              }}
+              onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
             >
               <span className="project-pill-dot" />
               <span className="project-pill-name">{project.name}</span>

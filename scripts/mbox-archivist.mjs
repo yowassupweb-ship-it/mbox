@@ -19,7 +19,7 @@ const username = process.env.MBOX_USERNAME || "Admin";
 const password = process.env.MBOX_PASSWORD;
 const agentName = process.env.MBOX_AGENT_NAME || "Джарвис";
 const groqKey = process.env.GROQ_API_KEY;
-const groqModel = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
 
 if (!baseUrl || !password) {

@@ -21,9 +21,12 @@
 
 .project-pill {
   flex: none;
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: var(--space-2);
+  column-gap: var(--space-2);
+  row-gap: 2px;
   padding: var(--space-2) var(--space-4);
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-pill);
@@ -31,17 +34,34 @@
   color: var(--text-muted);
   font-size: var(--text-md);
   font-weight: var(--weight-medium);
+  cursor: grab;
   transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
 }
 
+.project-pill.is-dragging {
+  opacity: .4;
+}
+
+.project-pill.is-drop-target {
+  border-color: var(--accent-color);
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
 .project-pill-dot {
+  grid-row: 1 / 3;
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: var(--project-color, #2c2c2e);
 }
 
+.project-pill-name {
+  grid-column: 2;
+}
+
 .project-pill-count {
+  grid-column: 2;
+  justify-self: start;
   min-width: 22px;
   padding: 1px 7px;
   border-radius: var(--radius-pill);

@@ -54,6 +54,12 @@ export function positionBetween(before?: number, after?: number) {
   return (before + after) / 2;
 }
 
+/** Тот же приём, что и todoPosition, но для плиток проектов в рядах-фильтрах. */
+export function projectPosition(project: Project, fallbackIndex: number) {
+  const raw = Number((project.props as Record<string, unknown> | null)?.position);
+  return Number.isFinite(raw) ? raw : (fallbackIndex + 1) * TODO_POSITION_GAP;
+}
+
 export function parseProps(value: string) {
   return Object.fromEntries(
     value

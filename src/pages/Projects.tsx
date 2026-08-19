@@ -7,6 +7,7 @@ import { formatBytes } from "../lib/format";
 import { fetchJson } from "../lib/api";
 import { projectMemoryMatches } from "../lib/memory";
 import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
+import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
 
@@ -67,13 +68,38 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   const route = parseRoute(selectedNodeKey);
   const visible = useMemo(() => {
     const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    return tokens.length
+    const filtered = tokens.length
       ? projects.filter((project) => {
         const haystack = projectSearchText(project, memories, decisions);
         return tokens.every((token) => haystack.includes(token));
       })
       : projects;
+    return [...filtered].sort((a, b) => projectPosition(a, projects.indexOf(a)) - projectPosition(b, projects.indexOf(b)));
   }, [projects, query, memories, decisions]);
+
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+
+  async function reorderProject(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    const rest = visible.filter((item) => item.id !== draggedId);
+    const targetIndex = rest.findIndex((item) => item.id === targetId);
+    if (targetIndex === -1) return;
+    const before = rest[targetIndex - 1];
+    const after = rest[targetIndex];
+    const newPosition = positionBetween(
+      before ? projectPosition(before, projects.indexOf(before)) : undefined,
+      after ? projectPosition(after, projects.indexOf(after)) : undefined,
+    );
+    const dragged = visible.find((item) => item.id === draggedId);
+    if (!dragged) return;
+    await fetchJson(`/api/mbox/projects/${draggedId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ props: { ...dragged.props, position: newPosition } }),
+    });
+    onSaved();
+  }
 
   const [projectId, setProjectId] = useState(route.projectId || visible[0]?.id);
   const view = route.view;
@@ -122,10 +148,25 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
             key={item.id}
             role="tab"
             aria-selected={item.id === project.id}
-            className={item.id === project.id ? "project-pill is-active" : "project-pill"}
+            className={[
+              item.id === project.id ? "project-pill is-active" : "project-pill",
+              draggedProjectId === item.id ? "is-dragging" : "",
+              dropTargetId === item.id && draggedProjectId && draggedProjectId !== item.id ? "is-drop-target" : "",
+            ].filter(Boolean).join(" ")}
             style={{ ["--project-color" as string]: item.color || "#2c2c2e" }}
             onClick={() => go(item.id, view)}
             onContextMenu={(event) => { if (onProjectContext) { event.preventDefault(); onProjectContext(item, { x: event.clientX, y: event.clientY }); } }}
+            draggable
+            onDragStart={(event) => { setDraggedProjectId(item.id); event.dataTransfer.setData("text/plain", item.id); event.dataTransfer.effectAllowed = "move"; }}
+            onDragOver={(event) => { if (draggedProjectId && draggedProjectId !== item.id) { event.preventDefault(); setDropTargetId(item.id); } }}
+            onDragLeave={() => setDropTargetId((current) => (current === item.id ? null : current))}
+            onDrop={(event) => {
+              event.preventDefault();
+              const draggedId = event.dataTransfer.getData("text/plain") || draggedProjectId;
+              setDropTargetId(null);
+              if (draggedId) reorderProject(draggedId, item.id);
+            }}
+            onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
           >
             <span className="project-pill-dot" />
             <span className="project-pill-name">{item.name}</span>
