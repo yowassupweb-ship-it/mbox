@@ -605,6 +605,65 @@
 .git-repo { font-family: "SF Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
 .git-host { color: var(--text-muted); font-size: var(--text-sm); }
 
+/* Структура репозитория — публикует scripts/publish-repo-structure.mjs (или set_repo_structure
+   у локального агента), только пути файлов, без содержимого. Дерево через <details>/<summary>:
+   бесплатная клавиатурная доступность и раскрытие без лишнего состояния в React. */
+.repo-tree {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: #0c0c0e;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+}
+
+.repo-tree-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  font-weight: var(--weight-bold);
+  color: var(--text-main);
+}
+
+.repo-tree-head .muted { font-weight: var(--weight-normal); font-size: var(--text-xs); }
+
+.repo-tree-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.repo-tree > .repo-tree-list { padding-left: 0; }
+
+.repo-tree-list summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+}
+.repo-tree-list summary::-webkit-details-marker { display: none; }
+.repo-tree-list summary svg { color: var(--accent-color); flex: none; }
+.repo-tree-list summary:hover { color: var(--text-main); }
+
+.repo-tree-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.repo-tree-file svg { flex: none; }
+
 /* Деплой */
 
 .deploy-steps { display: grid; gap: var(--space-1); width: min(100%, 560px); }

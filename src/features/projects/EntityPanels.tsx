@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Check, ExternalLink, Pencil, Plus, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ExternalLink, File, Folder, Pencil, Plus, X } from "lucide-react";
 import { saveEntity } from "../../lib/api";
 import { projectMemoryMatches } from "../../lib/memory";
 import type { Memory, Project } from "../../types";
@@ -96,6 +96,63 @@ export function StackPanel({ project, onSaved }: { project: Project; onSaved: ()
   );
 }
 
+type RepoStructure = { paths: string[]; file_count: number; updated_at: string; updated_by: string };
+
+type TreeNode = { name: string; isFile: boolean; children: Map<string, TreeNode> };
+
+function buildRepoTree(paths: string[]): TreeNode {
+  const root: TreeNode = { name: "", isFile: false, children: new Map() };
+  for (const path of paths) {
+    const parts = path.split("/").filter(Boolean);
+    let node = root;
+    parts.forEach((part, index) => {
+      const isFile = index === parts.length - 1;
+      let next = node.children.get(part);
+      if (!next) {
+        next = { name: part, isFile, children: new Map() };
+        node.children.set(part, next);
+      }
+      node = next;
+    });
+  }
+  return root;
+}
+
+/** Папки первого уровня раскрыты по умолчанию — остальное сворачивается: у репозитория MBOX
+ * 85 файлов, полностью развёрнутое дерево длиннее экрана. */
+function RepoTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
+  const entries = [...node.children.values()].sort((a, b) => (a.isFile === b.isFile ? a.name.localeCompare(b.name) : a.isFile ? 1 : -1));
+  return (
+    <ul className="repo-tree-list">
+      {entries.map((child) => (
+        <li key={child.name}>
+          {child.isFile ? (
+            <span className="repo-tree-file"><File size={13} />{child.name}</span>
+          ) : (
+            <details open={depth < 1}>
+              <summary><Folder size={13} />{child.name}</summary>
+              <RepoTreeNode node={child} depth={depth + 1} />
+            </details>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RepoTreePanel({ structure }: { structure: RepoStructure }) {
+  const tree = useMemo(() => buildRepoTree(structure.paths), [structure.paths]);
+  return (
+    <div className="repo-tree">
+      <div className="repo-tree-head">
+        <span>Структура репозитория</span>
+        <span className="muted">{structure.file_count} файлов · опубликовал {structure.updated_by}</span>
+      </div>
+      <RepoTreeNode node={tree} depth={0} />
+    </div>
+  );
+}
+
 export function GitPanel({ project, onSaved }: { project: Project; onSaved: () => void }) {
   const [editing, setEditing] = useState(!project.git_url);
   const [url, setUrl] = useState(project.git_url || "");
@@ -107,6 +164,9 @@ export function GitPanel({ project, onSaved }: { project: Project; onSaved: () =
   }, [project.id, project.git_url]);
 
   const href = normalizeGitUrl(project.git_url || "");
+  // Публикует scripts/publish-repo-structure.mjs (или MCP-инструмент set_repo_structure) —
+  // только пути, без содержимого файлов, специально для find_file у Джарвиса.
+  const repoStructure = (project.props as unknown as { repo_structure?: RepoStructure } | undefined)?.repo_structure;
 
   return (
     <div className="entity-panel git-panel">
@@ -130,6 +190,10 @@ export function GitPanel({ project, onSaved }: { project: Project; onSaved: () =
           <SaveButton state={state} idleLabel="Сохранить Git" onClick={async () => { if (await save({ git_url: url })) setEditing(false); }} />
         </>
       ) : <Button variant="ghost" icon={Pencil} onClick={() => setEditing(true)}>Изменить адрес</Button>}
+
+      {repoStructure && Array.isArray(repoStructure.paths) && repoStructure.paths.length > 0 && (
+        <RepoTreePanel structure={repoStructure} />
+      )}
     </div>
   );
 }
