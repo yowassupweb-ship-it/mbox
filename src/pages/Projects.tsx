@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { BookOpen, Flag, FolderPlus, Folder, ListTodo, Trash2 } from "lucide-react";
+import { FolderPlus, Folder, ListTodo, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { FolderBoard } from "../features/projects/FolderBoard";
 import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
 import { formatBytes } from "../lib/format";
 import { fetchJson } from "../lib/api";
+import { projectMemoryMatches } from "../lib/memory";
 import type { DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
 
@@ -18,12 +19,6 @@ function searchValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(searchValue).join(" ");
   if (typeof value === "object") return Object.values(value as Record<string, unknown>).map(searchValue).join(" ");
   return String(value);
-}
-
-function projectMemoryMatches(memory: Memory, project: Project, todoIds: Set<string>) {
-  const metadataProject = typeof memory.metadata?.project_id === "string" ? memory.metadata.project_id : "";
-  const metadataTodo = typeof memory.metadata?.todo_id === "string" ? memory.metadata.todo_id : "";
-  return memory.project_id === project.id || metadataProject === project.id || (!!metadataTodo && todoIds.has(metadataTodo));
 }
 
 function projectSearchText(project: Project, memories: Memory[], decisions: DecisionEntry[]) {
@@ -203,87 +198,18 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
             </button>
           )}
         </header>
-        <div className="project-workspace">
-          <div className="project-workspace-main">
-            {view === "todo" ? (
-              <>
-                {renderTodoForm(project)}
-                <TodoCardGrid project={project} onSaved={onSaved} />
-              </>
-            ) : openFolder ? (
-              <FolderBoard folder={openFolder} project={project} memories={memories} onSaved={onSaved} />
-            ) : renderEntity(project, view as ProjectEntityKind)}
-          </div>
-          <ProjectMemoryPanel project={project} memories={memories} decisions={decisions} />
+        <div className="project-workspace-main">
+          {view === "todo" ? (
+            <>
+              {renderTodoForm(project)}
+              <TodoCardGrid project={project} onSaved={onSaved} />
+            </>
+          ) : openFolder ? (
+            <FolderBoard folder={openFolder} project={project} memories={memories} onSaved={onSaved} />
+          ) : renderEntity(project, view as ProjectEntityKind)}
         </div>
       </section>
     </div>
-  );
-}
-
-function previewText(value: string, limit = 170) {
-  const text = value.replace(/\s+/g, " ").trim();
-  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
-}
-
-function shortDate(value: string) {
-  if (!value) return "";
-  return new Date(value).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
-}
-
-function ProjectMemoryPanel({ project, memories, decisions }: { project: Project; memories: Memory[]; decisions: DecisionEntry[] }) {
-  const todoIds = useMemo(() => new Set(project.todos.map((todo) => todo.id)), [project.todos]);
-  const projectMemories = useMemo(
-    () => memories
-      .filter((memory) => projectMemoryMatches(memory, project, todoIds))
-      .sort((a, b) => +new Date(b.updated_at || b.created_at) - +new Date(a.updated_at || a.created_at))
-      .slice(0, 5),
-    [memories, project, todoIds],
-  );
-  const projectDecisions = useMemo(
-    () => decisions
-      .filter((decision) => decision.project_id === project.id)
-      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
-      .slice(0, 4),
-    [decisions, project.id],
-  );
-
-  return (
-    <aside className="project-memory-panel" aria-label="Память проекта">
-      <header>
-        <BookOpen size={16} />
-        <strong>Память проекта</strong>
-        <span>{projectMemories.length + projectDecisions.length}</span>
-      </header>
-
-      <div className="project-memory-group">
-        <div className="project-memory-group-title">
-          <BookOpen size={14} />
-          <span>Факты</span>
-        </div>
-        {projectMemories.length ? projectMemories.map((memory) => (
-          <article className="project-memory-item" key={memory.id}>
-            <strong>{memory.title}</strong>
-            <p>{previewText(memory.content)}</p>
-            <small>{memory.entity_type} · {shortDate(memory.updated_at || memory.created_at)}</small>
-          </article>
-        )) : <p className="project-memory-empty">Связанных записей пока нет</p>}
-      </div>
-
-      <div className="project-memory-group">
-        <div className="project-memory-group-title">
-          <Flag size={14} />
-          <span>Решения</span>
-        </div>
-        {projectDecisions.length ? projectDecisions.map((decision) => (
-          <article className="project-memory-item" key={decision.id}>
-            <strong>{decision.title}</strong>
-            <p>{previewText(decision.decision || decision.impact || decision.rationale)}</p>
-            <small>{decision.actor} · {shortDate(decision.created_at)}</small>
-          </article>
-        )) : <p className="project-memory-empty">Решений по проекту пока нет</p>}
-      </div>
-    </aside>
   );
 }
 

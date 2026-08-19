@@ -1,8 +1,9 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { BookOpen, Link2, Pencil, Plus, X } from "lucide-react";
+import { BookOpen, Flag, Link2, Pencil, Plus, X } from "lucide-react";
 import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
-import type { Memory } from "../types";
+import { projectMemoryMatches } from "../lib/memory";
+import type { DecisionEntry, Memory, Project } from "../types";
 import { Button, EmptyState, ErrorText, Panel, SaveButton, Select, type SaveState, TableWrap, TextArea, TextInput } from "../ui";
 
 type MemoryLink = {
@@ -17,10 +18,10 @@ type MemoryLink = {
 
 type LinkView = { otherId: string; otherTitle: string; type: string; dir: "out" | "in" };
 
-export function MemoryBoard({ memories, onSaved }: { memories: Memory[]; onSaved: () => void }) {
-  const count = memories.length;
+export function MemoryBoard({ memories, projects, decisions, onSaved }: { memories: Memory[]; projects: Project[]; decisions: DecisionEntry[]; onSaved: () => void }) {
   const [links, setLinks] = useState<MemoryLink[]>([]);
   const [editing, setEditing] = useState<Memory | null>(null);
+  const [projectId, setProjectId] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -43,20 +44,96 @@ export function MemoryBoard({ memories, onSaved }: { memories: Memory[]; onSaved
   }, [links]);
 
   const linkedCount = linksByMemory.size;
+  const activeProject = projects.find((item) => item.id === projectId);
+
+  // Своя память — это память конкретного проекта: напрямую, через metadata или через его todo.
+  // «Все» снимает фильтр и показывает весь пул, как раньше.
+  const visibleMemories = useMemo(() => {
+    if (!activeProject) return memories;
+    const todoIds = new Set(activeProject.todos.map((todo) => todo.id));
+    return memories.filter((memory) => projectMemoryMatches(memory, activeProject, todoIds));
+  }, [memories, activeProject]);
+
+  const visibleDecisions = useMemo(
+    () => activeProject ? decisions.filter((decision) => decision.project_id === activeProject.id) : [],
+    [decisions, activeProject],
+  );
+
+  const count = visibleMemories.length;
 
   return (
-    <Panel
-      title="Память"
-      icon={BookOpen}
-      actions={
-        <span className="muted">
-          {count} {plural(count, "запись", "записи", "записей")}
-          {links.length > 0 && <> · {links.length} {plural(links.length, "связь", "связи", "связей")} у {linkedCount} {plural(linkedCount, "записи", "записей", "записей")}</>}
-        </span>
-      }
-    >
-      <MemoryEditor editing={editing} onSaved={onSaved} onDone={() => setEditing(null)} />
-      <MemoryTable memories={memories} linksByMemory={linksByMemory} onEdit={setEditing} editingId={editing?.id} />
+    <>
+      {projects.length > 0 && (
+        <div className="project-rail" role="tablist" aria-label="Фильтр по проекту">
+          <button
+            role="tab"
+            aria-selected={!projectId}
+            className={!projectId ? "project-pill is-active" : "project-pill"}
+            onClick={() => setProjectId("")}
+          >
+            <span className="project-pill-name">Все проекты</span>
+            <span className="project-pill-count">{memories.length}</span>
+          </button>
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              role="tab"
+              aria-selected={projectId === project.id}
+              className={projectId === project.id ? "project-pill is-active" : "project-pill"}
+              style={{ ["--project-color" as string]: project.color || "#2c2c2e" }}
+              onClick={() => setProjectId(project.id)}
+            >
+              <span className="project-pill-dot" />
+              <span className="project-pill-name">{project.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeProject && (
+        <ProjectDecisions project={activeProject} decisions={visibleDecisions} />
+      )}
+
+      <Panel
+        title="Память"
+        icon={BookOpen}
+        actions={
+          <span className="muted">
+            {count} {plural(count, "запись", "записи", "записей")}
+            {links.length > 0 && <> · {links.length} {plural(links.length, "связь", "связи", "связей")} у {linkedCount} {plural(linkedCount, "записи", "записей", "записей")}</>}
+          </span>
+        }
+      >
+        <MemoryEditor editing={editing} projects={projects} onSaved={onSaved} onDone={() => setEditing(null)} presetProjectId={projectId} />
+        <MemoryTable memories={visibleMemories} linksByMemory={linksByMemory} onEdit={setEditing} editingId={editing?.id} />
+      </Panel>
+    </>
+  );
+}
+
+function previewText(value: string, limit = 220) {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
+}
+
+function shortDate(value: string) {
+  if (!value) return "";
+  return new Date(value).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+/** Решения проекта — то же, что раньше висело в панели сбоку от Todo, теперь рядом с его памятью. */
+function ProjectDecisions({ project, decisions }: { project: Project; decisions: DecisionEntry[] }) {
+  return (
+    <Panel title={`Решения · ${project.name}`} icon={Flag}>
+      <div className="project-memory-group">
+        {decisions.length ? decisions.map((decision) => (
+          <article className="project-memory-item" key={decision.id}>
+            <strong>{decision.title}</strong>
+            <p>{previewText(decision.decision || decision.impact || decision.rationale)}</p>
+            <small>{decision.actor} · {shortDate(decision.created_at)}</small>
+          </article>
+        )) : <p className="project-memory-empty">Решений по проекту пока нет</p>}
+      </div>
     </Panel>
   );
 }
@@ -68,11 +145,14 @@ const accessOptions = [
 ];
 
 // Редактор без «угадывания по id»: правка приходит выбором строки (editing), новая запись — при null.
-function MemoryEditor({ editing, onSaved, onDone }: { editing: Memory | null; onSaved: () => void; onDone: () => void }) {
+// presetProjectId: запись, созданная при активном фильтре по проекту, сразу привязывается к нему;
+// поле «Проект» в форме позволяет сменить или снять привязку и для новой, и для существующей записи.
+function MemoryEditor({ editing, projects, onSaved, onDone, presetProjectId }: { editing: Memory | null; projects: Project[]; onSaved: () => void; onDone: () => void; presetProjectId?: string }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [tags, setTags] = useState("");
   const [accessLevel, setAccessLevel] = useState("private");
+  const [projectId, setProjectId] = useState("");
   const [state, setState] = useState<SaveState>("idle");
   const [error, setError] = useState("");
 
@@ -81,9 +161,10 @@ function MemoryEditor({ editing, onSaved, onDone }: { editing: Memory | null; on
     setContent(editing?.content ?? "");
     setTags(editing?.tags.join(", ") ?? "");
     setAccessLevel(editing?.access_level ?? "private");
+    setProjectId(editing ? (editing.project_id ?? "") : (presetProjectId ?? ""));
     setState("idle");
     setError("");
-  }, [editing]);
+  }, [editing, presetProjectId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -95,6 +176,7 @@ function MemoryEditor({ editing, onSaved, onDone }: { editing: Memory | null; on
         content,
         tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
         access_level: accessLevel,
+        project_id: projectId || null,
       });
       setState("idle");
       onSaved();
@@ -114,6 +196,10 @@ function MemoryEditor({ editing, onSaved, onDone }: { editing: Memory | null; on
       <TextInput label="Название" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="О чём запись" />
       <TextArea label="Содержимое" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Свободный текст" rows={4} />
       <TextInput label="Теги" hint="Через запятую" value={tags} onChange={(event) => setTags(event.target.value)} placeholder="проект, решение, черновик" />
+      <Select label="Проект" hint="Необязательно" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+        <option value="">— без проекта —</option>
+        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+      </Select>
       <Select label="Доступ" value={accessLevel} onChange={(event) => setAccessLevel(event.target.value)} options={accessOptions} />
       {error && <ErrorText>{error}</ErrorText>}
       <SaveButton state={state} idleLabel={editing ? "Сохранить правки" : "Добавить запись"} type="submit" />

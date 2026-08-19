@@ -1150,10 +1150,11 @@ async function handleApiWithContext(req, res, url) {
          content = COALESCE($2, content),
          access_level = COALESCE(NULLIF($3, ''), access_level),
          tags = COALESCE($4, tags),
+         project_id = CASE WHEN $5 THEN $6::bigint ELSE project_id END,
          updated_at = now()
-       WHERE id = $5
+       WHERE id = $7
        RETURNING id::text`,
-      [String(body.title || "").trim(), body.content ?? null, String(body.access_level || ""), Array.isArray(body.tags) ? body.tags : null, memoryMatch[1]],
+      [String(body.title || "").trim(), body.content ?? null, String(body.access_level || ""), Array.isArray(body.tags) ? body.tags : null, Object.prototype.hasOwnProperty.call(body, "project_id"), body.project_id || null, memoryMatch[1]],
     );
     if (result.rows[0]) await recordMemoryAction({ memoryId: result.rows[0].id, actor: actorFromReq(req), action: "update", note: "memory updated via API", metadata: { fields: Object.keys(body || {}) } });
     if (result.rows[0]) await refreshMemoryEmbeddings();

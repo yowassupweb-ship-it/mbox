@@ -810,50 +810,13 @@
   color: var(--text-main);
   background: rgba(255, 255, 255, .09);
 }
-.project-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-  gap: var(--space-4);
-  align-items: start;
-}
-
 .project-workspace-main {
   min-width: 0;
   display: grid;
   gap: var(--space-4);
 }
 
-.project-memory-panel {
-  position: sticky;
-  top: 76px;
-  display: grid;
-  gap: var(--space-3);
-  min-width: 0;
-  max-height: calc(100svh - 150px);
-  overflow: auto;
-}
-
-.project-memory-panel > header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-2);
-  padding-bottom: var(--space-2);
-  border-bottom: var(--border-width) solid var(--border-color);
-}
-
-.project-memory-panel > header svg { color: var(--accent-color); }
-.project-memory-panel > header strong { font-size: var(--text-md); }
-.project-memory-panel > header span {
-  min-width: 24px;
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  background: var(--element-bg);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  text-align: center;
-}
-
+/* Карточки памяти/решений — переиспользуются на странице Память для показа записей проекта. */
 .project-memory-group {
   display: grid;
   gap: var(--space-2);
@@ -900,15 +863,4 @@
   margin: 0;
   color: var(--text-dim);
   font-size: var(--text-xs);
-}
-
-@media (max-width: 980px) {
-  .project-workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .project-memory-panel {
-    position: static;
-    max-height: none;
-  }
 }
