@@ -200,6 +200,30 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "list_project_todos",
+      description: "Посмотреть список задач конкретного проекта с их статусом и приоритетом.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" } },
+        required: ["project_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_memory",
+      description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "Ключевые слова для поиска" } },
+        required: ["query"],
+      },
+    },
+  },
 ];
 
 function matchProjectFuzzy(projectName, projectList) {
@@ -290,6 +314,28 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return `записал в память: «${title}»${project ? ` (проект «${project.name}»)` : ""} (#${created.memory?.id ?? "?"})`;
   }
 
+  if (name === "list_project_todos") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
+    const todos = (context.todos || []).slice(0, 20);
+    if (!todos.length) return `у проекта «${project.name}» пока нет задач`;
+    const lines = todos.map((t) => `[${t.status}/${t.priority}] ${t.title}`);
+    return `задачи проекта «${project.name}» (${todos.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "search_memory") {
+    const q = String(args.query || "").trim();
+    if (!q) return "не искал — пустой запрос";
+    const data = await mboxFetch(`/api/mbox/memories?q=${encodeURIComponent(q)}`);
+    const rows = (data.memories || []).slice(0, 5);
+    if (!rows.length) return `по запросу «${q}» в памяти ничего не нашлось`;
+    return rows.map((m) => {
+      const project = projectList.find((p) => p.id === m.project_id);
+      return `«${m.title}»${project ? ` (${project.name})` : ""}: ${String(m.content || "").slice(0, 160)}`;
+    }).join(" | ");
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -334,9 +380,9 @@ async function respondToRequests() {
         + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
         + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
         + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
-        + "record_memory (записать долгоживущий факт — предпочтение пользователя, удачный/неудачный "
-        + "подход, важное решение). Если просят одно из этого — вызови функцию, не пиши текстом, что "
-        + "сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
+        + "record_memory (записать долгоживущий факт), list_project_todos (посмотреть задачи проекта), "
+        + "search_memory (поискать в памяти). Если просят одно из этого — вызови функцию, не пиши текстом, "
+        + "что сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
         + "проекта) — вызови функцию для КАЖДОГО действия по отдельности в этом же ответе, не только для "
         + "первого. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
         + "делать, а не притворяйся, что сделал. Известные "

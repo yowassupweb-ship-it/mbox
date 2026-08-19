@@ -482,6 +482,30 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "list_project_todos",
+      description: "Посмотреть список задач конкретного проекта с их статусом и приоритетом.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" } },
+        required: ["project_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_memory",
+      description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "Ключевые слова для поиска" } },
+        required: ["query"],
+      },
+    },
+  },
 ];
 
 function matchProjectFuzzy(projectName: unknown, projectList: { id: string; name: string }[]) {
@@ -576,6 +600,32 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     return `записал в память: «${title}»${project ? ` (проект «${project.name}»)` : ""} (#${inserted.rows[0].id})`;
   }
 
+  if (name === "list_project_todos") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const rows = (await client.query(
+      "SELECT title, status, priority FROM todos WHERE project_id = $1 ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC LIMIT 20",
+      [project.id],
+    )).rows as { title: string; status: string; priority: string }[];
+    if (!rows.length) return `у проекта «${project.name}» пока нет задач`;
+    const lines = rows.map((t) => `[${t.status}/${t.priority}] ${t.title}`);
+    return `задачи проекта «${project.name}» (${rows.length}${rows.length === 20 ? "+" : ""}): ${lines.join("; ")}`;
+  }
+
+  if (name === "search_memory") {
+    const q = String(args.query || "").trim();
+    if (!q) return "не искал — пустой запрос";
+    const rows = (await client.query(
+      `SELECT m.title, m.content, p.name AS project_name
+       FROM memories m LEFT JOIN projects p ON p.id = m.project_id
+       WHERE m.title ILIKE '%' || $1 || '%' OR m.content ILIKE '%' || $1 || '%'
+       ORDER BY m.updated_at DESC LIMIT 5`,
+      [q],
+    )).rows as { title: string; content: string; project_name: string | null }[];
+    if (!rows.length) return `по запросу «${q}» в памяти ничего не нашлось`;
+    return rows.map((m) => `«${m.title}»${m.project_name ? ` (${m.project_name})` : ""}: ${m.content.slice(0, 160)}`).join(" | ");
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -586,18 +636,24 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
     try {
       await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
       const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows as { id: string; name: string }[];
+      const stats = (await client.query(
+        `SELECT (SELECT count(*) FROM todos)::int AS todos_total,
+                (SELECT count(*) FROM todos WHERE status NOT IN ('done', 'archived'))::int AS todos_open,
+                (SELECT count(*) FROM memories)::int AS memories_total`,
+      )).rows[0] as { todos_total: number; todos_open: number; memories_total: number };
       const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
         + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно этим `
         + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
         + "create_todo, create_project, delete_project (необратимо, точное название), update_todo_status, "
         + "set_todo_priority, delete_todo (необратимо, точный заголовок), record_memory (записать долгоживущий "
-        + "факт — предпочтение пользователя, удачный/неудачный подход, важное решение). Если просят одно из этого "
-        + "— вызови функцию, не пиши текстом, что сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий "
-        + "(например, удалить два разных проекта, или создать задачу и сразу поменять её приоритет) — вызови "
-        + "функцию для КАЖДОГО действия по отдельности в этом же ответе, не только для первого. Если просят "
-        + "что-то другое, для чего нет функции — честно скажи, что не умеешь этого делать, а не притворяйся, что "
-        + "сделал. Известные проекты: "
-        + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
+        + "факт), list_project_todos (посмотреть задачи проекта), search_memory (поискать в памяти). Если просят "
+        + "одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном сообщении просят "
+        + "НЕСКОЛЬКО действий (например, удалить два разных проекта) — вызови функцию для КАЖДОГО действия по "
+        + "отдельности в этом же ответе, не только для первого. Если просят что-то другое, для чего нет функции — "
+        + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
+        + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Сводка по MBOX прямо сейчас: всего задач `
+        + `${stats.todos_total}, из них незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total}. `
+        + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь.";
 
       // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — см. комментарий
       // в server/mbox-server.mjs. Модель часто выполняет только первое из нескольких запрошенных
