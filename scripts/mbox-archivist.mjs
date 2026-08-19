@@ -245,6 +245,14 @@ const JARVIS_TOOLS = [
   },
 ];
 
+function excerptAround(text, query, radius) {
+  const index = text.toLowerCase().indexOf(query.toLowerCase());
+  if (index === -1) return text.slice(0, radius * 2);
+  const start = Math.max(0, index - radius);
+  const end = Math.min(text.length, index + query.length + radius);
+  return text.slice(start, end);
+}
+
 function matchProjectFuzzy(projectName, projectList) {
   const q = String(projectName || "").trim().toLowerCase();
   return projectList.find((p) => p.name.toLowerCase() === q)
@@ -366,8 +374,12 @@ async function runJarvisTool(name, rawArgs, projectList) {
     for (const project of targets) {
       const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
       for (const t of context.todos || []) {
-        if (t.title.toLowerCase().includes(q) || String(t.note || "").toLowerCase().includes(q)) {
-          matches.push(`[${project.name}] «${t.title}» (${t.status}/${t.priority})`);
+        const note = String(t.note || "");
+        const noteMatch = note.toLowerCase().includes(q);
+        if (t.title.toLowerCase().includes(q) || noteMatch) {
+          // Заголовок без query сбивал модель с толку, если совпадение было только в note.
+          const snippet = noteMatch ? `, в описании: "...${excerptAround(note, q, 60)}..."` : "";
+          matches.push(`[${project.name}] «${t.title}» (${t.status}/${t.priority})${snippet}`);
         }
       }
       if (matches.length >= 10) break;

@@ -527,6 +527,14 @@ const JARVIS_TOOLS = [
   },
 ];
 
+function excerptAround(text: string, query: string, radius: number) {
+  const index = text.toLowerCase().indexOf(query.toLowerCase());
+  if (index === -1) return text.slice(0, radius * 2);
+  const start = Math.max(0, index - radius);
+  const end = Math.min(text.length, index + query.length + radius);
+  return text.slice(start, end);
+}
+
 function matchProjectFuzzy(projectName: unknown, projectList: { id: string; name: string }[]) {
   const q = String(projectName || "").trim().toLowerCase();
   return projectList.find((p) => p.name.toLowerCase() === q)
@@ -659,9 +667,15 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
          AND ($2::bigint IS NULL OR t.project_id = $2::bigint)
        ORDER BY t.updated_at DESC LIMIT 10`,
       [q, project?.id || null],
-    )).rows as { title: string; status: string; priority: string; project_name: string }[];
+    )).rows as { title: string; note: string; status: string; priority: string; project_name: string }[];
     if (!rows.length) return `по запросу «${q}» задач не нашлось`;
-    return rows.map((t) => `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})`).join("; ");
+    // Раньше возвращали только заголовок — если совпадение было в note, а не в title, модель
+    // видела заголовок без query и решала, что задача не подходит, хотя SQL нашёл её верно.
+    return rows.map((t) => {
+      const noteMatch = t.note && t.note.toLowerCase().includes(q.toLowerCase());
+      const snippet = noteMatch ? `, в описании: "...${excerptAround(t.note, q, 60)}..."` : "";
+      return `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})${snippet}`;
+    }).join("; ");
   }
 
   return `неизвестное действие: ${name}`;

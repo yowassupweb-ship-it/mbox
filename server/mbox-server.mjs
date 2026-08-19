@@ -902,6 +902,16 @@ const JARVIS_TOOLS = [
   },
 ];
 
+/** Кусок текста вокруг найденного совпадения — иначе модель видит заголовок без query и решает,
+ * что результат нерелевантный, хотя совпадение реально есть в note. */
+function excerptAround(text, query, radius) {
+  const index = text.toLowerCase().indexOf(query.toLowerCase());
+  if (index === -1) return text.slice(0, radius * 2);
+  const start = Math.max(0, index - radius);
+  const end = Math.min(text.length, index + query.length + radius);
+  return text.slice(start, end);
+}
+
 function matchProjectFuzzy(projectName, projectList) {
   const q = String(projectName || "").trim().toLowerCase();
   return projectList.find((p) => p.name.toLowerCase() === q)
@@ -1037,9 +1047,15 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
        ORDER BY t.updated_at DESC LIMIT 10`,
       [q, project?.id || null],
     )).rows;
-    console.error(`[debug] search_todos args=${rawArgs} parsedQuery=${JSON.stringify(q)} projectArg=${JSON.stringify(args.project_name)} matchedProject=${project?.name ?? "null"} rowCount=${rows.length}`);
     if (!rows.length) return `по запросу «${q}» задач не нашлось`;
-    return rows.map((t) => `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})`).join("; ");
+    // Раньше возвращали только заголовок — если совпадение было в note, а не в title, модель
+    // видела заголовок без "1440" и решала, что задача не подходит, хотя SQL нашёл её верно.
+    // Сниппет вокруг совпадения делает видимым, ГДЕ именно нашлось совпадение.
+    return rows.map((t) => {
+      const noteMatch = t.note && t.note.toLowerCase().includes(q.toLowerCase());
+      const snippet = noteMatch ? `, в описании: "...${excerptAround(t.note, q, 60)}..."` : "";
+      return `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})${snippet}`;
+    }).join("; ");
   }
 
   return `неизвестное действие: ${name}`;
