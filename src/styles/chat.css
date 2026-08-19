@@ -552,6 +552,31 @@
 .console-log-status.failed { color: var(--state-danger); }
 .console-log-line.failed .console-log-text { color: var(--state-danger); }
 
+/* Инструменты, реально вызванные для ответа — бейджами сразу под сообщением, а не отдельной
+   строкой лога: читается как "приложено к этому ответу", а не как ещё одно сообщение. */
+.console-tools-used {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.console-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.console-tool-chip svg { color: var(--accent-color); flex: none; }
+
 .console-log-line.typing { opacity: .7; }
 .console-log-line.typing .console-log-text { animation: console-blink 1.4s ease-in-out infinite; }
 @keyframes console-blink { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
