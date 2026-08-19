@@ -6,8 +6,9 @@
 .agent-chat {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
-  /* Прижато к нижнему меню (≈50px) вплотную, минимальный зазор — не парит отдельно над ним. */
-  bottom: calc(53px + env(safe-area-inset-bottom));
+  /* Нижнее меню: 7px+7px паддинг + 44px min-height пункта + 1px бордер = 59px — кнопка садится
+     вплотную на него, без зазора. */
+  bottom: calc(59px + env(safe-area-inset-bottom));
   z-index: 60;
   display: grid;
   gap: 4px;
@@ -458,7 +459,7 @@
    телефоне своя раскладка уже посчитана под меньшую высоту навигации — там не трогаем. */
 @media (min-width: 1201px) {
   .agent-chat-shell.console {
-    max-height: calc(100svh - 53px - env(safe-area-inset-bottom) - 6px);
+    max-height: calc(100svh - 59px - env(safe-area-inset-bottom) - 6px);
   }
 }
 
