@@ -405,8 +405,17 @@ BEGIN
   project_id_value := NULLIF(row_data->>'project_id', '')::BIGINT;
   title_value := COALESCE(row_data->>'title', row_data->>'name', TG_TABLE_NAME || ' #' || COALESCE(entity_id_value::TEXT, ''));
 
+  -- Подзапрос, а не голое project_id_value: при каскадном удалении (например, todos при удалении
+  -- их проекта) OLD ещё несёт старый project_id, но строка проекта к этому моменту уже могла
+  -- исчезнуть в той же транзакции — INSERT с несуществующим id падал на FK. Подзапрос отдаёт NULL,
+  -- если проекта больше нет, вместо попытки сослаться на призрак.
   INSERT INTO audit_events(actor, action, entity_type, entity_id, project_id, summary, metadata)
-  VALUES (COALESCE(NULLIF(current_setting('mbox.actor', true), ''), 'system'), lower(TG_OP), TG_TABLE_NAME, entity_id_value, project_id_value, title_value, row_data);
+  VALUES (
+    COALESCE(NULLIF(current_setting('mbox.actor', true), ''), 'system'),
+    lower(TG_OP), TG_TABLE_NAME, entity_id_value,
+    (SELECT id FROM projects WHERE id = project_id_value),
+    title_value, row_data
+  );
 
   RETURN COALESCE(NEW, OLD);
 END;

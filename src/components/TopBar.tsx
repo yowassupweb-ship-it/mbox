@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { AlertTriangle, Search } from "lucide-react";
 import { useState } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 
@@ -12,6 +12,8 @@ export type AgentRosterEntry = {
   since?: string;
 };
 
+export type AttentionTodo = { id: string; title: string; status: string; projectId: string; projectName: string };
+
 type TopBarProps = {
   query: string;
   onQueryChange: (query: string) => void;
@@ -20,7 +22,11 @@ type TopBarProps = {
   notice?: string;
   notices?: Array<{ id: string; text: string; at: string }>;
   roster?: AgentRosterEntry[];
+  attentionTodos?: AttentionTodo[];
+  onOpenTodo?: (projectId: string) => void;
 };
+
+const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
 
 export function TopBar({
   query,
@@ -30,6 +36,8 @@ export function TopBar({
   notice = "",
   notices = [],
   roster = [],
+  attentionTodos = [],
+  onOpenTodo,
 }: TopBarProps) {
   const [open, setOpen] = useState(false);
   const online = roster.filter((agent) => agent.status === "active");
@@ -54,6 +62,24 @@ export function TopBar({
       </button>
       {open && (
         <div className="agent-status-popover" role="dialog" aria-label="Статус агентов">
+          {attentionTodos.length > 0 && (
+            <section className="popover-section">
+              <strong><AlertTriangle size={14} /> Требует внимания</strong>
+              <ul className="attention-list">
+                {attentionTodos.map((todo) => (
+                  <li key={todo.id}>
+                    <button type="button" onClick={() => { onOpenTodo?.(todo.projectId); setOpen(false); }}>
+                      <span className={`attention-dot status-${todo.status}`} />
+                      <span className="attention-body">
+                        <span className="attention-title">{todo.title}</span>
+                        <span className="attention-meta">{todo.projectName} · {attentionStatusLabel[todo.status] || todo.status}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <section className="popover-section">
             <strong>Команда</strong>
             {roster.length ? (

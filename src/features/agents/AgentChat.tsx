@@ -1,20 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Avatar,
-  ChatContainer,
-  ConversationHeader,
-  MainContainer,
-  Message,
-  MessageList,
-  MessageSeparator,
-  TypingIndicator,
-} from "@chatscope/chat-ui-kit-react";
-import { ArrowUp, MessageSquare, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, MessageSquare, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
-import type { AgentActivity, AgentInboxItem, AgentRun } from "../../types";
+import type { AgentActivity, AgentInboxItem, AgentRun, Project } from "../../types";
 
 const HUMAN = "Человек";
 const READ_KEY = "mbox.chat.readAt";
@@ -33,44 +23,52 @@ function agentState(agent: AgentActivity, runs: AgentRun[]) {
   return { key: "offline", label: "отключён", detail: formatSince(agent.last_seen) };
 }
 
+type LogLine = {
+  id: string;
+  kind: "in" | "out" | "sys" | "cmd";
+  actor: string;
+  text: string;
+  at: string;
+  pending?: "sending" | "sent" | "failed";
+};
+
 /**
- * Чат с агентами на готовом ките @chatscope, перекрашенном под токены MBOX.
+ * Чат — настоящая консоль, не мессенджер: моноширинный лог строк вместо пузырей, слэш-команды
+ * работают локально (без похода в MCP-очередь), обычный текст уходит агентам как раньше.
  *
- * Про скорость честно: постоянного соединения у агента нет. Но MCP-сервер теперь прицепляет
+ * Про скорость честно: постоянного соединения у агента нет. Но MCP-сервер прицепляет
  * непрочитанные сообщения человека к ответу ЛЮБОГО вызова инструмента, поэтому агент видит
- * написанное на первом же своём действии, а не когда сам вспомнит заглянуть в ящик.
+ * написанное на первом же своём действии — и теперь не теряет его, пока реально не ответит
+ * (см. pendingMessages в scripts/mbox-mcp-server.mjs).
  */
-export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
+export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
+  projects: Project[];
   projectId?: string;
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState("");
   const [text, setText] = useState("");
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyPos, setHistoryPos] = useState(-1);
+  const [localLines, setLocalLines] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const conversation = useMemo(
     () => [...inbox].filter((item) => CONVERSATION.has(item.item_type)).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(-80),
     [inbox],
   );
 
-  // Оптимистичное сообщение живёт, пока такое же не появится в ящике. Раньше оно исчезало
-  // сразу после ответа сервера и возвращалось только после полной перезагрузки данных — отсюда мигание.
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
   const stillPending = pending.filter((item) => item.failed || !arrived.has(item.body.trim()));
 
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
 
-  // Счётчик у кнопки — реплики агентов, пришедшие после последнего чтения.
-  //
-  // Считать «всё, что не отмечено просмотренным» нельзя: у отметок нет прошлого, и в первый же
-  // заход вся переписка целиком объявлялась непрочитанной — на кнопке висели десятки при полном
-  // отсутствии новых сообщений. Поэтому граница — момент времени, и на первом запуске это «сейчас»:
-  // история, которую человек уже видел, новой не считается.
   const [readAt, setReadAt] = useState(() => {
     const stored = window.localStorage.getItem(READ_KEY);
     if (stored) return stored;
@@ -85,7 +83,6 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
   );
   const unread = unreadItems.length;
 
-  // Открытый чат — это и есть прочтение, в том числе для сообщений, пришедших при открытом окне.
   useEffect(() => {
     if (!open || !unread) return;
     const last = unreadItems[unreadItems.length - 1].created_at;
@@ -93,10 +90,99 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
     setReadAt(last);
   }, [open, unread, unreadItems]);
 
+  useEffect(() => {
+    if (!pending.length) return;
+    setPending((current) => current.filter((item) => item.failed || !arrived.has(item.body.trim())));
+  }, [arrived, pending.length]);
+
+  // Единый лог: реальная переписка + оптимистичные отправки + локальные команды, всё по времени.
+  const lines = useMemo<LogLine[]>(() => {
+    const fromConversation: LogLine[] = conversation.map((item) => ({
+      id: `msg-${item.id}`,
+      kind: item.agent_name === HUMAN ? "out" : "in",
+      actor: item.agent_name,
+      text: item.body || item.title,
+      at: item.created_at,
+    }));
+    const fromPending: LogLine[] = stillPending.map((item) => ({
+      id: item.id,
+      kind: "out",
+      actor: "Ты",
+      text: item.body,
+      at: new Date().toISOString(),
+      pending: item.failed ? "failed" : item.sent ? "sent" : "sending",
+    }));
+    return [...fromConversation, ...fromPending, ...localLines].sort((a, b) => a.at.localeCompare(b.at));
+  }, [conversation, stillPending, localLines]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [open, lines.length]);
+
+  function pushLocal(kind: "sys" | "cmd", text: string) {
+    setLocalLines((current) => [...current, { id: `local-${Date.now()}-${Math.random()}`, kind, actor: kind === "cmd" ? "Ты" : "mbox", text, at: new Date().toISOString() }]);
+  }
+
+  /** Слэш-команды выполняются тут же, без похода в очередь агентов — быстрая справка и обзор. */
+  function runCommand(raw: string) {
+    const [cmd, ...rest] = raw.trim().slice(1).split(/\s+/);
+    const arg = rest.join(" ");
+    pushLocal("cmd", raw);
+
+    switch (cmd) {
+      case "help":
+        pushLocal("sys", [
+          "команды:",
+          "  /status, /agents  — кто сейчас на связи",
+          "  /blocked          — задачи, которые ждут решения",
+          "  /who <имя>        — что известно про агента",
+          "  /clear            — очистить окно (переписка не удаляется)",
+          "  /help             — эта справка",
+          "что угодно без / — уходит агентам в общую или адресную (кнопки выше) переписку",
+        ].join("\n"));
+        return;
+      case "status":
+      case "agents": {
+        if (!agents.length) { pushLocal("sys", "агентов пока не подключено"); return; }
+        pushLocal("sys", states.map(({ agent, state }) => `${agent.name.padEnd(10)} ${state.label}${state.detail ? " · " + state.detail : ""}`).join("\n"));
+        return;
+      }
+      case "blocked": {
+        const items = projects.flatMap((project) => project.todos
+          .filter((todo) => todo.status === "blocked" || todo.status === "review")
+          .map((todo) => `${project.name} · ${todo.status === "blocked" ? "заблокирована" : "на проверке"} · ${todo.title}`));
+        pushLocal("sys", items.length ? items.join("\n") : "ничего не заблокировано и не ждёт проверки");
+        return;
+      }
+      case "who": {
+        const found = states.find(({ agent }) => agent.name.toLowerCase() === arg.toLowerCase());
+        if (!found) { pushLocal("sys", arg ? `агент «${arg}» не найден` : "укажи имя: /who Codex"); return; }
+        pushLocal("sys", `${found.agent.name}: ${found.state.label}${found.state.detail ? " — " + found.state.detail : ""} · ${found.agent.kind}${found.agent.client ? " · " + found.agent.client : ""}`);
+        return;
+      }
+      case "clear":
+        setLocalLines([]);
+        setPending([]);
+        return;
+      default:
+        pushLocal("sys", `неизвестная команда: /${cmd} — попробуй /help`);
+    }
+  }
+
   async function send() {
     const raw = text.trim();
     if (!raw) return;
+    setHistory((current) => [...current, raw]);
+    setHistoryPos(-1);
     setText("");
+
+    if (raw.startsWith("/")) {
+      runCommand(raw);
+      return;
+    }
+
     const body = target ? `@${target} ${raw}` : raw;
     const localId = `local-${Date.now()}`;
     setPending((current) => [...current, { id: localId, body, sent: false }]);
@@ -125,122 +211,99 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
     }
   }
 
-  useEffect(() => {
-    if (!pending.length) return;
-    setPending((current) => current.filter((item) => item.failed || !arrived.has(item.body.trim())));
-  }, [arrived, pending.length]);
+  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") { event.preventDefault(); void send(); return; }
+    if (event.key === "ArrowUp" && history.length) {
+      event.preventDefault();
+      const next = historyPos < 0 ? history.length - 1 : Math.max(0, historyPos - 1);
+      setHistoryPos(next);
+      setText(history[next]);
+      return;
+    }
+    if (event.key === "ArrowDown" && historyPos >= 0) {
+      event.preventDefault();
+      const next = historyPos + 1;
+      if (next >= history.length) { setHistoryPos(-1); setText(""); } else { setHistoryPos(next); setText(history[next]); }
+    }
+  }
 
   let lastDay = "";
 
   return (
     <div className="agent-chat">
       {open && (
-        <div className="agent-chat-shell">
+        <div className="agent-chat-shell console">
+          <div className="console-bar">
+            <span className="console-dot r" />
+            <span className="console-dot y" />
+            <span className="console-dot g" />
+            <span className="console-title">mbox — консоль агентов</span>
+            <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
+          </div>
+
           <div className="chat-roster">
-            <button className={target === "" ? "is-active" : ""} type="button" onClick={() => setTarget("")}>Всем</button>
+            <button className={target === "" ? "is-active" : ""} type="button" onClick={() => setTarget("")}>всем</button>
             {states.map(({ agent, state }) => (
               <button
                 key={agent.id}
-                className={`${target === agent.name ? "is-active" : ""}`}
+                className={target === agent.name ? "is-active" : ""}
                 type="button"
                 onClick={() => setTarget(target === agent.name ? "" : agent.name)}
                 title={state.detail}
               >
-                <AgentAvatar name={agent.name} status={agent.status} live={state.key === "working"} size={18} />
+                <AgentAvatar name={agent.name} status={agent.status} live={state.key === "working"} size={16} />
                 {agent.name}
-                <em>{state.label}</em>
               </button>
             ))}
-            <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={16} /></button>
           </div>
 
-          <MainContainer responsive>
-            <ChatContainer>
-              <ConversationHeader>
-                <ConversationHeader.Content
-                  userName={target ? `Команда для ${target}` : "Конференция агентов"}
-                  info={working.length ? `${working.map((entry) => entry.agent.name).join(", ")} в работе` : `${agents.length} агентов, никто не занят`}
-                />
-              </ConversationHeader>
+          <div className="console-log" ref={scrollRef}>
+            {lines.length === 0 && (
+              <div className="console-log-line sys"><span className="console-log-text">mbox консоль готова. /help — список команд.</span></div>
+            )}
+            {lines.map((line) => {
+              const day = line.at.slice(0, 10);
+              const showDay = day !== lastDay;
+              lastDay = day;
+              const time = new Date(line.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              return (
+                <div key={line.id}>
+                  {showDay && <div className="console-log-sep">{day}</div>}
+                  <div className={`console-log-line ${line.kind}${line.pending === "failed" ? " failed" : ""}`}>
+                    <span className="console-log-time">{time}</span>
+                    {line.kind === "in" && <AgentAvatar name={line.actor} size={16} />}
+                    <span className="console-log-actor">
+                      {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "ты" : line.actor}
+                      <ChevronRight size={11} />
+                    </span>
+                    <span className="console-log-text">
+                      {line.text}
+                      {line.pending === "sending" && <em className="console-log-status"> отправляется…</em>}
+                      {line.pending === "failed" && <em className="console-log-status failed"> не отправлено</em>}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {working.length > 0 && (
+              <div className="console-log-line sys typing">
+                <span className="console-log-time" />
+                <span className="console-log-actor">·</span>
+                <span className="console-log-text">{working[0].agent.name} печатает: {working[0].state.detail || "работает"}</span>
+              </div>
+            )}
+          </div>
 
-              <MessageList
-                autoScrollToBottom
-                autoScrollToBottomOnMount
-                scrollBehavior="auto"
-                typingIndicator={working.length
-                  ? <TypingIndicator content={`${working[0].agent.name}: ${working[0].state.detail || "работает"}`} />
-                  : undefined}
-              >
-                {conversation.flatMap((item) => {
-                  const mine = item.agent_name === HUMAN;
-                  const day = item.created_at.slice(0, 10);
-                  const rows = [];
-                  if (day !== lastDay) {
-                    rows.push(<MessageSeparator key={`sep-${item.id}`} content={day} />);
-                    lastDay = day;
-                  }
-                  rows.push(
-                    <Message
-                      key={item.id}
-                      model={{
-                        message: item.body || item.title,
-                        sentTime: formatSince(item.created_at),
-                        sender: mine ? "Ты" : item.agent_name,
-                        direction: mine ? "outgoing" : "incoming",
-                        position: "single",
-                      }}
-                    >
-                      {!mine && (
-                        <Avatar name={item.agent_name}>
-                          <AgentAvatar name={item.agent_name} status={states.find((entry) => entry.agent.name === item.agent_name)?.agent.status ?? "idle"} size={30} />
-                        </Avatar>
-                      )}
-                      <Message.Header sender={mine ? "Ты" : item.agent_name} sentTime={formatSince(item.created_at)} />
-                    </Message>,
-                  );
-                  return rows;
-                })}
-
-                {stillPending.map((item) => (
-                  <Message
-                    key={item.id}
-                    className={item.failed ? "chat-failed" : item.sent ? "" : "chat-pending"}
-                    model={{
-                      message: item.body,
-                      sentTime: item.failed ? "не отправлено" : item.sent ? "отправлено" : "отправляется",
-                      sender: "Ты",
-                      direction: "outgoing",
-                      position: "single",
-                    }}
-                  >
-                    <Message.Header sender="Ты" sentTime={item.failed ? "не отправлено" : item.sent ? "отправлено" : "отправляется"} />
-                  </Message>
-                ))}
-              </MessageList>
-
-
-            </ChatContainer>
-          </MainContainer>
-
-          <form
-            className="chat-composer"
-            onSubmit={(event) => { event.preventDefault(); void send(); }}
-          >
-            <textarea
+          <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+            <span className="console-prompt">{target ? `@${target}` : "~"}$</span>
+            <input
               value={text}
               onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void send();
-                }
-              }}
-              placeholder={target ? `Команда для ${target}` : "Написать всем агентам"}
-              rows={1}
+              onKeyDown={onKeyDown}
+              placeholder={target ? `команда или сообщение для ${target}` : "команда (/help) или сообщение всем"}
+              spellCheck={false}
+              autoComplete="off"
             />
-            <button type="submit" disabled={!text.trim()} aria-label="Отправить">
-              <ArrowUp size={18} strokeWidth={2.5} />
-            </button>
           </form>
         </div>
       )}

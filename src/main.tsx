@@ -117,6 +117,15 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   }, [realtime.state, realtime.label, data.agents, data.inbox, data.projects, data.runs]);
   const agentLabel = headerStatus.label;
   const headerState = headerStatus.state;
+  // Раньше пилюля просто кричала «N заблокировано» без единого способа что-то с этим сделать —
+  // «вижу и ничего не могу». Список конкретных задач с переходом закрывает это: клик ведёт прямо
+  // в кабан нужного проекта, где карточку можно перетащить в другую колонку.
+  const attentionTodos = useMemo(
+    () => data.projects.flatMap((project) => project.todos
+      .filter((todo) => todo.status === "blocked" || todo.status === "review")
+      .map((todo) => ({ id: todo.id, title: todo.title, status: todo.status, projectId: project.id, projectName: project.name }))),
+    [data.projects],
+  );
   const agentRoster = useMemo<AgentRosterEntry[]>(() => data.agents.map((agent) => {
     const status = effectiveStatus(agent);
     const live = liveRunOf(data.runs, agent.name);
@@ -177,7 +186,17 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   return (
     <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
       <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
-        <TopBar query={query} onQueryChange={setQuery} realtimeState={headerState} realtimeLabel={agentLabel} notice={realtime.notice} notices={agentNotices} roster={agentRoster} />
+        <TopBar
+          query={query}
+          onQueryChange={setQuery}
+          realtimeState={headerState}
+          realtimeLabel={agentLabel}
+          notice={realtime.notice}
+          notices={agentNotices}
+          roster={agentRoster}
+          attentionTodos={attentionTodos}
+          onOpenTodo={(projectId) => setRoute("projects", query, `${projectId}:todo`, "push")}
+        />
         {data.offline && <OfflineBanner onRetry={data.reload} />}
         {data.loading && <p className="muted empty-state">Загрузка данных</p>}
         {section === "overview" && <Overview data={data} />}
@@ -189,7 +208,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
         {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
       </main>
-      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
+      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
       {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
       <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} badges={{ projects: unseenTodos }} />
     </div>

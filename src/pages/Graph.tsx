@@ -90,11 +90,17 @@ export function GraphBoard({ folders, memories, decisions, projects, edges, onSa
   const dragRef = useRef<{ key: string; el: HTMLElement; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
 
+  // Пока сохранённые позиции ещё в пути, дефолтная раскладка успевает мигнуть на экране и тут же
+  // «прыгнуть» на пользовательскую — на медленном соединении это читается как «сброс расстановки».
+  // positionsLoaded держит карту невидимой до первого реального ответа сервера.
+  const [positionsLoaded, setPositionsLoaded] = useState(false);
+
   useEffect(() => {
     void fetchOr<{ positions: Position[] }>("/api/mbox/graph/positions", { positions: [] }).then((data) => {
       const next: Record<string, { x: number; y: number }> = {};
       for (const item of data.positions) next[`${item.entity_type}:${item.entity_id}`] = { x: Number(item.x), y: Number(item.y) };
       setPositions(next);
+      setPositionsLoaded(true);
     });
   }, []);
 
@@ -453,14 +459,14 @@ export function GraphBoard({ folders, memories, decisions, projects, edges, onSa
   // пустое поле, потому что узлы стоят за краем экрана, а масштаб по умолчанию единица.
   const fitted = useRef(false);
   useEffect(() => {
-    if (fitted.current || !nodes.length || !canvasRef.current) return;
+    if (fitted.current || !positionsLoaded || !nodes.length || !canvasRef.current) return;
     fitted.current = true;
     // Первый кадр кадрируем по кластерам (проекты и задачи), а не по дальней зоне памяти —
     // иначе масштаб уезжает в 25% и узлы нечитаемы.
     fitToContent(nodes.filter((node) => node.kind === "project" || node.kind === "todo"));
     // fitToContent намеренно не в зависимостях: вписываем ровно один раз за сессию карты.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length]);
+  }, [nodes.length, positionsLoaded]);
 
   return (
     <section className="map" aria-label="Карта MBOX">
@@ -516,6 +522,9 @@ export function GraphBoard({ folders, memories, decisions, projects, edges, onSa
         onPointerCancel={() => { panRef.current = null; dragRef.current = null; }}
         onDoubleClick={() => fitToContent()}
       >
+        {!positionsLoaded ? (
+          <div className="map-loading">Загрузка расположения…</div>
+        ) : (
         <div className="map-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
           <svg className="map-links">
             <defs>
@@ -571,6 +580,7 @@ export function GraphBoard({ folders, memories, decisions, projects, edges, onSa
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {selected && (

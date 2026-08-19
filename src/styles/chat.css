@@ -459,3 +459,115 @@
 .chat-composer button:hover:not(:disabled) { filter: brightness(1.1); }
 .chat-composer button:active:not(:disabled) { transform: translateY(1px); }
 .chat-composer button:disabled { opacity: .38; box-shadow: none; cursor: default; }
+
+/* ── Консольный режим чата: терминальный лог вместо пузырей ────────────────── */
+
+.agent-chat-shell.console {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: #0c0c0e;
+}
+
+.agent-chat-shell .console-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: #17171a;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+
+.agent-chat-shell .console-title {
+  margin-left: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}
+
+.agent-chat-shell .console-bar .chat-close {
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.agent-chat-shell .console-bar .chat-close:hover { color: var(--text-main); }
+
+.console-log {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.console-log-sep {
+  margin: 10px 0 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.console-log-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.console-log-time { flex: none; color: #5b6b66; font-variant-numeric: tabular-nums; min-width: 62px; }
+
+.console-log-actor {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-weight: var(--weight-bold);
+  color: var(--text-2);
+}
+
+.console-log-line.in .console-log-actor { color: var(--accent-color); }
+.console-log-line.out .console-log-actor { color: var(--state-ok); }
+.console-log-line.sys .console-log-actor { color: var(--text-muted); }
+.console-log-line.cmd .console-log-actor { color: var(--state-warn); }
+.console-log-line.cmd .console-log-text { color: var(--text-2); }
+.console-log-line.sys .console-log-text { white-space: pre-wrap; color: var(--text-2); }
+
+.console-log-text { min-width: 0; overflow-wrap: anywhere; color: var(--text-main); }
+.console-log-status { font-style: normal; color: var(--text-muted); }
+.console-log-status.failed { color: var(--state-danger); }
+.console-log-line.failed .console-log-text { color: var(--state-danger); }
+
+.console-log-line.typing { opacity: .7; }
+.console-log-line.typing .console-log-text { animation: console-blink 1.4s ease-in-out infinite; }
+@keyframes console-blink { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+
+.console-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, .06);
+  background: #101012;
+}
+
+.console-prompt {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: var(--weight-bold);
+  color: var(--accent-color);
+  font-size: 12.5px;
+}
+
+.console-input-row input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.console-input-row input::placeholder { color: var(--text-muted); }

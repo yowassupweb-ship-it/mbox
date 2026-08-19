@@ -1,6 +1,5 @@
 /* Точка входа стилей. Порядок @import значим — правила ниже перекрывают правила выше. */
 
-@import "@chatscope/chat-ui-kit-styles/dist/default/styles.min.css";
 @import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/shell.css";

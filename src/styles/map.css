@@ -358,3 +358,12 @@
     0 0 0 2px color-mix(in srgb, var(--accent-color) 50%, transparent),
     0 0 40px -2px color-mix(in srgb, var(--node-color, #8ab4ff) 75%, transparent);
 }
+
+.map-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

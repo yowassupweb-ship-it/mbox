@@ -145,12 +145,47 @@
 }
 
 .popover-section > strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 9px;
   font-size: 13px;
   letter-spacing: .01em;
   color: var(--text-main);
 }
+
+/* «Требует внимания» — заблокированные/на проверке задачи, кликабельно ведут к ним.
+   Раньше пилюля просто показывала число без единого способа что-то с ним сделать. */
+.attention-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+
+.attention-list button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: rgba(255, 176, 0, .07);
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.attention-list button:hover { background: rgba(255, 176, 0, .14); }
+
+.attention-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--state-warn); }
+.attention-dot.status-blocked { background: var(--state-danger); }
+
+.attention-body { min-width: 0; display: grid; gap: 1px; }
+.attention-title {
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attention-meta { color: var(--text-muted); font-size: var(--text-xs); }
 
 .agent-roster {
   list-style: none;
