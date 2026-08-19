@@ -224,6 +224,21 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_todos",
+      description: "Найти задачи по тексту в заголовке ИЛИ в описании (note) — list_project_todos видит только заголовки, этот инструмент ищет по содержимому задачи.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Текст для поиска" },
+          project_name: { type: "string", description: "Ограничить поиск одним проектом, необязательно" },
+        },
+        required: ["query"],
+      },
+    },
+  },
 ];
 
 function matchProjectFuzzy(projectName, projectList) {
@@ -336,6 +351,24 @@ async function runJarvisTool(name, rawArgs, projectList) {
     }).join(" | ");
   }
 
+  if (name === "search_todos") {
+    const q = String(args.query || "").trim().toLowerCase();
+    if (!q) return "не искал — пустой запрос";
+    const targets = args.project_name ? [matchProjectFuzzy(args.project_name, projectList)].filter(Boolean) : projectList;
+    const matches = [];
+    for (const project of targets) {
+      const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
+      for (const t of context.todos || []) {
+        if (t.title.toLowerCase().includes(q) || String(t.note || "").toLowerCase().includes(q)) {
+          matches.push(`[${project.name}] «${t.title}» (${t.status}/${t.priority})`);
+        }
+      }
+      if (matches.length >= 10) break;
+    }
+    if (!matches.length) return `по запросу «${args.query}» задач не нашлось`;
+    return matches.slice(0, 10).join("; ");
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -380,9 +413,10 @@ async function respondToRequests() {
         + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
         + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
         + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
-        + "record_memory (записать долгоживущий факт), list_project_todos (посмотреть задачи проекта), "
-        + "search_memory (поискать в памяти). Если просят одно из этого — вызови функцию, не пиши текстом, "
-        + "что сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
+        + "record_memory (записать долгоживущий факт), list_project_todos (заголовки задач проекта), "
+        + "search_todos (искать по тексту задачи, включая описание — если list_project_todos не нашёл нужное, "
+        + "попробуй search_todos), search_memory (поискать в памяти). Если просят одно из этого — вызови "
+        + "функцию, не пиши текстом, что сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
         + "проекта) — вызови функцию для КАЖДОГО действия по отдельности в этом же ответе, не только для "
         + "первого. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
         + "делать, а не притворяйся, что сделал. Известные "

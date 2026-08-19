@@ -881,6 +881,21 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_todos",
+      description: "Найти задачи по тексту в заголовке ИЛИ в описании (note) — list_project_todos видит только заголовки, этот инструмент ищет по содержимому задачи.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Текст для поиска" },
+          project_name: { type: "string", description: "Ограничить поиск одним проектом, необязательно" },
+        },
+        required: ["query"],
+      },
+    },
+  },
 ];
 
 function matchProjectFuzzy(projectName, projectList) {
@@ -1003,6 +1018,22 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
     return rows.map((m) => `«${m.title}»${m.project_name ? ` (${m.project_name})` : ""}: ${m.content.slice(0, 160)}`).join(" | ");
   }
 
+  if (name === "search_todos") {
+    const q = String(args.query || "").trim();
+    if (!q) return "не искал — пустой запрос";
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const rows = (await client.query(
+      `SELECT t.title, t.note, t.status, t.priority, p.name AS project_name
+       FROM todos t JOIN projects p ON p.id = t.project_id
+       WHERE (t.title ILIKE '%' || $1 || '%' OR t.note ILIKE '%' || $1 || '%')
+         AND ($2::text IS NULL OR t.project_id = $2)
+       ORDER BY t.updated_at DESC LIMIT 10`,
+      [q, project?.id || null],
+    )).rows;
+    if (!rows.length) return `по запросу «${q}» задач не нашлось`;
+    return rows.map((t) => `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})`).join("; ");
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -1026,8 +1057,10 @@ async function replyAsJarvis(item) {
       + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
       + "create_todo, create_project, delete_project (необратимо, точное название), update_todo_status, "
       + "set_todo_priority, delete_todo (необратимо, точный заголовок), record_memory (записать долгоживущий "
-      + "факт), list_project_todos (посмотреть задачи проекта), search_memory (поискать в памяти). Если просят "
-      + "одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном сообщении просят "
+      + "факт), list_project_todos (заголовки задач проекта), search_todos (искать по тексту задачи, включая "
+      + "описание — если list_project_todos не нашёл нужное, попробуй search_todos, там ищется больше, чем "
+      + "просто заголовок), search_memory (поискать в памяти). Если просят одно из этого — вызови функцию, не "
+      + "пиши текстом, что сделал это. Если в одном сообщении просят "
       + "НЕСКОЛЬКО действий (например, удалить два разных проекта) — вызови функцию для КАЖДОГО действия по "
       + "отдельности в этом же ответе, не только для первого. Если просят что-то другое, для чего нет функции — "
       + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
