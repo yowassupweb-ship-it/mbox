@@ -3,6 +3,7 @@ import { BookOpen, Flag, Link2, Pencil, Plus, X } from "lucide-react";
 import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
 import { projectMemoryMatches } from "../lib/memory";
+import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import type { DecisionEntry, Memory, Project } from "../types";
 import { Button, EmptyState, ErrorText, Panel, SaveButton, Select, type SaveState, TableWrap, TextArea, TextInput } from "../ui";
 
@@ -19,6 +20,7 @@ type MemoryLink = {
 type LinkView = { otherId: string; otherTitle: string; type: string; dir: "out" | "in" };
 
 export function MemoryBoard({ memories, projects, decisions, onSaved }: { memories: Memory[]; projects: Project[]; decisions: DecisionEntry[]; onSaved: () => void }) {
+  const railRef = useWheelToHorizontal<HTMLDivElement>();
   const [links, setLinks] = useState<MemoryLink[]>([]);
   const [editing, setEditing] = useState<Memory | null>(null);
   const [projectId, setProjectId] = useState("");
@@ -64,7 +66,7 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
   return (
     <>
       {projects.length > 0 && (
-        <div className="project-rail" role="tablist" aria-label="Фильтр по проекту">
+        <div className="project-rail" ref={railRef} role="tablist" aria-label="Фильтр по проекту">
           <button
             role="tab"
             aria-selected={!projectId}

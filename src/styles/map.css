@@ -67,8 +67,41 @@
   box-shadow: var(--chin-shadow);
 }
 
-.map-tools-gap { display: none; }
-.map-scale { color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; padding: 0 var(--space-2); }
+.map-scale { color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; padding: 0 var(--space-1); min-width: 34px; text-align: center; }
+
+/* Зум — отдельный плавающий кластер внизу слева, не толкается с режимами наверху. */
+.map-zoom {
+  position: absolute;
+  left: var(--space-4);
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  border: var(--border-width) solid var(--glass-brd);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(1.4);
+}
+
+.map-zoom button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.map-zoom button:hover { color: var(--text-main); background: rgba(255, 255, 255, .06); }
 
 .map-canvas {
   position: absolute;
@@ -226,6 +259,7 @@
 .map-node.kind-todo.priority-high em { background: rgba(255, 212, 121, .18); color: #ffe7a8; }
 .map-node.kind-todo.priority-low em { opacity: .72; }
 .map-node.kind-memory,
+.map-node.kind-decision,
 .map-node.kind-folder { width: 180px; }
 
 .map-inspector {

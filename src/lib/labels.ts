@@ -1,9 +1,12 @@
 import type { AuditEvent, Project } from "../types";
 import { formatClock } from "./format";
 
+// next технически тот же статус, что и раньше, но в кабане и везде в UI он значит «вернули
+// на доработку после проверки» — этим же статусом ReviewQueue помечает «Доработать».
+// Отдельного статуса под это не заводили, чтобы не трогать схему.
 export const todoStatusLabels: Record<string, string> = {
-  open: "Новая",
-  next: "Следующая",
+  open: "В ожидании",
+  next: "Переработка",
   doing: "В работе",
   blocked: "Заблокирована",
   review: "На проверке",
@@ -20,7 +23,7 @@ export const todoPriorityLabels: Record<string, string> = {
 
 export const todoStatusHint: Record<string, string> = {
   open: "можно брать, но не первая в очереди",
-  next: "следующая задача для агента",
+  next: "вернули на доработку после проверки",
   doing: "сейчас в работе",
   blocked: "нужен ответ или внешний доступ",
   review: "готово к проверке человеком",

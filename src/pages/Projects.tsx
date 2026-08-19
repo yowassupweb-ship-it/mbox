@@ -6,6 +6,7 @@ import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/ent
 import { formatBytes } from "../lib/format";
 import { fetchJson } from "../lib/api";
 import { projectMemoryMatches } from "../lib/memory";
+import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import type { DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
 
@@ -62,6 +63,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   decisions: DecisionEntry[];
   onProjectContext?: (project: Project, position: { x: number; y: number }) => void;
 }) {
+  const railRef = useWheelToHorizontal<HTMLDivElement>();
   const route = parseRoute(selectedNodeKey);
   const visible = useMemo(() => {
     const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -114,7 +116,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
 
   return (
     <div className="control-panel">
-      <div className="project-rail" role="tablist" aria-label="Проекты">
+      <div className="project-rail" ref={railRef} role="tablist" aria-label="Проекты">
         {visible.map((item) => (
           <button
             key={item.id}

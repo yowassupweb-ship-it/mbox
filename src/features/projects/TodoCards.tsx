@@ -12,10 +12,11 @@ import { Button, EmptyState, ErrorText, ManualForm, SaveButton, Select, TextArea
 const statusOptions = Object.entries(todoStatusLabels).map(([value, label]) => ({ value, label }));
 const priorityOptions = Object.entries(todoPriorityLabels).map(([value, label]) => ({ value, label }));
 
-// «Готово» и «Архив» — по сути один и тот же бакет («Готово = архив»), отдельной колонки под
-// архив не заводим: карточка со статусом archived показывается в «Готово», а всё, что туда
-// перетащили, встаёт как done — canonical-статус у объединённой колонки один.
-const kanbanColumns = Object.keys(todoStatusLabels).filter((status) => status !== "archived");
+// Явный порядок колонок кабана: В ожидании → В работе → Заблокирована → На проверке →
+// Переработка → Готово. «Готово» и «Архив» — один бакет («Готово = архив»), отдельной
+// колонки под архив нет: карточка со статусом archived показывается в «Готово», а всё,
+// что туда перетащили, встаёт как done — canonical-статус у объединённой колонки один.
+const kanbanColumns = ["open", "doing", "blocked", "review", "next", "done"];
 const columnMatchesStatus = (columnStatus: string, todoStatus: string) =>
   columnStatus === "done" ? todoStatus === "done" || todoStatus === "archived" : todoStatus === columnStatus;
 

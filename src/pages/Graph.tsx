@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Link2, Maximize, Minus, Plus, Unlink } from "lucide-react";
 import { fetchJson, fetchOr } from "../lib/api";
 import { edgeTypeLabel, todoPriorityLabel, todoStatusLabel } from "../lib/labels";
-import type { FolderRow, GraphEdge, Memory, Project, Todo } from "../types";
+import { projectMemoryMatches } from "../lib/memory";
+import type { DecisionEntry, FolderRow, GraphEdge, Memory, Project, Todo } from "../types";
 
-type NodeKind = "project" | "todo" | "memory" | "folder";
+type NodeKind = "project" | "todo" | "memory" | "decision" | "folder";
 
 type MapNode = {
   key: string;
@@ -37,8 +38,16 @@ const kindColor: Record<NodeKind, string> = {
   project: "#8ab4ff",
   todo: "#ffd479",
   memory: "#7ee2a8",
+  decision: "#f2a0c0",
   folder: "#c9a6ff",
 };
+
+/** Радиус кольца, вмещающего N спутников проекта (та же формула упаковки, что и при расстановке). */
+function orbitRadiusFor(count: number, perRing: number, baseRadius: number, ringStep: number) {
+  if (count <= 0) return 0;
+  const rings = Math.ceil(count / perRing);
+  return baseRadius + (rings - 1) * ringStep;
+}
 
 const todoStatusOrder = ["doing", "next", "review", "blocked", "open"];
 const todoStatusColor: Record<string, string> = {
@@ -63,9 +72,10 @@ function activeTodos(todos: Todo[]) {
  * Быстродействие: во время перетаскивания меняется только CSS-переменная узла, без перерисовки
  * дерева. Состояние React обновляется один раз, когда отпустили.
  */
-export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
+export function GraphBoard({ folders, memories, decisions, projects, edges, onSaved }: {
   folders: FolderRow[];
   memories: Memory[];
+  decisions: DecisionEntry[];
   projects: Project[];
   edges: GraphEdge[];
   onSaved: () => void;
@@ -88,22 +98,88 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     });
   }, []);
 
-  // Радиальная раскладка: каждый проект — хаб, его задачи орбитой вокруг; кластеры стоят сеткой.
-  // Позиции без сохранённых считаются детерминированно, чтобы карта не прыгала между загрузками.
+  // Радиальная раскладка: каждый проект — хаб, вокруг орбитой ВСЕ его сущности (задачи, память,
+  // решения, привязанные папки) — не только задачи, как раньше. Позиции без сохранённых считаются
+  // детерминированно, чтобы карта не прыгала между загрузками.
   const nodes = useMemo<MapNode[]>(() => {
     const list: MapNode[] = [];
     const place = (kind: NodeKind, entityId: string, x: number, y: number) => positions[`${kind}:${entityId}`] ?? { x, y };
     // center: узел позиционируется левым-верхним углом, а центр карточки = (x+110, y+32).
     const atCenter = (kind: NodeKind, id: string, cx: number, cy: number) => place(kind, id, cx - 110, cy - 32);
 
+    const perRing = 8;
+    const RING_BASE = 165;
+    const RING_STEP = 125;
+
+    type Satellite = { kind: NodeKind; id: string; label: string; sub: string; color: string; extra?: Partial<MapNode> };
+    const satellitesByProject = new Map<string, Satellite[]>();
+    const assignedMemoryIds = new Set<string>();
+    const assignedDecisionIds = new Set<string>();
+    const assignedFolderIds = new Set<string>();
+
+    projects.forEach((project) => {
+      const sats: Satellite[] = [];
+      const todoIds = new Set(project.todos.map((todo) => todo.id));
+
+      if (showTodos) {
+        const visibleTodos = activeTodos(project.todos).sort((a, b) => {
+          const leftStatus = todoStatusOrder.indexOf(a.status);
+          const rightStatus = todoStatusOrder.indexOf(b.status);
+          const statusDelta = (leftStatus === -1 ? 99 : leftStatus) - (rightStatus === -1 ? 99 : rightStatus);
+          return statusDelta || (todoPriorityRank[b.priority] || 0) - (todoPriorityRank[a.priority] || 0) || a.title.localeCompare(b.title);
+        });
+        for (const todo of visibleTodos) {
+          sats.push({
+            kind: "todo", id: todo.id, label: todo.title,
+            sub: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}`,
+            color: todoStatusColor[todo.status] || kindColor.todo,
+            extra: { status: todo.status, priority: todo.priority, projectName: project.name, note: todo.note },
+          });
+        }
+      }
+
+      // Память и решения — тоже орбита проекта, а не отдельная зона в стороне: раньше там были
+      // только задачи, и «Память» с «Записями» терялись где-то сбоку без всякой связи с проектом.
+      if (showMemories) {
+        for (const memory of memories) {
+          if (!projectMemoryMatches(memory, project, todoIds)) continue;
+          assignedMemoryIds.add(memory.id);
+          sats.push({ kind: "memory", id: memory.id, label: memory.title, sub: "память", color: kindColor.memory });
+        }
+        for (const decision of decisions) {
+          if (decision.project_id !== project.id) continue;
+          assignedDecisionIds.add(decision.id);
+          sats.push({ kind: "decision", id: decision.id, label: decision.title, sub: "решение", color: kindColor.decision });
+        }
+      }
+
+      for (const folder of folders) {
+        if (folder.project_id !== project.id) continue;
+        assignedFolderIds.add(folder.id);
+        sats.push({ kind: "folder", id: folder.id, label: folder.name, sub: folder.entity_type, color: folder.color || kindColor.folder });
+      }
+
+      satellitesByProject.set(project.id, sats);
+    });
+
+    // Шаг сетки кластеров подстраивается под самый «раскормленный» проект — иначе у соседа с
+    // тремя спутниками кластер налезает на проект с тридцатью, и получается куча, а не карта.
+    const maxOrbit = Math.max(0, ...projects.map((project) => orbitRadiusFor(satellitesByProject.get(project.id)?.length || 0, perRing, RING_BASE, RING_STEP)));
+    const adaptiveClusterW = Math.max(CLUSTER_W, maxOrbit * 2 + 180);
     const cols = Math.max(1, Math.ceil(Math.sqrt(projects.length)));
     const centers = new Map<string, { cx: number; cy: number }>();
 
     projects.forEach((project, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
-      const cx = MARGIN_X + 300 + col * CLUSTER_W;
-      const cy = MARGIN_Y + 300 + row * CLUSTER_W;
+      const gridX = MARGIN_X + 300 + col * adaptiveClusterW;
+      const gridY = MARGIN_Y + 300 + row * adaptiveClusterW;
+      // Центр берём из ФАКТИЧЕСКИ размещённой точки (учитывает сохранённую/перетащенную позицию),
+      // а не из сырой сетки — иначе спутники orbit'ились вокруг места, откуда проект уже уехал,
+      // и перетаскивание хаба визуально «отвязывалось» от его же орбиты.
+      const point = atCenter("project", project.id, gridX, gridY);
+      const cx = point.x + 110;
+      const cy = point.y + 32;
       centers.set(project.id, { cx, cy });
       list.push({
         key: `project:${project.id}`,
@@ -112,58 +188,47 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         label: project.name,
         sub: `${activeTodos(project.todos).length} активных задач`,
         color: project.color || kindColor.project,
-        ...atCenter("project", project.id, cx, cy),
+        ...point,
       });
     });
 
-    if (showTodos) {
-      projects.forEach((project) => {
-        const center = centers.get(project.id);
-        if (!center) return;
-        const visibleTodos = activeTodos(project.todos).sort((a, b) => {
-          const leftStatus = todoStatusOrder.indexOf(a.status);
-          const rightStatus = todoStatusOrder.indexOf(b.status);
-          const statusDelta = (leftStatus === -1 ? 99 : leftStatus) - (rightStatus === -1 ? 99 : rightStatus);
-          return statusDelta || (todoPriorityRank[b.priority] || 0) - (todoPriorityRank[a.priority] || 0) || a.title.localeCompare(b.title);
-        });
-        const perRing = 8;
-        visibleTodos.forEach((todo, index) => {
-          const ring = Math.floor(index / perRing);
-          const idxInRing = index % perRing;
-          const inThisRing = Math.min(perRing, visibleTodos.length - ring * perRing);
-          const radius = 165 + ring * 125;
-          const angle = -Math.PI / 2 + (idxInRing / inThisRing) * Math.PI * 2;
-          const tx = center.cx + Math.cos(angle) * radius;
-          const ty = center.cy + Math.sin(angle) * radius;
-          list.push({
-            key: `todo:${todo.id}`,
-            kind: "todo",
-            entityId: todo.id,
-            label: todo.title,
-            sub: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}`,
-            color: todoStatusColor[todo.status] || kindColor.todo,
-            status: todo.status,
-            priority: todo.priority,
-            projectName: project.name,
-            note: todo.note,
-            ...atCenter("todo", todo.id, tx, ty),
-          });
+    projects.forEach((project) => {
+      const center = centers.get(project.id);
+      const sats = satellitesByProject.get(project.id);
+      if (!center || !sats) return;
+      sats.forEach((sat, index) => {
+        const ring = Math.floor(index / perRing);
+        const idxInRing = index % perRing;
+        const inThisRing = Math.min(perRing, sats.length - ring * perRing);
+        const radius = RING_BASE + ring * RING_STEP;
+        const angle = -Math.PI / 2 + (idxInRing / inThisRing) * Math.PI * 2;
+        const tx = center.cx + Math.cos(angle) * radius;
+        const ty = center.cy + Math.sin(angle) * radius;
+        list.push({
+          key: `${sat.kind}:${sat.id}`,
+          kind: sat.kind,
+          entityId: sat.id,
+          label: sat.label,
+          sub: sat.sub,
+          color: sat.color,
+          ...sat.extra,
+          ...atCenter(sat.kind, sat.id, tx, ty),
         });
       });
-    }
+    });
 
-    // Память и папки — отдельная зона справа от всех кластеров, аккуратной колонной-сеткой.
-    const zoneX = MARGIN_X + cols * CLUSTER_W + 120;
+    // Несвязанные с проектом память/папки — отдельная зона справа от всех кластеров.
+    const zoneX = MARGIN_X + cols * adaptiveClusterW + 120;
+    const looseMemories = showMemories ? memories.filter((memory) => !assignedMemoryIds.has(memory.id)) : [];
+    const looseFolders = folders.filter((folder) => !assignedFolderIds.has(folder.id));
 
-    if (showMemories) {
-      memories.slice(0, 24).forEach((memory, index) => {
-        const point = place("memory", memory.id, zoneX + (index % 2) * (NODE_W + 48), MARGIN_Y + Math.floor(index / 2) * ROW_STEP);
-        list.push({ key: `memory:${memory.id}`, kind: "memory", entityId: memory.id, label: memory.title, sub: "память", color: kindColor.memory, ...point });
-      });
-    }
+    looseMemories.slice(0, 24).forEach((memory, index) => {
+      const point = place("memory", memory.id, zoneX + (index % 2) * (NODE_W + 48), MARGIN_Y + Math.floor(index / 2) * ROW_STEP);
+      list.push({ key: `memory:${memory.id}`, kind: "memory", entityId: memory.id, label: memory.title, sub: "память", color: kindColor.memory, ...point });
+    });
 
-    const folderBaseX = zoneX + (showMemories ? 2 * (NODE_W + 48) + 100 : 0);
-    folders.slice(0, 16).forEach((folder, index) => {
+    const folderBaseX = zoneX + (looseMemories.length ? 2 * (NODE_W + 48) + 100 : 0);
+    looseFolders.slice(0, 16).forEach((folder, index) => {
       const point = place("folder", folder.id, folderBaseX, MARGIN_Y + index * ROW_STEP);
       list.push({ key: `folder:${folder.id}`, kind: "folder", entityId: folder.id, label: folder.name, sub: folder.entity_type, color: folder.color || kindColor.folder, ...point });
     });
@@ -204,7 +269,7 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     }
 
     return list;
-  }, [projects, memories, folders, positions, showTodos, showMemories]);
+  }, [projects, memories, decisions, folders, positions, showTodos, showMemories]);
 
   const byKey = useMemo(() => new Map(nodes.map((node) => [node.key, node])), [nodes]);
 
@@ -229,8 +294,38 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
       }
     }
 
+    // Тонкие линии принадлежности рисуем и для памяти/решений/папок в орбите — иначе спутники
+    // читаются просто как соседние узлы, а не как то, что реально относится к проекту.
+    if (showMemories) {
+      for (const project of projects) {
+        const from = byKey.get(`project:${project.id}`);
+        if (!from) continue;
+        const todoIds = new Set(project.todos.map((todo) => todo.id));
+        for (const memory of memories) {
+          if (!projectMemoryMatches(memory, project, todoIds)) continue;
+          const to = byKey.get(`memory:${memory.id}`);
+          if (to) result.push({ key: `owns:memory:${memory.id}`, from, to, label: "", real: false });
+        }
+        for (const decision of decisions) {
+          if (decision.project_id !== project.id) continue;
+          const to = byKey.get(`decision:${decision.id}`);
+          if (to) result.push({ key: `owns:decision:${decision.id}`, from, to, label: "", real: false });
+        }
+      }
+    }
+
+    for (const project of projects) {
+      const from = byKey.get(`project:${project.id}`);
+      if (!from) continue;
+      for (const folder of folders) {
+        if (folder.project_id !== project.id) continue;
+        const to = byKey.get(`folder:${folder.id}`);
+        if (to) result.push({ key: `owns:folder:${folder.id}`, from, to, label: "", real: false });
+      }
+    }
+
     return result;
-  }, [edges, byKey, projects, showTodos]);
+  }, [edges, byKey, projects, memories, decisions, folders, showTodos, showMemories]);
 
   // При выборе узла подсвечиваем его и соседей, остальное гасим — сразу видно, с чем он связан.
   const activeKeys = useMemo(() => {
@@ -345,7 +440,11 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
     const maxY = Math.max(...ys) + 64;
     const width = maxX - minX + 220;
     const height = maxY - minY + 200;
-    const minScale = box.width < 560 ? 0.18 : 0.4;
+    // Пол масштаба был рассчитан на карту в 3-4 кластера. С орбитами памяти/решений и адаптивным
+    // шагом сетки (чтобы кластеры не наезжали друг на друга) реальная карта стала заметно шире —
+    // пол в 0.4 не давал вписать её целиком, и fitToContent центрировал вид на пустоту за краем
+    // экрана. Опускаем пол сильно ниже: лучше мелко, но всё видно, чем красиво и мимо.
+    const minScale = box.width < 560 ? 0.06 : 0.08;
     const scale = Math.min(1.2, Math.max(minScale, Math.min(box.width / width, box.height / height)));
     setView({ scale, x: box.width / 2 - ((minX + maxX) / 2) * scale, y: box.height / 2 - ((minY + maxY) / 2) * scale });
   }
@@ -365,6 +464,8 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
 
   return (
     <section className="map" aria-label="Карта MBOX">
+      {/* Режимы и зум — два отдельных плавающих кластера, а не одна раздутая прокручиваемая лента:
+          иначе на узком экране все восемь кнопок толкались в одну ленту и читались кучей. */}
       <div className="map-tools">
         <button className={linkFrom ? "is-active" : ""} type="button" onClick={() => setLinkFrom(linkFrom ? null : selected)} disabled={!selected || selected.kind !== "project"}>
           <Link2 size={15} />{linkFrom ? `связать с… (от ${linkFrom.label})` : "Связать"}
@@ -372,12 +473,13 @@ export function GraphBoard({ folders, memories, projects, edges, onSaved }: {
         <button className={showTodos ? "is-active" : ""} type="button" onClick={() => setShowTodos((value) => !value)}>Задачи</button>
         <button className={showMemories ? "is-active" : ""} type="button" onClick={() => setShowMemories((value) => !value)}>Память</button>
         <button type="button" onClick={relayout} title="Расставить заново по кластерам">Разложить</button>
-        <span className="map-tools-gap" />
-        <button type="button" onClick={() => setView((current) => ({ ...current, scale: Math.max(0.2, current.scale - 0.15) }))} aria-label="Отдалить"><Minus size={15} /></button>
-        <button type="button" onClick={() => setView((current) => ({ ...current, scale: Math.min(2.4, current.scale + 0.15) }))} aria-label="Приблизить"><Plus size={15} /></button>
-        <button type="button" onClick={() => fitToContent()} aria-label="Вписать"><Maximize size={15} /></button>
-        <button type="button" onClick={() => setView({ x: 0, y: 0, scale: 1 })} aria-label="Сбросить"><Crosshair size={15} /></button>
+      </div>
+      <div className="map-zoom">
+        <button type="button" onClick={() => setView((current) => ({ ...current, scale: Math.max(0.05, current.scale - 0.15) }))} aria-label="Отдалить"><Minus size={15} /></button>
         <span className="map-scale">{Math.round(view.scale * 100)}%</span>
+        <button type="button" onClick={() => setView((current) => ({ ...current, scale: Math.min(2.4, current.scale + 0.15) }))} aria-label="Приблизить"><Plus size={15} /></button>
+        <button type="button" onClick={() => fitToContent()} aria-label="Вписать всё" title="Вписать всё"><Maximize size={15} /></button>
+        <button type="button" onClick={() => fitToContent(nodes.filter((node) => node.kind === "project" || node.kind === "todo"))} aria-label="Фокус на проектах" title="Фокус на проектах и задачах"><Crosshair size={15} /></button>
       </div>
       <div
         className={linkFrom ? "map-canvas is-linking" : "map-canvas"}
