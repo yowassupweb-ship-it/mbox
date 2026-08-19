@@ -8,9 +8,9 @@
 }
 
 .metric-card {
-  min-height: 124px;
-  border-radius: 34px;
-  padding: 20px;
+  min-height: 118px;
+  border-radius: var(--radius-xl);
+  padding: 18px;
   display: grid;
   align-content: space-between;
 }
@@ -22,7 +22,9 @@
 }
 
 .metric-card strong {
-  font-size: 34px;
+  font-size: 32px;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-card small {
