@@ -140,6 +140,51 @@
 .danger-text { color: var(--state-danger); }
 .danger-text svg { color: var(--state-danger); }
 
+/* Живые воспоминания проекта: факты (record_memory от Джарвиса/агентов), привязанные к этому
+   проекту — прямо на странице проекта, рядом с сущностями, а не только в отдельной Памяти. */
+.project-facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.project-facts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-main);
+}
+
+.project-facts-head svg { color: var(--accent-color); flex: none; }
+.project-facts-head .muted { margin-left: auto; font-size: var(--text-xs); }
+
+.project-facts-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2);
+}
+
+.project-fact-card {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--container-bg));
+}
+
+.project-fact-card b { font-size: var(--text-sm); }
+.project-fact-card p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.project-fact-card time { color: var(--text-muted); font-size: 11px; }
+
 /* Перетаскивание карточек */
 
 .todo-drag-slot {
