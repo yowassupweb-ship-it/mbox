@@ -735,11 +735,16 @@ const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-async function groqComplete(messages, tools, purpose = "reply") {
+// Запрос человека может лежать в очереди на прерывание (см. POST /agent/inbox/:id/cancel) —
+// контроллер живёт, пока идёт агентский цикл, и удаляется в finally у replyAsJarvis.
+const activeJarvisRequests = new Map();
+
+async function groqComplete(messages, tools, purpose = "reply", signal) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
     body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
+    signal,
   });
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
@@ -1107,6 +1112,8 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
 
 async function replyAsJarvis(item) {
   if (!GROQ_API_KEY) return;
+  const controller = new AbortController();
+  activeJarvisRequests.set(String(item.id), controller);
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try {
@@ -1168,7 +1175,7 @@ async function replyAsJarvis(item) {
     const toolsUsed = [];
     let reply = "";
     for (let step = 0; step < 5; step += 1) {
-      const message = await groqComplete(messages, JARVIS_TOOLS);
+      const message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal);
       if (!message.tool_calls?.length) {
         reply = message.content || "";
         break;
@@ -1194,8 +1201,13 @@ async function replyAsJarvis(item) {
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });
   } catch (error) {
-    console.error(`Jarvis inline reply failed: ${error.message}`);
+    if (error.name === "AbortError") {
+      console.error(`Jarvis reply for #${item.id} cancelled by user`);
+    } else {
+      console.error(`Jarvis inline reply failed: ${error.message}`);
+    }
   } finally {
+    activeJarvisRequests.delete(String(item.id));
     await client.end();
   }
 }
@@ -2385,6 +2397,16 @@ async function handleApiWithContext(req, res, url) {
     );
     if (result.rows[0]) broadcastChange(req, "update", "agent_inbox", `#${inboxMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
+  }
+
+  const cancelMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)\/cancel$/);
+  if (cancelMatch && req.method === "POST") {
+    // Прерывание реального запроса, а не просто спрятать спиннер: abort() режет fetch к Groq
+    // на полпути, и помечаем сообщение done, чтобы резервный cron его не подобрал следом.
+    const controller = activeJarvisRequests.get(cancelMatch[1]);
+    if (controller) controller.abort();
+    await query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [cancelMatch[1]]);
+    return sendJson(res, 200, { ok: true, aborted: Boolean(controller) });
   }
 
   if (url.pathname === "/api/mbox/agent/runs") {

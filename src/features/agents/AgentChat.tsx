@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -211,6 +211,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   }, [awaitingJarvisSince]);
 
   const awaitingJarvisSeconds = awaitingJarvisSince ? Math.max(0, Math.floor((Date.now() - awaitingJarvisSince) / 1000)) : 0;
+
+  const cancelJarvis = useCallback(() => {
+    if (!awaitingJarvisId) return;
+    const id = awaitingJarvisId;
+    setAwaitingJarvisId(null);
+    setAwaitingJarvisSince(null);
+    fetchJson(`/api/mbox/agent/inbox/${id}/cancel`, { method: "POST" }).catch(() => {});
+  }, [awaitingJarvisId]);
 
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
@@ -460,6 +468,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-log-time" />
                 <span className="console-log-actor">·</span>
                 <span className="console-log-text">{JARVIS_NAME} думает… {awaitingJarvisSeconds}с</span>
+                <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
+                  <X size={11} />
+                </button>
               </div>
             )}
           </div>

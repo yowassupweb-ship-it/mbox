@@ -589,6 +589,22 @@
 .console-tool-chip svg { color: var(--accent-color); flex: none; }
 
 .console-log-line.typing { opacity: .7; }
+
+.console-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.console-cancel-btn:hover { color: var(--state-danger); border-color: var(--state-danger); }
 .console-log-line.typing .console-log-text { animation: console-blink 1.4s ease-in-out infinite; }
 @keyframes console-blink { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 
