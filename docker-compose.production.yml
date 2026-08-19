@@ -13,6 +13,9 @@ services:
       MBOX_VPN_MANAGED_EXTERNALLY: "true"
       MBOX_PORT: "3000"
       MBOX_HOST: "0.0.0.0"
+      MBOX_AGENT_NAME: ${MBOX_AGENT_NAME:-Джарвис}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
     networks:
       - mbox-net
 

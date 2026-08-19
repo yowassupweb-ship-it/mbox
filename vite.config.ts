@@ -349,6 +349,54 @@ async function queryPostgres<T extends QueryResultRow>(sql: string, values: unkn
   }
 }
 
+// Зеркало server/mbox-server.mjs — прямой ответ Джарвиса из POST /agent/inbox, без ожидания
+// минутного тика systemd-таймера (scripts/mbox-archivist.mjs), который разбирает только память.
+const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+
+async function groqChat(messages: { role: string; content: string }[]) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
+    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2 }),
+  });
+  if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: unknown; body?: unknown }, clients: Set<WebSocket>) {
+  if (!GROQ_API_KEY) return;
+  try {
+    const reply = await groqChat([
+      {
+        role: "system",
+        content: `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+          + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно `
+          + "этим названием, не выдумывай другое. Отвечай коротко и по делу, на русском. Ты не пишешь код и "
+          + "ничего не деплоишь — только мелкие справки, вопросы про память/задачи и небольшие организационные действия.",
+      },
+      { role: "user", content: String(item.body || item.title || "") },
+    ]);
+    const client = await getPool().connect();
+    try {
+      await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
+      await client.query(
+        `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+         VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
+        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id })],
+      );
+      await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
+    } finally {
+      client.release();
+    }
+    broadcastRealtime(clients, "entity_changed", { entity: "agent_inbox" });
+  } catch (error) {
+    console.error(`Jarvis inline reply failed: ${(error as Error).message}`);
+  }
+}
+
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) {
   if (!memoryId || !action) return null;
   const result = await queryPostgres(
@@ -1843,6 +1891,11 @@ function mboxDevApi() {
               ],
             );
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
+            const senderName = String(body.agent_name || "Agent");
+            const addressedTo = body.props && typeof body.props === "object" ? String((body.props as Record<string, unknown>).to || "") : "";
+            if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
+              replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body }, realtimeClients);
+            }
             return sendJson(res, 201, { inbox_item: result.rows[0] });
           }
 

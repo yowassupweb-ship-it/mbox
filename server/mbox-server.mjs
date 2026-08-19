@@ -727,6 +727,55 @@ async function query(sql, values = []) {
   }
 }
 
+// Джарвис раньше жил только в systemd-таймере (см. scripts/mbox-archivist.mjs) с шагом в минуту —
+// для чата это ощущалось как "не отвечает". Здесь та же логика ответа на прямое сообщение, но
+// вызывается синхронно из POST /agent/inbox сразу после вставки, без ожидания следующего тика.
+// Разбор памяти (fact/log) по-прежнему остаётся за таймером — там мгновенность не нужна.
+const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+
+async function groqChat(messages) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
+    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2 }),
+  });
+  if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+async function replyAsJarvis(item) {
+  if (!GROQ_API_KEY) return;
+  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
+    const reply = await groqChat([
+      {
+        role: "system",
+        content: `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+          + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно `
+          + "этим названием, не выдумывай другое. Отвечай коротко и по делу, на русском. Ты не пишешь код и "
+          + "ничего не деплоишь — только мелкие справки, вопросы про память/задачи и небольшие организационные действия.",
+      },
+      { role: "user", content: item.body || item.title },
+    ]);
+    await client.query(
+      `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+       VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id })],
+    );
+    await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
+    broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });
+  } catch (error) {
+    console.error(`Jarvis inline reply failed: ${error.message}`);
+  } finally {
+    await client.end();
+  }
+}
+
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }) {
   if (!memoryId || !action) return null;
   const result = await query(
@@ -1866,6 +1915,11 @@ async function handleApiWithContext(req, res, url) {
         [body.project_id || null, String(body.agent_name || actorFromReq(req)), String(body.item_type || ""), String(body.title || "").trim(), String(body.body || ""), String(body.status || ""), String(body.priority || ""), Boolean(body.requires_human), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
       );
       broadcastChange(req, "create", "agent_inbox", String(body.title || "").trim());
+      const senderName = String(body.agent_name || actorFromReq(req));
+      const addressedTo = body.props && typeof body.props === "object" ? String(body.props.to || "") : "";
+      if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
+        replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body });
+      }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
     }
     const result = await query("SELECT id::text, project_id::text, agent_name, item_type, title, body, status, priority, requires_human, props, pg_column_size(agent_inbox)::int AS memory_bytes, created_at::text, updated_at::text FROM agent_inbox ORDER BY updated_at DESC LIMIT 200");
