@@ -4,7 +4,31 @@ import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
-import type { AgentActivity, AgentInboxItem, AgentRun, Project } from "../../types";
+import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
+
+const SLASH_COMMANDS = [
+  { value: "help", hint: "эта справка" },
+  { value: "status", hint: "кто сейчас на связи" },
+  { value: "agents", hint: "кто сейчас на связи" },
+  { value: "blocked", hint: "задачи, которые ждут решения" },
+  { value: "who", hint: "что известно про агента" },
+  { value: "clear", hint: "очистить окно" },
+];
+
+type Suggestion = { value: string; hint?: string };
+
+/** Активный токен под курсором: символ-триггер сразу после пробела/начала строки и то, что после него набрано. */
+function activeToken(value: string, cursor: number): { trigger: "@" | "/" | "$" | "#"; query: string; start: number } | null {
+  const before = value.slice(0, cursor);
+  const match = before.match(/(?:^|\s)([@/$#])(\S*)$/);
+  if (!match) return null;
+  const trigger = match[1] as "@" | "/" | "$" | "#";
+  const query = match[2];
+  const start = cursor - query.length - 1;
+  // Слэш-команды — это ЦЕЛОЕ сообщение (см. runCommand), не мог быть где-то в середине текста.
+  if (trigger === "/" && start !== 0) return null;
+  return { trigger, query, start };
+}
 
 const HUMAN = "Человек";
 const READ_KEY = "mbox.chat.readAt";
@@ -41,17 +65,21 @@ type LogLine = {
  * написанное на первом же своём действии — и теперь не теряет его, пока реально не ответит
  * (см. pendingMessages в scripts/mbox-mcp-server.mjs).
  */
-export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }: {
+export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, onSaved }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
   projects: Project[];
+  artifacts: Artifact[];
   projectId?: string;
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState("");
   const [text, setText] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState(0);
   const [history, setHistory] = useState<string[]>([]);
   const [historyPos, setHistoryPos] = useState(-1);
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
@@ -67,6 +95,45 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [text]);
+
+  // Подсказки по вводу: @агент, /команда, $проект, #артефакт — набор символов, о котором просили
+  // не тратить контекст на постоянное "MBOX"/"Джарвис" целиком, а выбирать мышью/стрелками.
+  const token = activeToken(text, cursor);
+  const tokenKey = token ? `${token.trigger}:${token.start}` : null;
+  const suggestions = useMemo<Suggestion[]>(() => {
+    if (!token || tokenKey === dismissedKey) return [];
+    const q = token.query.toLowerCase();
+    if (token.trigger === "@") {
+      return agents.map((a) => ({ value: a.name, hint: agentState(a, runs).label })).filter((s) => s.value.toLowerCase().includes(q));
+    }
+    if (token.trigger === "/") {
+      return SLASH_COMMANDS.filter((c) => c.value.startsWith(q));
+    }
+    if (token.trigger === "$") {
+      return projects.map((p) => ({ value: p.name, hint: "проект" })).filter((s) => s.value.toLowerCase().includes(q));
+    }
+    if (token.trigger === "#") {
+      return artifacts.map((a) => ({ value: a.name, hint: "артефакт" })).filter((s) => s.value.toLowerCase().includes(q)).slice(0, 20);
+    }
+    return [];
+  }, [token, tokenKey, dismissedKey, agents, runs, projects, artifacts]);
+
+  useEffect(() => { setHighlight(0); }, [tokenKey]);
+
+  function acceptSuggestion(value: string) {
+    if (!token) return;
+    const before = text.slice(0, token.start);
+    const after = text.slice(cursor);
+    const insert = `${token.trigger}${value} `;
+    setText(`${before}${insert}${after}`);
+    const nextCursor = before.length + insert.length;
+    setCursor(nextCursor);
+    setDismissedKey(null);
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (el) { el.focus(); el.setSelectionRange(nextCursor, nextCursor); }
+    });
+  }
 
   const conversation = useMemo(
     () => [...inbox].filter((item) => CONVERSATION.has(item.item_type)).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(-80),
@@ -151,6 +218,12 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
           "  /clear            — очистить окно (переписка не удаляется)",
           "  /help             — эта справка",
           "что угодно без / — уходит агентам в общую или адресную (кнопки выше) переписку",
+          "",
+          "подсказки по вводу (всплывают сами, выбор — стрелками/мышью, Enter или Tab):",
+          "  @ — агент       (@Джарвис ...)",
+          "  / — команда     (в начале сообщения)",
+          "  $ — проект      ($MBOX вместо «мбокс/mbox/MBOX»)",
+          "  # — артефакт",
         ].join("\n"));
         return;
       case "status":
@@ -222,6 +295,12 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (suggestions.length) {
+      if (event.key === "ArrowDown") { event.preventDefault(); setHighlight((h) => (h + 1) % suggestions.length); return; }
+      if (event.key === "ArrowUp") { event.preventDefault(); setHighlight((h) => (h - 1 + suggestions.length) % suggestions.length); return; }
+      if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); acceptSuggestion(suggestions[highlight].value); return; }
+      if (event.key === "Escape") { event.preventDefault(); setDismissedKey(tokenKey); return; }
+    }
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); return; }
     // История команд — только когда курсор ещё не гуляет по многострочному тексту, иначе
     // стрелки должны просто двигать курсор внутри composer'а, как в любом текстовом поле.
@@ -307,24 +386,43 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
             )}
           </div>
 
-          <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-            <span className="console-prompt">{target ? `@${target}` : "~"}<ChevronRight size={13} /></span>
-            <textarea
-              ref={composerRef}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={target ? `сообщение для ${target} (Shift+Enter — новая строка)` : "команда (/help) или сообщение всем — Shift+Enter для новой строки"}
-              spellCheck={false}
-              autoComplete="off"
-              rows={1}
-            />
-          </form>
+          <div className="console-composer">
+            {suggestions.length > 0 && (
+              <div className="console-suggest">
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    key={suggestion.value}
+                    type="button"
+                    className={index === highlight ? "is-active" : ""}
+                    onMouseDown={(event) => { event.preventDefault(); acceptSuggestion(suggestion.value); }}
+                  >
+                    <b>{token?.trigger}{suggestion.value}</b>
+                    {suggestion.hint && <em>{suggestion.hint}</em>}
+                  </button>
+                ))}
+              </div>
+            )}
+            <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+              <span className="console-prompt">{target && `@${target}`}<ChevronRight size={13} /></span>
+              <textarea
+                ref={composerRef}
+                value={text}
+                onChange={(event) => { setText(event.target.value); setCursor(event.target.selectionStart); }}
+                onClick={(event) => setCursor(event.currentTarget.selectionStart)}
+                onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
+                onKeyDown={onKeyDown}
+                placeholder={target ? `сообщение для ${target} (Shift+Enter — новая строка)` : "команда (/help), @агент, $проект, #артефакт — Shift+Enter для новой строки"}
+                spellCheck={false}
+                autoComplete="off"
+                rows={1}
+              />
+            </form>
+          </div>
         </div>
       )}
 
       <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
-        <Terminal size={17} />
+        <Terminal size={11} />
         <span>Агенты</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}

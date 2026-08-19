@@ -208,7 +208,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
         {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
       </main>
-      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
+      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
       {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
       <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} badges={{ projects: unseenTodos }} />
     </div>
