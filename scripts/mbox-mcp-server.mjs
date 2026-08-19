@@ -67,7 +67,8 @@ async function pendingMessages() {
   lastPushCheck = now;
   try {
     const data = await mboxFetch("/api/mbox/agent/inbox");
-    const mine = (data.inbox || []).filter((item) => {
+    const inbox = data.inbox || [];
+    const mine = inbox.filter((item) => {
       if (item.status === "done") return false;
       if (item.agent_name !== "Человек") return false;
       const to = item.props?.to;
@@ -75,27 +76,49 @@ async function pendingMessages() {
     });
     if (!mine.length) return "";
 
+    // Раньше сообщение помечалось done сразу по факту показа — если агент не заметил его среди
+    // прочего текста ответа, оно пропадало НАВСЕГДА без следа. Теперь закрываем его только когда
+    // у ЭТОГО агента появилась запись в inbox ПОЗЖЕ сообщения — то есть он реально среагировал
+    // (ответил, отчитался, что угодно), а не просто «оно было в ответе инструмента».
+    const myLaterItems = inbox.filter((item) => item.agent_name === agentName);
+    const responded = (item) => myLaterItems.some((mine) => new Date(mine.created_at) > new Date(item.created_at));
     for (const item of mine) {
+      if (!responded(item)) continue;
       await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "done" }),
       }).catch(() => undefined);
     }
 
-    const lines = mine.map((item) => "- " + (item.body || item.title)).join("\n");
-    return ["", "", "=== СООБЩЕНИЕ ОТ ЧЕЛОВЕКА (" + mine.length + ") ===", lines, "=== конец, ответь через create_inbox_item ==="].join("\n");
+    const stillOpen = mine.filter((item) => !responded(item));
+    if (!stillOpen.length) return "";
+
+    const lines = stillOpen.map((item) => "- " + (item.body || item.title)).join("\n");
+    return [
+      "", "",
+      "🔴 СООБЩЕНИЕ ОТ ЧЕЛОВЕКА, ТРЕБУЕТ ОТВЕТА (" + stillOpen.length + ") 🔴",
+      lines,
+      "Ответь через create_inbox_item ПРЯМО СЕЙЧАС, прежде чем продолжать текущую задачу.",
+      "Это напоминание будет повторяться на каждом вызове инструмента, пока ты не ответишь.",
+      "=== конец сообщения от человека ===",
+    ].join("\n");
   } catch {
     return "";
   }
 }
 
-/** Обёртка вокруг ответа инструмента: добавляет непрочитанное человеком. */
+/**
+ * Обёртка вокруг ответа инструмента: добавляет непрочитанное человеком.
+ * Когда человек реально ждёт ответа, рутинное напоминание о workflow намеренно убирается —
+ * два текстовых блока на каждый вызов означали, что срочное сообщение тонуло среди рутины
+ * и агент проходил мимо него взглядом.
+ */
 async function withPush(result) {
   const push = await pendingMessages();
   const content = result.content || [];
-  const reminder = "MBOX workflow reminder: use get_agent_context before work, claim_task before editing, set_task_status/finish_task when pausing or finishing, and record_memory after meaningful work.";
-  const extra = [{ type: "text", text: reminder }];
-  if (push) extra.push({ type: "text", text: push });
+  const extra = push
+    ? [{ type: "text", text: push }]
+    : [{ type: "text", text: "MBOX workflow reminder: use get_agent_context before work, claim_task before editing, set_task_status/finish_task when pausing or finishing, and record_memory after meaningful work." }];
   return { ...result, content: [...content, ...extra] };
 }
 
