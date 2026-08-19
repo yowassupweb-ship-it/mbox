@@ -100,7 +100,7 @@
 }
 
 .entity-tile svg { grid-area: icon; color: var(--kind-accent, #d4dceb); }
-.entity-tile b { grid-area: name; color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-medium); }
+.entity-tile b { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-medium); }
 .entity-tile small { grid-area: meta; color: var(--text-muted); font-size: var(--text-xs); }
 
 .entity-tile.is-active {
@@ -140,23 +140,7 @@
 .danger-text { color: var(--state-danger); }
 .danger-text svg { color: var(--state-danger); }
 
-/* Живые воспоминания проекта: факты (record_memory от Джарвиса/агентов), привязанные к этому
-   проекту — прямо на странице проекта, рядом с сущностями, а не только в отдельной Памяти. */
-.project-facts {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.project-facts-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-main);
-}
-
-.project-facts-head svg { color: var(--accent-color); flex: none; }
-.project-facts-head .muted { margin-left: auto; font-size: var(--text-xs); }
-
+/* Карточки записей памяти — использует вкладка «Воспоминания» (EntityPanels.tsx MemoriesPanel). */
 .project-facts-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

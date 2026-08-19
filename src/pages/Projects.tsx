@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderPlus, Folder, ListTodo, Sparkles, Trash2 } from "lucide-react";
+import { FolderPlus, Folder, ListTodo, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { FolderBoard } from "../features/projects/FolderBoard";
 import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
@@ -121,15 +121,6 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   const projectFolders = folders.filter((folder) => folder.project_id === project.id);
   const openFolder = view.startsWith("folder:") ? projectFolders.find((folder) => folder.id === view.slice(7)) : undefined;
 
-  // "MBOX больше напоминает справочник" — сущности (Git/Стек/Доступ) есть, а живого следа о проекте
-  // нет. Факты (record_memory от Джарвиса и агентов) уже пишутся в общую память, но были видны
-  // только на отдельной странице Памяти. Здесь — та же лента, но прямо на странице проекта.
-  const todoIds = new Set(project.todos.map((todo) => todo.id));
-  const projectFacts = memories
-    .filter((memory) => memory.entity_type === "fact" && projectMemoryMatches(memory, project, todoIds))
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    .slice(0, 5);
-
   /** Папку, созданную здесь же, здесь же надо и удалять: контекстное меню дерева до неё не достаёт. */
   async function deleteFolder(folder: FolderRow) {
     if (!window.confirm(`Удалить папку «${folder.name}»? Сама папка исчезнет, содержимое проекта останется.`)) return;
@@ -236,25 +227,6 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
           <small>создать</small>
         </button>
       </div>
-
-      {projectFacts.length > 0 && (
-        <section className="project-facts" aria-label="Живые воспоминания проекта">
-          <header className="project-facts-head">
-            <Sparkles size={15} />
-            <b>Живые воспоминания</b>
-            <span className="muted">полный список — на странице «Память»</span>
-          </header>
-          <div className="project-facts-list">
-            {projectFacts.map((fact) => (
-              <article key={fact.id} className="project-fact-card">
-                <b>{fact.title}</b>
-                <p>{fact.content}</p>
-                <time>{new Date(fact.updated_at).toLocaleDateString("ru-RU")}</time>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
 
       <section className="control-body">
         <header className="control-body-head">

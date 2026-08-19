@@ -12,7 +12,7 @@ export const projectEntityKinds: Record<ProjectEntityKind, { icon: LucideIcon; a
   deploy: { icon: Rocket, accent: "#ff9f7a", label: "Деплой" },
   stack: { icon: Layers, accent: "#7cd8e8", label: "Стек" },
   access: { icon: ShieldCheck, accent: "#f2a0c0", label: "Доступ" },
-  memories: { icon: Brain, accent: "#29e0d6", label: "Воспоминания" },
+  memories: { icon: Brain, accent: "#29e0d6", label: "Память" },
 };
 
 export function entityKindMeta(kind?: string) {
