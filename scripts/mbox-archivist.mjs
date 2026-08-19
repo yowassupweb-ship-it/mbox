@@ -97,7 +97,10 @@ async function ping(event) {
 async function respondToRequests() {
   const data = await mboxFetch("/api/mbox/agent/inbox");
   const inbox = data.inbox || [];
-  const mine = inbox.filter((item) => item.status !== "done" && item.agent_name === "Человек" && item.props?.to === agentName);
+  // Без явного @Джарвис пользователь адресует сообщение "в пустоту" — реальные агенты (Claude, Codex)
+  // сидят в сессиях и не всегда онлайн. Джарвис — единственный постоянный, поэтому берёт себе всё,
+  // что не тегнуто явно на кого-то другого, а не только прямые обращения.
+  const mine = inbox.filter((item) => item.status !== "done" && item.agent_name === "Человек" && (!item.props?.to || item.props.to === agentName));
   if (!mine.length) return { answered: 0 };
 
   let answered = 0;
