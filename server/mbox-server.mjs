@@ -747,9 +747,12 @@ async function groqComplete(messages, tools) {
 }
 
 // Раньше Джарвис только генерировал текст и мог написать "задача добавлена", ничего не сделав —
-// модель не отличает выполненное действие от вежливой выдумки. Даём ей ровно один настоящий
-// инструмент (создание todo) через tool calling; всё остальное подтверждается только текстом,
-// с явным предупреждением в системном промпте не выдумывать выполненные действия.
+// модель не отличает выполненное действие от вежливой выдумки. Даём ей набор настоящих инструментов
+// через tool calling; всё остальное подтверждается только текстом, с явным предупреждением в
+// системном промпте не выдумывать выполненные действия.
+const TODO_STATUSES = ["open", "next", "doing", "blocked", "review", "done", "archived"];
+const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
+
 const JARVIS_TOOLS = [
   {
     type: "function",
@@ -791,11 +794,90 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_todo_status",
+      description: "Сменить статус существующей задачи, например пометить готовой или заблокированной.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живёт задача" },
+          todo_title: { type: "string", description: "Заголовок задачи, максимально похожий на существующий" },
+          status: { type: "string", enum: TODO_STATUSES, description: "Новый статус" },
+        },
+        required: ["project_name", "todo_title", "status"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_todo_priority",
+      description: "Сменить приоритет существующей задачи.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живёт задача" },
+          todo_title: { type: "string", description: "Заголовок задачи, максимально похожий на существующий" },
+          priority: { type: "string", enum: TODO_PRIORITIES, description: "Новый приоритет" },
+        },
+        required: ["project_name", "todo_title", "priority"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_todo",
+      description: "Удалить задачу насовсем. Необратимо — заголовок задачи должен совпадать ТОЧНО.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живёт задача" },
+          todo_title: { type: "string", description: "Точный заголовок задачи для удаления" },
+        },
+        required: ["project_name", "todo_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "record_memory",
+      description: "Записать факт в память MBOX — то, что стоит запомнить надолго (предпочтение пользователя, удачный или неудачный подход, важное решение).",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Короткий заголовок факта" },
+          content: { type: "string", description: "Сам факт" },
+          project_name: { type: "string", description: "Название проекта, если факт относится к конкретному проекту, необязательно" },
+        },
+        required: ["title", "content"],
+      },
+    },
+  },
 ];
+
+function matchProjectFuzzy(projectName, projectList) {
+  const q = String(projectName || "").trim().toLowerCase();
+  return projectList.find((p) => p.name.toLowerCase() === q)
+    || projectList.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
+}
+
+async function matchTodoFuzzy(client, projectId, todoTitle, { exact = false } = {}) {
+  const rows = (await client.query("SELECT id::text, title, status, priority FROM todos WHERE project_id = $1", [projectId])).rows;
+  const q = String(todoTitle || "").trim();
+  if (exact) return rows.find((t) => t.title === q);
+  const qLower = q.toLowerCase();
+  return rows.find((t) => t.title.toLowerCase() === qLower)
+    || rows.find((t) => t.title.toLowerCase().includes(qLower) || qLower.includes(t.title.toLowerCase()));
+}
 
 async function runJarvisTool(client, name, rawArgs, projectList) {
   let args = {};
   try { args = JSON.parse(rawArgs || "{}"); } catch { /* модель иногда шлёт кривой JSON — просто игнорируем аргументы */ }
+
   if (name === "create_project") {
     const projectName = String(args.name || "").trim();
     if (!projectName) return "не создал проект — нет названия";
@@ -806,9 +888,10 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
     projectList.push({ id: inserted.rows[0].id, name: projectName });
     return `создан проект «${projectName}» (#${inserted.rows[0].id})`;
   }
+
   if (name === "delete_project") {
-    // Удаление необратимо — специально без нечёткого совпадения (как в create_todo), чтобы
-    // модель не снесла соседний проект по неточной команде.
+    // Удаление необратимо — специально без нечёткого совпадения, чтобы модель не снесла
+    // соседний проект по неточной команде.
     const projectName = String(args.project_name || "").trim();
     const match = projectList.find((p) => p.name === projectName);
     if (!match) return `не нашёл проект «${projectName}» с точным названием — есть: ${projectList.map((p) => p.name).join(", ")}`;
@@ -817,19 +900,60 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
     if (index !== -1) projectList.splice(index, 1);
     return `удалён проект «${match.name}» (#${match.id})`;
   }
-  if (name !== "create_todo") return `неизвестное действие: ${name}`;
-  const title = String(args.title || "").trim();
-  if (!title) return "не создал задачу — нет заголовка";
-  const projectName = String(args.project_name || "").trim().toLowerCase();
-  const match = projectList.find((p) => p.name.toLowerCase() === projectName)
-    || projectList.find((p) => p.name.toLowerCase().includes(projectName) || projectName.includes(p.name.toLowerCase()));
-  if (!match) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
-  const inserted = await client.query(
-    `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
-     VALUES ($1, $2, $3, 'open', 'normal', '{}', 'private') RETURNING id::text`,
-    [match.id, title, String(args.note || "")],
-  );
-  return `создана задача «${title}» в проекте «${match.name}» (#${inserted.rows[0].id})`;
+
+  if (name === "create_todo") {
+    const title = String(args.title || "").trim();
+    if (!title) return "не создал задачу — нет заголовка";
+    const match = matchProjectFuzzy(args.project_name, projectList);
+    if (!match) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const inserted = await client.query(
+      `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
+       VALUES ($1, $2, $3, 'open', 'normal', '{}', 'private') RETURNING id::text`,
+      [match.id, title, String(args.note || "")],
+    );
+    return `создана задача «${title}» в проекте «${match.name}» (#${inserted.rows[0].id})`;
+  }
+
+  if (name === "update_todo_status" || name === "set_todo_priority") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const todo = await matchTodoFuzzy(client, project.id, args.todo_title);
+    if (!todo) return `не нашёл задачу «${args.todo_title}» в проекте «${project.name}»`;
+    if (name === "update_todo_status") {
+      const status = TODO_STATUSES.includes(args.status) ? args.status : null;
+      if (!status) return `неизвестный статус «${args.status}» — доступны: ${TODO_STATUSES.join(", ")}`;
+      await client.query("UPDATE todos SET status = $1, updated_at = now() WHERE id = $2", [status, todo.id]);
+      return `задача «${todo.title}» теперь в статусе «${status}» (была «${todo.status}»)`;
+    }
+    const priority = TODO_PRIORITIES.includes(args.priority) ? args.priority : null;
+    if (!priority) return `неизвестный приоритет «${args.priority}» — доступны: ${TODO_PRIORITIES.join(", ")}`;
+    await client.query("UPDATE todos SET priority = $1, updated_at = now() WHERE id = $2", [priority, todo.id]);
+    return `у задачи «${todo.title}» теперь приоритет «${priority}» (был «${todo.priority}»)`;
+  }
+
+  if (name === "delete_todo") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const todo = await matchTodoFuzzy(client, project.id, args.todo_title, { exact: true });
+    if (!todo) return `не нашёл задачу с точным заголовком «${args.todo_title}» в проекте «${project.name}»`;
+    await client.query("DELETE FROM todos WHERE id = $1", [todo.id]);
+    return `удалена задача «${todo.title}» из проекта «${project.name}»`;
+  }
+
+  if (name === "record_memory") {
+    const title = String(args.title || "").trim();
+    const content = String(args.content || "").trim();
+    if (!title || !content) return "не записал факт — нужны и заголовок, и содержание";
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const inserted = await client.query(
+      `INSERT INTO memories(project_id, title, content, entity_type, access_level, tags, metadata)
+       VALUES ($1, $2, $3, 'fact', 'agents', '{}', $4) RETURNING id::text`,
+      [project?.id || null, title, content, JSON.stringify({ source_agent: JARVIS_NAME })],
+    );
+    return `записал в память: «${title}»${project ? ` (проект «${project.name}»)` : ""} (#${inserted.rows[0].id})`;
+  }
+
+  return `неизвестное действие: ${name}`;
 }
 
 async function replyAsJarvis(item) {
@@ -841,11 +965,11 @@ async function replyAsJarvis(item) {
     const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows;
     const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
       + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно этим `
-      + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть РОВНО ТРИ реальных "
-      + "действия — функции create_todo (создать задачу в проекте), create_project (создать новый проект) и "
-      + "delete_project (удалить проект — необратимо, только по точному названию). Если просят одно из этого — "
-      + "вызови функцию, не пиши текстом, что сделал это. Если просят что-то другое (изменить приоритет, "
-      + "пометить готовым, удалить задачу, сгенерировать картинку и т.п.) — у тебя нет для этого инструмента, "
+      + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
+      + "create_todo, create_project, delete_project (необратимо, точное название), update_todo_status, "
+      + "set_todo_priority, delete_todo (необратимо, точный заголовок), record_memory (записать долгоживущий "
+      + "факт — предпочтение пользователя, удачный/неудачный подход, важное решение). Если просят одно из этого "
+      + "— вызови функцию, не пиши текстом, что сделал это. Если просят что-то другое, для чего нет функции — "
       + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
       + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
     const message = await groqComplete([
