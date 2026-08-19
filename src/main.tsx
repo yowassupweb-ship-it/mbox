@@ -1,4 +1,4 @@
-import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
@@ -206,8 +206,12 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "projects" && <ProjectsBoard projects={data.projects} folders={data.folders} memories={data.memories} decisions={data.decisions} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} memories={data.memories} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
         {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} decisions={data.decisions} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
-        {section === "server" && <ServerBoard pulse={realtime.pulse} />}
-        {section === "settings" && <AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
+        {section === "settings" && (
+          <SettingsBoard
+            server={<ServerBoard pulse={realtime.pulse} />}
+            access={<AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
+          />
+        )}
       </main>
       <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
       {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
@@ -567,6 +571,25 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
     </Panel>
   );
 }
+/** Сервер и Доступ раньше были двумя кнопками нижнего меню — сведены в одну «Настройки» с
+ * внутренним переключателем, задача стояла с самого начала переверстки и не отменялась. */
+function SettingsBoard({ server, access }: { server: ReactNode; access: ReactNode }) {
+  const [tab, setTab] = useState<"server" | "access">("server");
+  return (
+    <div className="settings-board">
+      <div className="settings-tabs" role="tablist" aria-label="Настройки">
+        <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
+          <Server size={16} /> Сервер
+        </button>
+        <button role="tab" aria-selected={tab === "access"} className={tab === "access" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("access")}>
+          <ShieldCheck size={16} /> Доступ
+        </button>
+      </div>
+      {tab === "server" ? server : access}
+    </div>
+  );
+}
+
 function ServerBoard({ pulse }: { pulse: number }) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [usage, setUsage] = useState<GroqUsage | null>(null);

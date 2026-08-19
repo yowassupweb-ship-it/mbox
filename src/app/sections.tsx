@@ -1,6 +1,8 @@
-import { BookOpen, FileCode2, FolderKanban, GitBranch, History, Library, Server, ShieldCheck, type LucideIcon } from "lucide-react";
+import { BookOpen, FileCode2, FolderKanban, GitBranch, History, Library, Settings, type LucideIcon } from "lucide-react";
 import type { SectionKey } from "../types";
 
+// Сервер и Доступ раньше были двумя отдельными кнопками нижнего меню — задача свести их в одну
+// «Настройки» стояла с самого начала переверстки и была не отменена, просто отложена.
 export const sections: Array<{ key: SectionKey; label: string; icon: LucideIcon }> = [
   { key: "overview", label: "Обзор", icon: Library },
   { key: "memories", label: "Память", icon: BookOpen },
@@ -8,6 +10,5 @@ export const sections: Array<{ key: SectionKey; label: string; icon: LucideIcon 
   { key: "projects", label: "Проекты", icon: FolderKanban },
   { key: "graph", label: "Граф", icon: GitBranch },
   { key: "history", label: "История", icon: History },
-  { key: "server", label: "Сервер", icon: Server },
-  { key: "settings", label: "Доступ", icon: ShieldCheck },
+  { key: "settings", label: "Настройки", icon: Settings },
 ];

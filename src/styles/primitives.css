@@ -158,6 +158,42 @@
   min-height: 0;
 }
 
+/* Сервер + Доступ сведены в одну кнопку «Настройки» с переключателем внутри. */
+.settings-board {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.settings-tabs {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-self: start;
+}
+
+.settings-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--container-bg);
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.settings-tab svg { color: var(--kind-accent, currentColor); }
+
+.settings-tab.is-active {
+  color: var(--text-main);
+  background: var(--element-bg);
+  border-color: color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
+  box-shadow: var(--chin-shadow);
+}
+
 .project-workspace {
   height: calc(100vh - 184px);
   align-items: stretch;

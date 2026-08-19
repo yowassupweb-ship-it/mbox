@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderPlus, Folder, ListTodo, Trash2 } from "lucide-react";
+import { FolderPlus, Folder, ListTodo, Sliders, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { FolderBoard } from "../features/projects/FolderBoard";
 import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
@@ -170,7 +170,12 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
           >
             <span className="project-pill-dot" />
             <span className="project-pill-name">{item.name}</span>
-            <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>
+            <span className="project-pill-meta">
+              <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>
+              <span className="project-pill-props" title="Ключей в props">
+                <Sliders size={10} />{Object.keys(item.props || {}).length}
+              </span>
+            </span>
           </button>
         ))}
       </div>
