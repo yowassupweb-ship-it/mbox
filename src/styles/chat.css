@@ -116,7 +116,7 @@
 
 /* Пузыри: крупный радиус, один угол приплюснут в сторону автора — так видно, кто говорит. */
 .agent-chat-shell .cs-message__content {
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--element-bg);
   border: var(--border-width) solid var(--border-color);
   color: var(--text-main);
@@ -203,7 +203,7 @@
 .agent-chat-shell .cs-message-input__content-editor {
   background: var(--element-bg);
   color: var(--text-main);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   font-size: var(--text-sm);
   line-height: 1.45;
 }
@@ -349,12 +349,12 @@
 
 .agent-chat-shell .cs-message .cs-message__content,
 .agent-chat-shell .cs-message.cs-message--incoming .cs-message__content {
-  border-radius: 22px 22px 22px 8px;
+  border-radius: var(--radius-lg) 22px 22px 8px;
   background: var(--element-bg);
 }
 
 .agent-chat-shell .cs-message.cs-message--outgoing .cs-message__content {
-  border-radius: 22px 22px 8px 22px;
+  border-radius: var(--radius-lg) 22px 8px 22px;
 }
 
 /* Белые куски в поле ввода: у кита светлые фоны на самом инпуте, обёртке и панели инструментов. */
@@ -370,7 +370,7 @@
 .agent-chat-shell .cs-message-input__content-editor-wrapper,
 .agent-chat-shell .cs-message-input__content-editor-container {
   background: var(--element-bg);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
 }
 
 .agent-chat-shell .cs-message-input__content-editor-container { padding: 0; }
@@ -426,7 +426,7 @@
   max-height: 140px;
   padding: 12px 16px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   background: var(--element-bg);
   box-shadow: var(--container-inset);
   color: var(--text-main);

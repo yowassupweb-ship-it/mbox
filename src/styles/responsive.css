@@ -167,7 +167,7 @@
 
   .panel {
     padding: 14px;
-    border-radius: 28px;
+    border-radius: var(--radius-xl);
   }
 
   .panel-title {
@@ -233,14 +233,14 @@
     min-height: 132px;
     max-height: 42svh;
     padding: 14px;
-    border-radius: 24px;
+    border-radius: var(--radius-lg);
   }
 
   .todo-props-field,
   .project-props-editor textarea {
     min-height: 76px;
     max-height: 148px;
-    border-radius: 22px;
+    border-radius: var(--radius-lg);
   }
 
   .manual-form {
@@ -291,7 +291,7 @@
   .graph-card {
     min-width: 92px;
     max-width: 134px;
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
     padding: 8px 10px;
   }
 
@@ -306,7 +306,7 @@
   .agent-guide div,
   .secret-row,
   .agent-row {
-    border-radius: 22px;
+    border-radius: var(--radius-lg);
     padding: 11px 12px;
   }
 

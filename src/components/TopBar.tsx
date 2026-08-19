@@ -15,7 +15,7 @@ export type AgentRosterEntry = {
 type TopBarProps = {
   query: string;
   onQueryChange: (query: string) => void;
-  realtimeState?: "connecting" | "connected" | "thinking" | "working" | "offline";
+  realtimeState?: "connecting" | "connected" | "thinking" | "working" | "attention" | "offline";
   realtimeLabel?: string;
   notice?: string;
   notices?: Array<{ id: string; text: string; at: string }>;

@@ -44,7 +44,7 @@
   position: sticky;
   top: 18px;
   height: 86px;
-  border-radius: 34px;
+  border-radius: var(--radius-xl);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -231,7 +231,7 @@
 
 .sync-panel {
   margin-top: auto;
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   display: grid;
   gap: 12px;
@@ -378,9 +378,23 @@
 }
 
 .realtime-pill.working {
-  color: #ffe3b0;
-  border-color: rgba(255, 204, 102, .2);
+  color: color-mix(in srgb, var(--accent-color) 82%, white 10%);
+  border-color: color-mix(in srgb, var(--accent-color) 45%, transparent);
   transform: translateY(-1px);
+}
+
+/* Требует внимания: заблокировано, ждёт проверки, упала сессия, нужен человек — тревожный
+   янтарь, а не спокойный зелёный «connected». Раньше цвет пилюли не знал об этих случаях
+   вовсе, и текст с цветом расходились. */
+.realtime-pill.attention {
+  color: var(--state-warn);
+  border-color: color-mix(in srgb, var(--state-warn) 40%, transparent);
+  animation: pill-attention-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pill-attention-pulse {
+  0%, 100% { box-shadow: var(--chin-shadow); }
+  50% { box-shadow: var(--chin-shadow), 0 0 0 3px color-mix(in srgb, var(--state-warn) 18%, transparent); }
 }
 
 .realtime-pill.offline {
@@ -403,7 +417,7 @@
   max-height: 320px;
   overflow: auto;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 26px;
+  border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--container-bg) 92%, transparent);
   box-shadow: 0 24px 54px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
   backdrop-filter: blur(22px) saturate(150%);
@@ -425,7 +439,7 @@
 .agent-status-item {
   display: grid;
   gap: 4px;
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   padding: 10px;
   background: rgba(255,255,255,.05);
 }

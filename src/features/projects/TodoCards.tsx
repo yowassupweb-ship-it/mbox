@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { CheckCheck, ChevronDown, Maximize2, Plus, Trash2, X } from "lucide-react";
+import { CheckCheck, Maximize2, Plus, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
@@ -12,64 +12,55 @@ import { Button, EmptyState, ErrorText, ManualForm, SaveButton, Select, TextArea
 const statusOptions = Object.entries(todoStatusLabels).map(([value, label]) => ({ value, label }));
 const priorityOptions = Object.entries(todoPriorityLabels).map(([value, label]) => ({ value, label }));
 
+// «Готово» и «Архив» — по сути один и тот же бакет («Готово = архив»), отдельной колонки под
+// архив не заводим: карточка со статусом archived показывается в «Готово», а всё, что туда
+// перетащили, встаёт как done — canonical-статус у объединённой колонки один.
+const kanbanColumns = Object.keys(todoStatusLabels).filter((status) => status !== "archived");
+const columnMatchesStatus = (columnStatus: string, todoStatus: string) =>
+  columnStatus === "done" ? todoStatus === "done" || todoStatus === "archived" : todoStatus === columnStatus;
+
 export function TodoCardGrid({ project, onSaved }: { project: Project; onSaved: () => void }) {
   const [openTodo, setOpenTodo] = useState<Todo | null>(null);
   const [order, setOrder] = useState<Todo[]>(() => orderTodos(project.todos));
   const [dragId, setDragId] = useState<string | null>(null);
-  const [showDone, setShowDone] = useState(false);
+  const [overColumn, setOverColumn] = useState<string | null>(null);
   const [seenVersion, setSeenVersion] = useState(0);
 
   useEffect(() => setOrder(orderTodos(project.todos)), [project.todos]);
 
-  async function moveCard(fromId: string, toId: string) {
-    if (fromId === toId) return;
+  /**
+   * Карточка меняет статус (колонку) и/или позицию внутри неё одним драгом — как в Шаре.
+   * Позиция — общее число на весь проект (см. lib/tree), поэтому «соседи» для перерасчёта
+   * берутся из уже отфильтрованной по статусу колонки: другие статусы между ними не мешают.
+   */
+  async function moveCard(fromId: string, toStatus: string, beforeId?: string) {
     const current = [...order];
-    const from = current.findIndex((todo) => todo.id === fromId);
-    const to = current.findIndex((todo) => todo.id === toId);
-    if (from < 0 || to < 0) return;
+    const fromIndex = current.findIndex((todo) => todo.id === fromId);
+    if (fromIndex < 0) return;
+    const [moved] = current.splice(fromIndex, 1);
+    const updated: Todo = moved.status === toStatus ? moved : { ...moved, status: toStatus };
 
-    const [moved] = current.splice(from, 1);
-    current.splice(to, 0, moved);
-    setOrder(current);
-
-    const before = current[to - 1] ? todoPosition(current[to - 1], to - 1) : undefined;
-    const after = current[to + 1] ? todoPosition(current[to + 1], to + 1) : undefined;
+    const columnItems = current.filter((todo) => columnMatchesStatus(toStatus, todo.status));
+    const insertAt = beforeId ? columnItems.findIndex((todo) => todo.id === beforeId) : -1;
+    const boundedInsertAt = insertAt < 0 ? columnItems.length : insertAt;
+    const before = columnItems[boundedInsertAt - 1] ? todoPosition(columnItems[boundedInsertAt - 1], 0) : undefined;
+    const after = columnItems[boundedInsertAt] ? todoPosition(columnItems[boundedInsertAt], 0) : undefined;
     const position = positionBetween(before, after);
 
-    // props при PATCH заменяются целиком — шлём слитый объект, иначе остальные факты о задаче потеряются.
-    await saveEntity("/api/mbox/todos", moved.id, { props: { ...(moved.props || {}), position: String(position) } });
-    onSaved();
+    const globalTarget = beforeId ? current.findIndex((todo) => todo.id === beforeId) : current.length;
+    current.splice(globalTarget < 0 ? current.length : globalTarget, 0, updated);
+    setOrder(current);
+    setOverColumn(null);
+
+    try {
+      await saveEntity("/api/mbox/todos", moved.id, { status: toStatus, props: { ...(moved.props || {}), position: String(position) } });
+      onSaved();
+    } catch {
+      setOrder(orderTodos(project.todos));
+    }
   }
 
   if (!order.length) return <EmptyState text="Todo пока нет" />;
-
-  // Многоколоночная кладка заполняет колонки сверху вниз, поэтому «выполненные в конце списка»
-  // визуально уезжают вправо, а не вниз. Разносим на два отдельных блока.
-  const active = order.filter((todo) => !["done", "archived"].includes(todo.status));
-  const finished = order.filter((todo) => ["done", "archived"].includes(todo.status));
-
-  const slot = (todo: Todo) => (
-    <div
-      key={todo.id}
-      className={dragId === todo.id ? "todo-drag-slot is-dragging" : "todo-drag-slot"}
-      draggable
-      onDragStart={(event) => {
-        setDragId(todo.id);
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", todo.id);
-      }}
-      onDragEnd={() => setDragId(null)}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault();
-        const fromId = event.dataTransfer.getData("text/plain") || dragId;
-        setDragId(null);
-        if (fromId) void moveCard(fromId, todo.id);
-      }}
-    >
-      <TodoCard todo={todo} seenVersion={seenVersion} onOpen={() => setOpenTodo(todo)} onSaved={onSaved} />
-    </div>
-  );
 
   const marks = order.map((todo) => ({ key: `todo:${todo.id}`, bytes: todo.memory_bytes }));
   const unseen = countUnseen(marks);
@@ -85,18 +76,55 @@ export function TodoCardGrid({ project, onSaved }: { project: Project; onSaved: 
         </div>
       )}
 
-      {active.length ? <div className="todo-note-grid">{active.map(slot)}</div> : <EmptyState text="Активных задач нет" />}
-
-      {finished.length > 0 && (
-        <section className="todo-done-block">
-          <button className="todo-done-head" type="button" onClick={() => setShowDone((value) => !value)} aria-expanded={showDone}>
-            <ChevronDown size={16} className={showDone ? "is-open" : ""} />
-            <span>Выполнено</span>
-            <b>{finished.length}</b>
-          </button>
-          {showDone && <div className="todo-note-grid">{finished.map(slot)}</div>}
-        </section>
-      )}
+      <div className="todo-kanban" role="group" aria-label="Доска задач по статусам">
+        {kanbanColumns.map((status) => {
+          const items = order.filter((todo) => columnMatchesStatus(status, todo.status));
+          return (
+            <div className="todo-kanban-column" key={status}>
+              <div className={`todo-kanban-head status-${status}`}>
+                <span className="todo-kanban-dot" />
+                <span>{todoStatusLabel(status)}</span>
+                <b>{items.length}</b>
+              </div>
+              <div
+                className={overColumn === status ? "todo-kanban-drop is-over" : "todo-kanban-drop"}
+                onDragOver={(event) => { event.preventDefault(); setOverColumn(status); }}
+                onDragLeave={() => setOverColumn((current) => (current === status ? null : current))}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const fromId = event.dataTransfer.getData("text/plain") || dragId;
+                  setDragId(null);
+                  if (fromId) void moveCard(fromId, status);
+                }}
+              >
+                {items.length ? items.map((todo) => (
+                  <div
+                    key={todo.id}
+                    className={dragId === todo.id ? "todo-drag-slot is-dragging" : "todo-drag-slot"}
+                    draggable
+                    onDragStart={(event) => {
+                      setDragId(todo.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", todo.id);
+                    }}
+                    onDragEnd={() => { setDragId(null); setOverColumn(null); }}
+                    onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setOverColumn(status); }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const fromId = event.dataTransfer.getData("text/plain") || dragId;
+                      setDragId(null);
+                      if (fromId) void moveCard(fromId, status, todo.id);
+                    }}
+                  >
+                    <TodoCard todo={todo} seenVersion={seenVersion} onOpen={() => setOpenTodo(todo)} onSaved={onSaved} />
+                  </div>
+                )) : <p className="todo-kanban-empty">Нет задач</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {openTodo && (
         <TodoModal

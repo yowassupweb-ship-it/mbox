@@ -9,7 +9,7 @@
 
 .memory-table-wrap {
   overflow: auto;
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   background: var(--element-bg);
   box-shadow: var(--container-inset);
 }
@@ -83,7 +83,7 @@
   overflow: auto;
   resize: vertical;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   padding: 18px;
   outline: 0;
   background: var(--element-bg);
@@ -99,7 +99,7 @@
   overflow: auto;
   resize: vertical;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 12px 14px;
   outline: 0;
   background: color-mix(in srgb, var(--element-bg) 82%, transparent);
@@ -166,7 +166,7 @@
   display: grid;
   gap: 10px;
   margin-top: 12px;
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   padding: 16px;
   background: var(--element-bg);
   box-shadow: var(--container-inset);
@@ -207,7 +207,7 @@
 /* Карточка живёт между min и max: тело обрезается по строкам, шапка и действия всегда на месте. */
 .todo-note-card {
   border: var(--border-width) solid var(--border-color);
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
   padding: 15px;
@@ -444,7 +444,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   padding: 8px 16px;
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
@@ -494,7 +494,7 @@
   display: grid;
   gap: 10px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   padding: 12px;
   background: color-mix(in srgb, var(--element-bg) 72%, transparent);
   box-shadow: var(--container-inset);
@@ -541,7 +541,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 30px;
+  border-radius: var(--radius-xl);
   padding: 12px;
   background: color-mix(in srgb, var(--element-bg) 68%, transparent);
   box-shadow: var(--container-inset);
@@ -571,7 +571,7 @@
   min-height: 68px;
   max-height: 180px;
   overflow: auto;
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 12px 14px;
   resize: vertical;
 }
@@ -608,7 +608,7 @@
   display: grid;
   gap: 14px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 38px;
+  border-radius: var(--radius-xl);
   padding: 24px;
   background: color-mix(in srgb, var(--container-bg) 92%, transparent);
   box-shadow: var(--container-inset), 0 18px 54px rgba(0,0,0,.42);
@@ -759,7 +759,7 @@ time {
   position: relative;
   min-height: 560px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 34px;
+  border-radius: var(--radius-xl);
   overflow: hidden;
   background: #151517;
   box-shadow: var(--container-inset);
@@ -797,7 +797,7 @@ time {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-radius: 26px;
+  border-radius: var(--radius-xl);
   padding: 12px 14px;
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
@@ -823,7 +823,7 @@ time {
   display: grid;
   gap: 4px;
   border: 1px solid rgba(255,255,255,.07);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   padding: 11px 13px;
   background: color-mix(in srgb, var(--element-bg) 66%, transparent);
   box-shadow: var(--chin-shadow);
@@ -856,7 +856,7 @@ time {
   gap: 4px;
   padding: 12px 14px;
   border: 1px solid rgba(255, 255, 255, .08);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--element-bg) 58%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 24px rgba(0, 0, 0, .16);
 }
@@ -899,7 +899,7 @@ time {
 .relation-description {
   width: 100%;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 0 14px;
   outline: 0;
   background: var(--element-bg);
@@ -942,7 +942,7 @@ time {
 .agent-contract {
   display: grid;
   gap: 6px;
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 12px 14px;
   background: color-mix(in srgb, var(--element-bg) 72%, transparent);
   box-shadow: var(--container-inset);
@@ -970,7 +970,7 @@ time {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
@@ -1038,7 +1038,7 @@ time {
 .project-entity-editor textarea {
   width: 100%;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 0 14px;
   outline: 0;
   background: var(--element-bg);
@@ -1138,7 +1138,7 @@ time {
   display: grid;
   gap: 2px;
   border: var(--border-width) solid rgba(255,255,255,.08);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
   background: color-mix(in srgb, var(--node-color, #2c2c2e) 42%, #2c2c2e);
   box-shadow: var(--chin-shadow);
@@ -1220,7 +1220,7 @@ time {
   bottom: 18px;
   display: grid;
   gap: 3px;
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   padding: 12px 14px;
   background: color-mix(in srgb, var(--container-bg) 88%, transparent);
   box-shadow: var(--chin-shadow);
@@ -1235,7 +1235,7 @@ time {
   position: relative;
   height: 300px;
   overflow: hidden;
-  border-radius: 34px;
+  border-radius: var(--radius-xl);
   background: var(--element-bg);
   box-shadow: var(--container-inset);
 }
@@ -1261,7 +1261,7 @@ time {
   inset: 16%;
   border: 1px solid rgba(47,125,171,.22);
   transform: rotate(-8deg);
-  border-radius: 32px;
+  border-radius: var(--radius-xl);
 }
 
 .editor-preview {
@@ -1286,7 +1286,7 @@ time {
 }
 
 .editor-preview textarea {
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   min-height: 180px;
   resize: vertical;
 }
@@ -1550,4 +1550,93 @@ time {
 @media (max-width: 640px) {
   .needs-item { grid-template-columns: auto minmax(0, 1fr); }
   .needs-item-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; }
+}
+
+/* Кабан-доска Todo — колонки по статусам, drag между ними. */
+.todo-kanban {
+  display: flex;
+  gap: var(--space-3);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+  scroll-snap-type: x proximity;
+}
+
+.todo-kanban-column {
+  flex: 0 0 272px;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+  scroll-snap-align: start;
+}
+
+.todo-kanban-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  box-shadow: var(--chin-shadow);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.todo-kanban-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--state-off); flex: none; }
+.todo-kanban-head.status-doing .todo-kanban-dot { background: var(--state-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-live) 25%, transparent); }
+.todo-kanban-head.status-blocked .todo-kanban-dot { background: var(--state-danger); }
+.todo-kanban-head.status-review .todo-kanban-dot { background: var(--state-warn); }
+.todo-kanban-head.status-next .todo-kanban-dot { background: var(--state-ok); }
+.todo-kanban-head.status-done .todo-kanban-dot,
+.todo-kanban-head.status-archived .todo-kanban-dot { opacity: .5; }
+
+.todo-kanban-head b {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .07);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-kanban-drop {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 64px;
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  transition: background var(--duration-fast) var(--ease-out), outline-color var(--duration-fast) var(--ease-out);
+  outline: 1px dashed transparent;
+  outline-offset: -1px;
+}
+
+.todo-kanban-drop.is-over {
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
+  outline-color: color-mix(in srgb, var(--accent-color) 55%, transparent);
+}
+
+.todo-kanban-empty {
+  margin: 0;
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.todo-drag-slot { transition: opacity var(--duration-fast) var(--ease-out); }
+.todo-drag-slot.is-dragging { opacity: .35; }
+.todo-drag-slot .todo-note-card { cursor: grab; }
+.todo-drag-slot.is-dragging .todo-note-card { cursor: grabbing; }
+
+@media (max-width: 640px) {
+  .todo-kanban-column { flex-basis: 84vw; }
 }

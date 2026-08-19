@@ -9,7 +9,7 @@
 
 .agent-work-column {
   border: var(--border-width) solid var(--border-color);
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   background: var(--panel-bg);
   box-shadow: var(--chin-shadow);
   padding: 14px;
@@ -278,7 +278,7 @@
   min-width: 0;
   gap: 11px;
   padding: 15px;
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   border: var(--border-width) solid var(--border-color);
   background:
     radial-gradient(140% 120% at 100% 0%, color-mix(in srgb, var(--agent-accent, #8aa4c2) 12%, transparent), transparent 46%),
@@ -458,7 +458,7 @@
 
 .agent-stream {
   border: var(--border-width) solid var(--border-color);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   background: var(--container-bg, #1c1c1e);
   box-shadow: var(--chin-shadow);
   padding: 14px;

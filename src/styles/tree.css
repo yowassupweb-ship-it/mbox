@@ -173,7 +173,7 @@
   display: grid;
   gap: 6px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 24px;
+  border-radius: var(--radius-lg);
   padding: 10px;
   background: color-mix(in srgb, var(--container-bg) 94%, transparent);
   box-shadow: var(--chin-shadow), 0 18px 46px rgba(0,0,0,.42);

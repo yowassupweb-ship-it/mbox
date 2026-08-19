@@ -76,12 +76,15 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     () => [...realtime.notices, ...data.auditEvents.slice(0, 12).map(auditNotice)].slice(0, 12),
     [realtime.notices, data.auditEvents],
   );
-  const agentLabel = useMemo(() => {
-    // Статус читается сверху вниз: чем ниже случай, тем спокойнее обстановка.
-    if (realtime.state === "offline") return "Нет связи с сервером";
-    if (realtime.state === "connecting") return realtime.label;
+  // Текст и цвет пилюли раньше считались двумя независимыми useMemo с разными приоритетами:
+  // текст мог кричать «4 заблокировано» (статичный бэклог), пока цвет красился в спокойный
+  // «connected», потому что не знал о блокировках вовсе — статус жил своей жизнью отдельно
+  // от происходящего. Теперь один расчёт: живое сейчас (кто-то реально работает) стоит выше
+  // статичных счётчиков бэклога, а counted-состояния получают свой тревожный цвет пилюли.
+  const headerStatus = useMemo(() => {
+    if (realtime.state === "offline") return { state: "offline" as const, label: "Нет связи с сервером" };
+    if (realtime.state === "connecting") return { state: "connecting" as const, label: realtime.label };
 
-    // Живость берётся из свежести heartbeat: колонка live_runs считает и брошенные running-сессии.
     const active = data.agents.filter((agent) => effectiveStatus(agent) === "active");
     const working = data.agents.filter((agent) => isAgentWorking(agent, data.runs));
     const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
@@ -91,30 +94,29 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     // Упавшая сессия интересна, пока свежая: недельной давности падение — это уже история, а не статус.
     const failedRun = data.runs.find((run) => run.status === "failed" && Date.now() - Date.parse(run.heartbeat_at || run.started_at) < RUN_STALE_MS);
 
-    if (needsHuman.length) return `Нужен ты: ${needsHuman[0].title}`;
-    if (failedRun) return `${failedRun.agent_name}: сессия упала`;
-    if (blocked) return `${blocked} ${plural(blocked, "задача заблокирована", "задачи заблокированы", "задач заблокировано")}`;
-    if (onReview) return `${onReview} ${plural(onReview, "задача ждёт", "задачи ждут", "задач ждут")} проверки`;
+    if (needsHuman.length) return { state: "attention" as const, label: `Нужен ты: ${needsHuman[0].title}` };
+    if (failedRun) return { state: "attention" as const, label: `${failedRun.agent_name}: сессия упала` };
 
+    // Живое важнее статичного бэклога: пока кто-то реально работает, пилюля показывает это,
+    // а не число заблокированных задач, которое никуда не денется само по себе.
     if (working.length === 1) {
       const goal = liveRunOf(data.runs, working[0].name)?.goal;
-      return goal ? `${working[0].name}: ${goal}` : `${working[0].name} в работе`;
+      return { state: "working" as const, label: goal ? `${working[0].name}: ${goal}` : `${working[0].name} в работе` };
     }
-    if (working.length > 1) return `${working.length} агента в работе: ${working.map((agent) => agent.name).join(", ")}`;
+    if (working.length > 1) return { state: "working" as const, label: `${working.length} агента в работе: ${working.map((agent) => agent.name).join(", ")}` };
 
-    if (leased.length) return `${leased[0].claimed_by} держит «${leased[0].title}»`;
-    if (active.length === 1) return `${active[0].name} на связи, задачу не взял`;
-    if (active.length > 1) return `${active.length} агента на связи: ${active.map((agent) => agent.name).join(", ")}`;
+    if (blocked) return { state: "attention" as const, label: `${blocked} ${plural(blocked, "задача заблокирована", "задачи заблокированы", "задач заблокировано")}` };
+    if (onReview) return { state: "attention" as const, label: `${onReview} ${plural(onReview, "задача ждёт", "задачи ждут", "задач ждут")} проверки` };
+
+    if (leased.length) return { state: "connected" as const, label: `${leased[0].claimed_by} держит «${leased[0].title}»` };
+    if (active.length === 1) return { state: "connected" as const, label: `${active[0].name} на связи, задачу не взял` };
+    if (active.length > 1) return { state: "connected" as const, label: `${active.length} агента на связи: ${active.map((agent) => agent.name).join(", ")}` };
 
     const idle = [...data.agents].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""))[0];
-    return idle ? `Тишина · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи";
+    return { state: "connected" as const, label: idle ? `Тишина · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи" };
   }, [realtime.state, realtime.label, data.agents, data.inbox, data.projects, data.runs]);
-  const headerState = useMemo<"connecting" | "connected" | "working" | "offline">(() => {
-    if (realtime.state === "offline") return "offline";
-    if (realtime.state === "connecting") return "connecting";
-    if (data.agents.some((agent) => isAgentWorking(agent, data.runs))) return "working";
-    return "connected";
-  }, [realtime.state, data.agents, data.runs]);
+  const agentLabel = headerStatus.label;
+  const headerState = headerStatus.state;
   const agentRoster = useMemo<AgentRosterEntry[]>(() => data.agents.map((agent) => {
     const status = effectiveStatus(agent);
     const live = liveRunOf(data.runs, agent.name);
