@@ -1037,6 +1037,7 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
        ORDER BY t.updated_at DESC LIMIT 10`,
       [q, project?.id || null],
     )).rows;
+    console.error(`[debug] search_todos args=${rawArgs} parsedQuery=${JSON.stringify(q)} projectArg=${JSON.stringify(args.project_name)} matchedProject=${project?.name ?? "null"} rowCount=${rows.length}`);
     if (!rows.length) return `по запросу «${q}» задач не нашлось`;
     return rows.map((t) => `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})`).join("; ");
   }
