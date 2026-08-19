@@ -370,26 +370,50 @@ async function groqComplete(messages: GroqMessage[], tools?: unknown[]): Promise
 
 // Раньше Джарвис только писал текстом "задача добавлена", ничего не создав — модель не отличает
 // выполненное действие от вежливой выдумки. Даём ровно один настоящий инструмент через tool calling.
-const JARVIS_TOOLS = [{
-  type: "function",
-  function: {
-    name: "create_todo",
-    description: "Создать новую задачу (todo) в существующем проекте MBOX. Единственное реальное действие, которое ты можешь выполнить.",
-    parameters: {
-      type: "object",
-      properties: {
-        project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
-        title: { type: "string", description: "Короткий заголовок задачи" },
-        note: { type: "string", description: "Подробности задачи, необязательно" },
+const JARVIS_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "create_todo",
+      description: "Создать новую задачу (todo) в существующем проекте MBOX.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+          title: { type: "string", description: "Короткий заголовок задачи" },
+          note: { type: "string", description: "Подробности задачи, необязательно" },
+        },
+        required: ["project_name", "title"],
       },
-      required: ["project_name", "title"],
     },
   },
-}];
+  {
+    type: "function",
+    function: {
+      name: "create_project",
+      description: "Создать новый пустой проект в MBOX по названию.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "Название нового проекта" } },
+        required: ["name"],
+      },
+    },
+  },
+];
 
 async function runJarvisTool(client: PoolClient, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[]): Promise<string> {
   let args: Record<string, unknown> = {};
   try { args = JSON.parse(rawArgs || "{}"); } catch { /* кривой JSON от модели — работаем без аргументов */ }
+  if (name === "create_project") {
+    const projectName = String(args.name || "").trim();
+    if (!projectName) return "не создал проект — нет названия";
+    const inserted = await client.query(
+      `INSERT INTO projects(name, status, stack, access_level, props) VALUES ($1, 'active', '[]', 'private', '{}') RETURNING id::text`,
+      [projectName],
+    );
+    projectList.push({ id: inserted.rows[0].id as string, name: projectName });
+    return `создан проект «${projectName}» (#${inserted.rows[0].id})`;
+  }
   if (name !== "create_todo") return `неизвестное действие: ${name}`;
   const title = String(args.title || "").trim();
   if (!title) return "не создал задачу — нет заголовка";
@@ -414,11 +438,12 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows as { id: string; name: string }[];
       const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
         + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно этим `
-        + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть РОВНО ОДНО реальное "
-        + "действие — функция create_todo (создать задачу в проекте). Если просят создать задачу — вызови функцию, "
-        + "не пиши текстом, что сделал это. Если просят что-то другое (изменить приоритет, пометить готовым, "
-        + "удалить, сгенерировать картинку и т.п.) — у тебя нет для этого инструмента, честно скажи, что не умеешь "
-        + `этого делать, а не притворяйся, что сделал. Известные проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
+        + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть РОВНО ДВА реальных "
+        + "действия — функции create_todo (создать задачу в проекте) и create_project (создать новый проект). Если "
+        + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если просят что-то другое "
+        + "(изменить приоритет, пометить готовым, удалить, сгенерировать картинку и т.п.) — у тебя нет для этого "
+        + "инструмента, честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
+        + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
 
       const message = await groqComplete([
         { role: "system", content: systemPrompt },

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Bird, ChevronRight, Terminal, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Terminal, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
@@ -57,6 +57,16 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // field-sizing: content не работает в Safari/Firefox — растим textarea вручную по scrollHeight,
+  // это единственный способ, который реально работает везде.
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [text]);
 
   const conversation = useMemo(
     () => [...inbox].filter((item) => CONVERSATION.has(item.item_type)).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(-80),
@@ -298,8 +308,9 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
           </div>
 
           <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-            <span className="console-prompt"><Bird size={13} />{target ? `@${target}` : "~"}</span>
+            <span className="console-prompt">{target ? `@${target}` : "~"}<ChevronRight size={13} /></span>
             <textarea
+              ref={composerRef}
               value={text}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={onKeyDown}

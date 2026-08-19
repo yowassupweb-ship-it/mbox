@@ -93,26 +93,47 @@ async function groqChat(messages, { json = false, tools = null } = {}) {
 // То же единственное реальное действие, что и в мгновенном пути (server/mbox-server.mjs,
 // vite.config.ts) — этот cron-путь теперь просто резервный на случай, если инлайн-ответ не сработал,
 // но без этого он продолжал бы писать "задача добавлена", ничего не создав.
-const JARVIS_TOOLS = [{
-  type: "function",
-  function: {
-    name: "create_todo",
-    description: "Создать новую задачу (todo) в существующем проекте MBOX. Единственное реальное действие, которое ты можешь выполнить.",
-    parameters: {
-      type: "object",
-      properties: {
-        project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
-        title: { type: "string", description: "Короткий заголовок задачи" },
-        note: { type: "string", description: "Подробности задачи, необязательно" },
+const JARVIS_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "create_todo",
+      description: "Создать новую задачу (todo) в существующем проекте MBOX.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+          title: { type: "string", description: "Короткий заголовок задачи" },
+          note: { type: "string", description: "Подробности задачи, необязательно" },
+        },
+        required: ["project_name", "title"],
       },
-      required: ["project_name", "title"],
     },
   },
-}];
+  {
+    type: "function",
+    function: {
+      name: "create_project",
+      description: "Создать новый пустой проект в MBOX по названию.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "Название нового проекта" } },
+        required: ["name"],
+      },
+    },
+  },
+];
 
 async function runJarvisTool(name, rawArgs, projectList) {
   let args = {};
   try { args = JSON.parse(rawArgs || "{}"); } catch { /* кривой JSON от модели — работаем без аргументов */ }
+  if (name === "create_project") {
+    const projectName = String(args.name || "").trim();
+    if (!projectName) return "не создал проект — нет названия";
+    const created = await mboxFetch("/api/mbox/projects", { method: "POST", body: JSON.stringify({ name: projectName }) });
+    projectList.push({ id: created.project?.id, name: projectName });
+    return `создан проект «${projectName}» (#${created.project?.id ?? "?"})`;
+  }
   if (name !== "create_todo") return `неизвестное действие: ${name}`;
   const title = String(args.title || "").trim();
   if (!title) return "не создал задачу — нет заголовка";
@@ -169,10 +190,11 @@ async function respondToRequests() {
             + `отсюда задержка ответа, и это нормально, а не баг. Модель, на которой ты работаешь — ${groqModel} `
             + `через Groq API (бесплатный тир). Если спросят, какая ты модель — отвечай честно этим названием, `
             + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
-            + "РОВНО ОДНО реальное действие — функция create_todo (создать задачу в проекте). Если просят создать "
-            + "задачу — вызови функцию, не пиши текстом, что сделал это. Если просят что-то другое (изменить "
-            + "приоритет, пометить готовым, удалить, сгенерировать картинку и т.п.) — у тебя нет для этого "
-            + "инструмента, честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные "
+            + "РОВНО ДВА реальных действия — функции create_todo (создать задачу в проекте) и create_project "
+            + "(создать новый проект). Если просят одно из этого — вызови функцию, не пиши текстом, что сделал "
+            + "это. Если просят что-то другое (изменить приоритет, пометить готовым, удалить, сгенерировать "
+            + "картинку и т.п.) — у тебя нет для этого инструмента, честно скажи, что не умеешь этого делать, а "
+            + "не притворяйся, что сделал. Известные "
             + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`,
         },
         { role: "user", content: item.body || item.title },
