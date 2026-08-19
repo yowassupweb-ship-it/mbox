@@ -245,7 +245,7 @@ export function AgentChat({ inbox, agents, runs, projectId, onSaved }: {
         </div>
       )}
 
-      <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Чат с агентами, ${unread} непрочитанных` : "Чат с агентами"} title="Чат с агентами">
         <MessageSquare size={17} />
         <span>Агенты</span>
         {working.length > 0 && <i className="chat-dot state-working" />}

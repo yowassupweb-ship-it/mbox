@@ -5,8 +5,9 @@
 
 .agent-chat {
   position: fixed;
-  right: max(18px, env(safe-area-inset-right));
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  right: max(16px, env(safe-area-inset-right));
+  /* Над нижним меню (≈50px), а не поверх него — круглая кнопка не перекрывает навигацию. */
+  bottom: calc(60px + env(safe-area-inset-bottom));
   z-index: 60;
   display: grid;
   gap: var(--space-2);
@@ -239,30 +240,59 @@
 
 /* Кнопка вызова */
 
+/* Круглая кнопка чата с агентами (FAB): только иконка, счётчики — угловыми бейджами. */
 .agent-chat-toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 44px;
-  padding: 0 var(--space-5);
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  padding: 0;
   border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-pill);
-  background: rgba(44, 44, 46, .82);
+  border-radius: 50%;
+  background: rgba(44, 44, 46, .86);
   box-shadow: var(--chin-shadow);
   color: var(--text-main);
-  font-size: 14px;
-  font-weight: 760;
   backdrop-filter: blur(18px) saturate(150%);
+  transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.agent-chat-toggle:hover { transform: translateY(-1px); }
+.agent-chat-toggle:active { transform: translateY(1px); box-shadow: var(--container-inset); }
+
+/* Подпись прячем визуально, но оставляем для скринридеров. */
+.agent-chat-toggle span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .agent-chat-toggle b {
+  position: absolute;
+  top: -3px;
+  right: -3px;
   min-width: 20px;
-  padding: 0 7px;
+  height: 20px;
+  padding: 0 6px;
   border-radius: var(--radius-pill);
   background: var(--state-ok);
   color: #04210e;
   font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
   line-height: 20px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg-color);
+}
+
+.agent-chat-toggle .chat-dot {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
 }
 
 /*
@@ -306,14 +336,9 @@
   }
 
   .agent-chat-toggle {
-    min-height: 44px;
-    padding: 0 13px;
-  }
-
-  .agent-chat-toggle span {
-    max-width: 72px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    width: 50px;
+    height: 50px;
+    padding: 0;
   }
 }
 

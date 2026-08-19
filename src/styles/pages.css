@@ -1509,3 +1509,45 @@ time {
   .todo-quick-controls { grid-template-columns: 1fr 1fr; }
   .todo-quick-submit { grid-column: 1 / -1; }
 }
+
+/* «Требуют твоего ответа» — запросы агентов с решением в один тап */
+.needs-panel { border-color: color-mix(in srgb, var(--accent-color) 32%, var(--border-color)); }
+.needs-answer { display: grid; gap: 10px; }
+
+.needs-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  border: var(--border-width) solid var(--border-color);
+  box-shadow: var(--chin-shadow);
+}
+
+.needs-item-body { min-width: 0; display: grid; gap: 3px; }
+.needs-item-body strong { font-size: var(--text-md); line-height: 1.3; }
+.needs-item-body p { color: var(--text-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
+.needs-item-reply { display: flex; gap: 8px; margin-top: 8px; }
+.needs-item-reply input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--border-color);
+  background: var(--container-bg);
+  color: var(--text-main);
+  box-shadow: var(--container-inset);
+  outline: 0;
+}
+.needs-item-reply input::placeholder { color: var(--text-muted); }
+
+.needs-item-actions { display: grid; gap: 6px; align-content: start; }
+
+@media (max-width: 640px) {
+  .needs-item { grid-template-columns: auto minmax(0, 1fr); }
+  .needs-item-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; }
+}

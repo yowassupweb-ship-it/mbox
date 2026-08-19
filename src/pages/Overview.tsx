@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
-import { Archive, BookOpen, ClipboardCheck, FolderKanban, ShieldCheck } from "lucide-react";
+import { Archive, BookOpen, ClipboardCheck, FolderKanban, HelpCircle, ShieldCheck } from "lucide-react";
 import { AgentWorkBoard } from "../features/agents/AgentWorkBoard";
+import { NeedsAnswer } from "../features/agents/NeedsAnswer";
 import { ReviewQueue } from "../features/projects/ReviewQueue";
 import type { MboxData } from "../hooks/useMboxData";
 import { formatBytes, sumBytes } from "../lib/format";
@@ -16,9 +17,15 @@ export function Overview({ data }: { data: MboxData }) {
   ]);
 
   const reviewCount = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "review").length, 0);
+  const needsCount = data.inbox.filter((item) => item.requires_human && item.status !== "done").length;
 
   return (
     <>
+      {needsCount > 0 && (
+        <Panel title={`Требуют твоего ответа · ${needsCount}`} icon={HelpCircle} className="needs-panel">
+          <NeedsAnswer inbox={data.inbox} onSaved={data.reload} />
+        </Panel>
+      )}
       <MetricGrid>
         <Metric title="Память" value={data.memories.length} subtitle={formatBytes(totalBytes)} icon={BookOpen} />
         <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} icon={Archive} />

@@ -1805,6 +1805,18 @@ function mboxDevApi() {
             return sendJson(res, 200, { inbox: result.rows });
           }
 
+          const inboxMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)$/);
+          if (inboxMatch && req.method === "PATCH") {
+            const body = await readBody<Record<string, unknown>>(req);
+            const result = await queryPostgres(
+              `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
+               WHERE id = $5 RETURNING id::text`,
+              [String(body.status ?? ""), String(body.priority ?? ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1]],
+            );
+            if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
+            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
+          }
+
           if (url.pathname === "/api/mbox/agent/runs") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
