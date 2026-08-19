@@ -501,6 +501,18 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_project_info",
+      description: "Посмотреть карточку проекта: ссылку на git, стек, деплой, уровень доступа.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" } },
+        required: ["project_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_memory",
       description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
       parameters: {
@@ -642,6 +654,22 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     return `задачи проекта «${project.name}» (${rows.length}${rows.length === 20 ? "+" : ""}): ${lines.join("; ")}`;
   }
 
+  if (name === "get_project_info") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const row = (await client.query(
+      "SELECT git_url, stack, deploy_provider, deploy_target, access_level FROM projects WHERE id = $1",
+      [project.id],
+    )).rows[0] as { git_url: string | null; stack: string[]; deploy_provider: string | null; deploy_target: string | null; access_level: string };
+    const parts = [
+      row.git_url ? `git: ${row.git_url}` : "git не указан",
+      Array.isArray(row.stack) && row.stack.length ? `стек: ${row.stack.join(", ")}` : "стек не указан",
+      row.deploy_target || row.deploy_provider ? `деплой: ${[row.deploy_provider, row.deploy_target].filter(Boolean).join(" / ")}` : "деплой не указан",
+      `доступ: ${row.access_level}`,
+    ];
+    return `проект «${project.name}»: ${parts.join("; ")}`;
+  }
+
   if (name === "search_memory") {
     const q = String(args.query || "").trim();
     if (!q) return "не искал — пустой запрос";
@@ -698,12 +726,13 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
         + "create_todo, create_project, delete_project (необратимо, точное название), update_todo_status, "
         + "set_todo_priority, delete_todo (необратимо, точный заголовок), record_memory (записать долгоживущий "
-        + "факт), list_project_todos (заголовки задач проекта), search_todos (искать по тексту задачи, включая "
-        + "описание — если list_project_todos не нашёл нужное, попробуй search_todos, там ищется больше, чем "
-        + "просто заголовок), search_memory (поискать в памяти). Если просят одно из этого — вызови функцию, не "
-        + "пиши текстом, что сделал это. Если в одном сообщении просят "
-        + "НЕСКОЛЬКО действий (например, удалить два разных проекта) — вызови функцию для КАЖДОГО действия по "
-        + "отдельности в этом же ответе, не только для первого. Если просят что-то другое, для чего нет функции — "
+        + "факт), list_project_todos (заголовки задач проекта), get_project_info (git/стек/деплой/доступ "
+        + "проекта), search_todos (искать по тексту задачи, включая описание — если list_project_todos не "
+        + "нашёл нужное, попробуй search_todos, там ищется больше, чем просто заголовок), search_memory "
+        + "(поискать в памяти). Если просят одно из этого — вызови функцию, не пиши текстом, что сделал это. "
+        + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
+        + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "
+        + "только первое. Если просят что-то другое, для чего нет функции — "
         + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Тебе видна история разговора "
         + "(не только последнее сообщение), но действие вызывай ТОЛЬКО когда об этом явно просят прямо сейчас — "
         + "фразы вроде «буду делать проект на стеке X» или «планирую X» это описание планов, а не команда, не "
