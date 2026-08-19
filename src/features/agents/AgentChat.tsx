@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -26,6 +26,33 @@ type Suggestion = { value: string; hint?: string };
 function parseMention(raw: string): string {
   const match = raw.trim().match(/^@(\S+)/);
   return match ? match[1] : "";
+}
+
+const MARKDOWN_TOKEN = /(\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|(?<!\w)_[^_\n]+_(?!\w))/g;
+
+/** Модель (например, Джарвис) иногда шлёт **bold**/`code`/*italic* и списки — раньше это лежало
+ * в логе буквальными звёздочками. Без внешней библиотеки: разбор построчно + инлайн-токены. */
+function renderMarkdownLite(text: string): ReactNode {
+  return text.split("\n").map((line, lineIndex, lines) => {
+    const isListItem = /^\s*[-*]\s/.test(line);
+    const content = isListItem ? line.replace(/^\s*[-*]\s/, "") : line;
+    const parts = content.split(MARKDOWN_TOKEN).filter((part) => part !== "");
+    const rendered = parts.map((part, partIndex) => {
+      const key = `${lineIndex}-${partIndex}`;
+      if (part.startsWith("**") && part.endsWith("**")) return <b key={key}>{part.slice(2, -2)}</b>;
+      if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
+      if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
+      if (part.startsWith("_") && part.endsWith("_")) return <em key={key}>{part.slice(1, -1)}</em>;
+      return part;
+    });
+    return (
+      <span key={lineIndex}>
+        {isListItem ? "• " : ""}
+        {rendered}
+        {lineIndex < lines.length - 1 && <br />}
+      </span>
+    );
+  });
 }
 
 /** Активный токен под курсором: символ-триггер сразу после пробела/начала строки и то, что после него набрано. */
@@ -400,7 +427,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                       </span>
                     </span>
                     <span className="console-log-text">
-                      {line.text}
+                      {renderMarkdownLite(line.text)}
                       {line.pending === "sending" && <em className="console-log-status"> отправляется…</em>}
                       {line.pending === "failed" && <em className="console-log-status failed"> не отправлено</em>}
                     </span>

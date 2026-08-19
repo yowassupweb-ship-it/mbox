@@ -540,6 +540,14 @@
 .console-log-line.sys .console-log-text { white-space: pre-wrap; color: var(--text-2); }
 
 .console-log-text { min-width: 0; overflow-wrap: anywhere; color: var(--text-main); }
+.console-log-text code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .08);
+  font-family: var(--font-mono);
+  font-size: .95em;
+}
+.console-log-text em { font-style: italic; color: var(--text-2); }
 .console-log-status { font-style: normal; color: var(--text-muted); }
 .console-log-status.failed { color: var(--state-danger); }
 .console-log-line.failed .console-log-text { color: var(--state-danger); }
