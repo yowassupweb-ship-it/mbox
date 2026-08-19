@@ -382,6 +382,12 @@ async function runJarvisTool(name, rawArgs, projectList) {
       row.deploy_target || row.deploy_provider ? `деплой: ${[row.deploy_provider, row.deploy_target].filter(Boolean).join(" / ")}` : "деплой не указан",
       `доступ: ${row.access_level}`,
     ];
+    const props = row.props && typeof row.props === "object" ? row.props : {};
+    const descriptiveKeys = Object.keys(props).filter((key) => !key.startsWith("deploy_"));
+    if (descriptiveKeys.length) {
+      const propsText = descriptiveKeys.map((key) => `${key}: ${String(props[key]).slice(0, 200)}`).join("; ");
+      parts.push(`описание из props — ${propsText}`);
+    }
     return `проект «${project.name}»: ${parts.join("; ")}`;
   }
 
@@ -471,9 +477,12 @@ async function respondToRequests() {
         + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
         + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
         + "record_memory (записать долгоживущий факт), list_project_todos (заголовки задач проекта), "
-        + "get_project_info (git/стек/деплой/доступ проекта), search_todos (искать по тексту задачи, включая "
-        + "описание — если list_project_todos не нашёл нужное, попробуй search_todos), search_memory (поискать "
-        + "в памяти). Если просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
+        + "get_project_info (git/стек/деплой/доступ и описание проекта из props — если просят РАССКАЗАТЬ/"
+        + "ОПИСАТЬ проект, роль, контекст — используй именно этот инструмент, не search_memory: там технические "
+        + "итоги прогонов агентов, а не описание проекта), search_todos (искать по тексту задачи, включая "
+        + "описание — если list_project_todos не нашёл нужное, попробуй search_todos), search_memory (искать "
+        + "конкретные факты по ключевым словам, НЕ для общего описания проекта). Если просят одно из этого — "
+        + "вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
         + "делать, а не притворяйся, что сделал. Тебе видна история разговора (не только последнее сообщение), "

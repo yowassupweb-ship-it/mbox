@@ -11,10 +11,31 @@ import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
 
-// Кроме восьми постоянных сущностей у проекта могут быть свои папки: folder:<id>.
+// Кроме постоянных сущностей у проекта могут быть свои папки: folder:<id>.
 type View = "todo" | ProjectEntityKind | `folder:${string}`;
 
-const entityOrder: ProjectEntityKind[] = ["git", "figma", "stack", "memories", "properties", "relations", "philosophy", "deploy", "access"];
+// У ЛЮБОГО проекта обязательны только три вещи: живой контекст (память), факты (свойства) и связи
+// с другими сущностями. Всё остальное — Git, Figma, Стек, Философия, Деплой, Доступ — раньше было
+// жёстко зашито и висело у каждого проекта, даже пустое. Теперь это опциональные разделы, которые
+// подключаются через «Добавить папку», как и любая произвольная папка (см. #159 — посты/документы
+// туда же, обычными папками, без отдельной сущности под каждый тип).
+const MANDATORY_ENTITIES: ProjectEntityKind[] = ["memories", "properties", "relations"];
+const OPTIONAL_ENTITIES: ProjectEntityKind[] = ["git", "figma", "stack", "philosophy", "deploy", "access"];
+const entityOrder: ProjectEntityKind[] = [...MANDATORY_ENTITIES, ...OPTIONAL_ENTITIES];
+
+/** Проекты, заведённые до этой правки, не имеют props.enabled_entities — без этого у них молча
+ * исчезли бы уже заполненные Git/Стек/Деплой и т.п. Пока список явно не сохранён, считаем
+ * подключённым всё, где реально есть данные, а не только то, что отмечено вручную. */
+function autoDetectEnabled(project: Project): string[] {
+  const detected: string[] = [];
+  if (project.git_url) detected.push("git");
+  if (project.props?.figma_url) detected.push("figma");
+  if (project.stack.length > 0) detected.push("stack");
+  if (project.props?.philosophy || project.props?.principles) detected.push("philosophy");
+  if (project.deploy_provider || project.deploy_target) detected.push("deploy");
+  if (project.access_level && project.access_level !== "private") detected.push("access");
+  return detected;
+}
 
 function searchValue(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -79,6 +100,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
 
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   async function reorderProject(draggedId: string, targetId: string) {
     if (draggedId === targetId) return;
@@ -120,6 +142,9 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   const activeTodos = project.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length;
   const projectFolders = folders.filter((folder) => folder.project_id === project.id);
   const openFolder = view.startsWith("folder:") ? projectFolders.find((folder) => folder.id === view.slice(7)) : undefined;
+  const enabledOptional = Array.isArray(project.props?.enabled_entities) ? project.props.enabled_entities as string[] : autoDetectEnabled(project);
+  const visibleEntityOrder = [...MANDATORY_ENTITIES, ...OPTIONAL_ENTITIES.filter((kind) => enabledOptional.includes(kind))];
+  const addableEntities = OPTIONAL_ENTITIES.filter((kind) => !enabledOptional.includes(kind));
 
   /** Папку, созданную здесь же, здесь же надо и удалять: контекстное меню дерева до неё не достаёт. */
   async function deleteFolder(folder: FolderRow) {
@@ -129,14 +154,27 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
     onSaved();
   }
 
-  async function createFolder() {
-    const name = window.prompt("Название новой папки проекта");
+  async function createFolder(presetName?: string) {
+    const name = presetName || window.prompt("Название новой папки проекта");
     if (!name?.trim()) return;
     await fetchJson("/api/mbox/folders", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: name.trim(), entity_type: "project", access_level: "private", project_id: project.id, color: project.color || "#2c2c2e" }),
     });
+    setAddMenuOpen(false);
+    onSaved();
+  }
+
+  /** Подключить опциональную сущность (Git/Figma/Стек/...) проекту — данные и так уже есть в
+   * project (git_url, props.stack и т.п.), просто раньше вкладка всегда показывалась, даже пустой. */
+  async function enableEntity(kind: ProjectEntityKind) {
+    await fetchJson(`/api/mbox/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ props: { ...project.props, enabled_entities: [...enabledOptional, kind] } }),
+    });
+    setAddMenuOpen(false);
     onSaved();
   }
 
@@ -192,7 +230,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
           <b>Todo</b>
           <small>{activeTodos} активно</small>
         </button>
-        {entityOrder.map((kind) => {
+        {visibleEntityOrder.map((kind) => {
           const meta = projectEntityKinds[kind];
           const Icon = meta.icon;
           return (
@@ -226,11 +264,46 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
           </button>
         ))}
 
-        <button className="entity-tile is-add" type="button" onClick={createFolder}>
-          <FolderPlus size={17} />
-          <b>Папка</b>
-          <small>создать</small>
-        </button>
+        <div className="entity-add-wrap">
+          <button className="entity-tile is-add" type="button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((value) => !value)}>
+            <FolderPlus size={17} />
+            <b>Папка</b>
+            <small>добавить</small>
+          </button>
+          {addMenuOpen && (
+            <div className="entity-add-menu" role="menu">
+              {addableEntities.length > 0 && (
+                <div className="entity-add-group">
+                  <strong>Разделы проекта</strong>
+                  {addableEntities.map((kind) => {
+                    const meta = projectEntityKinds[kind];
+                    const Icon = meta.icon;
+                    return (
+                      <button key={kind} type="button" role="menuitem" onClick={() => void enableEntity(kind)}>
+                        <Icon size={15} style={{ color: meta.accent }} />
+                        {meta.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="entity-add-group">
+                <strong>Быстрые папки</strong>
+                <button type="button" role="menuitem" onClick={() => void createFolder("Посты")}>
+                  <Folder size={15} /> Посты
+                </button>
+                <button type="button" role="menuitem" onClick={() => void createFolder("Документы")}>
+                  <Folder size={15} /> Документы
+                </button>
+              </div>
+              <div className="entity-add-group">
+                <button type="button" role="menuitem" onClick={() => void createFolder()}>
+                  <FolderPlus size={15} /> Своя папка…
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <section className="control-body">

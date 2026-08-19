@@ -837,6 +837,56 @@
 .entity-tile.is-add:hover { border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color)); }
 .entity-tile.is-add:hover svg,
 .entity-tile.is-add:hover b { color: var(--accent-color); }
+.entity-tile.is-add { width: 100%; }
+
+/* Пикер «Добавить папку»: опциональные разделы (Git/Figma/Стек/...), быстрые пресеты (Посты,
+   Документы — см. todo #159) и своя папка — раньше это был голый window.prompt без выбора типа. */
+.entity-add-wrap { position: relative; min-width: 0; }
+
+.entity-add-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max(220px, 100%);
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--container-bg) 96%, transparent);
+  box-shadow: 0 20px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+.entity-add-group { display: grid; gap: 2px; }
+.entity-add-group + .entity-add-group { padding-top: var(--space-2); border-top: var(--border-width) solid var(--border-color); }
+
+.entity-add-group strong {
+  display: block;
+  margin-bottom: 2px;
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.entity-add-group button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.entity-add-group button:hover { background: var(--element-bg); }
 
 /* Конфа: кому адресовано сообщение */
 
