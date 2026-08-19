@@ -1640,3 +1640,28 @@ time {
 @media (max-width: 640px) {
   .todo-kanban-column { flex-basis: 84vw; }
 }
+
+/* Переключатель «Факты» на странице Памяти — фильтр по entity_type=fact (разметка архивариуса) */
+.memory-panel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.facts-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--element-bg);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.facts-toggle b { font-variant-numeric: tabular-nums; }
+
+.facts-toggle.is-active {
+  color: #051826;
+  background: var(--state-warn);
+  border-color: var(--state-warn);
+}

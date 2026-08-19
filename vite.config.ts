@@ -1217,10 +1217,11 @@ function mboxDevApi() {
                  access_level = COALESCE(NULLIF($3, ''), access_level),
                  tags = COALESCE($4, tags),
                  project_id = CASE WHEN $5 THEN $6::bigint ELSE project_id END,
+                 entity_type = COALESCE(NULLIF($7, ''), entity_type),
                  updated_at = now()
-               WHERE id = $7
+               WHERE id = $8
                RETURNING id::text`,
-              [String(body.title ?? "").trim(), body.content ?? null, String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : null, Object.prototype.hasOwnProperty.call(body, "project_id"), (body.project_id as string) || null, memoryMatch[1]],
+              [String(body.title ?? "").trim(), body.content ?? null, String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : null, Object.prototype.hasOwnProperty.call(body, "project_id"), (body.project_id as string) || null, String(body.entity_type ?? ""), memoryMatch[1]],
             );
             if (result.rows[0]) await recordMemoryAction({ memoryId: result.rows[0].id, actor: String(actorFromReq(req)), action: "update", note: "memory updated via API", metadata: { fields: Object.keys(body || {}) } });
             if (result.rows[0]) await refreshMemoryEmbeddings();

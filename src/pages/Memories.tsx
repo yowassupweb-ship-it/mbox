@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { BookOpen, Flag, Link2, Pencil, Plus, X } from "lucide-react";
+import { BookOpen, Flag, Link2, Pencil, Plus, Sparkles, X } from "lucide-react";
 import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
 import { projectMemoryMatches } from "../lib/memory";
@@ -47,14 +47,22 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
 
   const linkedCount = linksByMemory.size;
   const activeProject = projects.find((item) => item.id === projectId);
+  const [factsOnly, setFactsOnly] = useState(false);
+  const factsCount = memories.filter((memory) => memory.entity_type === "fact").length;
 
   // Своя память — это память конкретного проекта: напрямую, через metadata или через его todo.
-  // «Все» снимает фильтр и показывает весь пул, как раньше.
+  // «Все» снимает фильтр и показывает весь пул, как раньше. «Факты» — отдельный срез поверх:
+  // архивариус (scripts/mbox-archivist.mjs) размечает записи entity_type=fact/log, отделяя
+  // durable-факты от технических логов прогонов — без разметки все они лежали одним потоком.
   const visibleMemories = useMemo(() => {
-    if (!activeProject) return memories;
-    const todoIds = new Set(activeProject.todos.map((todo) => todo.id));
-    return memories.filter((memory) => projectMemoryMatches(memory, activeProject, todoIds));
-  }, [memories, activeProject]);
+    let list = memories;
+    if (activeProject) {
+      const todoIds = new Set(activeProject.todos.map((todo) => todo.id));
+      list = list.filter((memory) => projectMemoryMatches(memory, activeProject, todoIds));
+    }
+    if (factsOnly) list = list.filter((memory) => memory.entity_type === "fact");
+    return list;
+  }, [memories, activeProject, factsOnly]);
 
   const visibleDecisions = useMemo(
     () => activeProject ? decisions.filter((decision) => decision.project_id === activeProject.id) : [],
@@ -100,10 +108,17 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
         title="Память"
         icon={BookOpen}
         actions={
-          <span className="muted">
-            {count} {plural(count, "запись", "записи", "записей")}
-            {links.length > 0 && <> · {links.length} {plural(links.length, "связь", "связи", "связей")} у {linkedCount} {plural(linkedCount, "записи", "записей", "записей")}</>}
-          </span>
+          <div className="memory-panel-actions">
+            {factsCount > 0 && (
+              <button type="button" className={factsOnly ? "facts-toggle is-active" : "facts-toggle"} onClick={() => setFactsOnly((value) => !value)} title="Показывать только durable-факты, размеченные архивариусом">
+                <Sparkles size={13} /> Факты <b>{factsCount}</b>
+              </button>
+            )}
+            <span className="muted">
+              {count} {plural(count, "запись", "записи", "записей")}
+              {links.length > 0 && <> · {links.length} {plural(links.length, "связь", "связи", "связей")} у {linkedCount} {plural(linkedCount, "записи", "записей", "записей")}</>}
+            </span>
+          </div>
         }
       >
         <MemoryEditor editing={editing} projects={projects} onSaved={onSaved} onDone={() => setEditing(null)} presetProjectId={projectId} />
