@@ -1420,6 +1420,11 @@ time {
   font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   line-height: 1.65;
+  /* Строки — жёсткая сетка колонок с nowrap (время/актор/действие/сущность/сообщение), на узком
+     экране это шире viewport. Раньше .console просто резал (overflow:hidden), обрубая текст и
+     местами ломая раскладку страницы — теперь сама лента скроллится по горизонтали. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .console-line {
@@ -1447,7 +1452,10 @@ time {
 .act-heartbeat .c-act { color: #6b7280; }
 .act-heartbeat { opacity: .72; }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
+  /* Остальное приложение переходит на мобильную раскладку при 720px (см. responsive.css) — этот
+     брейкпоинт был на 640px, поэтому в промежутке 641–720px жёсткая 5-колоночная сетка лога всё
+     ещё съезжала за край экрана. */
   .console-line { grid-template-columns: 60px 1fr; grid-auto-flow: row; white-space: normal; row-gap: 0; }
   .c-entity, .c-act, .c-actor { grid-column: 2; }
 }

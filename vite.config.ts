@@ -1393,6 +1393,26 @@ function mboxDevApi() {
       const realtimeTimer = setInterval(() => broadcastRealtime(realtimeClients, "server_tick"), 5000);
       server.httpServer?.on("close", () => clearInterval(realtimeTimer));
 
+      // publicDir: false (ниже в defineConfig) отключает автораздачу public/ — сделано специально,
+      // чтобы Vite не путал его с outDir build (тоже public/, иначе предупреждение о конфликте).
+      // Но это заодно ломает /fonts/*.ttf и любые другие статические файлы в dev: без обработчика
+      // они улетают в SPA-фолбэк и отдаются как index.html (Content-Type: text/html), поэтому
+      // @font-face с Press Start 2P тихо не грузился только в dev — на проде public/ раздаёт сервер.
+      const PUBLIC_MIME: Record<string, string> = {
+        ".ttf": "font/ttf", ".otf": "font/otf", ".woff": "font/woff", ".woff2": "font/woff2",
+        ".ico": "image/x-icon", ".png": "image/png", ".svg": "image/svg+xml", ".txt": "text/plain", ".json": "application/json",
+      };
+      server.middlewares.use((req, res, next) => {
+        const pathname = (req.url || "").split("?")[0];
+        if (req.method !== "GET" || pathname.startsWith("/assets/") || pathname === "/" || pathname === "/index.html") return next();
+        const ext = path.extname(pathname);
+        if (!ext || !(ext in PUBLIC_MIME)) return next();
+        const filePath = path.join(process.cwd(), "public", pathname);
+        if (!filePath.startsWith(path.join(process.cwd(), "public")) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return next();
+        res.setHeader("content-type", PUBLIC_MIME[ext]);
+        fs.createReadStream(filePath).pipe(res);
+      });
+
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith("/api/mbox/")) return next();
         const url = new URL(req.url, "http://localhost");
@@ -1474,6 +1494,8 @@ function mboxDevApi() {
                ),
                names AS (
                  SELECT name FROM presence
+                 UNION SELECT name FROM audited
+                 UNION SELECT name FROM ran
                )
                SELECT n.name,
                       COALESCE(p.kind, 'ai_agent') AS kind,

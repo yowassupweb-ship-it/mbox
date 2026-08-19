@@ -13,7 +13,7 @@ function ActivityBars() {
   );
 }
 
-function AgentCard({ agent, runs, decisions }: { agent: AgentActivity; runs: AgentRun[]; decisions: DecisionEntry[] }) {
+function AgentCard({ agent, runs, decisions, inbox }: { agent: AgentActivity; runs: AgentRun[]; decisions: DecisionEntry[]; inbox: AgentInboxItem[] }) {
   const mine = runs.filter((run) => run.agent_name === agent.name);
   const live = liveRunOf(runs, agent.name);
   const lastRun = live || mine[0];
@@ -23,6 +23,10 @@ function AgentCard({ agent, runs, decisions }: { agent: AgentActivity; runs: Age
   const status = effectiveStatus(agent);
   const stateKey = working ? "working" : status;
   const stateLabel = working ? "в работе" : agentStatusLabels[status] || status;
+  // Джарвис (и любой другой лёгкий агент без agent_runs) не заводит сессии — его единица работы
+  // это ответ во входящих, а не run. Без этого карточка всегда показывала «нет активности»,
+  // даже если агент только что ответил на что-то.
+  const lastInbox = !lastRun ? inbox.find((item) => item.agent_name === agent.name) : undefined;
 
   return (
     <article className={`agent-card ${stateKey}`} style={{ ["--agent-accent" as string]: agentIdentity(agent.name).accent }}>
@@ -38,7 +42,9 @@ function AgentCard({ agent, runs, decisions }: { agent: AgentActivity; runs: Age
       <div className="agent-card-now">
         {working && <ActivityBars />}
         <span className={working ? "agent-card-goal live" : "agent-card-goal"}>
-          {lastRun ? (working ? lastRun.goal : `последнее: ${lastRun.goal}`) : "нет активности"}
+          {lastRun ? (working ? lastRun.goal : `последнее: ${lastRun.goal}`)
+            : lastInbox ? `последнее: ${lastInbox.title}`
+            : "нет активности"}
         </span>
       </div>
 
@@ -96,7 +102,7 @@ export function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: Age
       {agents.length ? (
         <div className="agent-cards">
           {agents.slice(0, 8).map((agent) => (
-            <AgentCard key={agent.id} agent={agent} runs={runs} decisions={decisions} />
+            <AgentCard key={agent.id} agent={agent} runs={runs} decisions={decisions} inbox={inbox} />
           ))}
         </div>
       ) : <EmptyState text="Агенты пока не подключены" />}

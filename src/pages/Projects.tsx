@@ -6,6 +6,7 @@ import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/ent
 import { formatBytes } from "../lib/format";
 import { fetchJson } from "../lib/api";
 import { projectMemoryMatches } from "../lib/memory";
+import { countUnseen, onSeenChange } from "../lib/seen";
 import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, FolderRow, Memory, Project } from "../types";
@@ -101,6 +102,20 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  // Бейдж непрочитанного на пилюле проекта — используем тот же учёт «просмотрено», что и на
+  // карточках todo (lib/seen), поэтому подписываемся на его изменения, а не считаем один раз.
+  const [seenTick, setSeenTick] = useState(0);
+  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
+  const unseenByProject = useMemo(() => {
+    void seenTick;
+    const map = new Map<string, number>();
+    for (const item of visible) {
+      const marks = item.todos.map((todo) => ({ key: `todo:${todo.id}`, bytes: todo.memory_bytes }));
+      map.set(item.id, countUnseen(marks));
+    }
+    return map;
+  }, [visible, seenTick]);
 
   async function reorderProject(draggedId: string, targetId: string) {
     if (draggedId === targetId) return;
@@ -206,7 +221,9 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
             }}
             onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
           >
-            <span className="project-pill-dot" />
+            {unseenByProject.get(item.id)! > 0 && (
+              <span className="project-pill-unread" title={`${unseenByProject.get(item.id)} непрочитанных`}>{unseenByProject.get(item.id)}</span>
+            )}
             <span className="project-pill-name">{item.name}</span>
             <span className="project-pill-meta">
               <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>

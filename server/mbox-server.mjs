@@ -1504,6 +1504,8 @@ async function handleApiWithContext(req, res, url) {
        ),
        names AS (
          SELECT name FROM presence
+         UNION SELECT name FROM audited
+         UNION SELECT name FROM ran
        )
        SELECT n.name,
               COALESCE(p.kind, 'ai_agent') AS kind,
@@ -2565,7 +2567,7 @@ async function handleApiWithContext(req, res, url) {
           todoId: result.rows[0].todo_id,
           agentRunId: result.rows[0].id,
           sourceAgent: result.rows[0].agent_name || actorFromReq(req),
-          title: `РС‚РѕРі Р·Р°РїСѓСЃРєР°: ${result.rows[0].goal}`,
+          title: `Итог запуска: ${result.rows[0].goal}`,
           content: result.rows[0].result,
           touchedFiles: result.rows[0].touched_files,
           reason: "agent_run_created_finished",

@@ -550,7 +550,7 @@ function consoleTime(iso: string): string {
 
 function HistoryBoard({ events }: { events: AuditEvent[] }) {
   return (
-    <Panel title="История" icon={History}>
+    <Panel title="История" icon={History} className="panel-bare">
       <div className="console" role="log" aria-label="Журнал аудита">
         <div className="console-bar">
           <span className="console-title">mbox — журнал аудита</span>

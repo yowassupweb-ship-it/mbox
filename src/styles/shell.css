@@ -40,6 +40,20 @@
   box-shadow: var(--container-inset);
 }
 
+/* Для панелей, чей контент уже сам по себе оформлен как отдельный блок (например .console на
+   Истории — своя рамка, свой заголовок «mbox — журнал аудита») — рамка панели поверх рамки
+   контента читалась как рамка в рамке. Здесь она снимается, заголовок и отступы panel-title
+   остаются. */
+.panel.panel-bare,
+.dark .panel.panel-bare {
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .brand-rail {
   position: sticky;
   top: 18px;
