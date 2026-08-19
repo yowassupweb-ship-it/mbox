@@ -28,6 +28,7 @@ npm run build               # vite build --outDir public --emptyOutDir false
 npm run mbox:docker:up      # локальный postgres + app
 npm run mbox:db:tunnel      # ssh-туннель к боевой БД (нужен paramiko + MBOX_SSH_*)
 node scripts/seed-mbox-project.mjs   # ПЕРЕЗАПИСЫВАЕТ все todo проекта MBOX
+node scripts/publish-repo-structure.mjs [проект]  # публикует git ls-files в props.repo_structure — так Джарвис находит файлы через find_file, не имея доступа к файловой системе
 ```
 
 Тестов нет. Проверка типов вручную: `npx tsc --noEmit`.
