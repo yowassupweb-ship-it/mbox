@@ -1077,6 +1077,7 @@ async function replyAsJarvis(item) {
       { role: "user", content: item.body || item.title },
     ];
     const actionLog = [];
+    const toolsUsed = [];
     let reply = "";
     for (let step = 0; step < 5; step += 1) {
       const message = await groqComplete(messages, JARVIS_TOOLS);
@@ -1088,15 +1089,19 @@ async function replyAsJarvis(item) {
       for (const call of message.tool_calls) {
         const result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
         actionLog.push(result);
+        if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
         messages.push({ role: "tool", tool_call_id: call.id, content: result });
       }
     }
     if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
 
+    // "Джарвис использовал инструменты: ..." — видимый след того, что реально было вызвано,
+    // а не просто текст. Отдельным полем в props, а не вклеено в текст, чтобы клиент рисовал
+    // это отдельной приглушённой строкой в логе.
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id })],
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed })],
     );
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });

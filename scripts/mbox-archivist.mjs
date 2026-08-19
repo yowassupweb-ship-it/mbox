@@ -429,6 +429,7 @@ async function respondToRequests() {
         { role: "user", content: item.body || item.title },
       ];
       const actionLog = [];
+      const toolsUsed = [];
       let reply = "";
       for (let step = 0; step < 5; step += 1) {
         const message = await groqChat(messages, { tools: JARVIS_TOOLS });
@@ -440,6 +441,7 @@ async function respondToRequests() {
         for (const call of message.tool_calls) {
           const result = await runJarvisTool(call.function?.name, call.function?.arguments, projectList);
           actionLog.push(result);
+          if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
           messages.push({ role: "tool", tool_call_id: call.id, content: result });
         }
       }
@@ -455,7 +457,7 @@ async function respondToRequests() {
           body: reply,
           priority: "normal",
           requires_human: false,
-          props: { to: "Человек", re: item.id },
+          props: { to: "Человек", re: item.id, tools_used: toolsUsed },
         }),
       });
       await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });

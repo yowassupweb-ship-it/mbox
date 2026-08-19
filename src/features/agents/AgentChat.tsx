@@ -242,13 +242,28 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   // Единый лог: реальная переписка + оптимистичные отправки + локальные команды, всё по времени.
   const lines = useMemo<LogLine[]>(() => {
-    const fromConversation: LogLine[] = conversation.map((item) => ({
-      id: `msg-${item.id}`,
-      kind: item.agent_name === HUMAN ? "out" : "in",
-      actor: item.agent_name,
-      text: item.body || item.title,
-      at: item.created_at,
-    }));
+    const fromConversation: LogLine[] = conversation.flatMap((item) => {
+      const line: LogLine = {
+        id: `msg-${item.id}`,
+        kind: item.agent_name === HUMAN ? "out" : "in",
+        actor: item.agent_name,
+        text: item.body || item.title,
+        at: item.created_at,
+      };
+      // "Джарвис использовал инструменты: ..." — видимый след реально выполненных действий,
+      // а не просто текст ответа. Та же метка времени, идёт сразу после в массиве — стабильная
+      // сортировка ниже (Array.sort по строке) сохранит порядок при равных ключах.
+      const toolsUsed = Array.isArray(item.props?.tools_used) ? (item.props.tools_used as unknown[]).filter((t): t is string => typeof t === "string") : [];
+      if (!toolsUsed.length) return [line];
+      const toolsLine: LogLine = {
+        id: `msg-${item.id}-tools`,
+        kind: "sys",
+        actor: "mbox",
+        text: `${item.agent_name} использовал инструменты: ${toolsUsed.join(", ")}`,
+        at: item.created_at,
+      };
+      return [line, toolsLine];
+    });
     const fromPending: LogLine[] = stillPending.map((item) => ({
       id: item.id,
       kind: "out",

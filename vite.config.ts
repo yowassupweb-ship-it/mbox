@@ -696,6 +696,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         { role: "user", content: String(item.body || item.title || "") },
       ];
       const actionLog: string[] = [];
+      const toolsUsed: string[] = [];
       let reply = "";
       for (let step = 0; step < 5; step += 1) {
         const message = await groqComplete(messages, JARVIS_TOOLS);
@@ -707,6 +708,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         for (const call of message.tool_calls) {
           const result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
           actionLog.push(result);
+          if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
           messages.push({ role: "tool", tool_call_id: call.id, content: result });
         }
       }
@@ -715,7 +717,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       await client.query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id })],
+        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed })],
       );
       await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     } finally {
