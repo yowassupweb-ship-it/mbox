@@ -735,15 +735,54 @@ const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-async function groqChat(messages) {
+async function groqComplete(messages, tools) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2 }),
+    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
   });
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
-  return data.choices?.[0]?.message?.content ?? "";
+  return data.choices?.[0]?.message ?? { content: "" };
+}
+
+// Раньше Джарвис только генерировал текст и мог написать "задача добавлена", ничего не сделав —
+// модель не отличает выполненное действие от вежливой выдумки. Даём ей ровно один настоящий
+// инструмент (создание todo) через tool calling; всё остальное подтверждается только текстом,
+// с явным предупреждением в системном промпте не выдумывать выполненные действия.
+const JARVIS_TOOLS = [{
+  type: "function",
+  function: {
+    name: "create_todo",
+    description: "Создать новую задачу (todo) в существующем проекте MBOX. Единственное реальное действие, которое ты можешь выполнить.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+        title: { type: "string", description: "Короткий заголовок задачи" },
+        note: { type: "string", description: "Подробности задачи, необязательно" },
+      },
+      required: ["project_name", "title"],
+    },
+  },
+}];
+
+async function runJarvisTool(client, name, rawArgs, projectList) {
+  let args = {};
+  try { args = JSON.parse(rawArgs || "{}"); } catch { /* модель иногда шлёт кривой JSON — просто игнорируем аргументы */ }
+  if (name !== "create_todo") return `неизвестное действие: ${name}`;
+  const title = String(args.title || "").trim();
+  if (!title) return "не создал задачу — нет заголовка";
+  const projectName = String(args.project_name || "").trim().toLowerCase();
+  const match = projectList.find((p) => p.name.toLowerCase() === projectName)
+    || projectList.find((p) => p.name.toLowerCase().includes(projectName) || projectName.includes(p.name.toLowerCase()));
+  if (!match) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+  const inserted = await client.query(
+    `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
+     VALUES ($1, $2, $3, 'open', 'normal', '{}', 'private') RETURNING id::text`,
+    [match.id, title, String(args.note || "")],
+  );
+  return `создана задача «${title}» в проекте «${match.name}» (#${inserted.rows[0].id})`;
 }
 
 async function replyAsJarvis(item) {
@@ -752,16 +791,30 @@ async function replyAsJarvis(item) {
   await client.connect();
   try {
     await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
-    const reply = await groqChat([
-      {
-        role: "system",
-        content: `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
-          + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно `
-          + "этим названием, не выдумывай другое. Отвечай коротко и по делу, на русском. Ты не пишешь код и "
-          + "ничего не деплоишь — только мелкие справки, вопросы про память/задачи и небольшие организационные действия.",
-      },
+    const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows;
+    const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+      + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно этим `
+      + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть РОВНО ОДНО реальное "
+      + "действие — функция create_todo (создать задачу в проекте). Если просят создать задачу — вызови функцию, "
+      + "не пиши текстом, что сделал это. Если просят что-то другое (изменить приоритет, пометить готовым, "
+      + "удалить, сгенерировать картинку и т.п.) — у тебя нет для этого инструмента, честно скажи, что не умеешь "
+      + `этого делать, а не притворяйся, что сделал. Известные проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
+    const message = await groqComplete([
+      { role: "system", content: systemPrompt },
       { role: "user", content: item.body || item.title },
-    ]);
+    ], JARVIS_TOOLS);
+
+    let reply;
+    if (message.tool_calls?.length) {
+      const results = [];
+      for (const call of message.tool_calls) {
+        results.push(await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList));
+      }
+      reply = results.join("; ");
+    } else {
+      reply = message.content || "";
+    }
+
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,

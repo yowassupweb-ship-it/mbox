@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, MessageSquare, X } from "lucide-react";
+import { Bird, ChevronRight, Terminal, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
@@ -211,16 +211,20 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
     }
   }
 
-  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Enter") { event.preventDefault(); void send(); return; }
-    if (event.key === "ArrowUp" && history.length) {
+  function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); return; }
+    // История команд — только когда курсор ещё не гуляет по многострочному тексту, иначе
+    // стрелки должны просто двигать курсор внутри composer'а, как в любом текстовом поле.
+    const target = event.currentTarget;
+    const singleLine = !target.value.includes("\n");
+    if (event.key === "ArrowUp" && singleLine && history.length) {
       event.preventDefault();
       const next = historyPos < 0 ? history.length - 1 : Math.max(0, historyPos - 1);
       setHistoryPos(next);
       setText(history[next]);
       return;
     }
-    if (event.key === "ArrowDown" && historyPos >= 0) {
+    if (event.key === "ArrowDown" && singleLine && historyPos >= 0) {
       event.preventDefault();
       const next = historyPos + 1;
       if (next >= history.length) { setHistoryPos(-1); setText(""); } else { setHistoryPos(next); setText(history[next]); }
@@ -267,11 +271,13 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
                 <div key={line.id}>
                   {showDay && <div className="console-log-sep">{day}</div>}
                   <div className={`console-log-line ${line.kind}${line.pending === "failed" ? " failed" : ""}`}>
-                    <span className="console-log-time">{time}</span>
-                    {line.kind === "in" && <AgentAvatar name={line.actor} size={16} />}
-                    <span className="console-log-actor">
-                      {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "ты" : line.actor}
-                      <ChevronRight size={11} />
+                    <span className="console-log-head">
+                      <span className="console-log-time">{time}</span>
+                      {line.kind === "in" && <AgentAvatar name={line.actor} size={16} />}
+                      <span className="console-log-actor">
+                        {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "ты" : line.actor}
+                        <ChevronRight size={11} />
+                      </span>
                     </span>
                     <span className="console-log-text">
                       {line.text}
@@ -292,21 +298,22 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
           </div>
 
           <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-            <span className="console-prompt">{target ? `@${target}` : "~"}$</span>
-            <input
+            <span className="console-prompt"><Bird size={13} />{target ? `@${target}` : "~"}</span>
+            <textarea
               value={text}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={onKeyDown}
-              placeholder={target ? `команда или сообщение для ${target}` : "команда (/help) или сообщение всем"}
+              placeholder={target ? `сообщение для ${target} (Shift+Enter — новая строка)` : "команда (/help) или сообщение всем — Shift+Enter для новой строки"}
               spellCheck={false}
               autoComplete="off"
+              rows={1}
             />
           </form>
         </div>
       )}
 
-      <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Чат с агентами, ${unread} непрочитанных` : "Чат с агентами"} title="Чат с агентами">
-        <MessageSquare size={17} />
+      <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
+        <Terminal size={17} />
         <span>Агенты</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}

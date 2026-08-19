@@ -38,6 +38,16 @@ export function agentIdentity(name: string): AgentIdentity {
   if (key.includes("gemini") || key.includes("bard") || key.includes("google")) {
     return { key: "gemini", label: raw, accent: GEMINI_ACCENT, glyph: brandGlyph(GEMINI_PATH) };
   }
+  // Джарвис — «свой», постоянный агент MBOX (scripts/mbox-archivist.mjs), не сторонний бренд.
+  // Фирменный цвет MBOX вместо хеша, чтобы глаз сразу выделял его среди Claude/Codex/Gemini.
+  if (key.includes("джарвис") || key.includes("jarvis")) {
+    return {
+      key: "generic",
+      label: raw,
+      accent: "#29e0d6",
+      glyph: <text x="12" y="12" textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight="760" fill="currentColor">Д</text>,
+    };
+  }
   const hue = hashHue(key || "agent");
   const initials = raw.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "A";
   return { key: "generic", label: raw, accent: `hsl(${hue} 62% 60%)`, glyph: <text x="12" y="12" textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight="760" fill="currentColor">{initials}</text> };

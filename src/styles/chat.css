@@ -467,6 +467,17 @@
   background: #0c0c0e;
 }
 
+/* Раньше высота была зажата в min(86vh, 820px) — на большом мониторе внизу оставалось впустую
+   пол-окна. На широком экране (кнопка ещё в нижнем правом углу, см. брейкпоинты ниже) консоль
+   растягивается от нижнего меню почти до верха браузера; на планшете/телефоне своя раскладка
+   уже посчитана под меньшую высоту навигации — там не трогаем. */
+@media (min-width: 1201px) {
+  .agent-chat-shell.console {
+    height: calc(100svh - 60px - env(safe-area-inset-bottom) - 14px);
+    max-height: calc(100svh - 60px - env(safe-area-inset-bottom) - 14px);
+  }
+}
+
 .agent-chat-shell .console-bar {
   display: flex;
   align-items: center;
@@ -509,11 +520,19 @@
   text-align: center;
 }
 
+/* Имя/время — своей строкой над текстом, а не в общей строке с ним: длинный ответ раньше
+   растягивал первую строку лога вбок вместе с меткой времени, съедая горизонтальное место. */
 .console-log-line {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 0;
+}
+
+.console-log-head {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 1px 0;
 }
 
 .console-log-time { flex: none; color: #5b6b66; font-variant-numeric: tabular-nums; min-width: 62px; }
@@ -545,7 +564,7 @@
 
 .console-input-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid rgba(255, 255, 255, .06);
@@ -554,20 +573,33 @@
 
 .console-prompt {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 3px;
   font-family: var(--font-mono);
   font-weight: var(--weight-bold);
   color: var(--accent-color);
   font-size: 12.5px;
 }
 
-.console-input-row input {
+/* Раньше однострочный input — длинный текст просто убегал вбок, редактировать было неудобно.
+   Textarea растёт вверх по мере ввода (field-sizing: content), а Enter/Shift+Enter — как в любом
+   чате: отправить/перенос строки (см. onKeyDown в AgentChat.tsx). */
+.console-input-row textarea {
   flex: 1;
   min-width: 0;
+  min-height: 20px;
+  max-height: 220px;
   border: 0;
   outline: 0;
+  resize: none;
+  field-sizing: content;
   background: transparent;
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 12.5px;
+  line-height: 1.5;
+  padding: 2px 0;
 }
-.console-input-row input::placeholder { color: var(--text-muted); }
+.console-input-row textarea::placeholder { color: var(--text-muted); }
