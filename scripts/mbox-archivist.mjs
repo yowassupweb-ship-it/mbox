@@ -21,6 +21,9 @@ const agentName = process.env.MBOX_AGENT_NAME || "Джарвис";
 const groqKey = process.env.GROQ_API_KEY;
 const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
+// Только для текста, который Джарвис показывает пользователю — сам по себе таймер здесь не настраивается
+// (см. /etc/systemd/system/mbox-archivist.timer на сервере, OnUnitActiveSec).
+const TIMER_MINUTES_HINT = process.env.ARCHIVIST_TIMER_MINUTES || "1-2";
 
 if (!baseUrl || !password) {
   console.error("MBOX_URL and MBOX_PASSWORD are required");
@@ -109,9 +112,14 @@ async function respondToRequests() {
       const reply = await groqChat([
         {
           role: "system",
-          content: "Ты Джарвис — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). "
-            + "Отвечай коротко и по делу, на русском. Ты не пишешь код и ничего не деплоишь — только мелкие "
-            + "справки, вопросы про память/задачи и небольшие организационные действия.",
+          content: `Ты Джарвис — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+            + `Ты работаешь не как обычный чат-агент в сессии, а как cron-задача: просыпаешься по таймеру `
+            + `(сейчас — раз в ${TIMER_MINUTES_HINT} минуту), проверяешь новые сообщения и снова засыпаешь — `
+            + `отсюда задержка ответа, и это нормально, а не баг. Модель, на которой ты работаешь — ${groqModel} `
+            + `через Groq API (бесплатный тир). Если спросят, какая ты модель — отвечай честно этим названием, `
+            + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. Ты не пишешь `
+            + "код и ничего не деплоишь — только мелкие справки, вопросы про память/задачи и небольшие "
+            + "организационные действия.",
         },
         { role: "user", content: item.body || item.title },
       ]);
