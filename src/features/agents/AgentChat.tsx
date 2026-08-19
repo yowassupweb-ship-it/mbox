@@ -496,6 +496,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 placeholder="команда (/help), @агент, $проект, #артефакт — Shift+Enter для новой строки"
                 spellCheck={false}
                 autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
                 rows={1}
               />
             </form>

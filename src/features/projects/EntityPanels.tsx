@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, Pencil, Plus, X } from "lucide-react";
 import { saveEntity } from "../../lib/api";
-import type { Project } from "../../types";
+import { projectMemoryMatches } from "../../lib/memory";
+import type { Memory, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
 import { PropsEditor } from "./PropsEditor";
 import { RelationsPanel } from "./RelationsPanel";
 import type { ProjectEntityKind } from "../tree/entityKinds";
 
 /** Единая точка входа для постоянных сущностей проекта. */
-export function ProjectEntityView({ project, projects, kind, onSaved }: { project: Project; projects: Project[]; kind: ProjectEntityKind; onSaved: () => void }) {
+export function ProjectEntityView({ project, projects, memories, kind, onSaved }: { project: Project; projects: Project[]; memories: Memory[]; kind: ProjectEntityKind; onSaved: () => void }) {
   if (kind === "properties") return <PropsEditor project={project} onSaved={onSaved} />;
   if (kind === "relations") return <RelationsPanel project={project} projects={projects} onSaved={onSaved} />;
   if (kind === "stack") return <StackPanel project={project} onSaved={onSaved} />;
@@ -16,6 +17,7 @@ export function ProjectEntityView({ project, projects, kind, onSaved }: { projec
   if (kind === "figma") return <FigmaPanel project={project} onSaved={onSaved} />;
   if (kind === "deploy") return <DeployPanel project={project} onSaved={onSaved} />;
   if (kind === "philosophy") return <PhilosophyPanel project={project} onSaved={onSaved} />;
+  if (kind === "memories") return <MemoriesPanel project={project} memories={memories} />;
   return <AccessPanel project={project} onSaved={onSaved} />;
 }
 
@@ -317,4 +319,47 @@ function hostOf(value: string) {
   } catch {
     return "";
   }
+}
+
+/** Полноценная вкладка вместо тизера на странице проекта — весь пул памяти проекта с поиском,
+ * как Git/Стек/Доступ. Джарвис ищет по этому же пулу через свой инструмент search_memory. */
+export function MemoriesPanel({ project, memories }: { project: Project; memories: Memory[] }) {
+  const [search, setSearch] = useState("");
+  const todoIds = new Set(project.todos.map((todo) => todo.id));
+  const projectMemories = memories
+    .filter((memory) => projectMemoryMatches(memory, project, todoIds))
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? projectMemories.filter((memory) => `${memory.title} ${memory.content}`.toLowerCase().includes(q))
+    : projectMemories;
+
+  if (!projectMemories.length) {
+    return (
+      <div className="entity-panel memories-panel">
+        <EmptyState text="У проекта пока нет записей в памяти — Джарвис и агенты пишут их через record_memory по ходу работы" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="entity-panel memories-panel">
+      <TextInput
+        label="Поиск по памяти проекта"
+        hint={`${visible.length} из ${projectMemories.length}`}
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        spellCheck={false}
+      />
+      <div className="project-facts-list memories-tab-list">
+        {visible.map((memory) => (
+          <article key={memory.id} className="project-fact-card">
+            <b>{memory.title}</b>
+            <p>{memory.content}</p>
+            <time>{memory.entity_type} · {new Date(memory.updated_at).toLocaleDateString("ru-RU")}</time>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
 }

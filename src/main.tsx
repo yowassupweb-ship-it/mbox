@@ -16,6 +16,7 @@ import {
   Plus,
   Server,
   ShieldCheck,
+  Zap,
 } from "lucide-react";
 import { BottomNav } from "./components/BottomNav";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
@@ -46,7 +47,7 @@ import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
 import type {
   AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, DecisionEntry, FolderRow,
-  GraphEdge, GraphNode, GraphVisualEdge, Me, Memory, Project,
+  GraphEdge, GraphNode, GraphVisualEdge, GroqUsage, Me, Memory, Project,
   SecretSummary, SectionKey, ServerMetrics, Todo,
 } from "./types";
 import "./styles.css";
@@ -202,7 +203,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "overview" && <Overview data={data} />}
         {section === "memories" && <MemoryBoard memories={data.memories} projects={data.projects} decisions={data.decisions} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} projects={data.projects} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
-        {section === "projects" && <ProjectsBoard projects={data.projects} folders={data.folders} memories={data.memories} decisions={data.decisions} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
+        {section === "projects" && <ProjectsBoard projects={data.projects} folders={data.folders} memories={data.memories} decisions={data.decisions} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} memories={data.memories} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
         {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} decisions={data.decisions} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "server" && <ServerBoard pulse={realtime.pulse} />}
@@ -217,7 +218,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
 function ProjectInspector({ node, projects, fallbackProject, onColorChange, onSaved }: { node: FolderTreeNode | null; projects: Project[]; fallbackProject?: Project; onColorChange: (projectId: string, color: string) => void; onSaved: () => void }) {
   if (node?.type === "project_entity" && node.id && node.entityKind) {
     const project = projects.find((item) => item.id === node.id);
-    if (project) return <ProjectEntityView project={project} projects={projects} kind={node.entityKind} onSaved={onSaved} />;
+    if (project) return <ProjectEntityView project={project} projects={projects} memories={[]} kind={node.entityKind} onSaved={onSaved} />;
   }
 
   if (node?.type === "todo" && node.id) {
@@ -568,12 +569,15 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
 }
 function ServerBoard({ pulse }: { pulse: number }) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
+  const [usage, setUsage] = useState<GroqUsage | null>(null);
 
   useEffect(() => {
     let alive = true;
     async function load() {
       const data = await fetchJson<{ metrics: ServerMetrics | null }>("/api/mbox/server");
       if (alive) setMetrics(data.metrics);
+      const groq = await fetchJson<GroqUsage>("/api/mbox/agent/groq-usage");
+      if (alive) setUsage(groq);
     }
     load();
     return () => {
@@ -581,11 +585,27 @@ function ServerBoard({ pulse }: { pulse: number }) {
     };
   }, [pulse]);
 
+  const usagePanel = usage && (
+    <Panel title="Джарвис / Groq" icon={Zap}>
+      <div className="entity-list">
+        <EntityLine title="Токенов сегодня" value={Number(usage.tokens_today).toLocaleString("ru-RU")} />
+        <EntityLine title="Токенов за 24ч" value={Number(usage.tokens_24h).toLocaleString("ru-RU")} />
+        <EntityLine title="Токенов всего" value={Number(usage.total_tokens).toLocaleString("ru-RU")} />
+        <EntityLine title="Вызовов за 24ч" value={String(usage.calls_24h)} />
+        <EntityLine title="Вызовов всего" value={String(usage.calls_total)} />
+        <EntityLine title="Последний вызов" value={usage.last_call_at ? formatDateTime(usage.last_call_at) : "ещё не было"} />
+      </div>
+    </Panel>
+  );
+
   if (!metrics) {
     return (
-      <Panel title="Сервер" icon={Server}>
-        <EmptyState text="Ожидание метрик сервера" />
-      </Panel>
+      <div className="content-grid server-grid">
+        <Panel title="Сервер" icon={Server}>
+          <EmptyState text="Ожидание метрик сервера" />
+        </Panel>
+        {usagePanel}
+      </div>
     );
   }
 
@@ -608,6 +628,7 @@ function ServerBoard({ pulse }: { pulse: number }) {
           ))}
         </div>
       </Panel>
+      {usagePanel}
     </div>
   );
 }

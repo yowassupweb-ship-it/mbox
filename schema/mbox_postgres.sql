@@ -213,6 +213,21 @@ CREATE TABLE IF NOT EXISTS server_metrics (
   captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Расход токенов Джарвиса на Groq — пользователь хочет видеть остаток/затраты, а не гадать.
+-- Groq free tier не выставляет счёт в деньгах, но токены и число вызовов — реальный лимитирующий
+-- ресурс (rate limits по токенам/минуту), поэтому считаем именно их.
+CREATE TABLE IF NOT EXISTS groq_usage (
+  id BIGSERIAL PRIMARY KEY,
+  purpose TEXT NOT NULL DEFAULT 'reply',
+  model TEXT NOT NULL DEFAULT '',
+  prompt_tokens INT NOT NULL DEFAULT 0,
+  completion_tokens INT NOT NULL DEFAULT 0,
+  total_tokens INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_groq_usage_created_at ON groq_usage(created_at);
+
 CREATE TABLE IF NOT EXISTS protected_secrets (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,

@@ -87,6 +87,11 @@ async function groqChat(messages, { json = false, tools = null } = {}) {
   });
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
+  const usage = data.usage || {};
+  mboxFetch("/api/mbox/agent/groq-usage", {
+    method: "POST",
+    body: JSON.stringify({ purpose: "cron", model: groqModel, prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 }),
+  }).catch((error) => console.error(`groq_usage log failed: ${error.message}`));
   return tools ? data.choices?.[0]?.message ?? { content: "" } : data.choices?.[0]?.message?.content ?? "";
 }
 

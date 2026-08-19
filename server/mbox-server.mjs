@@ -735,7 +735,7 @@ const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-async function groqComplete(messages, tools) {
+async function groqComplete(messages, tools, purpose = "reply") {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
@@ -743,6 +743,13 @@ async function groqComplete(messages, tools) {
   });
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
+  // Пользователь хочет видеть расход токенов, а не гадать — пишем каждый вызов, не только успешные
+  // ответы. Best-effort: если запись в БД не удалась, это не должно ронять сам ответ Джарвиса.
+  const usage = data.usage || {};
+  query(
+    "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
+    [purpose, GROQ_MODEL, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
+  ).catch((error) => console.error(`groq_usage insert failed: ${error.message}`));
   return data.choices?.[0]?.message ?? { content: "" };
 }
 
@@ -1283,6 +1290,31 @@ async function handleApiWithContext(req, res, url) {
     );
     if (started) broadcastRealtime("agent_presence", { agent: name, event: "session_start" });
     return sendJson(res, 200, { presence: result.rows[0] });
+  }
+
+  if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {
+    const result = await query(
+      `SELECT
+         (SELECT COALESCE(sum(total_tokens), 0) FROM groq_usage)::bigint AS total_tokens,
+         (SELECT COALESCE(sum(total_tokens), 0) FROM groq_usage WHERE created_at > now() - interval '24 hours')::bigint AS tokens_24h,
+         (SELECT COALESCE(sum(total_tokens), 0) FROM groq_usage WHERE created_at > date_trunc('day', now()))::bigint AS tokens_today,
+         (SELECT count(*) FROM groq_usage)::int AS calls_total,
+         (SELECT count(*) FROM groq_usage WHERE created_at > now() - interval '24 hours')::int AS calls_24h,
+         (SELECT max(created_at)::text FROM groq_usage) AS last_call_at`,
+    );
+    return sendJson(res, 200, result.rows[0]);
+  }
+
+  if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "POST") {
+    // Резервный cron-путь (scripts/mbox-archivist.mjs) не имеет прямого доступа к БД, только REST —
+    // логирует свой расход через этот же счётчик, чтобы цифра в UI была честной, а не только по
+    // мгновенным ответам.
+    const body = await readBody(req);
+    await query(
+      "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
+      [String(body.purpose || "reply"), String(body.model || ""), Number(body.prompt_tokens) || 0, Number(body.completion_tokens) || 0, Number(body.total_tokens) || 0],
+    );
+    return sendJson(res, 200, { ok: true });
   }
 
   if (url.pathname === "/api/mbox/agents") {

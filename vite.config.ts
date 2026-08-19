@@ -362,7 +362,7 @@ type GroqMessage = {
   tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
 };
 
-async function groqComplete(messages: GroqMessage[], tools?: unknown[]): Promise<GroqMessage> {
+async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose = "reply"): Promise<GroqMessage> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
@@ -370,6 +370,11 @@ async function groqComplete(messages: GroqMessage[], tools?: unknown[]): Promise
   });
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
+  const usage = data.usage || {};
+  queryPostgres(
+    "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
+    [purpose, GROQ_MODEL, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
+  ).catch((error: Error) => console.error(`groq_usage insert failed: ${error.message}`));
   return data.choices?.[0]?.message ?? { role: "assistant", content: "" };
 }
 
@@ -1368,6 +1373,28 @@ function mboxDevApi() {
               [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
             );
             return sendJson(res, 200, { presence: result.rows[0] });
+          }
+
+          if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {
+            const result = await queryPostgres<{ total_tokens: string; tokens_24h: string; tokens_today: string; calls_total: number; calls_24h: number; last_call_at: string | null }>(
+              `SELECT
+                 (SELECT COALESCE(sum(total_tokens), 0) FROM groq_usage)::bigint AS total_tokens,
+                 (SELECT COALESCE(sum(total_tokens), 0) FROM groq_usage WHERE created_at > now() - interval '24 hours')::bigint AS tokens_24h,
+                 (SELECT COALESCE(sum(total_tokens), 0) FROM groq_usage WHERE created_at > date_trunc('day', now()))::bigint AS tokens_today,
+                 (SELECT count(*) FROM groq_usage)::int AS calls_total,
+                 (SELECT count(*) FROM groq_usage WHERE created_at > now() - interval '24 hours')::int AS calls_24h,
+                 (SELECT max(created_at)::text FROM groq_usage) AS last_call_at`,
+            );
+            return sendJson(res, 200, result.rows[0]);
+          }
+
+          if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "POST") {
+            const body = await readBody<{ purpose?: string; model?: string; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }>(req);
+            await queryPostgres(
+              "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
+              [String(body.purpose || "reply"), String(body.model || ""), Number(body.prompt_tokens) || 0, Number(body.completion_tokens) || 0, Number(body.total_tokens) || 0],
+            );
+            return sendJson(res, 200, { ok: true });
           }
 
           if (url.pathname === "/api/mbox/status") {

@@ -440,8 +440,12 @@
   .map-link-label { opacity: 1; }
 
   /* Чат разворачивается почти на весь экран — иначе на 360px это щель. */
-  .chat-roster { gap: 5px; padding: var(--space-2) var(--space-3); }
   .chat-composer textarea { font-size: 16px; }
+
+  /* iOS Safari зумит страницу при фокусе на любом поле ввода с font-size < 16px — консольный
+     composer был 12.5px (моноширинный терминальный размер), из-за чего на iPhone любое нажатие
+     в чат разъезжало весь экран приближением и делать было ничего невозможно. */
+  .console-input-row textarea { font-size: 16px; }
 }
 
 /*

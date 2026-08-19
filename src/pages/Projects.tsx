@@ -14,7 +14,7 @@ import { EmptyState } from "../ui";
 // Кроме восьми постоянных сущностей у проекта могут быть свои папки: folder:<id>.
 type View = "todo" | ProjectEntityKind | `folder:${string}`;
 
-const entityOrder: ProjectEntityKind[] = ["git", "figma", "stack", "properties", "relations", "philosophy", "deploy", "access"];
+const entityOrder: ProjectEntityKind[] = ["git", "figma", "stack", "memories", "properties", "relations", "philosophy", "deploy", "access"];
 
 function searchValue(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -210,7 +210,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
             >
               <Icon size={17} />
               <b>{meta.label}</b>
-              <small>{entitySummary(project, kind)}</small>
+              <small>{entitySummary(project, kind, memories)}</small>
             </button>
           );
         })}
@@ -284,7 +284,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   );
 }
 
-function entitySummary(project: Project, kind: ProjectEntityKind) {
+function entitySummary(project: Project, kind: ProjectEntityKind, memories: Memory[]) {
   if (kind === "git") return project.git_url ? "указан" : "не указан";
   if (kind === "figma") return project.props?.figma_url ? "указана" : "не указана";
   if (kind === "stack") return `${project.stack.length}`;
@@ -292,5 +292,9 @@ function entitySummary(project: Project, kind: ProjectEntityKind) {
   if (kind === "relations") return `${project.relations.length}`;
   if (kind === "philosophy") return project.props?.philosophy ? "задана" : "пусто";
   if (kind === "deploy") return project.deploy_provider || "не указан";
+  if (kind === "memories") {
+    const todoIds = new Set(project.todos.map((todo) => todo.id));
+    return `${memories.filter((memory) => projectMemoryMatches(memory, project, todoIds)).length}`;
+  }
   return project.access_level;
 }

@@ -131,6 +131,15 @@ export type ServerMetrics = {
   captured_at: string;
 };
 
+export type GroqUsage = {
+  total_tokens: string;
+  tokens_24h: string;
+  tokens_today: string;
+  calls_total: number;
+  calls_24h: number;
+  last_call_at: string | null;
+};
+
 export type SecretSummary = {
   id: string;
   project_id: string | null;
