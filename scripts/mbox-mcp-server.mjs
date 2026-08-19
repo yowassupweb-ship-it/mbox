@@ -28,7 +28,9 @@ async function mboxFetch(path, init = {}) {
     headers: {
       "content-type": "application/json",
       cookie,
-      "x-mbox-agent": agentName,
+      // HTTP-заголовки — только ASCII; кириллическое имя агента ломало fetch с "character ...
+      // greater than 255". Кодируем на выходе, сервер декодирует (actorFromReq/resolveRequestActor).
+      "x-mbox-agent": encodeURIComponent(agentName),
       ...(init.headers || {}),
     },
   });

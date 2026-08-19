@@ -28,12 +28,24 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
 
 const requestContext = new AsyncLocalStorage<{ actor: string }>();
 
+// HTTP-заголовки — ASCII-only; клиенты шлют имя агента через encodeURIComponent, чтобы кириллица
+// ("Архивариус") не валила fetch с "character ... greater than 255". decodeURIComponent на чистом
+// ASCII — no-op, старые клиенты не ломаются.
+function decodeAgentHeader(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function actorFromReq(req: IncomingMessage) {
   // Контекст резолвится один раз в middleware (см. resolveRequestActor) и покрывает и заголовок
   // доверенного агента, и вошедшего человека. Заголовок — фолбэк для мест до входа в контекст.
   const contextActor = requestContext.getStore()?.actor;
   if (contextActor) return contextActor;
-  return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
+  const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
+  return header ? decodeAgentHeader(String(header)) : "Agent";
 }
 
 /**
@@ -43,7 +55,7 @@ function actorFromReq(req: IncomingMessage) {
  */
 async function resolveRequestActor(req: IncomingMessage): Promise<string> {
   const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
-  if (header) return String(header);
+  if (header) return decodeAgentHeader(String(header));
   try {
     const user = await currentUser(req);
     if (user?.username) return user.username;

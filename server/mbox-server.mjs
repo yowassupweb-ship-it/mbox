@@ -115,13 +115,25 @@ function broadcastRealtime(type, payload = {}) {
   }
 }
 
+// HTTP-заголовки — ASCII-only (ByteString); клиенты (mbox-mcp-server.mjs, mbox-archivist.mjs)
+// шлют имя агента через encodeURIComponent, чтобы кириллица ("Архивариус") не валила fetch.
+// Старые клиенты присылают чистый ASCII — decodeURIComponent на нём тоже безопасен (no-op).
+function decodeAgentHeader(value) {
+  try {
+    return decodeURIComponent(String(value));
+  } catch {
+    return String(value);
+  }
+}
+
 function actorFromReq(req) {
   // Контекст на запрос резолвится один раз в handleApi (см. resolveRequestActor) и покрывает
   // и заголовок доверенного агента, и вошедшего человека. Заголовок — фолбэк на случай вызова
   // до входа в контекст (не должно происходить в обычном потоке).
   const contextActor = requestContext.getStore()?.actor;
   if (contextActor) return contextActor;
-  return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
+  const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
+  return header ? decodeAgentHeader(header) : "Agent";
 }
 
 /**
@@ -132,7 +144,7 @@ function actorFromReq(req) {
  */
 async function resolveRequestActor(req) {
   const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
-  if (header) return String(header);
+  if (header) return decodeAgentHeader(header);
   try {
     const user = await currentUser(req);
     if (user?.username) return user.username;

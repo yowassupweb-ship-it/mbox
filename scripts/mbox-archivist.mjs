@@ -47,7 +47,9 @@ async function mboxFetch(path, init = {}) {
   if (!cookie) await login();
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", cookie, "x-mbox-agent": agentName, ...(init.headers || {}) },
+    // HTTP-заголовки — только ASCII (ByteString); имя агента кириллицей ("Архивариус") падало
+    // с "character ... greater than 255". Кодируем на выходе, decodeURIComponent — на сервере.
+    headers: { "content-type": "application/json", cookie, "x-mbox-agent": encodeURIComponent(agentName), ...(init.headers || {}) },
   });
   if (response.status === 401) {
     cookie = "";
