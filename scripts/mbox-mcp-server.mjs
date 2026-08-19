@@ -212,6 +212,32 @@ server.registerTool(
 );
 
 server.registerTool(
+  "set_repo_structure",
+  {
+    title: "Publish repo file structure to MBOX",
+    description: "Push a list of file paths (structure only, no content) for a project so other agents (e.g. Джарвис) can answer 'where does file X live' without filesystem access. Call this at the start of local work on a repo, or after a restructure. Paths only — never file contents.",
+    inputSchema: {
+      project: z.string(),
+      paths: z.array(z.string()),
+    },
+  },
+  async ({ project, paths }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    if (!target) throw new Error(`Project not found: ${project}`);
+    const props = {
+      ...(target.props && typeof target.props === "object" ? target.props : {}),
+      repo_structure: { paths, file_count: paths.length, updated_at: new Date().toISOString(), updated_by: agentName },
+    };
+    const data = await mboxFetch(`/api/mbox/projects/${target.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ props }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify({ project: target.name, file_count: paths.length, ...data }, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "claim_task",
   {
     title: "Claim MBOX task",

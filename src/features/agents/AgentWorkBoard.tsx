@@ -1,5 +1,5 @@
 import { AgentAvatar, agentIdentity } from "../../components/AgentAvatar";
-import { effectiveStatus, isAgentWorking, liveRunOf, liveRuns } from "../../lib/agents";
+import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf, liveRuns } from "../../lib/agents";
 import { baseName, formatSince } from "../../lib/format";
 import { agentStatusLabels, runStatusLabels } from "../../lib/labels";
 import type { AgentActivity, AgentInboxItem, AgentRun, DecisionEntry } from "../../types";
@@ -13,11 +13,37 @@ function ActivityBars() {
   );
 }
 
-function AgentCard({ agent, runs, decisions, inbox }: { agent: AgentActivity; runs: AgentRun[]; decisions: DecisionEntry[]; inbox: AgentInboxItem[] }) {
-  const mine = runs.filter((run) => run.agent_name === agent.name);
-  const live = liveRunOf(runs, agent.name);
+/** Схлопывает варианты одной семьи (Codex, "Codex smoke #132", "Codex debug #132", ...) в одну
+ * карточку: самая свежая по last_seen как основа, счётчики суммируются по всем именам семьи. */
+function groupAgentsByFamily(agents: AgentActivity[]): Array<{ agent: AgentActivity; displayName: string; memberNames: string[] }> {
+  const groups = new Map<string, AgentActivity[]>();
+  for (const agent of agents) {
+    const family = agentFamily(agent.name);
+    if (!family) continue;
+    const list = groups.get(family.key) || [];
+    list.push(agent);
+    groups.set(family.key, list);
+  }
+  return [...groups.entries()].map(([key, members]) => {
+    const label = agentFamily(members[0].name)!.label;
+    const newest = [...members].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""))[0];
+    const merged: AgentActivity = {
+      ...newest,
+      name: label,
+      active_sessions: members.reduce((sum, m) => sum + m.active_sessions, 0),
+      events: members.reduce((sum, m) => sum + m.events, 0),
+      runs: members.reduce((sum, m) => sum + m.runs, 0),
+      live_runs: members.reduce((sum, m) => sum + m.live_runs, 0),
+    };
+    return { agent: merged, displayName: label, memberNames: members.map((m) => m.name) };
+  });
+}
+
+function AgentCard({ agent, memberNames, runs, decisions, inbox }: { agent: AgentActivity; memberNames: string[]; runs: AgentRun[]; decisions: DecisionEntry[]; inbox: AgentInboxItem[] }) {
+  const mine = runs.filter((run) => memberNames.includes(run.agent_name));
+  const live = memberNames.map((name) => liveRunOf(runs, name)).find(Boolean);
   const lastRun = live || mine[0];
-  const lastDecision = decisions.find((decision) => decision.actor === agent.name);
+  const lastDecision = decisions.find((decision) => memberNames.includes(decision.actor));
   const files = (Array.isArray(lastRun?.touched_files) ? (lastRun!.touched_files as string[]) : []).slice(0, 5);
   const working = Boolean(live);
   const status = effectiveStatus(agent);
@@ -26,7 +52,7 @@ function AgentCard({ agent, runs, decisions, inbox }: { agent: AgentActivity; ru
   // Джарвис (и любой другой лёгкий агент без agent_runs) не заводит сессии — его единица работы
   // это ответ во входящих, а не run. Без этого карточка всегда показывала «нет активности»,
   // даже если агент только что ответил на что-то.
-  const lastInbox = !lastRun ? inbox.find((item) => item.agent_name === agent.name) : undefined;
+  const lastInbox = !lastRun ? inbox.find((item) => memberNames.includes(item.agent_name)) : undefined;
 
   return (
     <article className={`agent-card ${stateKey}`} style={{ ["--agent-accent" as string]: agentIdentity(agent.name).accent }}>
@@ -81,8 +107,9 @@ function StreamRow({ actor, title, tag }: { actor: string; title: string; tag?: 
 }
 
 export function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: AgentActivity[]; runs: AgentRun[]; inbox: AgentInboxItem[]; decisions: DecisionEntry[] }) {
-  const online = agents.filter((agent) => effectiveStatus(agent) === "active").length;
-  const working = agents.filter((agent) => isAgentWorking(agent, runs)).length;
+  const grouped = groupAgentsByFamily(agents);
+  const online = grouped.filter(({ agent }) => effectiveStatus(agent) === "active").length;
+  const working = grouped.filter(({ agent }) => isAgentWorking(agent, runs)).length;
   const activeRuns = liveRuns(runs);
   const visibleRuns = (activeRuns.length ? activeRuns : runs).slice(0, 5);
   const openInbox = inbox.filter((item) => item.status !== "done").slice(0, 5);
@@ -92,17 +119,17 @@ export function AgentWorkBoard({ agents, runs, inbox, decisions }: { agents: Age
       <header className="agent-activity-head">
         <h3>Работа агентов</h3>
         <div className="agent-activity-summary">
-          <span><b>{agents.length}</b> агентов</span>
+          <span><b>{grouped.length}</b> агентов</span>
           <span className="dot-sep" />
           <span className="tone-active"><b>{online}</b> на связи</span>
           {working > 0 && <span className="tone-working"><b>{working}</b> в работе</span>}
         </div>
       </header>
 
-      {agents.length ? (
+      {grouped.length ? (
         <div className="agent-cards">
-          {agents.slice(0, 8).map((agent) => (
-            <AgentCard key={agent.id} agent={agent} runs={runs} decisions={decisions} inbox={inbox} />
+          {grouped.map(({ agent, memberNames }) => (
+            <AgentCard key={agent.name} agent={agent} memberNames={memberNames} runs={runs} decisions={decisions} inbox={inbox} />
           ))}
         </div>
       ) : <EmptyState text="Агенты пока не подключены" />}

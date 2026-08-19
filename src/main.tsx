@@ -22,7 +22,7 @@ import { BottomNav } from "./components/BottomNav";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
 import { TopBar, type AgentRosterEntry } from "./components/TopBar";
 import { AgentAvatar } from "./components/AgentAvatar";
-import { RUN_STALE_MS, effectiveStatus, isAgentWorking, liveRunOf } from "./lib/agents";
+import { RUN_STALE_MS, agentFamily, effectiveStatus, isAgentWorking, liveRunOf } from "./lib/agents";
 import { fetchJson, saveEntity } from "./lib/api";
 import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
 import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
@@ -86,8 +86,11 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     if (realtime.state === "offline") return { state: "offline" as const, label: "Нет связи с сервером" };
     if (realtime.state === "connecting") return { state: "connecting" as const, label: realtime.label };
 
-    const active = data.agents.filter((agent) => effectiveStatus(agent) === "active");
-    const working = data.agents.filter((agent) => isAgentWorking(agent, data.runs));
+    // Пилюля в шапке — про постоянных агентов (Джарвис/Claude/Codex), не про человека (Admin
+    // тоже "на связи", пока открыт сайт) и не про разовые debug/smoke-сессии.
+    const knownAgents = data.agents.filter((agent) => agentFamily(agent.name));
+    const active = knownAgents.filter((agent) => effectiveStatus(agent) === "active");
+    const working = knownAgents.filter((agent) => isAgentWorking(agent, data.runs));
     const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
     const onReview = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "review").length, 0);
     const blocked = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "blocked").length, 0);
@@ -113,7 +116,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     if (active.length === 1) return { state: "connected" as const, label: `${active[0].name} на связи, задачу не взял` };
     if (active.length > 1) return { state: "connected" as const, label: `${active.length} агента на связи: ${active.map((agent) => agent.name).join(", ")}` };
 
-    const idle = [...data.agents].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""))[0];
+    const idle = [...knownAgents].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""))[0];
     return { state: "connected" as const, label: idle ? `Тишина · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи" };
   }, [realtime.state, realtime.label, data.agents, data.inbox, data.projects, data.runs]);
   const agentLabel = headerStatus.label;

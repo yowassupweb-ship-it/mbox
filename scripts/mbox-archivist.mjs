@@ -330,6 +330,21 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "find_file",
+      description: "Найти путь к файлу в структуре репозитория проекта — только список путей, без содержимого файлов (у тебя нет доступа к файловой системе). Структуру публикуют локальные агенты через set_repo_structure, если проект ещё не публиковал — так и скажи.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта" },
+          query: { type: "string", description: "Часть имени файла или пути" },
+        },
+        required: ["project_name", "query"],
+      },
+    },
+  },
 ];
 
 function excerptAround(text, query, radius) {
@@ -555,6 +570,20 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return `последние события${project ? ` в «${project.name}»` : ""}: ${lines.join("; ")}`;
   }
 
+  if (name === "find_file") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
+    const structure = context.project?.props?.repo_structure;
+    if (!structure || !Array.isArray(structure.paths) || !structure.paths.length) {
+      return `у проекта «${project.name}» ещё нет опубликованной структуры репозитория`;
+    }
+    const q = String(args.query || "").trim().toLowerCase();
+    const matches = structure.paths.filter((p) => String(p).toLowerCase().includes(q)).slice(0, 20);
+    if (!matches.length) return `по запросу «${args.query}» в структуре «${project.name}» ничего не нашлось (всего файлов: ${structure.paths.length})`;
+    return `найдено в «${project.name}»: ${matches.join(", ")}`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -614,7 +643,9 @@ async function respondToRequests() {
         + "конкретные факты по ключевым словам, НЕ для общего описания проекта), update_todo_note (дописать или "
         + "заменить описание задачи), link_projects (связать два проекта отношением), record_decision (записать "
         + "ВЫБОР между вариантами и почему — не факт, для фактов record_memory), get_groq_usage (сколько токенов "
-        + "Groq потрачено на тебя), list_recent_activity (последние события в проекте или во всём MBOX). Если "
+        + "Groq потрачено на тебя), list_recent_activity (последние события в проекте или во всём MBOX), "
+        + "find_file (найти путь к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь "
+        + "файлы). Если "
         + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "

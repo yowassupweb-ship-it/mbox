@@ -44,3 +44,14 @@ export function effectiveStatus(agent: AgentActivity) {
 export function isAgentWorking(agent: AgentActivity, runs: AgentRun[]) {
   return Boolean(liveRunOf(runs, agent.name));
 }
+
+/** Постоянная «семья» агентов в ростере — Джарвис, Claude, Codex. Всё остальное — либо человек
+ * (Admin), либо безымянный дефолт ("Agent"), либо разовая debug/smoke-сессия под уникальным
+ * MBOX_AGENT_NAME — не агент, за которым стоит следить в интерфейсе. */
+export function agentFamily(name: string): { key: string; label: string } | null {
+  const key = name.toLowerCase();
+  if (key.includes("джарвис") || key.includes("jarvis")) return { key: "jarvis", label: "Джарвис" };
+  if (key.includes("claude") || key.includes("anthropic")) return { key: "claude", label: "Claude" };
+  if (key.includes("codex") || key.includes("chatgpt") || key.includes("gpt") || key.includes("openai")) return { key: "codex", label: "Codex" };
+  return null;
+}

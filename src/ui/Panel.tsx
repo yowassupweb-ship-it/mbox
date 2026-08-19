@@ -19,8 +19,10 @@ export function Metric({ title, value, subtitle, icon: Icon }: { title: string; 
     <article className="metric-card">
       <div className="metric-icon"><Icon size={20} /></div>
       <span>{title}</span>
-      <strong>{value}</strong>
-      <small>{subtitle}</small>
+      <div className="metric-card-row">
+        <strong>{value}</strong>
+        <small>{subtitle}</small>
+      </div>
     </article>
   );
 }

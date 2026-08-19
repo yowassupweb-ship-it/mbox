@@ -48,7 +48,9 @@
 }
 
 .project-pill-name {
-  font-size: var(--text-lg);
+  font-family: var(--font-pixel);
+  font-size: 15px;
+  line-height: 1.4;
   color: var(--text-main);
   overflow-wrap: anywhere;
 }

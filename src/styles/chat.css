@@ -307,6 +307,12 @@
     border-radius: 50%;
   }
 
+  /* На круглой кнопке одна лишь иконка и держит внимание — 11px в 50px круге терялась. */
+  .agent-chat-toggle svg {
+    width: 20px;
+    height: 20px;
+  }
+
   .agent-chat-toggle-label {
     position: absolute;
     width: 1px;
@@ -315,6 +321,12 @@
     overflow: hidden;
     clip: rect(0 0 0 0);
     white-space: nowrap;
+  }
+
+  /* Стрелочка-приглашение перед вводом в консоли — на телефоне палец целится в неё же. */
+  .console-prompt svg {
+    width: 18px;
+    height: 18px;
   }
 }
 
