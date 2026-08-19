@@ -546,6 +546,76 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_todo_note",
+      description: "Записать или дополнить описание (note) существующей задачи — например, зафиксировать детали, найденные в разговоре.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живёт задача" },
+          todo_title: { type: "string", description: "Заголовок задачи, максимально похожий на существующий" },
+          note: { type: "string", description: "Текст, который нужно записать в описание" },
+          mode: { type: "string", enum: ["append", "replace"], description: "append — дописать к текущему описанию (по умолчанию), replace — заменить целиком" },
+        },
+        required: ["project_name", "todo_title", "note"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "link_projects",
+      description: "Связать два существующих проекта отношением (например «использует», «зависит от», «часть»). Появится в графе связей.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_a: { type: "string", description: "Название первого проекта" },
+          project_b: { type: "string", description: "Название второго проекта" },
+          relation: { type: "string", description: "Тип связи одним-двумя словами, например «зависит от», «использует», «часть»" },
+          description: { type: "string", description: "Пояснение связи, необязательно" },
+        },
+        required: ["project_a", "project_b"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "record_decision",
+      description: "Записать важное решение с обоснованием (не просто факт — именно ВЫБОР между вариантами и почему). Для фактов используй record_memory.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Короткий заголовок решения" },
+          decision: { type: "string", description: "Что именно решили" },
+          rationale: { type: "string", description: "Почему так решили, необязательно" },
+          project_name: { type: "string", description: "Название проекта, если решение относится к конкретному, необязательно" },
+        },
+        required: ["title", "decision"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_groq_usage",
+      description: "Посмотреть, сколько токенов Groq потрачено на тебя самого — сегодня, за сутки и всего.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_recent_activity",
+      description: "Посмотреть последние события в MBOX — что менялось (созданные/изменённые задачи, проекты, записи). Можно ограничить одним проектом.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Ограничить одним проектом, необязательно" } },
+      },
+    },
+  },
 ];
 
 function excerptAround(text: string, query: string, radius: number) {
@@ -563,7 +633,7 @@ function matchProjectFuzzy(projectName: unknown, projectList: { id: string; name
 }
 
 async function matchTodoFuzzy(client: PoolClient, projectId: string, todoTitle: unknown, exact = false) {
-  const rows = (await client.query("SELECT id::text, title, status, priority FROM todos WHERE project_id = $1", [projectId])).rows as { id: string; title: string; status: string; priority: string }[];
+  const rows = (await client.query("SELECT id::text, title, status, priority, note FROM todos WHERE project_id = $1", [projectId])).rows as { id: string; title: string; status: string; priority: string; note: string }[];
   const q = String(todoTitle || "").trim();
   if (exact) return rows.find((t) => t.title === q);
   const qLower = q.toLowerCase();
@@ -721,6 +791,72 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     }).join("; ");
   }
 
+  if (name === "update_todo_note") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const todo = await matchTodoFuzzy(client, project.id, args.todo_title);
+    if (!todo) return `не нашёл задачу «${args.todo_title}» в проекте «${project.name}»`;
+    const note = String(args.note || "").trim();
+    if (!note) return "нечего записывать — пустое описание";
+    const mode = args.mode === "replace" ? "replace" : "append";
+    const newNote = mode === "replace" || !todo.note ? note : `${todo.note}\n${note}`;
+    await client.query("UPDATE todos SET note = $1, updated_at = now() WHERE id = $2", [newNote, todo.id]);
+    return `у задачи «${todo.title}» ${mode === "replace" ? "заменено" : "дополнено"} описание`;
+  }
+
+  if (name === "link_projects") {
+    const a = matchProjectFuzzy(args.project_a, projectList);
+    if (!a) return `не нашёл проект «${args.project_a}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const b = matchProjectFuzzy(args.project_b, projectList);
+    if (!b) return `не нашёл проект «${args.project_b}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    if (a.id === b.id) return "нельзя связать проект сам с собой";
+    const relation = String(args.relation || "").trim() || "related";
+    await client.query(
+      `INSERT INTO graph_edges(from_entity, from_id, to_entity, to_id, edge_type, description)
+       VALUES ('project', $1, 'project', $2, $3, $4) ON CONFLICT DO NOTHING`,
+      [a.id, b.id, relation, String(args.description || "")],
+    );
+    return `связал «${a.name}» → «${b.name}» отношением «${relation}»`;
+  }
+
+  if (name === "record_decision") {
+    const title = String(args.title || "").trim();
+    const decision = String(args.decision || "").trim();
+    if (!title || !decision) return "не записал решение — нужны и заголовок, и само решение";
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const inserted = await client.query(
+      `INSERT INTO decision_log(project_id, actor, title, decision, rationale)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
+      [project?.id || null, JARVIS_NAME, title, decision, String(args.rationale || "")],
+    );
+    return `записал решение: «${title}»${project ? ` (проект «${project.name}»)` : ""} (#${inserted.rows[0].id})`;
+  }
+
+  if (name === "get_groq_usage") {
+    const row = (await client.query(
+      `SELECT COALESCE(SUM(total_tokens), 0)::text AS total,
+              COALESCE(SUM(total_tokens) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::text AS last_24h,
+              COALESCE(SUM(total_tokens) FILTER (WHERE created_at > date_trunc('day', now())), 0)::text AS today,
+              COUNT(*)::int AS calls_total
+       FROM groq_usage`,
+    )).rows[0] as { total: string; last_24h: string; today: string; calls_total: number };
+    return `токены Groq: сегодня ${row.today}, за последние 24ч ${row.last_24h}, всего ${row.total} (звонков к Groq: ${row.calls_total})`;
+  }
+
+  if (name === "list_recent_activity") {
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const rows = (await client.query(
+      `SELECT actor, action, entity_type, summary, created_at::text
+       FROM audit_events
+       WHERE ($1::bigint IS NULL OR project_id = $1::bigint)
+       ORDER BY created_at DESC LIMIT 10`,
+      [project?.id || null],
+    )).rows as { actor: string; action: string; entity_type: string; summary: string }[];
+    if (!rows.length) return "недавних событий не нашлось";
+    const lines = rows.map((e) => `${e.actor} ${e.action} ${e.entity_type}${e.summary ? ` (${e.summary})` : ""}`);
+    return `последние события${project ? ` в «${project.name}»` : ""}: ${lines.join("; ")}`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -748,7 +884,11 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "используй именно этот инструмент, не search_memory: там технические итоги прогонов агентов, а не "
         + "описание проекта), search_todos (искать по тексту задачи, включая описание — если list_project_todos "
         + "не нашёл нужное, попробуй search_todos, там ищется больше, чем просто заголовок), search_memory "
-        + "(искать конкретные факты/решения по ключевым словам, НЕ для общего описания проекта). Если просят "
+        + "(искать конкретные факты/решения по ключевым словам, НЕ для общего описания проекта), update_todo_note "
+        + "(дописать или заменить описание задачи), link_projects (связать два проекта отношением — «использует», "
+        + "«зависит от» и т.п.), record_decision (записать ВЫБОР между вариантами и почему — не факт, для фактов "
+        + "record_memory), get_groq_usage (сколько токенов Groq потрачено на тебя — сегодня/за сутки/всего), "
+        + "list_recent_activity (последние события в проекте или во всём MBOX). Если просят "
         + "одно из этого — вызови функцию, не пиши текстом, что сделал это. "
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
         + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "

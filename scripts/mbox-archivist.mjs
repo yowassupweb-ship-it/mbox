@@ -260,6 +260,76 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_todo_note",
+      description: "Записать или дополнить описание (note) существующей задачи — например, зафиксировать детали, найденные в разговоре.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живёт задача" },
+          todo_title: { type: "string", description: "Заголовок задачи, максимально похожий на существующий" },
+          note: { type: "string", description: "Текст, который нужно записать в описание" },
+          mode: { type: "string", enum: ["append", "replace"], description: "append — дописать к текущему описанию (по умолчанию), replace — заменить целиком" },
+        },
+        required: ["project_name", "todo_title", "note"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "link_projects",
+      description: "Связать два существующих проекта отношением (например «использует», «зависит от», «часть»). Появится в графе связей.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_a: { type: "string", description: "Название первого проекта" },
+          project_b: { type: "string", description: "Название второго проекта" },
+          relation: { type: "string", description: "Тип связи одним-двумя словами, например «зависит от», «использует», «часть»" },
+          description: { type: "string", description: "Пояснение связи, необязательно" },
+        },
+        required: ["project_a", "project_b"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "record_decision",
+      description: "Записать важное решение с обоснованием (не просто факт — именно ВЫБОР между вариантами и почему). Для фактов используй record_memory.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Короткий заголовок решения" },
+          decision: { type: "string", description: "Что именно решили" },
+          rationale: { type: "string", description: "Почему так решили, необязательно" },
+          project_name: { type: "string", description: "Название проекта, если решение относится к конкретному, необязательно" },
+        },
+        required: ["title", "decision"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_groq_usage",
+      description: "Посмотреть, сколько токенов Groq потрачено на тебя самого — сегодня, за сутки и всего.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_recent_activity",
+      description: "Посмотреть последние события в MBOX — что менялось (созданные/изменённые задачи, проекты, записи). Можно ограничить одним проектом.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Ограничить одним проектом, необязательно" } },
+      },
+    },
+  },
 ];
 
 function excerptAround(text, query, radius) {
@@ -425,6 +495,66 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return matches.slice(0, 10).join("; ");
   }
 
+  if (name === "update_todo_note") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const todo = await matchTodoFuzzy(project.name, args.todo_title);
+    if (!todo) return `не нашёл задачу «${args.todo_title}» в проекте «${project.name}»`;
+    const note = String(args.note || "").trim();
+    if (!note) return "нечего записывать — пустое описание";
+    const mode = args.mode === "replace" ? "replace" : "append";
+    const newNote = mode === "replace" || !todo.note ? note : `${todo.note}\n${note}`;
+    await mboxFetch(`/api/mbox/todos/${todo.id}`, { method: "PATCH", body: JSON.stringify({ note: newNote }) });
+    return `у задачи «${todo.title}» ${mode === "replace" ? "заменено" : "дополнено"} описание`;
+  }
+
+  if (name === "link_projects") {
+    const a = matchProjectFuzzy(args.project_a, projectList);
+    if (!a) return `не нашёл проект «${args.project_a}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const b = matchProjectFuzzy(args.project_b, projectList);
+    if (!b) return `не нашёл проект «${args.project_b}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    if (a.id === b.id) return "нельзя связать проект сам с собой";
+    const relation = String(args.relation || "").trim() || "related";
+    await mboxFetch("/api/mbox/graph/edges", {
+      method: "POST",
+      body: JSON.stringify({ from_entity: "project", from_id: a.id, to_entity: "project", to_id: b.id, edge_type: relation, description: String(args.description || "") }),
+    });
+    return `связал «${a.name}» → «${b.name}» отношением «${relation}»`;
+  }
+
+  if (name === "record_decision") {
+    const title = String(args.title || "").trim();
+    const decision = String(args.decision || "").trim();
+    if (!title || !decision) return "не записал решение — нужны и заголовок, и само решение";
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const created = await mboxFetch("/api/mbox/decisions", {
+      method: "POST",
+      body: JSON.stringify({ project_id: project?.id || null, actor: agentName, title, decision, rationale: String(args.rationale || "") }),
+    });
+    return `записал решение: «${title}»${project ? ` (проект «${project.name}»)` : ""} (#${created.decision?.id ?? "?"})`;
+  }
+
+  if (name === "get_groq_usage") {
+    const row = await mboxFetch("/api/mbox/agent/groq-usage");
+    return `токены Groq: сегодня ${row.tokens_today}, за последние 24ч ${row.tokens_24h}, всего ${row.total_tokens} (звонков к Groq: ${row.calls_total})`;
+  }
+
+  if (name === "list_recent_activity") {
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    let events;
+    if (project) {
+      const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
+      events = context.history || [];
+    } else {
+      const data = await mboxFetch("/api/mbox/history");
+      events = data.events || [];
+    }
+    events = events.slice(0, 10);
+    if (!events.length) return "недавних событий не нашлось";
+    const lines = events.map((e) => `${e.actor} ${e.action} ${e.entity_type}${e.summary ? ` (${e.summary})` : ""}`);
+    return `последние события${project ? ` в «${project.name}»` : ""}: ${lines.join("; ")}`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -481,8 +611,11 @@ async function respondToRequests() {
         + "ОПИСАТЬ проект, роль, контекст — используй именно этот инструмент, не search_memory: там технические "
         + "итоги прогонов агентов, а не описание проекта), search_todos (искать по тексту задачи, включая "
         + "описание — если list_project_todos не нашёл нужное, попробуй search_todos), search_memory (искать "
-        + "конкретные факты по ключевым словам, НЕ для общего описания проекта). Если просят одно из этого — "
-        + "вызови функцию, не пиши текстом, что сделал это. Если в одном "
+        + "конкретные факты по ключевым словам, НЕ для общего описания проекта), update_todo_note (дописать или "
+        + "заменить описание задачи), link_projects (связать два проекта отношением), record_decision (записать "
+        + "ВЫБОР между вариантами и почему — не факт, для фактов record_memory), get_groq_usage (сколько токенов "
+        + "Groq потрачено на тебя), list_recent_activity (последние события в проекте или во всём MBOX). Если "
+        + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
         + "делать, а не притворяйся, что сделал. Тебе видна история разговора (не только последнее сообщение), "
