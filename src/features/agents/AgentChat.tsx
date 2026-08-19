@@ -234,9 +234,6 @@ export function AgentChat({ inbox, agents, runs, projects, projectId, onSaved }:
       {open && (
         <div className="agent-chat-shell console">
           <div className="console-bar">
-            <span className="console-dot r" />
-            <span className="console-dot y" />
-            <span className="console-dot g" />
             <span className="console-title">mbox — консоль агентов</span>
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
           </div>

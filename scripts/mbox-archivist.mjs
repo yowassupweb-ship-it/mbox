@@ -1,8 +1,8 @@
 /**
- * Архивариус — постоянный лёгкий агент, не через MCP-сессию, а через cron/systemd-таймер:
+ * Джарвис — постоянный лёгкий агент, не через MCP-сессию, а через cron/systemd-таймер:
  * будится раз в несколько минут, делает две вещи и засыпает.
  *
- *   1. Отвечает на прямые сообщения человека в консольном чате, адресованные ему (@Архивариус).
+ *   1. Отвечает на прямые сообщения человека в консольном чате, адресованные ему (@Джарвис).
  *   2. Разбирает свежую память: отличает настоящие ФАКТЫ (решения, знания, контекст — стоит
  *      помнить долго) от технических ЛОГОВ (авто-сводки прогонов агентов — ценны как история,
  *      но не как «интересный факт»). До этого вся память лежала одним неразличимым потоком.
@@ -17,7 +17,7 @@
 const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "Admin";
 const password = process.env.MBOX_PASSWORD;
-const agentName = process.env.MBOX_AGENT_NAME || "Архивариус";
+const agentName = process.env.MBOX_AGENT_NAME || "Джарвис";
 const groqKey = process.env.GROQ_API_KEY;
 const groqModel = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
@@ -47,7 +47,7 @@ async function mboxFetch(path, init = {}) {
   if (!cookie) await login();
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
-    // HTTP-заголовки — только ASCII (ByteString); имя агента кириллицей ("Архивариус") падало
+    // HTTP-заголовки — только ASCII (ByteString); имя агента кириллицей ("Джарвис") падало
     // с "character ... greater than 255". Кодируем на выходе, decodeURIComponent — на сервере.
     headers: { "content-type": "application/json", cookie, "x-mbox-agent": encodeURIComponent(agentName), ...(init.headers || {}) },
   });
@@ -93,7 +93,7 @@ async function ping(event) {
   }
 }
 
-/** Прямые запросы человека — тот же паттерн адресации, что в консольном чате (@Архивариус). */
+/** Прямые запросы человека — тот же паттерн адресации, что в консольном чате (@Джарвис). */
 async function respondToRequests() {
   const data = await mboxFetch("/api/mbox/agent/inbox");
   const inbox = data.inbox || [];
@@ -106,7 +106,7 @@ async function respondToRequests() {
       const reply = await groqChat([
         {
           role: "system",
-          content: "Ты Архивариус — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). "
+          content: "Ты Джарвис — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). "
             + "Отвечай коротко и по делу, на русском. Ты не пишешь код и ничего не деплоишь — только мелкие "
             + "справки, вопросы про память/задачи и небольшие организационные действия.",
         },

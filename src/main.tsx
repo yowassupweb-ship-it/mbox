@@ -548,9 +548,6 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
     <Panel title="История" icon={History}>
       <div className="console" role="log" aria-label="Журнал аудита">
         <div className="console-bar">
-          <span className="console-dot r" />
-          <span className="console-dot y" />
-          <span className="console-dot g" />
           <span className="console-title">mbox — журнал аудита</span>
           <span className="console-count">{events.length} {plural(events.length, "событие", "события", "событий")}</span>
         </div>
