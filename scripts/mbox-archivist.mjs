@@ -117,10 +117,14 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "create_project",
-      description: "Создать новый пустой проект в MBOX по названию.",
+      description: "Создать новый проект в MBOX. Можно только с названием (пустой), а можно сразу заполнить то, что пользователь уже сказал словами — не переспрашивай то, что уже прозвучало в разговоре.",
       parameters: {
         type: "object",
-        properties: { name: { type: "string", description: "Название нового проекта" } },
+        properties: {
+          name: { type: "string", description: "Название нового проекта" },
+          stack: { type: "array", items: { type: "string" }, description: "Технологический стек, если упомянут, необязательно" },
+          git_url: { type: "string", description: "Ссылка на репозиторий, если упомянута, необязательно" },
+        },
         required: ["name"],
       },
     },
@@ -264,9 +268,12 @@ async function runJarvisTool(name, rawArgs, projectList) {
   if (name === "create_project") {
     const projectName = String(args.name || "").trim();
     if (!projectName) return "не создал проект — нет названия";
-    const created = await mboxFetch("/api/mbox/projects", { method: "POST", body: JSON.stringify({ name: projectName }) });
+    const stack = Array.isArray(args.stack) ? args.stack.map(String) : [];
+    const gitUrl = String(args.git_url || "").trim();
+    const created = await mboxFetch("/api/mbox/projects", { method: "POST", body: JSON.stringify({ name: projectName, stack, git_url: gitUrl }) });
     projectList.push({ id: created.project?.id, name: projectName });
-    return `создан проект «${projectName}» (#${created.project?.id ?? "?"})`;
+    const extra = [stack.length ? `стек: ${stack.join(", ")}` : "", gitUrl ? `git: ${gitUrl}` : ""].filter(Boolean).join(", ");
+    return `создан проект «${projectName}»${extra ? ` (${extra})` : ""} (#${created.project?.id ?? "?"})`;
   }
 
   if (name === "delete_project") {
@@ -419,14 +426,24 @@ async function respondToRequests() {
         + "функцию, не пиши текстом, что сделал это. Если в одном сообщении просят НЕСКОЛЬКО действий (например, удалить два разных "
         + "проекта) — вызови функцию для КАЖДОГО действия по отдельности в этом же ответе, не только для "
         + "первого. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
-        + "делать, а не притворяйся, что сделал. Известные "
+        + "делать, а не притворяйся, что сделал. Тебе видна история разговора (не только последнее сообщение) "
+        + "— если человек раньше упоминал детали (стек, ссылку и т.п.), а потом попросил создать проект, "
+        + "подставь их в create_project сам, не переспрашивай то, что уже прозвучало. Если деталей вообще не "
+        + "было — создавай хотя бы с одним названием, не устраивай анкету из вопросов. Известные "
         + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
+
+      // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — используем уже загруженный inbox
+      // (см. выше в этой функции) как настоящую историю разговора, а не только последнюю реплику.
+      const history = inbox
+        .filter((row) => ["question", "answer"].includes(row.item_type) && (row.agent_name === "Человек" || row.agent_name === agentName))
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .slice(-8);
 
       // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — модель часто
       // выполняет только первое из нескольких запрошенных действий; цикл даёт ей шанс продолжить.
       const messages = [
         { role: "system", content: systemPrompt },
-        { role: "user", content: item.body || item.title },
+        ...history.map((row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title })),
       ];
       const actionLog = [];
       const toolsUsed = [];

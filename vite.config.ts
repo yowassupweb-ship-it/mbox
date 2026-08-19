@@ -399,10 +399,14 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "create_project",
-      description: "Создать новый пустой проект в MBOX по названию.",
+      description: "Создать новый проект в MBOX. Можно только с названием (пустой), а можно сразу заполнить то, что пользователь уже сказал словами — не переспрашивай то, что уже прозвучало в разговоре.",
       parameters: {
         type: "object",
-        properties: { name: { type: "string", description: "Название нового проекта" } },
+        properties: {
+          name: { type: "string", description: "Название нового проекта" },
+          stack: { type: "array", items: { type: "string" }, description: "Технологический стек, если упомянут, необязательно" },
+          git_url: { type: "string", description: "Ссылка на репозиторий, если упомянута, необязательно" },
+        },
         required: ["name"],
       },
     },
@@ -545,12 +549,15 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
   if (name === "create_project") {
     const projectName = String(args.name || "").trim();
     if (!projectName) return "не создал проект — нет названия";
+    const stack = Array.isArray(args.stack) ? args.stack.map(String) : [];
+    const gitUrl = String(args.git_url || "").trim();
     const inserted = await client.query(
-      `INSERT INTO projects(name, status, stack, access_level, props) VALUES ($1, 'active', '[]', 'private', '{}') RETURNING id::text`,
-      [projectName],
+      `INSERT INTO projects(name, status, stack, git_url, access_level, props) VALUES ($1, 'active', $2, $3, 'private', '{}') RETURNING id::text`,
+      [projectName, JSON.stringify(stack), gitUrl || null],
     );
     projectList.push({ id: inserted.rows[0].id as string, name: projectName });
-    return `создан проект «${projectName}» (#${inserted.rows[0].id})`;
+    const extra = [stack.length ? `стек: ${stack.join(", ")}` : "", gitUrl ? `git: ${gitUrl}` : ""].filter(Boolean).join(", ");
+    return `создан проект «${projectName}»${extra ? ` (${extra})` : ""} (#${inserted.rows[0].id})`;
   }
 
   if (name === "delete_project") {
@@ -683,17 +690,30 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "пиши текстом, что сделал это. Если в одном сообщении просят "
         + "НЕСКОЛЬКО действий (например, удалить два разных проекта) — вызови функцию для КАЖДОГО действия по "
         + "отдельности в этом же ответе, не только для первого. Если просят что-то другое, для чего нет функции — "
-        + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
+        + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Тебе видна история разговора "
+        + "(не только последнее сообщение) — если человек раньше упоминал детали (стек, ссылку и т.п.), а потом "
+        + "попросил создать проект, подставь их в create_project сам, не переспрашивай то, что уже прозвучало. "
+        + "Если деталей вообще не было — создавай хотя бы с одним названием, не устраивай анкету из вопросов, "
+        + "человек всегда может дополнить проект следующим сообщением. Известные проекты: "
         + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Сводка по MBOX прямо сейчас: всего задач `
         + `${stats.todos_total}, из них незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total}. `
         + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь.";
+
+      // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — подтягиваем реальную историю
+      // разговора (см. комментарий в server/mbox-server.mjs), включая только что вставленное.
+      const history = (await client.query(
+        `SELECT agent_name, body, title FROM agent_inbox
+         WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = $1)
+         ORDER BY created_at DESC LIMIT 8`,
+        [JARVIS_NAME],
+      )).rows.reverse() as { agent_name: string; body: string; title: string }[];
 
       // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — см. комментарий
       // в server/mbox-server.mjs. Модель часто выполняет только первое из нескольких запрошенных
       // действий за раз; цикл даёт ей шанс продолжить следующим шагом.
       const messages: GroqMessage[] = [
         { role: "system", content: systemPrompt },
-        { role: "user", content: String(item.body || item.title || "") },
+        ...history.map((row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title })),
       ];
       const actionLog: string[] = [];
       const toolsUsed: string[] = [];
