@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Terminal, X } from "lucide-react";
+import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
+
+const JARVIS_NAME = "Джарвис";
 
 const SLASH_COMMANDS = [
   { value: "help", hint: "эта справка" },
@@ -15,7 +17,16 @@ const SLASH_COMMANDS = [
   { value: "clear", hint: "очистить окно" },
 ];
 
+const TRIGGER_ICON = { "@": AtSign, "/": Slash, "$": DollarSign, "#": Hash } as const;
+
 type Suggestion = { value: string; hint?: string };
+
+/** Ведущее @Имя в начале сообщения — раньше был отдельный ростер кнопок для выбора адресата,
+ * теперь то же самое просто печатается в тексте (см. подсказки по @) и парсится отсюда. */
+function parseMention(raw: string): string {
+  const match = raw.trim().match(/^@(\S+)/);
+  return match ? match[1] : "";
+}
 
 /** Активный токен под курсором: символ-триггер сразу после пробела/начала строки и то, что после него набрано. */
 function activeToken(value: string, cursor: number): { trigger: "@" | "/" | "$" | "#"; query: string; start: number } | null {
@@ -75,7 +86,6 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [target, setTarget] = useState("");
   const [text, setText] = useState("");
   const [cursor, setCursor] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
@@ -84,8 +94,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [historyPos, setHistoryPos] = useState(-1);
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
+  const [awaitingJarvisId, setAwaitingJarvisId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const liveMention = parseMention(text);
 
   // field-sizing: content не работает в Safari/Firefox — растим textarea вручную по scrollHeight,
   // это единственный способ, который реально работает везде.
@@ -142,6 +154,21 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
   const stillPending = pending.filter((item) => item.failed || !arrived.has(item.body.trim()));
+
+  // "Ответ приходит резко" — раньше не было вообще никакого признака, что Джарвис работает над
+  // ответом (в отличие от "печатает" у сессионных агентов ниже, у него нет agent_runs). Плашка
+  // "думает" висит с момента отправки до прихода ответа с props.re на этот же item, либо гаснет
+  // по таймауту, если инлайн-путь не сработал и подхватил резервный cron (тогда ответ просто придёт
+  // самостоятельным сообщением позже).
+  useEffect(() => {
+    if (!awaitingJarvisId) return;
+    if (conversation.some((item) => item.agent_name === JARVIS_NAME && String(item.props?.re ?? "") === awaitingJarvisId)) {
+      setAwaitingJarvisId(null);
+      return;
+    }
+    const timeout = window.setTimeout(() => setAwaitingJarvisId(null), 25000);
+    return () => window.clearTimeout(timeout);
+  }, [awaitingJarvisId, conversation]);
 
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
@@ -266,12 +293,13 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       return;
     }
 
-    const body = target ? `@${target} ${raw}` : raw;
+    const body = raw;
+    const mentionTarget = parseMention(raw);
     const localId = `local-${Date.now()}`;
     setPending((current) => [...current, { id: localId, body, sent: false }]);
 
     try {
-      await fetchJson("/api/mbox/agent/inbox", {
+      const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -282,9 +310,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           body,
           priority: "high",
           requires_human: false,
-          props: target ? { to: target } : {},
+          props: mentionTarget ? { to: mentionTarget } : {},
         }),
       });
+      // Джарвис отвечает и на нетегнутые сообщения (см. scripts/mbox-archivist.mjs), поэтому
+      // индикатор "думает" уместен если адресат не указан или это явно он.
+      if ((!mentionTarget || mentionTarget.toLowerCase() === JARVIS_NAME.toLowerCase()) && result.inbox_item?.id) {
+        setAwaitingJarvisId(result.inbox_item.id);
+      }
       // Помечаем отправленным сразу. Ждать onSaved нельзя: он тянет одиннадцать ручек
       // через туннель к боевой базе, и «отправляется» висело бы секундами.
       setPending((current) => current.map((item) => item.id === localId ? { ...item, sent: true } : item));
@@ -327,24 +360,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       {open && (
         <div className="agent-chat-shell console">
           <div className="console-bar">
-            <span className="console-title">mbox — консоль агентов</span>
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
-          </div>
-
-          <div className="chat-roster">
-            <button className={target === "" ? "is-active" : ""} type="button" onClick={() => setTarget("")}>всем</button>
-            {states.map(({ agent, state }) => (
-              <button
-                key={agent.id}
-                className={target === agent.name ? "is-active" : ""}
-                type="button"
-                onClick={() => setTarget(target === agent.name ? "" : agent.name)}
-                title={state.detail}
-              >
-                <AgentAvatar name={agent.name} status={agent.status} live={state.key === "working"} size={16} />
-                {agent.name}
-              </button>
-            ))}
           </div>
 
           <div className="console-log" ref={scrollRef}>
@@ -384,26 +400,37 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-log-text">{working[0].agent.name} печатает: {working[0].state.detail || "работает"}</span>
               </div>
             )}
+            {awaitingJarvisId && (
+              <div className="console-log-line sys typing">
+                <span className="console-log-time" />
+                <span className="console-log-actor">·</span>
+                <span className="console-log-text">{JARVIS_NAME} думает…</span>
+              </div>
+            )}
           </div>
 
           <div className="console-composer">
             {suggestions.length > 0 && (
               <div className="console-suggest">
-                {suggestions.map((suggestion, index) => (
-                  <button
-                    key={suggestion.value}
-                    type="button"
-                    className={index === highlight ? "is-active" : ""}
-                    onMouseDown={(event) => { event.preventDefault(); acceptSuggestion(suggestion.value); }}
-                  >
-                    <b>{token?.trigger}{suggestion.value}</b>
-                    {suggestion.hint && <em>{suggestion.hint}</em>}
-                  </button>
-                ))}
+                {suggestions.map((suggestion, index) => {
+                  const Icon = token ? TRIGGER_ICON[token.trigger] : AtSign;
+                  return (
+                    <button
+                      key={suggestion.value}
+                      type="button"
+                      className={index === highlight ? "is-active" : ""}
+                      onMouseDown={(event) => { event.preventDefault(); acceptSuggestion(suggestion.value); }}
+                    >
+                      <Icon size={12} className="console-suggest-icon" />
+                      <b>{suggestion.value}</b>
+                      {suggestion.hint && <em>{suggestion.hint}</em>}
+                    </button>
+                  );
+                })}
               </div>
             )}
             <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-              <span className="console-prompt">{target && `@${target}`}<ChevronRight size={13} /></span>
+              <span className="console-prompt">{liveMention && `@${liveMention}`}<ChevronRight size={13} /></span>
               <textarea
                 ref={composerRef}
                 value={text}
@@ -411,7 +438,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 onClick={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyDown={onKeyDown}
-                placeholder={target ? `сообщение для ${target} (Shift+Enter — новая строка)` : "команда (/help), @агент, $проект, #артефакт — Shift+Enter для новой строки"}
+                placeholder="команда (/help), @агент, $проект, #артефакт — Shift+Enter для новой строки"
                 spellCheck={false}
                 autoComplete="off"
                 rows={1}
@@ -423,7 +450,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
       <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
         <Terminal size={11} />
-        <span>Агенты</span>
+        <span className="agent-chat-toggle-label">Консоль</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}
       </button>

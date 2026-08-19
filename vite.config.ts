@@ -399,6 +399,18 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "delete_project",
+      description: "Удалить существующий проект вместе со всеми его задачами. Необратимо — название должно совпадать ТОЧНО.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Точное название проекта для удаления" } },
+        required: ["project_name"],
+      },
+    },
+  },
 ];
 
 async function runJarvisTool(client: PoolClient, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[]): Promise<string> {
@@ -413,6 +425,15 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     );
     projectList.push({ id: inserted.rows[0].id as string, name: projectName });
     return `создан проект «${projectName}» (#${inserted.rows[0].id})`;
+  }
+  if (name === "delete_project") {
+    const projectName = String(args.project_name || "").trim();
+    const match = projectList.find((p) => p.name === projectName);
+    if (!match) return `не нашёл проект «${projectName}» с точным названием — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    await client.query("DELETE FROM projects WHERE id = $1", [match.id]);
+    const index = projectList.indexOf(match);
+    if (index !== -1) projectList.splice(index, 1);
+    return `удалён проект «${match.name}» (#${match.id})`;
   }
   if (name !== "create_todo") return `неизвестное действие: ${name}`;
   const title = String(args.title || "").trim();
@@ -438,11 +459,12 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows as { id: string; name: string }[];
       const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
         + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно этим `
-        + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть РОВНО ДВА реальных "
-        + "действия — функции create_todo (создать задачу в проекте) и create_project (создать новый проект). Если "
-        + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если просят что-то другое "
-        + "(изменить приоритет, пометить готовым, удалить, сгенерировать картинку и т.п.) — у тебя нет для этого "
-        + "инструмента, честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
+        + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть РОВНО ТРИ реальных "
+        + "действия — функции create_todo (создать задачу в проекте), create_project (создать новый проект) и "
+        + "delete_project (удалить проект — необратимо, только по точному названию). Если просят одно из этого — "
+        + "вызови функцию, не пиши текстом, что сделал это. Если просят что-то другое (изменить приоритет, "
+        + "пометить готовым, удалить задачу, сгенерировать картинку и т.п.) — у тебя нет для этого инструмента, "
+        + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Известные проекты: "
         + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
 
       const message = await groqComplete([

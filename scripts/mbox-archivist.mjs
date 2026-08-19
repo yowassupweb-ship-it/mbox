@@ -122,6 +122,18 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "delete_project",
+      description: "Удалить существующий проект вместе со всеми его задачами. Необратимо — название должно совпадать ТОЧНО.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Точное название проекта для удаления" } },
+        required: ["project_name"],
+      },
+    },
+  },
 ];
 
 async function runJarvisTool(name, rawArgs, projectList) {
@@ -133,6 +145,15 @@ async function runJarvisTool(name, rawArgs, projectList) {
     const created = await mboxFetch("/api/mbox/projects", { method: "POST", body: JSON.stringify({ name: projectName }) });
     projectList.push({ id: created.project?.id, name: projectName });
     return `создан проект «${projectName}» (#${created.project?.id ?? "?"})`;
+  }
+  if (name === "delete_project") {
+    const projectName = String(args.project_name || "").trim();
+    const match = projectList.find((p) => p.name === projectName);
+    if (!match) return `не нашёл проект «${projectName}» с точным названием — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    await mboxFetch(`/api/mbox/projects/${match.id}`, { method: "DELETE" });
+    const index = projectList.indexOf(match);
+    if (index !== -1) projectList.splice(index, 1);
+    return `удалён проект «${match.name}» (#${match.id})`;
   }
   if (name !== "create_todo") return `неизвестное действие: ${name}`;
   const title = String(args.title || "").trim();
@@ -190,9 +211,10 @@ async function respondToRequests() {
             + `отсюда задержка ответа, и это нормально, а не баг. Модель, на которой ты работаешь — ${groqModel} `
             + `через Groq API (бесплатный тир). Если спросят, какая ты модель — отвечай честно этим названием, `
             + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
-            + "РОВНО ДВА реальных действия — функции create_todo (создать задачу в проекте) и create_project "
-            + "(создать новый проект). Если просят одно из этого — вызови функцию, не пиши текстом, что сделал "
-            + "это. Если просят что-то другое (изменить приоритет, пометить готовым, удалить, сгенерировать "
+            + "РОВНО ТРИ реальных действия — функции create_todo (создать задачу в проекте), create_project "
+            + "(создать новый проект) и delete_project (удалить проект — необратимо, только по точному "
+            + "названию). Если просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если "
+            + "просят что-то другое (изменить приоритет, пометить готовым, удалить задачу, сгенерировать "
             + "картинку и т.п.) — у тебя нет для этого инструмента, честно скажи, что не умеешь этого делать, а "
             + "не притворяйся, что сделал. Известные "
             + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`,
