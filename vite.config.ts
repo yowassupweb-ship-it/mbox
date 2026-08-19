@@ -1,6 +1,7 @@
 import { defineConfig, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 import { createHash, randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -25,8 +26,31 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+const requestContext = new AsyncLocalStorage<{ actor: string }>();
+
 function actorFromReq(req: IncomingMessage) {
+  // Контекст резолвится один раз в middleware (см. resolveRequestActor) и покрывает и заголовок
+  // доверенного агента, и вошедшего человека. Заголовок — фолбэк для мест до входа в контекст.
+  const contextActor = requestContext.getStore()?.actor;
+  if (contextActor) return contextActor;
   return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
+}
+
+/**
+ * Раньше любой запрос без заголовка x-mbox-agent (то есть действие человека через браузер)
+ * не выставлял mbox.actor вовсе — dev писал такие правки в аудит как "system". Теперь для
+ * мутирующих запросов без заголовка актёр берётся из вошедшей сессии (username).
+ */
+async function resolveRequestActor(req: IncomingMessage): Promise<string> {
+  const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
+  if (header) return String(header);
+  try {
+    const user = await currentUser(req);
+    if (user?.username) return user.username;
+  } catch {
+    // без сессии — вернём пусто, вызывающая сторона решит фолбэк сама
+  }
+  return "";
 }
 
 function textPreview(value: unknown, limit = 240) {
@@ -300,7 +324,17 @@ function getPool(): Pool {
 }
 
 async function queryPostgres<T extends QueryResultRow>(sql: string, values: unknown[] = []): Promise<QueryResult<T>> {
-  return getPool().query<T>(sql, values);
+  const actor = requestContext.getStore()?.actor;
+  // Быстрый путь без лишнего round-trip'а — актёр в контексте есть только на мутирующих запросах
+  // (см. resolveRequestActor), поэтому параллельные GET на загрузке экрана его не платят.
+  if (!actor) return getPool().query<T>(sql, values);
+  const client = await getPool().connect();
+  try {
+    await client.query("SELECT set_config('mbox.actor', $1, false)", [actor]);
+    return await client.query<T>(sql, values);
+  } finally {
+    client.release();
+  }
 }
 
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) {
@@ -740,6 +774,11 @@ function mboxDevApi() {
         if (!req.url?.startsWith("/api/mbox/")) return next();
         const url = new URL(req.url, "http://localhost");
         const q = url.searchParams.get("q")?.trim() ?? "";
+        // Актёр резолвится (и uses GUC mbox.actor через queryPostgres) только для мутирующих
+        // запросов — на GET это лишний round-trip через SSH-туннель на каждый из 11 параллельных
+        // запросов загрузки экрана, тот самый баг с зависанием, который уже однажды чинили.
+        const actor = req.method && req.method !== "GET" ? await resolveRequestActor(req) : "";
+        return requestContext.run({ actor }, async () => {
 
         try {
           if (url.pathname === "/api/mbox/auth/login" && req.method === "POST") {
@@ -1995,6 +2034,7 @@ function mboxDevApi() {
         } catch (error) {
           return sendJson(res, 503, { error: error instanceof Error ? error.message : "unknown_error" });
         }
+        });
       });
     },
   };

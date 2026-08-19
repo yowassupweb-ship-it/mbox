@@ -116,7 +116,30 @@ function broadcastRealtime(type, payload = {}) {
 }
 
 function actorFromReq(req) {
+  // Контекст на запрос резолвится один раз в handleApi (см. resolveRequestActor) и покрывает
+  // и заголовок доверенного агента, и вошедшего человека. Заголовок — фолбэк на случай вызова
+  // до входа в контекст (не должно происходить в обычном потоке).
+  const contextActor = requestContext.getStore()?.actor;
+  if (contextActor) return contextActor;
   return req.headers["x-mbox-agent"] || req.headers["x-agent-name"] || "Agent";
+}
+
+/**
+ * Раньше любой запрос без заголовка x-mbox-agent (то есть ЛЮБОЕ действие человека через браузер)
+ * писался в аудит как безликий actor "Agent" — то же имя, что и у настоящих ботов. Теперь для
+ * запросов без заголовка актёр берётся из вошедшей сессии (username), и правки человека в истории
+ * видны как он сам, а не как агент.
+ */
+async function resolveRequestActor(req) {
+  const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
+  if (header) return String(header);
+  try {
+    const user = await currentUser(req);
+    if (user?.username) return user.username;
+  } catch {
+    // Сессии ещё нет (например, сам /auth/login) — останется дефолт ниже.
+  }
+  return "Agent";
 }
 
 function readableDetail(value, fallback) {
@@ -727,7 +750,8 @@ async function requireUser(req, res) {
 }
 
 async function handleApi(req, res, url) {
-  return requestContext.run({ actor: actorFromReq(req) }, () => handleApiWithContext(req, res, url));
+  const actor = await resolveRequestActor(req);
+  return requestContext.run({ actor }, () => handleApiWithContext(req, res, url));
 }
 
 async function handleApiWithContext(req, res, url) {

@@ -13,6 +13,7 @@ export function ProjectEntityView({ project, projects, kind, onSaved }: { projec
   if (kind === "relations") return <RelationsPanel project={project} projects={projects} onSaved={onSaved} />;
   if (kind === "stack") return <StackPanel project={project} onSaved={onSaved} />;
   if (kind === "git") return <GitPanel project={project} onSaved={onSaved} />;
+  if (kind === "figma") return <FigmaPanel project={project} onSaved={onSaved} />;
   if (kind === "deploy") return <DeployPanel project={project} onSaved={onSaved} />;
   if (kind === "philosophy") return <PhilosophyPanel project={project} onSaved={onSaved} />;
   return <AccessPanel project={project} onSaved={onSaved} />;
@@ -127,6 +128,45 @@ export function GitPanel({ project, onSaved }: { project: Project; onSaved: () =
           <SaveButton state={state} idleLabel="Сохранить Git" onClick={async () => { if (await save({ git_url: url })) setEditing(false); }} />
         </>
       ) : <Button variant="ghost" icon={Pencil} onClick={() => setEditing(true)}>Изменить адрес</Button>}
+    </div>
+  );
+}
+
+/** Ссылка на дизайн в Figma — как Git, но URL живёт в props (своей колонки под неё нет и не нужна). */
+export function FigmaPanel({ project, onSaved }: { project: Project; onSaved: () => void }) {
+  const savedUrl = String(project.props?.figma_url || "");
+  const [editing, setEditing] = useState(!savedUrl);
+  const [url, setUrl] = useState(savedUrl);
+  const { state, setState, save } = useSave(project, onSaved);
+
+  useEffect(() => {
+    setUrl(savedUrl);
+    setEditing(!savedUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, savedUrl]);
+
+  return (
+    <div className="entity-panel git-panel">
+      {savedUrl ? (
+        <a className="git-link" href={savedUrl} target="_blank" rel="noreferrer">
+          <span className="git-repo">{figmaFileName(savedUrl)}</span>
+          <span className="git-host">figma.com</span>
+          <ExternalLink size={16} />
+        </a>
+      ) : <EmptyState text="Дизайн не привязан" />}
+
+      {editing ? (
+        <>
+          <TextInput
+            label="Ссылка на Figma"
+            hint="https://www.figma.com/file/... или /design/..."
+            value={url}
+            spellCheck={false}
+            onChange={(event) => { setUrl(event.target.value); setState("idle"); }}
+          />
+          <SaveButton state={state} idleLabel="Сохранить Figma" onClick={async () => { if (await save({ props: { ...(project.props || {}), figma_url: url } })) setEditing(false); }} />
+        </>
+      ) : <Button variant="ghost" icon={Pencil} onClick={() => setEditing(true)}>Изменить ссылку</Button>}
     </div>
   );
 }
@@ -260,6 +300,15 @@ function normalizeGitUrl(value: string) {
 function repoShortName(value: string) {
   const path = normalizeGitUrl(value).replace(/^https?:\/\/[^/]+\//, "");
   return path || value;
+}
+
+function figmaFileName(value: string) {
+  try {
+    const parts = new URL(value).pathname.split("/").filter(Boolean);
+    return decodeURIComponent(parts[parts.length - 1] || value).replace(/-/g, " ");
+  } catch {
+    return value;
+  }
 }
 
 function hostOf(value: string) {

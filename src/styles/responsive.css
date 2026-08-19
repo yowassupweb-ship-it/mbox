@@ -123,10 +123,10 @@
     bottom: max(8px, env(safe-area-inset-bottom));
     width: auto;
     border: 1px solid rgba(255, 255, 255, .08);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 6px;
     overflow: hidden;
-    background: rgba(28, 28, 30, .72);
+    background: color-mix(in srgb, var(--container-bg) 72%, transparent);
     box-shadow: var(--chin-shadow), 0 14px 42px rgba(0, 0, 0, .42);
     backdrop-filter: blur(24px) saturate(160%);
   }
@@ -158,7 +158,7 @@
     padding: 0 13px;
     font-size: 13px;
     scroll-snap-align: start;
-    background: rgba(44, 44, 46, .74);
+    background: color-mix(in srgb, var(--element-bg) 74%, transparent);
   }
 
   .bottom-nav .nav-item span {

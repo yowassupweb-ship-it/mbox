@@ -1,10 +1,11 @@
-import { GitBranch, Layers, Link2, Rocket, ShieldCheck, Sliders, Sparkles, type LucideIcon } from "lucide-react";
+import { Figma, GitBranch, Layers, Link2, Rocket, ShieldCheck, Sliders, Sparkles, type LucideIcon } from "lucide-react";
 
-export type ProjectEntityKind = "relations" | "properties" | "philosophy" | "deploy" | "stack" | "access" | "git";
+export type ProjectEntityKind = "relations" | "properties" | "philosophy" | "deploy" | "stack" | "access" | "git" | "figma";
 
 /** У каждой постоянной сущности проекта своё лицо: иконка и акцент. Раньше все восемь были одинаковой папкой. */
 export const projectEntityKinds: Record<ProjectEntityKind, { icon: LucideIcon; accent: string; label: string }> = {
   git: { icon: GitBranch, accent: "#7ee2a8", label: "Git" },
+  figma: { icon: Figma, accent: "#f24e1e", label: "Figma" },
   relations: { icon: Link2, accent: "#8ab4ff", label: "Связи" },
   properties: { icon: Sliders, accent: "#c9a6ff", label: "Свойства" },
   philosophy: { icon: Sparkles, accent: "#ffd479", label: "Философия" },

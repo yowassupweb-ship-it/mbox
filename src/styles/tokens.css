@@ -1,74 +1,64 @@
-/* Дизайн-система Shar — «выпуклый интерфейс». Только тёмная тема.
-   Принцип: нажимаемое приподнято (--chin-shadow), вмещающее утоплено
-   (--container-inset), свет падает сверху. Компоненты стилизуются только
-   через токены — значения воспроизведены из shar-styleguide.html (dark). */
+/* Дизайн-система «Терминал» — консольный интерфейс. Только тёмная тема.
+   Принцип сместился с «выпуклого стекла» (Shar) на плоский терминал: моноширинный шрифт
+   везде, прямоугольные формы вместо пилюль, жёсткая офсетная тень вместо мягкого блика,
+   контрастные видимые границы вместо почти невидимых. «Парящие» элементы (шапка, FAB,
+   тулбар графа) остаются плавающими — просто одеты в терминальный, а не стеклянный вид. */
 
 :root {
-  /* Поверхности. В тёмной теме грунт и утопленный контейнер — один цвет
-     (#1c1c1e), глубину держит тень, а не цвет; приподнятое — светлее (#2c2c2e). */
-  --bg-color: #1c1c1e;        /* грунт экрана */
-  --container-bg: #1c1c1e;    /* утопленный контейнер */
-  --element-bg: #2c2c2e;      /* приподнятая поверхность */
-  --bg-raised: #2c2c2e;       /* алиас Shar */
-  --bg-sunken: #1c1c1e;       /* алиас Shar */
+  /* Поверхности — почти чёрный грунт, лёгкий шаг вверх для приподнятого */
+  --bg-color: #08090a;
+  --container-bg: #08090a;
+  --element-bg: #121316;
+  --bg-raised: #121316;
+  --bg-sunken: #08090a;
 
-  /* Текст */
-  --text-main: #ffffff;
-  --text-2: rgba(255, 255, 255, 0.7);     /* вторичный */
-  --text-muted: rgba(255, 255, 255, 0.4); /* приглушённый */
+  /* Текст — чуть холодный белый, в тон акцентному циану */
+  --text-main: #eef4f1;
+  --text-2: rgba(238, 244, 241, 0.7);
+  --text-muted: rgba(238, 244, 241, 0.44);
 
-  /* Границы. В темноте тонкие и почти невидимые — объём держит тень. */
-  --border-color: rgba(255, 255, 255, 0.06);
+  /* Границы видимые, не декоративные — терминальные боксы читаются по контуру, не по тени */
+  --border-color: rgba(133, 245, 219, 0.16);
   --border-width: 1px;
-  --hairline: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(133, 245, 219, 0.16);
 
-  /* Акцент */
-  --accent-color: #0a84ff;
-  --accent-2: #0a84ff;
-  --accent-chin: #004385;
-  --accent-edge: #004385;     /* алиас Shar */
+  /* Акцент — терминальный циан. Отдельно от --state-ok (зелёный) и брендов агентов,
+     чтобы «интерактивное» и «успех» не путались. */
+  --accent-color: #29e0d6;
+  --accent-2: #29e0d6;
+  --accent-chin: #0d5f5a;
+  --accent-edge: #0d5f5a;
 
-  /* Успех */
   --green: #22c55e;
   --green-edge: #15803d;
 
-  /* Три определяющие тени глубины */
-  --chin-color: #111112;
-  --chin-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.15),
-    0 1.5px 0 var(--chin-color),
-    0 4px 10px rgba(0, 0, 0, 0.4);
-  --container-inset: inset 0 1.5px 3.5px rgba(0, 0, 0, 0.3);
-  --accent-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 1.5px 0 var(--accent-chin),
-    0 4px 12px rgba(0, 0, 0, 0.5);
-  --green-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 1.5px 0 var(--green-edge),
-    0 4px 12px rgba(0, 0, 0, 0.5);
-  /* Плавающее: модалки, поповеры, оверлеи */
-  --float: 0 12px 48px rgba(0, 0, 0, 0.6), 0 2px 10px rgba(0, 0, 0, 0.45);
+  /* Тени — жёсткий офсет вместо мягкого блика. Терминальное окно, не стекло. */
+  --chin-color: #000000;
+  --chin-shadow: 2px 2px 0 rgba(0, 0, 0, 0.65);
+  --container-inset: inset 0 0 0 1px rgba(0, 0, 0, 0.55), inset 0 2px 5px rgba(0, 0, 0, 0.4);
+  --accent-shadow: 2px 2px 0 color-mix(in srgb, var(--accent-color) 55%, transparent);
+  --green-shadow: 2px 2px 0 color-mix(in srgb, var(--green-edge) 65%, transparent);
+  --float: 4px 5px 0 rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(133, 245, 219, 0.1);
 
-  /* Стекло — полупрозрачная плёнка + blur, фоном служит реальный контент */
-  --glass: rgba(255, 255, 255, 0.05);
-  --glass-brd: rgba(255, 255, 255, 0.15);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  --blur-glass: 20px;
+  /* Стекло для «парящих» элементов — темнее и жёстче по кромке, чем у Shar, но всё ещё
+     полупрозрачное с блюром: парящее сохраняется, глянец — нет. */
+  --glass: rgba(6, 8, 8, 0.72);
+  --glass-brd: rgba(133, 245, 219, 0.22);
+  --glass-shadow: 0 6px 0 rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(133, 245, 219, 0.08);
+  --blur-glass: 14px;
 
-  /* Состояния. Раньше эти цвета были рассыпаны литералами по правилам. */
+  /* Состояния */
   --state-ok: #35c759;
   --state-ok-soft: #58d977;
-  --state-live: #7cc6ff;
-  --state-warn: #ffd60a;
-  --state-off: #6b7280;
-  --state-danger: #ff453a;
+  --state-live: #29e0d6;
+  --state-warn: #ffb000;
+  --state-off: #5b6b66;
+  --state-danger: #ff4d5e;
 
-  /* Служебные цвета документа/подписей */
-  --eyebrow: #8a9bb8;
-  --code-bg: rgba(255, 255, 255, 0.06);
+  --eyebrow: #6fd8cc;
+  --code-bg: rgba(133, 245, 219, 0.08);
 
-  /* Шкала отступов, шаг 4px. Держаться этих значений, не вводить промежуточные. */
+  /* Шкала отступов, шаг 4px */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -78,37 +68,39 @@
   --space-7: 32px;
   --space-8: 44px;
 
-  /* Кнопка чата теперь парит НАД нижним меню круглым FAB, поэтому места в самой панели
-     резервировать не нужно — навигация занимает всю ширину. */
   --chat-slot: 0px;
 
-  /* Радиусы Shar: sm 10 · md 14 · lg 20 · xl 24 · pill */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 24px;
-  --radius-pill: 999px;
+  /* Радиусы — терминальные прямоугольники, не пилюли. --radius-pill сохранён как имя
+     (используется по всей кодовой базе), но теперь это маленький прямоугольный тег, не круг. */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-pill: 6px;
 
-  /* Типографика — SF / system-ui. H1 28 · H2 20 · строка 17 · тело 15 · вспом 13 · подпись 11 */
+  /* Типографика — моноширинный шрифт везде, включая заголовки. Настоящего pixel-фонта в
+     системных стеках нет и грузить веб-шрифт без спроса нельзя (см. правило репозитория
+     «никаких новых зависимостей») — консольность даёт сам моноширинный набор + разрядка
+     на заголовках (см. .panel-title, h1-h3 в base.css). */
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
   --text-xs: 11px;
-  --text-sm: 13px;
-  --text-md: 15px;
-  --text-lg: 17px;
-  --text-xl: 20px;
-  --text-2xl: 28px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 26px;
   --weight-normal: 500;
   --weight-medium: 600;
-  --weight-bold: 750;
-  --leading-tight: 1.25;
+  --weight-bold: 720;
+  --leading-tight: 1.3;
   --leading-normal: 1.55;
 
-  /* Движение — пружинная кривая Shar */
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
-  --duration-fast: 0.14s;
-  --duration-base: 0.24s;
+  --duration-fast: 0.12s;
+  --duration-base: 0.2s;
 
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  font-family: var(--font-mono);
   color: var(--text-main);
   background: var(--bg-color);
   font-synthesis: none;

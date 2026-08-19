@@ -195,7 +195,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, .07);
   color: var(--text-muted);
   font-size: 10px;

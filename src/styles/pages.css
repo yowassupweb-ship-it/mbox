@@ -102,7 +102,7 @@
   border-radius: 24px;
   padding: 12px 14px;
   outline: 0;
-  background: rgba(44,44,46,.82);
+  background: color-mix(in srgb, var(--element-bg) 82%, transparent);
   color: var(--text-main);
   box-shadow: var(--container-inset);
   line-height: 1.45;
@@ -120,7 +120,7 @@
 
 .note-project-pill {
   justify-self: start;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 8px 12px;
   background: var(--element-bg);
   color: var(--text-muted);
@@ -149,7 +149,7 @@
 .note-controls select {
   min-height: 40px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 12px;
   background: var(--element-bg);
   color: var(--text-main);
@@ -288,7 +288,7 @@
 }
 
 .todo-chip {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 5px 9px;
   background: rgba(255,255,255,.06);
   color: #aeb8c8;
@@ -407,7 +407,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 10px;
   background: var(--element-bg);
   color: var(--text-muted);
@@ -427,7 +427,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 8px 16px;
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
@@ -466,9 +466,9 @@
 .secret-actions button {
   min-height: 34px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 12px;
-  background: rgba(10, 132, 255, .18);
+  background: color-mix(in srgb, var(--accent-color) 18%, transparent);
   color: #d9ecff;
   box-shadow: var(--chin-shadow);
 }
@@ -496,7 +496,7 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: 28px;
   padding: 12px;
-  background: rgba(44, 44, 46, .72);
+  background: color-mix(in srgb, var(--element-bg) 72%, transparent);
   box-shadow: var(--container-inset);
 }
 
@@ -512,7 +512,7 @@
   width: 100%;
   height: 42px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 14px;
   outline: 0;
   background: var(--element-bg);
@@ -543,7 +543,7 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: 30px;
   padding: 12px;
-  background: rgba(44, 44, 46, .68);
+  background: color-mix(in srgb, var(--element-bg) 68%, transparent);
   box-shadow: var(--container-inset);
 }
 
@@ -553,7 +553,7 @@
   width: 100%;
   min-width: 0;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 14px;
   outline: 0;
   background: var(--element-bg);
@@ -610,7 +610,7 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: 38px;
   padding: 24px;
-  background: rgba(28, 28, 30, .92);
+  background: color-mix(in srgb, var(--container-bg) 92%, transparent);
   box-shadow: var(--container-inset), 0 18px 54px rgba(0,0,0,.42);
   backdrop-filter: blur(22px) saturate(150%);
 }
@@ -619,7 +619,7 @@
 .password-field {
   height: 44px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   outline: 0;
   background: var(--element-bg);
   color: var(--text-main);
@@ -690,7 +690,7 @@
 .tag-row span,
 .project-card span,
 .meta-chip {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 5px 10px;
   background: rgba(45,156,219,.12);
   color: #185f8b;
@@ -738,7 +738,7 @@ time {
   justify-content: space-between;
   gap: 12px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 6px 8px 6px 16px;
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
@@ -825,7 +825,7 @@ time {
   border: 1px solid rgba(255,255,255,.07);
   border-radius: 22px;
   padding: 11px 13px;
-  background: rgba(44,44,46,.66);
+  background: color-mix(in srgb, var(--element-bg) 66%, transparent);
   box-shadow: var(--chin-shadow);
 }
 
@@ -857,7 +857,7 @@ time {
   padding: 12px 14px;
   border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 22px;
-  background: rgba(44, 44, 46, .58);
+  background: color-mix(in srgb, var(--element-bg) 58%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 24px rgba(0, 0, 0, .16);
 }
 
@@ -931,7 +931,7 @@ time {
   width: 100%;
   height: 40px;
   border: var(--border-width) solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 14px;
   outline: 0;
   background: var(--element-bg);
@@ -944,7 +944,7 @@ time {
   gap: 6px;
   border-radius: 24px;
   padding: 12px 14px;
-  background: rgba(44,44,46,.72);
+  background: color-mix(in srgb, var(--element-bg) 72%, transparent);
   box-shadow: var(--container-inset);
 }
 
@@ -988,7 +988,7 @@ time {
 .relation-row button {
   min-height: 32px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 12px;
   background: rgba(255,255,255,.08);
   color: var(--text-main);
@@ -1012,7 +1012,7 @@ time {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 4px 6px 4px 12px;
   background: rgba(123, 180, 255, .13);
   color: #c4dcff;
@@ -1022,7 +1022,7 @@ time {
 .relation-chip button {
   min-height: 28px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 10px;
   background: rgba(255,255,255,.08);
   color: var(--text-main);
@@ -1070,7 +1070,7 @@ time {
 .graph-link-tools button {
   min-height: 40px;
   border: var(--border-width) solid rgba(123, 180, 255, .28);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 13px;
   background: rgba(30, 71, 112, .62);
   color: #d7e8ff;
@@ -1160,7 +1160,7 @@ time {
   height: 14px;
   border: 2px solid rgba(207, 227, 255, .8);
   border-radius: 50%;
-  background: rgba(28, 28, 30, .92);
+  background: color-mix(in srgb, var(--container-bg) 92%, transparent);
   transform: translateY(-50%);
   box-shadow: 0 0 0 4px rgba(123, 180, 255, .08);
 }
@@ -1175,9 +1175,9 @@ time {
   align-items: center;
   gap: 10px;
   border: var(--border-width) solid rgba(255,255,255,.08);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 8px 10px;
-  background: rgba(44, 44, 46, .72);
+  background: color-mix(in srgb, var(--element-bg) 72%, transparent);
   box-shadow: var(--chin-shadow);
   backdrop-filter: blur(18px) saturate(150%);
 }
@@ -1186,7 +1186,7 @@ time {
   width: 150px;
   height: 32px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 10px;
   background: rgba(255,255,255,.06);
   color: var(--text-main);
@@ -1222,7 +1222,7 @@ time {
   gap: 3px;
   border-radius: 22px;
   padding: 12px 14px;
-  background: rgba(28,28,30,.88);
+  background: color-mix(in srgb, var(--container-bg) 88%, transparent);
   box-shadow: var(--chin-shadow);
   backdrop-filter: blur(18px) saturate(150%);
 }

@@ -53,7 +53,7 @@
 .project-pill.is-active {
   color: var(--text-main);
   background: var(--element-bg);
-  border-color: color-mix(in srgb, var(--project-color, #8ab4ff) 45%, var(--border-color));
+  border-color: color-mix(in srgb, var(--project-color, var(--accent-color)) 45%, var(--border-color));
   box-shadow: var(--chin-shadow);
 }
 
@@ -85,7 +85,7 @@
 
 .entity-tile.is-active {
   background: var(--element-bg);
-  border-color: color-mix(in srgb, var(--kind-accent, #8ab4ff) 52%, var(--border-color));
+  border-color: color-mix(in srgb, var(--kind-accent, var(--accent-color)) 52%, var(--border-color));
   box-shadow: var(--chin-shadow);
 }
 
@@ -323,7 +323,7 @@
 }
 
 .relation-card header { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.relation-card header svg { color: #8ab4ff; flex: none; }
+.relation-card header svg { color: var(--accent-color); flex: none; }
 .relation-card header strong { min-width: 0; overflow-wrap: anywhere; }
 
 .relation-card header button {
@@ -351,7 +351,7 @@
   font-size: var(--text-xs);
 }
 
-.relation-direction em { color: #8ab4ff; font-style: normal; font-weight: var(--weight-medium); }
+.relation-direction em { color: var(--accent-color); font-style: normal; font-weight: var(--weight-medium); }
 .relation-why { margin: 0; color: #d8dfeb; font-size: var(--text-sm); line-height: 1.45; overflow-wrap: anywhere; }
 .relation-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-xs); }
 
@@ -644,7 +644,7 @@
   max-width: 100%;
   padding: var(--space-3) var(--space-4);
   border: var(--border-width) solid var(--border-color);
-  border-left: 3px solid var(--agent-accent, #8ab4ff);
+  border-left: 3px solid var(--agent-accent, var(--accent-color));
   border-radius: var(--radius-lg);
   background: var(--element-bg);
 }

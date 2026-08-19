@@ -12,7 +12,7 @@ import { EmptyState } from "../ui";
 // Кроме восьми постоянных сущностей у проекта могут быть свои папки: folder:<id>.
 type View = "todo" | ProjectEntityKind | `folder:${string}`;
 
-const entityOrder: ProjectEntityKind[] = ["git", "stack", "properties", "relations", "philosophy", "deploy", "access"];
+const entityOrder: ProjectEntityKind[] = ["git", "figma", "stack", "properties", "relations", "philosophy", "deploy", "access"];
 
 function searchValue(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -215,6 +215,7 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
 
 function entitySummary(project: Project, kind: ProjectEntityKind) {
   if (kind === "git") return project.git_url ? "указан" : "не указан";
+  if (kind === "figma") return project.props?.figma_url ? "указана" : "не указана";
   if (kind === "stack") return `${project.stack.length}`;
   if (kind === "properties") return `${Object.keys(project.props || {}).length}`;
   if (kind === "relations") return `${project.relations.length}`;

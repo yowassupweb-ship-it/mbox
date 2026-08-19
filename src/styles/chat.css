@@ -251,7 +251,7 @@
   padding: 0;
   border: var(--border-width) solid var(--border-color);
   border-radius: 50%;
-  background: rgba(44, 44, 46, .86);
+  background: color-mix(in srgb, var(--element-bg) 86%, transparent);
   box-shadow: var(--chin-shadow);
   color: var(--text-main);
   backdrop-filter: blur(18px) saturate(150%);
