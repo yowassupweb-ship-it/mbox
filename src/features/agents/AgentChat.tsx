@@ -95,6 +95,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
   const [awaitingJarvisId, setAwaitingJarvisId] = useState<string | null>(null);
+  const [awaitingJarvisSince, setAwaitingJarvisSince] = useState<number | null>(null);
+  // Значение не читается — сам факт смены форсирует re-render, чтобы Date.now() в
+  // awaitingJarvisSeconds ниже пересчитывался каждую секунду.
+  const [, setElapsedTick] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const liveMention = parseMention(text);
@@ -164,11 +168,21 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     if (!awaitingJarvisId) return;
     if (conversation.some((item) => item.agent_name === JARVIS_NAME && String(item.props?.re ?? "") === awaitingJarvisId)) {
       setAwaitingJarvisId(null);
+      setAwaitingJarvisSince(null);
       return;
     }
-    const timeout = window.setTimeout(() => setAwaitingJarvisId(null), 25000);
+    const timeout = window.setTimeout(() => { setAwaitingJarvisId(null); setAwaitingJarvisSince(null); }, 25000);
     return () => window.clearTimeout(timeout);
   }, [awaitingJarvisId, conversation]);
+
+  // Секунды в "думает…" — раньше плашка просто висела без обратной связи, сколько ещё ждать.
+  useEffect(() => {
+    if (!awaitingJarvisSince) return;
+    const interval = window.setInterval(() => setElapsedTick((value) => value + 1), 1000);
+    return () => window.clearInterval(interval);
+  }, [awaitingJarvisSince]);
+
+  const awaitingJarvisSeconds = awaitingJarvisSince ? Math.max(0, Math.floor((Date.now() - awaitingJarvisSince) / 1000)) : 0;
 
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
@@ -317,6 +331,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       // индикатор "думает" уместен если адресат не указан или это явно он.
       if ((!mentionTarget || mentionTarget.toLowerCase() === JARVIS_NAME.toLowerCase()) && result.inbox_item?.id) {
         setAwaitingJarvisId(result.inbox_item.id);
+        setAwaitingJarvisSince(Date.now());
       }
       // Помечаем отправленным сразу. Ждать onSaved нельзя: он тянет одиннадцать ручек
       // через туннель к боевой базе, и «отправляется» висело бы секундами.
@@ -404,7 +419,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
                 <span className="console-log-actor">·</span>
-                <span className="console-log-text">{JARVIS_NAME} думает…</span>
+                <span className="console-log-text">{JARVIS_NAME} думает… {awaitingJarvisSeconds}с</span>
               </div>
             )}
           </div>
