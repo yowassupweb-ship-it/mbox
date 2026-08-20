@@ -73,7 +73,7 @@ async function mboxFetch(path, init = {}) {
   return response.json();
 }
 
-async function groqChat(messages, { json = false, tools = null } = {}) {
+async function groqChat(messages, { json = false, tools = null } = {}, attempt = 0) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${groqKey}` },
@@ -85,6 +85,14 @@ async function groqChat(messages, { json = false, tools = null } = {}) {
       ...(tools ? { tools, tool_choice: "auto" } : {}),
     }),
   });
+  // Бесплатный тир Groq режет по запросам в минуту — при систематическом тике раз в минуту плюс
+  // живой чат это реальность, не редкость. Одна 429 раньше роняла весь тик без единой попытки повтора.
+  if (response.status === 429 && attempt < 2) {
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    return groqChat(messages, { json, tools }, attempt + 1);
+  }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
   const usage = data.usage || {};
@@ -236,6 +244,26 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "list_companies",
+      description: "Список компаний в MBOX — это НЕ проекты: компания объединяет несколько связанных проектов. Вопросы про юрлицо, контакты, бренд, реквизиты, тон общения, бизнес-контекст — это компания.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_company_info",
+      description: "Посмотреть карточку компании целиком: юрлицо, контакты, бренд, продукты, связанные проекты. Используй вместо get_project_info, когда речь о компании, а не о конкретном техническом проекте.",
+      parameters: {
+        type: "object",
+        properties: { company_name: { type: "string", description: "Название компании, максимально похожее на одну из существующих" } },
+        required: ["company_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_memory",
       description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
       parameters: {
@@ -361,6 +389,12 @@ function matchProjectFuzzy(projectName, projectList) {
     || projectList.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
 }
 
+function matchCompanyFuzzy(companyName, companyList) {
+  const q = String(companyName || "").trim().toLowerCase();
+  return companyList.find((c) => c.name.toLowerCase() === q)
+    || companyList.find((c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
+}
+
 async function matchTodoFuzzy(projectName, todoTitle, exact = false) {
   const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(projectName)}`);
   const todos = context.todos || [];
@@ -369,6 +403,26 @@ async function matchTodoFuzzy(projectName, todoTitle, exact = false) {
   const qLower = q.toLowerCase();
   return todos.find((t) => t.title.toLowerCase() === qLower)
     || todos.find((t) => t.title.toLowerCase().includes(qLower) || qLower.includes(t.title.toLowerCase()));
+}
+
+/** Тот же разбор, что в server/mbox-server.mjs — один упавший инструмент не должен ронять весь
+ * ответ. 23505 приходит сюда в error.body (сериализованный текст ошибки Postgres от MBOX API,
+ * не структурированный объект — HTTP-путь, не прямой клиент БД), поэтому проверяем по подстроке. */
+function describeToolFailure(name, error) {
+  const raw = String(error?.message || error || "");
+  if (raw.includes("duplicate key") || raw.includes("23505")) return `${name}: такая запись уже существует — не создаю дубликат`;
+  return `${name}: не выполнено (${raw.slice(0, 200) || "внутренняя ошибка"})`;
+}
+
+async function logJarvisError({ source = "cron", toolName = "", inboxId = null, projectId = null, message }) {
+  try {
+    await mboxFetch("/api/mbox/agent/jarvis-errors", {
+      method: "POST",
+      body: JSON.stringify({ source, tool_name: toolName, inbox_id: inboxId, project_id: projectId, message: String(message || "").slice(0, 2000) }),
+    });
+  } catch (error) {
+    console.error(`jarvis_errors log failed: ${error.message}`);
+  }
 }
 
 async function runJarvisTool(name, rawArgs, projectList) {
@@ -474,6 +528,29 @@ async function runJarvisTool(name, rawArgs, projectList) {
       parts.push(`описание из props — ${propsText}`);
     }
     return `проект «${project.name}»: ${parts.join("; ")}`;
+  }
+
+  if (name === "list_companies") {
+    const data = await mboxFetch("/api/mbox/companies");
+    const rows = data.companies || [];
+    if (!rows.length) return "компаний в MBOX пока нет";
+    const lines = rows.map((c) => {
+      const hint = c.props?.profile || c.props?.role || "";
+      return hint ? `${c.name} — ${String(hint).slice(0, 120)}` : c.name;
+    });
+    return `компании (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "get_company_info") {
+    const data = await mboxFetch("/api/mbox/companies");
+    const rows = data.companies || [];
+    const company = matchCompanyFuzzy(args.company_name, rows);
+    if (!company) return `не нашёл компанию «${args.company_name}» — есть: ${rows.map((c) => c.name).join(", ") || "компаний пока нет"}`;
+    const props = company.props && typeof company.props === "object" ? company.props : {};
+    const keys = Object.keys(props);
+    if (!keys.length) return `компания «${company.name}»: свойства не заполнены`;
+    const propsText = keys.map((key) => `${key}: ${String(props[key]).slice(0, 180)}`).join("; ");
+    return `компания «${company.name}» (доступ: ${company.access_level}): ${propsText}`;
   }
 
   if (name === "search_memory") {
@@ -616,6 +693,8 @@ async function respondToRequests() {
 
   const projectsData = await mboxFetch("/api/mbox/projects");
   const projectList = (projectsData.projects || []).map((project) => ({ id: project.id, name: project.name }));
+  const companiesData = await mboxFetch("/api/mbox/companies");
+  const companyNames = (companiesData.companies || []).map((c) => c.name);
 
   let answered = 0;
   for (const item of mine) {
@@ -645,7 +724,9 @@ async function respondToRequests() {
         + "ВЫБОР между вариантами и почему — не факт, для фактов record_memory), get_groq_usage (сколько токенов "
         + "Groq потрачено на тебя), list_recent_activity (последние события в проекте или во всём MBOX), "
         + "find_file (найти путь к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь "
-        + "файлы). Если "
+        + "файлы), list_companies и get_company_info (КОМПАНИЯ — не проект: контейнер верхнего уровня, "
+        + "владеет несколькими проектами; вопросы про юрлицо, контакты, бренд, реквизиты, тон общения — "
+        + "это компания, используй эти инструменты, а не get_project_info). Если "
         + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
@@ -655,7 +736,8 @@ async function respondToRequests() {
         + "Когда человек явно просит создать проект, а раньше в разговоре уже называл детали (стек, ссылку и "
         + "т.п.) — подставь их в create_project сам, не переспрашивай то, что уже прозвучало. Если деталей "
         + "вообще не было — создавай хотя бы с одним названием, не устраивай анкету из вопросов. Известные "
-        + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}.`;
+        + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Известные компании: `
+        + `${companyNames.join(", ") || "нет компаний"}.`;
 
       // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — используем уже загруженный inbox
       // (см. выше в этой функции) как настоящую историю разговора, а не только последнюю реплику.
@@ -681,7 +763,13 @@ async function respondToRequests() {
         }
         messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
         for (const call of message.tool_calls) {
-          const result = await runJarvisTool(call.function?.name, call.function?.arguments, projectList);
+          let result;
+          try {
+            result = await runJarvisTool(call.function?.name, call.function?.arguments, projectList);
+          } catch (error) {
+            result = describeToolFailure(call.function?.name || "инструмент", error);
+            await logJarvisError({ source: "cron", toolName: call.function?.name || "", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
+          }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
           messages.push({ role: "tool", tool_call_id: call.id, content: result });
@@ -706,6 +794,26 @@ async function respondToRequests() {
       answered += 1;
     } catch (error) {
       console.error(`request #${item.id} failed: ${error.message}`);
+      await logJarvisError({ source: "cron", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
+      // Тот же принцип, что в server/mbox-server.mjs: молчание после сбоя неотличимо от "ещё думает".
+      try {
+        await mboxFetch("/api/mbox/agent/inbox", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: item.project_id || null,
+            agent_name: agentName,
+            item_type: "answer",
+            title: `Ответ: ${(item.title || "").slice(0, 100)}`,
+            body: `Не получилось ответить: ${String(error.message || error).slice(0, 200)}. Попробуй ещё раз.`,
+            priority: "normal",
+            requires_human: false,
+            props: { to: "Человек", re: item.id, tools_used: [], failed: true },
+          }),
+        });
+        await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });
+      } catch (fallbackError) {
+        console.error(`fallback answer for #${item.id} also failed: ${fallbackError.message}`);
+      }
     }
   }
   return { answered };

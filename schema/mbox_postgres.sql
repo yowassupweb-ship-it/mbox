@@ -228,6 +228,18 @@ CREATE TABLE IF NOT EXISTS groq_usage (
 
 CREATE INDEX IF NOT EXISTS idx_groq_usage_created_at ON groq_usage(created_at);
 
+CREATE TABLE IF NOT EXISTS jarvis_errors (
+  id BIGSERIAL PRIMARY KEY,
+  source TEXT NOT NULL DEFAULT 'reply',
+  tool_name TEXT NOT NULL DEFAULT '',
+  inbox_id BIGINT,
+  project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
+  message TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jarvis_errors_created_at ON jarvis_errors(created_at);
+
 CREATE TABLE IF NOT EXISTS protected_secrets (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,

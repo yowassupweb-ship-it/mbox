@@ -739,13 +739,22 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // контроллер живёт, пока идёт агентский цикл, и удаляется в finally у replyAsJarvis.
 const activeJarvisRequests = new Map();
 
-async function groqComplete(messages, tools, purpose = "reply", signal) {
+/** Бесплатный тир Groq режет по запросам в минуту — при живом чате (несколько шагов цикла подряд,
+ * несколько тиков cron) 429 не редкость. Раньше первая же 429 роняла весь ответ Джарвиса без единой
+ * повторной попытки. Retry-After Groq присылает в секундах — уважаем его, если есть. */
+async function groqComplete(messages, tools, purpose = "reply", signal, attempt = 0) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
     body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
     signal,
   });
+  if (response.status === 429 && attempt < 2) {
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    return groqComplete(messages, tools, purpose, signal, attempt + 1);
+  }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
   // Пользователь хочет видеть расход токенов, а не гадать — пишем каждый вызов, не только успешные
@@ -900,6 +909,26 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "list_companies",
+      description: "Список компаний в MBOX — это НЕ проекты: компания объединяет несколько связанных проектов (например «Вокруг света» владеет проектами vs-works, vs-mail и другими). Спроси себя: если вопрос про юрлицо, контакты, бренд, реквизиты, тон общения или бизнес-контекст в целом — скорее всего это компания, а не отдельный проект.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_company_info",
+      description: "Посмотреть карточку компании целиком: юрлицо, контакты, бренд, продукты, связанные проекты и любые другие сведения, которые про неё записали. Используй это, а не get_project_info, когда речь о компании, а не о конкретном техническом проекте.",
+      parameters: {
+        type: "object",
+        properties: { company_name: { type: "string", description: "Название компании, максимально похожее на одну из существующих" } },
+        required: ["company_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_memory",
       description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
       parameters: {
@@ -1027,6 +1056,13 @@ function matchProjectFuzzy(projectName, projectList) {
     || projectList.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
 }
 
+/** Компании — отдельная сущность верхнего уровня, не строка в projectList; свой fuzzy-match. */
+function matchCompanyFuzzy(companyName, companyList) {
+  const q = String(companyName || "").trim().toLowerCase();
+  return companyList.find((c) => c.name.toLowerCase() === q)
+    || companyList.find((c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
+}
+
 async function matchTodoFuzzy(client, projectId, todoTitle, { exact = false } = {}) {
   const rows = (await client.query("SELECT id::text, title, status, priority, note FROM todos WHERE project_id = $1", [projectId])).rows;
   const q = String(todoTitle || "").trim();
@@ -1034,6 +1070,34 @@ async function matchTodoFuzzy(client, projectId, todoTitle, { exact = false } = 
   const qLower = q.toLowerCase();
   return rows.find((t) => t.title.toLowerCase() === qLower)
     || rows.find((t) => t.title.toLowerCase().includes(qLower) || qLower.includes(t.title.toLowerCase()));
+}
+
+/**
+ * Один упавший инструмент раньше рвал весь агентный цикл: 20 августа человек трижды подряд
+ * (315, 316, 323 в agent_inbox) просил Джарвиса создать 4 задачи разом — каждый раз он падал
+ * на INSERT INTO todos с уже существующим заголовком (idx_todos_project_title уникален по
+ * project_id+title) и не отвечал НИЧЕГО: ни успевшие пройти задачи не подтверждались, ни причина
+ * не объяснялась. Отсюда и общее ощущение "работает через раз, ломается на 2-3 задаче".
+ *
+ * Теперь ошибка одного вызова инструмента превращается в понятный текст для модели — цикл
+ * продолжается на следующий вызов, а не падает целиком.
+ */
+function describeToolFailure(name, error) {
+  if (error?.code === "23505") return `${name}: такая запись уже существует — не создаю дубликат`;
+  const message = String(error?.message || error || "").slice(0, 200);
+  return `${name}: не выполнено (${message || "внутренняя ошибка"})`;
+}
+
+/** Лучше потерять запись об ошибке, чем уронить ответ Джарвиса ИЗ-ЗА записи об ошибке. */
+async function logJarvisError({ source = "reply", toolName = "", inboxId = null, projectId = null, message }) {
+  try {
+    await query(
+      "INSERT INTO jarvis_errors(source, tool_name, inbox_id, project_id, message) VALUES ($1, $2, $3, $4, $5)",
+      [source, toolName, inboxId, projectId, String(message || "").slice(0, 2000)],
+    );
+  } catch (error) {
+    console.error(`jarvis_errors insert failed: ${error.message}`);
+  }
 }
 
 async function runJarvisTool(client, name, rawArgs, projectList) {
@@ -1154,6 +1218,33 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
     }
     return `проект «${project.name}»: ${parts.join("; ")}`;
   }
+
+  // Компании — контейнер верхнего уровня для нескольких проектов, отдельная таблица от projects.
+  // 20 августа человек спросил Джарвиса про компанию «Вокруг света» (там 25+ заполненных полей:
+  // юрлицо, контакты, бренд, тон общения, связанные проекты) — инструментов увидеть её не было
+  // вообще, и Джарвис честно ответил "нет записей о такой сущности", хотя запись была.
+  if (name === "list_companies") {
+    const rows = (await client.query("SELECT name, props FROM companies ORDER BY name")).rows;
+    if (!rows.length) return "компаний в MBOX пока нет";
+    const lines = rows.map((c) => {
+      const hint = c.props?.profile || c.props?.role || "";
+      return hint ? `${c.name} — ${String(hint).slice(0, 120)}` : c.name;
+    });
+    return `компании (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "get_company_info") {
+    const companyList = (await client.query("SELECT id::text, name FROM companies ORDER BY name")).rows;
+    const company = matchCompanyFuzzy(args.company_name, companyList);
+    if (!company) return `не нашёл компанию «${args.company_name}» — есть: ${companyList.map((c) => c.name).join(", ") || "компаний пока нет"}`;
+    const row = (await client.query("SELECT props, access_level FROM companies WHERE id = $1", [company.id])).rows[0];
+    const props = row.props && typeof row.props === "object" ? row.props : {};
+    const keys = Object.keys(props);
+    if (!keys.length) return `компания «${company.name}»: свойства не заполнены`;
+    const propsText = keys.map((key) => `${key}: ${String(props[key]).slice(0, 180)}`).join("; ");
+    return `компания «${company.name}» (доступ: ${row.access_level}): ${propsText}`;
+  }
+
 
   if (name === "search_memory") {
     const q = String(args.query || "").trim();
@@ -1279,11 +1370,20 @@ async function replyAsJarvis(item) {
   if (!GROQ_API_KEY) return;
   const controller = new AbortController();
   activeJarvisRequests.set(String(item.id), controller);
+  // new Client() и connect() — ВНУТРИ try. Раньше connect() стоял до try: если бы он упал (пул
+  // соединений, кратковременная недоступность БД), это был бы необработанный reject у fire-and-forget
+  // вызова replyAsJarvis(...) в POST /agent/inbox — а необработанный reject роняет весь процесс
+  // Node (unhandled-rejections=throw по умолчанию с Node 15), то есть не только Джарвис перестал бы
+  // отвечать, но и весь MBOX. Не воспроизводилось на проде (RestartCount=0 на момент находки), но
+  // мина реальная — защищаемся заранее, а не когда она сработает.
   const client = new Client({ connectionString: process.env.DATABASE_URL });
-  await client.connect();
   try {
+    await client.connect();
     await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
     const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows;
+    // "Известные проекты" в промпте так и не включали компании — Джарвис не мог даже заподозрить,
+    // что вопрос про компанию (а не про проект), потому что не знал, что компании вообще существуют.
+    const companyNames = (await client.query("SELECT name FROM companies ORDER BY name")).rows.map((c) => c.name);
     // Раньше не знал даже сколько всего задач в системе — приходилось отвечать "нет функции узнать".
     // Готовая сводка в промпте закрывает большинство "что вообще есть в MBOX"-вопросов без похода
     // в tool calling; list_project_todos/search_memory — для точечных вопросов по конкретному проекту.
@@ -1307,7 +1407,10 @@ async function replyAsJarvis(item) {
       + "«зависит от» и т.п.), record_decision (записать ВЫБОР между вариантами и почему — не факт, для фактов "
       + "record_memory), get_groq_usage (сколько токенов Groq потрачено на тебя — сегодня/за сутки/всего), "
       + "list_recent_activity (последние события в проекте или во всём MBOX), find_file (найти путь "
-      + "к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь файлы). Если просят "
+      + "к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь файлы), "
+      + "list_companies и get_company_info (КОМПАНИЯ — это не проект: контейнер верхнего уровня, "
+      + "владеет несколькими проектами; вопросы про юрлицо, контакты, бренд, реквизиты, тон общения, "
+      + "бизнес-контекст — это компания, используй эти инструменты, а не get_project_info). Если просят "
       + "одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
       + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не только повтор "
       + "одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не только первое. "
@@ -1319,7 +1422,8 @@ async function replyAsJarvis(item) {
       + "называл детали (стек, ссылку и т.п.) — подставь их в create_project сам, не переспрашивай то, что уже "
       + "прозвучало. Если деталей вообще не было — создавай хотя бы с одним названием, не устраивай анкету из "
       + "вопросов, человек всегда может дополнить проект следующим сообщением. Известные проекты: "
-      + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Сводка по MBOX прямо сейчас: всего задач `
+      + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Известные компании: `
+      + `${companyNames.join(", ") || "нет компаний"}. Сводка по MBOX прямо сейчас: всего задач `
       + `${stats.todos_total}, из них незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total}. `
       + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь.";
     // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — если человек в прошлом сообщении назвал
@@ -1352,7 +1456,13 @@ async function replyAsJarvis(item) {
       }
       messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
       for (const call of message.tool_calls) {
-        const result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+        let result;
+        try {
+          result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+        } catch (error) {
+          result = describeToolFailure(call.function?.name || "инструмент", error);
+          await logJarvisError({ source: "reply", toolName: call.function?.name || "", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
+        }
         actionLog.push(result);
         if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
         messages.push({ role: "tool", tool_call_id: call.id, content: result });
@@ -1375,10 +1485,26 @@ async function replyAsJarvis(item) {
       console.error(`Jarvis reply for #${item.id} cancelled by user`);
     } else {
       console.error(`Jarvis inline reply failed: ${error.message}`);
+      await logJarvisError({ source: "reply", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
+      // Раньше отказ ВНЕ цикла инструментов (сеть до Groq, рейт-лимит, обрыв соединения к БД)
+      // оставлял вопрос человека висеть открытым НАВСЕГДА без единого слова — молчание неотличимо
+      // от "ещё думает". Честное "не получилось" — тоже ответ, и его стоит показать. query() —
+      // отдельное свежее соединение, на случай если сломан именно client из этой попытки.
+      try {
+        await query(
+          `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+           VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
+          [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, `Не получилось ответить: ${String(error.message || error).slice(0, 200)}. Попробуй ещё раз.`, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], failed: true })],
+        );
+        await query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
+        broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: "не получилось ответить", notification: `Агент ${JARVIS_NAME} споткнулся` });
+      } catch (fallbackError) {
+        console.error(`Jarvis fallback answer for #${item.id} also failed: ${fallbackError.message}`);
+      }
     }
   } finally {
     activeJarvisRequests.delete(String(item.id));
-    await client.end();
+    try { await client.end(); } catch { /* уже не подключён или подключение сломано — нечего закрывать */ }
   }
 }
 
@@ -1507,6 +1633,27 @@ async function handleApiWithContext(req, res, url) {
     await query(
       "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
       [String(body.purpose || "reply"), String(body.model || ""), Number(body.prompt_tokens) || 0, Number(body.completion_tokens) || 0, Number(body.total_tokens) || 0],
+    );
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (url.pathname === "/api/mbox/agent/jarvis-errors" && req.method === "GET") {
+    // Раньше падения Джарвиса были видны только в docker logs контейнера — то есть нигде, кто
+    // не читает логи сервера руками. Здесь их видно и человеку (через историю), и самому Джарвису
+    // (см. tool list_recent_errors), если спросят "что у тебя ломалось".
+    const result = await query(
+      `SELECT id::text, source, tool_name, inbox_id::text, project_id::text, message, created_at::text
+       FROM jarvis_errors ORDER BY created_at DESC LIMIT 50`,
+    );
+    return sendJson(res, 200, { errors: result.rows });
+  }
+
+  if (url.pathname === "/api/mbox/agent/jarvis-errors" && req.method === "POST") {
+    // Резервный cron-путь логирует сюда же через REST, как и groq-usage выше.
+    const body = await readBody(req);
+    await query(
+      "INSERT INTO jarvis_errors(source, tool_name, inbox_id, project_id, message) VALUES ($1, $2, $3, $4, $5)",
+      [String(body.source || "reply"), String(body.tool_name || ""), body.inbox_id || null, body.project_id || null, String(body.message || "").slice(0, 2000)],
     );
     return sendJson(res, 200, { ok: true });
   }
@@ -2551,7 +2698,10 @@ async function handleApiWithContext(req, res, url) {
       const senderName = String(body.agent_name || actorFromReq(req));
       const addressedTo = body.props && typeof body.props === "object" ? String(body.props.to || "") : "";
       if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
-        replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body });
+        // .catch() обязателен на fire-and-forget вызове: необработанный reject роняет весь процесс.
+        // replyAsJarvis теперь сама не должна выбрасывать наружу, но это последний рубеж, не первый.
+        replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body })
+          .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
       }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
     }

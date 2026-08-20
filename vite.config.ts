@@ -365,13 +365,20 @@ type GroqMessage = {
 // Запрос человека может лежать в очереди на прерывание (см. POST /agent/inbox/:id/cancel).
 const activeJarvisRequests = new Map<string, AbortController>();
 
-async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose = "reply", signal?: AbortSignal): Promise<GroqMessage> {
+async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose = "reply", signal?: AbortSignal, attempt = 0): Promise<GroqMessage> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
     body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
     signal,
   });
+  // См. server/mbox-server.mjs — тот же ретрай на 429 с уважением Retry-After.
+  if (response.status === 429 && attempt < 2) {
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    return groqComplete(messages, tools, purpose, signal, attempt + 1);
+  }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
   const usage = data.usage || {};
@@ -522,6 +529,26 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "list_companies",
+      description: "Список компаний в MBOX — это НЕ проекты: компания объединяет несколько связанных проектов. Вопросы про юрлицо, контакты, бренд, реквизиты, тон общения, бизнес-контекст — это компания.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_company_info",
+      description: "Посмотреть карточку компании целиком: юрлицо, контакты, бренд, продукты, связанные проекты. Используй вместо get_project_info, когда речь о компании, а не о конкретном техническом проекте.",
+      parameters: {
+        type: "object",
+        properties: { company_name: { type: "string", description: "Название компании, максимально похожее на одну из существующих" } },
+        required: ["company_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_memory",
       description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
       parameters: {
@@ -647,6 +674,12 @@ function matchProjectFuzzy(projectName: unknown, projectList: { id: string; name
     || projectList.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
 }
 
+function matchCompanyFuzzy(companyName: unknown, companyList: { id: string; name: string }[]) {
+  const q = String(companyName || "").trim().toLowerCase();
+  return companyList.find((c) => c.name.toLowerCase() === q)
+    || companyList.find((c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
+}
+
 async function matchTodoFuzzy(client: PoolClient, projectId: string, todoTitle: unknown, exact = false) {
   const rows = (await client.query("SELECT id::text, title, status, priority, note FROM todos WHERE project_id = $1", [projectId])).rows as { id: string; title: string; status: string; priority: string; note: string }[];
   const q = String(todoTitle || "").trim();
@@ -654,6 +687,25 @@ async function matchTodoFuzzy(client: PoolClient, projectId: string, todoTitle: 
   const qLower = q.toLowerCase();
   return rows.find((t) => t.title.toLowerCase() === qLower)
     || rows.find((t) => t.title.toLowerCase().includes(qLower) || qLower.includes(t.title.toLowerCase()));
+}
+
+/** См. server/mbox-server.mjs — тот же разбор, тот же фикс (упавший инструмент не роняет весь ответ). */
+function describeToolFailure(name: string, error: { code?: string; message?: string } | unknown): string {
+  const err = error as { code?: string; message?: string };
+  if (err?.code === "23505") return `${name}: такая запись уже существует — не создаю дубликат`;
+  const message = String(err?.message || error || "").slice(0, 200);
+  return `${name}: не выполнено (${message || "внутренняя ошибка"})`;
+}
+
+async function logJarvisError({ source = "reply", toolName = "", inboxId = null, projectId = null, message }: { source?: string; toolName?: string; inboxId?: string | number | null; projectId?: string | number | null; message: string }) {
+  try {
+    await queryPostgres(
+      "INSERT INTO jarvis_errors(source, tool_name, inbox_id, project_id, message) VALUES ($1, $2, $3, $4, $5)",
+      [source, toolName, inboxId, projectId, String(message || "").slice(0, 2000)],
+    );
+  } catch (error) {
+    console.error(`jarvis_errors insert failed: ${(error as Error).message}`);
+  }
 }
 
 async function runJarvisTool(client: PoolClient, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[]): Promise<string> {
@@ -768,6 +820,28 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
       parts.push(`описание из props — ${propsText}`);
     }
     return `проект «${project.name}»: ${parts.join("; ")}`;
+  }
+
+  if (name === "list_companies") {
+    const rows = (await client.query("SELECT name, props FROM companies ORDER BY name")).rows as { name: string; props: Record<string, unknown> | null }[];
+    if (!rows.length) return "компаний в MBOX пока нет";
+    const lines = rows.map((c) => {
+      const hint = (c.props?.profile as string) || (c.props?.role as string) || "";
+      return hint ? `${c.name} — ${String(hint).slice(0, 120)}` : c.name;
+    });
+    return `компании (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "get_company_info") {
+    const companyList = (await client.query("SELECT id::text, name FROM companies ORDER BY name")).rows as { id: string; name: string }[];
+    const company = matchCompanyFuzzy(args.company_name, companyList);
+    if (!company) return `не нашёл компанию «${args.company_name}» — есть: ${companyList.map((c) => c.name).join(", ") || "компаний пока нет"}`;
+    const row = (await client.query("SELECT props, access_level FROM companies WHERE id = $1", [company.id])).rows[0] as { props: Record<string, unknown> | null; access_level: string };
+    const props = row.props && typeof row.props === "object" ? row.props : {};
+    const keys = Object.keys(props);
+    if (!keys.length) return `компания «${company.name}»: свойства не заполнены`;
+    const propsText = keys.map((key) => `${key}: ${String(props[key]).slice(0, 180)}`).join("; ");
+    return `компания «${company.name}» (доступ: ${row.access_level}): ${propsText}`;
   }
 
   if (name === "search_memory") {
@@ -898,6 +972,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
     try {
       await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
       const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows as { id: string; name: string }[];
+      const companyNames = ((await client.query("SELECT name FROM companies ORDER BY name")).rows as { name: string }[]).map((c) => c.name);
       const stats = (await client.query(
         `SELECT (SELECT count(*) FROM todos)::int AS todos_total,
                 (SELECT count(*) FROM todos WHERE status NOT IN ('done', 'archived'))::int AS todos_open,
@@ -918,7 +993,10 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "«зависит от» и т.п.), record_decision (записать ВЫБОР между вариантами и почему — не факт, для фактов "
         + "record_memory), get_groq_usage (сколько токенов Groq потрачено на тебя — сегодня/за сутки/всего), "
         + "list_recent_activity (последние события в проекте или во всём MBOX), find_file (найти путь "
-        + "к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь файлы). Если просят "
+        + "к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь файлы), "
+        + "list_companies и get_company_info (КОМПАНИЯ — не проект: контейнер верхнего уровня, "
+        + "владеет несколькими проектами; вопросы про юрлицо, контакты, бренд, реквизиты, тон общения — "
+        + "это компания, используй эти инструменты, а не get_project_info). Если просят "
         + "одно из этого — вызови функцию, не пиши текстом, что сделал это. "
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
         + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "
@@ -930,7 +1008,8 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "называл детали (стек, ссылку и т.п.) — подставь их в create_project сам, не переспрашивай то, что уже "
         + "прозвучало. Если деталей вообще не было — создавай хотя бы с одним названием, не устраивай анкету из "
         + "вопросов, человек всегда может дополнить проект следующим сообщением. Известные проекты: "
-        + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Сводка по MBOX прямо сейчас: всего задач `
+        + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Известные компании: `
+        + `${companyNames.join(", ") || "нет компаний"}. Сводка по MBOX прямо сейчас: всего задач `
         + `${stats.todos_total}, из них незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total}. `
         + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь.";
 
@@ -961,7 +1040,13 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         }
         messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
         for (const call of message.tool_calls) {
-          const result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+          let result: string;
+          try {
+            result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+          } catch (error) {
+            result = describeToolFailure(call.function?.name || "инструмент", error);
+            await logJarvisError({ source: "reply", toolName: call.function?.name || "", inboxId: item.id as string, projectId: (item.project_id as string) || null, message: (error as Error).message || String(error) });
+          }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
           messages.push({ role: "tool", tool_call_id: call.id, content: result });
@@ -984,6 +1069,19 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       console.error(`Jarvis reply for #${item.id} cancelled by user`);
     } else {
       console.error(`Jarvis inline reply failed: ${(error as Error).message}`);
+      await logJarvisError({ source: "reply", inboxId: item.id as string, projectId: (item.project_id as string) || null, message: (error as Error).message || String(error) });
+      // См. server/mbox-server.mjs — молчание после сбоя неотличимо от "ещё думает", лучше честное "не получилось".
+      try {
+        await queryPostgres(
+          `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+           VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
+          [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, `Не получилось ответить: ${String((error as Error).message || error).slice(0, 200)}. Попробуй ещё раз.`, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], failed: true })],
+        );
+        await queryPostgres("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
+        broadcastRealtime(clients, "entity_changed", { entity: "agent_inbox" });
+      } catch (fallbackError) {
+        console.error(`Jarvis fallback answer for #${item.id} also failed: ${(fallbackError as Error).message}`);
+      }
     }
   } finally {
     activeJarvisRequests.delete(String(item.id));
@@ -1606,6 +1704,23 @@ function mboxDevApi() {
             await queryPostgres(
               "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
               [String(body.purpose || "reply"), String(body.model || ""), Number(body.prompt_tokens) || 0, Number(body.completion_tokens) || 0, Number(body.total_tokens) || 0],
+            );
+            return sendJson(res, 200, { ok: true });
+          }
+
+          if (url.pathname === "/api/mbox/agent/jarvis-errors" && req.method === "GET") {
+            const result = await queryPostgres(
+              `SELECT id::text, source, tool_name, inbox_id::text, project_id::text, message, created_at::text
+               FROM jarvis_errors ORDER BY created_at DESC LIMIT 50`,
+            );
+            return sendJson(res, 200, { errors: result.rows });
+          }
+
+          if (url.pathname === "/api/mbox/agent/jarvis-errors" && req.method === "POST") {
+            const body = await readBody<{ source?: string; tool_name?: string; inbox_id?: string | number; project_id?: string | number; message?: string }>(req);
+            await queryPostgres(
+              "INSERT INTO jarvis_errors(source, tool_name, inbox_id, project_id, message) VALUES ($1, $2, $3, $4, $5)",
+              [String(body.source || "reply"), String(body.tool_name || ""), body.inbox_id || null, body.project_id || null, String(body.message || "").slice(0, 2000)],
             );
             return sendJson(res, 200, { ok: true });
           }
@@ -2531,7 +2646,8 @@ function mboxDevApi() {
             const senderName = String(body.agent_name || "Agent");
             const addressedTo = body.props && typeof body.props === "object" ? String((body.props as Record<string, unknown>).to || "") : "";
             if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
-              replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body }, realtimeClients);
+              replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body }, realtimeClients)
+                .catch((error: Error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
             }
             return sendJson(res, 201, { inbox_item: result.rows[0] });
           }
