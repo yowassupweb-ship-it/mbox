@@ -21,6 +21,7 @@ export type DataSource = {
   company_id: string | null;
   name: string;
   url: string;
+  kind: string;
   schedule_minutes: number;
   last_fetched_at: string | null;
   last_status: string;

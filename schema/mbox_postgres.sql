@@ -261,6 +261,34 @@ CREATE INDEX IF NOT EXISTS idx_data_sources_project ON data_sources(project_id);
 CREATE INDEX IF NOT EXISTS idx_data_sources_company ON data_sources(company_id);
 CREATE INDEX IF NOT EXISTS idx_data_sources_due ON data_sources(last_fetched_at);
 
+-- Не у каждого источника есть смысл пересказывать текстом: тур-фиды, прайс-листы, каталоги —
+-- структурированные данные, которые нужно не суммировать, а разбирать в таблицу и искать точным
+-- запросом («какие даты у тура X», не «расскажи вкратце про сайт»). kind переключает архивариуса
+-- между обработчиками; 'webpage' (по умолчанию) — прежний путь через Groq-сводку в память.
+ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'webpage';
+
+-- Разобранный фид туров (первый и пока единственный потребитель kind='tours_xml', vs-travel.ru).
+-- sheet_id уникален у поставщика — по нему различаем даты одного и того же тура и обновляем их
+-- же при повторном разборе, а не плодим дубли.
+CREATE TABLE IF NOT EXISTS tour_sheets (
+  id BIGSERIAL PRIMARY KEY,
+  source_id BIGINT NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+  tour_id TEXT NOT NULL,
+  sheet_id TEXT NOT NULL,
+  tour_name TEXT NOT NULL,
+  route_name TEXT NOT NULL DEFAULT '',
+  date_start DATE,
+  date_end DATE,
+  free_places INT NOT NULL DEFAULT 0,
+  price_from INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(source_id, sheet_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tour_sheets_source ON tour_sheets(source_id);
+CREATE INDEX IF NOT EXISTS idx_tour_sheets_name_trgm ON tour_sheets USING gin (tour_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_tour_sheets_date_start ON tour_sheets(date_start);
+
 CREATE TABLE IF NOT EXISTS protected_secrets (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,

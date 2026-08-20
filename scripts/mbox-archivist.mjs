@@ -93,9 +93,15 @@ async function groqChat(messages, { json = false, tools = null } = {}, attempt =
   // Бесплатный тир Groq режет по запросам в минуту — при систематическом тике раз в минуту плюс
   // живой чат это реальность, не редкость. Одна 429 раньше роняла весь тик без единой попытки повтора.
   if (response.status === 429 && attempt < 2) {
-    const retryAfter = Number(response.headers.get("retry-after"));
-    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1);
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    // См. server/mbox-server.mjs — Groq шлёт реальное время ожидания в теле ошибки, не в заголовке.
+    const bodyText = await response.text();
+    const retryAfterHeader = Number(response.headers.get("retry-after"));
+    const bodyMatch = bodyText.match(/try again in ([\d.]+)s/i);
+    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1]) : NaN;
+    const waitSec = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader
+      : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
+      : 3 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
     return groqChat(messages, { json, tools }, attempt + 1);
   }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
@@ -416,6 +422,21 @@ const JARVIS_TOOLS = [
         type: "object",
         properties: { name: { type: "string", description: "Название источника, максимально похожее на существующее" } },
         required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_tour_dates",
+      description: "Найти ближайшие даты и свободные места по названию тура из разобранного фида vs-travel.ru (kind='tours_xml' источник данных). Отвечай ЭТИМ инструментом на вопросы вроде «какие даты у тура X» или «сколько мест на ближайшую дату тура Y» — не придумывай цифры и не ищи в памяти.",
+      parameters: {
+        type: "object",
+        properties: {
+          tour_name: { type: "string", description: "Название тура или его часть, максимально похожее на реальное" },
+          only_available: { type: "boolean", description: "Только даты со свободными местами, по умолчанию false" },
+        },
+        required: ["tour_name"],
       },
     },
   },
@@ -758,6 +779,16 @@ async function runJarvisTool(name, rawArgs, projectList) {
     }
   }
 
+  if (name === "search_tour_dates") {
+    const q = String(args.tour_name || "").trim();
+    if (!q) return "не искал — не указано название тура";
+    const data = await mboxFetch(`/api/mbox/tour-sheets?q=${encodeURIComponent(q)}${args.only_available ? "&available=1" : ""}`);
+    const rows = data.sheets || [];
+    if (!rows.length) return `по запросу «${q}» дат не нашлось — либо тура с таким названием нет в фиде, либо все места и даты прошли`;
+    const lines = rows.map((r) => `${r.tour_name}: ${r.date_start || "?"}${r.date_end && r.date_end !== r.date_start ? `–${r.date_end}` : ""}, мест: ${r.free_places}, от ${r.price_from}₽`);
+    return `найдено (${rows.length}): ${lines.join("; ")}`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -826,7 +857,9 @@ async function respondToRequests() {
         + "это компания, используй эти инструменты, а не get_project_info), list_data_sources, "
         + "create_data_source и refresh_data_source (источник данных — внешний сайт или API, который MBOX "
         + "сам периодически перечитывает по графику и кладёт короткую сводку в память; если просят "
-        + "«следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory). Если "
+        + "«следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory), "
+        + "search_tour_dates (даты и свободные места по названию тура из разобранного фида vs-travel.ru — "
+        + "используй это для «какие даты у тура X» или «сколько мест на тур Y», не выдумывай цифры). Если "
         + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
@@ -967,67 +1000,18 @@ async function classifyMemories() {
 }
 
 /** Голая разметка -> читаемый текст, без внешних библиотек (проект намеренно без лишних зависимостей). */
-function stripHtml(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Забирает URL, сжимает в короткую сводку через Groq, кладёт/обновляет привязанную память. */
+/**
+ * Обновление источника целиком делегировано серверу: POST /api/mbox/data-sources/:id/refresh
+ * (server/mbox-server.mjs, refreshDataSourceById) сам решает, по kind — общая Groq-сводка веб-
+ * страницы или разбор структурированного фида (kind='tours_xml' — vs-travel.ru, 24МБ XML, свой
+ * парсер). Раньше вся эта логика была ЗДЕСЬ ЖЕ второй копией — при добавлении tours_xml пришлось
+ * бы писать парсер в третий раз (сервер, dev, архивариус). Архивариус — просто планировщик:
+ * знает, у кого вышел срок, дёргает готовую ручку, не знает деталей разбора.
+ */
 async function refreshOneSource(source) {
-  const response = await fetch(source.url, { redirect: "follow" });
-  if (!response.ok) throw new Error(`fetch ${response.status}`);
-  const html = await response.text();
-  const text = stripHtml(html).slice(0, 6000);
-  const digestRaw = await groqChat([
-    {
-      role: "system",
-      content: "Сделай короткую сводку веб-страницы для системы памяти MBOX: 5-10 пунктов, факты и "
-        + "цифры, без воды и без markdown-заголовков, на русском даже если страница на другом языке. "
-        + "Если страница явно пустая или это заглушка/ошибка — так и напиши одной строкой.",
-    },
-    { role: "user", content: text || "(пустая страница)" },
-  ]);
-  const digest = String(digestRaw || "").trim().slice(0, 3000);
-
-  let memoryId = source.last_memory_id;
-  if (memoryId) {
-    await mboxFetch(`/api/mbox/memories/${memoryId}`, { method: "PATCH", body: JSON.stringify({ content: digest }) });
-  } else {
-    const created = await mboxFetch("/api/mbox/memories", {
-      method: "POST",
-      body: JSON.stringify({
-        project_id: source.project_id || null,
-        title: `Источник: ${source.name}`,
-        content: digest,
-        entity_type: "fact",
-        access_level: source.access_level || "agents",
-        tags: ["источник-данных"],
-        metadata: { source_agent: agentName, data_source_id: source.id, data_source_url: source.url },
-      }),
-    });
-    memoryId = created.memory?.id || null;
-  }
-
-  await mboxFetch(`/api/mbox/data-sources/${source.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      last_fetched_at: new Date().toISOString(),
-      last_status: "ok",
-      last_summary: digest.slice(0, 500),
-      last_memory_id: memoryId,
-    }),
-  });
+  const result = await mboxFetch(`/api/mbox/data-sources/${source.id}/refresh`, { method: "POST" });
+  if (!result.ok) throw new Error(result.error || "refresh failed");
+  return result;
 }
 
 /** Раз в тик проверяет источники, у которых вышел срок (schedule_minutes с прошлого fetch), и

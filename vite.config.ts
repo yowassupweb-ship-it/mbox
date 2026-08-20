@@ -382,9 +382,18 @@ async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose 
   });
   // См. server/mbox-server.mjs — тот же ретрай на 429 с уважением Retry-After.
   if (response.status === 429 && attempt < 2) {
-    const retryAfter = Number(response.headers.get("retry-after"));
-    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1);
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    // Живое наблюдение 20 августа: TPM-лимит на этом аккаунте — 8000 токенов/минуту, и Groq прямо
+    // просит подождать "Please try again in 22.7s" в теле ошибки, а не в заголовке Retry-After
+    // (его тут просто нет). Прежний бэкофф в 1.5-3с был на порядок короче реального окна — retry
+    // бился в тот же самый рейт-лимит второй раз подряд. Разбираем секунды из текста ошибки.
+    const bodyText = await response.text();
+    const retryAfterHeader = Number(response.headers.get("retry-after"));
+    const bodyMatch = bodyText.match(/try again in ([\d.]+)s/i);
+    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1]) : NaN;
+    const waitSec = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader
+      : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
+      : 3 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
     return groqComplete(messages, tools, purpose, signal, attempt + 1);
   }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
@@ -690,6 +699,7 @@ const JARVIS_TOOLS = [
           project_name: { type: "string", description: "Проект, к которому привязать — если это не компания" },
           company_name: { type: "string", description: "Компания, к которой привязать — если это не проект" },
           schedule_minutes: { type: "number", description: "Как часто перечитывать, в минутах. По умолчанию раз в сутки (1440)." },
+          kind: { type: "string", enum: ["webpage", "tours_xml"], description: "webpage (по умолчанию) — обычная страница, пересказывается через Groq. tours_xml — структурированный XML-фид туров вида vs-travel.ru/prices/tours.xml, разбирается в таблицу дат/мест, не пересказывается." },
         },
         required: ["name", "url"],
       },
@@ -704,6 +714,21 @@ const JARVIS_TOOLS = [
         type: "object",
         properties: { name: { type: "string", description: "Название источника, максимально похожее на существующее" } },
         required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_tour_dates",
+      description: "Найти ближайшие даты и свободные места по названию тура из разобранного фида vs-travel.ru (kind='tours_xml' источник данных). Отвечай ЭТИМ инструментом на вопросы вроде «какие даты у тура X» или «сколько мест на ближайшую дату тура Y» — не придумывай цифры и не ищи в памяти.",
+      parameters: {
+        type: "object",
+        properties: {
+          tour_name: { type: "string", description: "Название тура или его часть, максимально похожее на реальное" },
+          only_available: { type: "boolean", description: "Только даты со свободными местами, по умолчанию false" },
+        },
+        required: ["tour_name"],
       },
     },
   },
@@ -758,9 +783,97 @@ async function logJarvisError({ source = "reply", toolName = "", inboxId = null,
 }
 
 /** См. server/mbox-server.mjs — общая логика для REST-ручки refresh и инструмента Джарвиса. */
+type TourSheetItem = { tour_id: string; sheet_id: string; tour_name: string; route_name: string; date_start: string | null; date_end: string | null; free_places: number; price_from: number };
+
+function parseFeedDate(raw: string | undefined): string | null {
+  const match = String(raw || "").trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+function decodeXmlEntities(text: string | undefined): string {
+  return String(text || "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+/** См. server/mbox-server.mjs — тот же разбор фида туров vs-travel.ru, тот же порядок совпадений. */
+function parseTourFeed(xml: string): TourSheetItem[] {
+  const items: TourSheetItem[] = [];
+  const tourRe = /<tour>([\s\S]*?)<\/tour>/g;
+  let tourMatch: RegExpExecArray | null;
+  while ((tourMatch = tourRe.exec(xml))) {
+    const tourBlock = tourMatch[1];
+    const tourId = (tourBlock.match(/<tour_id>([\s\S]*?)<\/tour_id>/) || [])[1] || "";
+    const tourName = decodeXmlEntities((tourBlock.match(/<tour_name>([\s\S]*?)<\/tour_name>/) || [])[1]).trim();
+    const routeName = decodeXmlEntities((tourBlock.match(/<route_name>([\s\S]*?)<\/route_name>/) || [])[1]).trim();
+    if (!tourName) continue;
+    const sheetRe = /<sheets>([\s\S]*?)<\/sheets>/g;
+    let sheetMatch: RegExpExecArray | null;
+    while ((sheetMatch = sheetRe.exec(tourBlock))) {
+      const sheetBlock = sheetMatch[1];
+      const sheetId = (sheetBlock.match(/<id>([\s\S]*?)<\/id>/) || [])[1] || "";
+      if (!sheetId) continue;
+      items.push({
+        tour_id: tourId,
+        sheet_id: sheetId,
+        tour_name: tourName,
+        route_name: routeName,
+        date_start: parseFeedDate((sheetBlock.match(/<date_start>([\s\S]*?)<\/date_start>/) || [])[1]),
+        date_end: parseFeedDate((sheetBlock.match(/<date_end>([\s\S]*?)<\/date_end>/) || [])[1]),
+        free_places: Number((sheetBlock.match(/<free_places>([\s\S]*?)<\/free_places>/) || [])[1]) || 0,
+        price_from: Number((sheetBlock.match(/<price_from>([\s\S]*?)<\/price_from>/) || [])[1]) || 0,
+      });
+    }
+  }
+  return items;
+}
+
+async function bulkUpsertTourSheets(sourceId: string, items: TourSheetItem[]): Promise<{ upserted: number; removed: number }> {
+  // См. server/mbox-server.mjs — сравнение по времени между JS-клиентом и Postgres ловит рассинхрон
+  // часов (живой прогон стёр все только что вставленные строки). Ключ теперь — множество sheet_id.
+  const BATCH = 400;
+  const seenSheetIds: string[] = [];
+  for (let i = 0; i < items.length; i += BATCH) {
+    const chunk = items.slice(i, i + BATCH).map((item) => ({ source_id: sourceId, ...item }));
+    await queryPostgres(
+      `INSERT INTO tour_sheets (source_id, tour_id, sheet_id, tour_name, route_name, date_start, date_end, free_places, price_from, updated_at)
+       SELECT v.source_id::bigint, v.tour_id, v.sheet_id, v.tour_name, v.route_name, v.date_start::date, v.date_end::date, v.free_places::int, v.price_from::int, now()
+       FROM jsonb_to_recordset($1::jsonb) AS v(source_id text, tour_id text, sheet_id text, tour_name text, route_name text, date_start text, date_end text, free_places int, price_from int)
+       ON CONFLICT (source_id, sheet_id) DO UPDATE SET
+         tour_name = EXCLUDED.tour_name, route_name = EXCLUDED.route_name,
+         date_start = EXCLUDED.date_start, date_end = EXCLUDED.date_end,
+         free_places = EXCLUDED.free_places, price_from = EXCLUDED.price_from,
+         updated_at = now()`,
+      [JSON.stringify(chunk)],
+    );
+    seenSheetIds.push(...chunk.map((item) => item.sheet_id));
+  }
+  if (!seenSheetIds.length) return { upserted: 0, removed: 0 };
+  const removed = await queryPostgres(
+    "DELETE FROM tour_sheets WHERE source_id = $1 AND NOT (sheet_id = ANY($2::text[])) RETURNING id",
+    [sourceId, seenSheetIds],
+  );
+  return { upserted: items.length, removed: removed.rows.length };
+}
+
 async function refreshDataSourceById(id: string): Promise<{ ok: boolean; summary: string; error?: string }> {
-  const row = (await queryPostgres("SELECT id::text, project_id::text, name, url, access_level, last_memory_id::text FROM data_sources WHERE id = $1", [id])).rows[0] as { id: string; project_id: string | null; name: string; url: string; access_level: string; last_memory_id: string | null } | undefined;
+  const row = (await queryPostgres("SELECT id::text, project_id::text, name, url, access_level, kind, last_memory_id::text FROM data_sources WHERE id = $1", [id])).rows[0] as { id: string; project_id: string | null; name: string; url: string; access_level: string; kind: string; last_memory_id: string | null } | undefined;
   if (!row) return { ok: false, summary: "", error: "источник не найден" };
+
+  if (row.kind === "tours_xml") {
+    try {
+      const response = await fetch(row.url, { redirect: "follow" });
+      if (!response.ok) throw new Error(`fetch ${response.status}`);
+      const xml = await response.text();
+      const items = parseTourFeed(xml);
+      const { upserted, removed } = await bulkUpsertTourSheets(row.id, items);
+      const summary = `разобрано ${upserted} дат, снято с продажи ${removed}`;
+      await queryPostgres("UPDATE data_sources SET last_fetched_at = now(), last_status = 'ok', last_summary = $1, updated_at = now() WHERE id = $2", [summary, row.id]);
+      return { ok: true, summary };
+    } catch (error) {
+      await queryPostgres("UPDATE data_sources SET last_fetched_at = now(), last_status = 'error', last_summary = $1, updated_at = now() WHERE id = $2", [String((error as Error).message || error).slice(0, 500), row.id]);
+      return { ok: false, summary: "", error: (error as Error).message || String(error) };
+    }
+  }
+
   try {
     const response = await fetch(row.url, { redirect: "follow" });
     if (!response.ok) throw new Error(`fetch ${response.status}`);
@@ -1080,10 +1193,11 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
       companyId = company.id;
     }
     if (!projectId && !companyId) return "не создал источник — укажи проект или компанию, к которой привязать";
+    const kind = args.kind === "tours_xml" ? "tours_xml" : "webpage";
     const inserted = await client.query(
-      `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes)
-       VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440)) RETURNING id::text`,
-      [projectId, companyId, sourceName, sourceUrl, Number(args.schedule_minutes) || 0],
+      `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes, kind)
+       VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440), $6) RETURNING id::text`,
+      [projectId, companyId, sourceName, sourceUrl, Number(args.schedule_minutes) || 0, kind],
     );
     return `создан источник «${sourceName}» (#${(inserted.rows[0] as { id: string }).id}), первое чтение — на ближайшем тике архивариуса`;
   }
@@ -1095,6 +1209,24 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     if (!source) return `не нашёл источник «${args.name}» — есть: ${rows.map((s) => s.name).join(", ") || "источников пока нет"}`;
     const result = await refreshDataSourceById(source.id);
     return result.ok ? `источник «${source.name}» обновлён: ${result.summary.slice(0, 200)}` : `не удалось обновить «${source.name}»: ${result.error}`;
+  }
+
+  if (name === "search_tour_dates") {
+    const q = String(args.tour_name || "").trim();
+    if (!q) return "не искал — не указано название тура";
+    const rows = (await client.query(
+      `SELECT tour_name, route_name, date_start::text, date_end::text, free_places, price_from
+       FROM tour_sheets
+       WHERE tour_name ILIKE '%' || $1 || '%'
+         AND (date_end IS NULL OR date_end >= CURRENT_DATE)
+         AND ($2 = false OR free_places > 0)
+       ORDER BY date_start ASC NULLS LAST
+       LIMIT 20`,
+      [q, Boolean(args.only_available)],
+    )).rows as { tour_name: string; route_name: string; date_start: string | null; date_end: string | null; free_places: number; price_from: number }[];
+    if (!rows.length) return `по запросу «${q}» дат не нашлось — либо тура с таким названием нет в фиде, либо все места и даты прошли`;
+    const lines = rows.map((r) => `${r.tour_name}: ${r.date_start || "?"}${r.date_end && r.date_end !== r.date_start ? `–${r.date_end}` : ""}, мест: ${r.free_places}, от ${r.price_from}₽`);
+    return `найдено (${rows.length}): ${lines.join("; ")}`;
   }
 
   return `неизвестное действие: ${name}`;
@@ -1136,8 +1268,10 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "это компания, используй эти инструменты, а не get_project_info), "
         + "list_data_sources, create_data_source и refresh_data_source (источник данных — внешний сайт или "
         + "API, который MBOX сам периодически перечитывает по графику и кладёт короткую сводку в память; "
-        + "если просят «следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory). "
-        + "Если просят "
+        + "если просят «следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory), "
+        + "search_tour_dates (даты и свободные места по названию тура из разобранного фида vs-travel.ru — "
+        + "используй это для вопросов «какие даты у тура X» или «сколько мест на тур Y», не выдумывай цифры "
+        + "и не ищи в памяти). Если просят "
         + "одно из этого — вызови функцию, не пиши текстом, что сделал это. "
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
         + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "
@@ -2342,16 +2476,16 @@ function mboxDevApi() {
               if (!name || !sourceUrl) return sendJson(res, 400, { error: "name_and_url_required" });
               if (!body.project_id && !body.company_id) return sendJson(res, 400, { error: "project_id_or_company_id_required" });
               const result = await queryPostgres(
-                `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes, access_level)
-                 VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440), COALESCE(NULLIF($6, ''), 'agents'))
+                `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes, access_level, kind)
+                 VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440), COALESCE(NULLIF($6, ''), 'agents'), COALESCE(NULLIF($7, ''), 'webpage'))
                  RETURNING id::text`,
-                [body.project_id || null, body.company_id || null, name, sourceUrl, Number(body.schedule_minutes) || 0, String(body.access_level ?? "")],
+                [body.project_id || null, body.company_id || null, name, sourceUrl, Number(body.schedule_minutes) || 0, String(body.access_level ?? ""), String(body.kind ?? "")],
               );
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
               return sendJson(res, 201, { source: result.rows[0] });
             }
             const result = await queryPostgres(
-              `SELECT id::text, project_id::text, company_id::text, name, url, schedule_minutes,
+              `SELECT id::text, project_id::text, company_id::text, name, url, schedule_minutes, kind,
                       last_fetched_at::text, last_status, last_summary, last_memory_id::text, access_level,
                       created_at::text, updated_at::text
                FROM data_sources
@@ -2372,6 +2506,7 @@ function mboxDevApi() {
                  last_summary = COALESCE($6, last_summary),
                  last_memory_id = COALESCE($7, last_memory_id),
                  access_level = COALESCE(NULLIF($8, ''), access_level),
+                 kind = COALESCE(NULLIF($10, ''), kind),
                  updated_at = now()
                WHERE id = $9
                RETURNING id::text`,
@@ -2385,6 +2520,7 @@ function mboxDevApi() {
                 body.last_memory_id || null,
                 String(body.access_level ?? ""),
                 dataSourceMatch[1],
+                String(body.kind ?? ""),
               ],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
@@ -2403,6 +2539,40 @@ function mboxDevApi() {
             if (result.error === "источник не найден") return sendJson(res, 404, { error: "not_found" });
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
             return sendJson(res, result.ok ? 200 : 502, result);
+          }
+
+          if (url.pathname === "/api/mbox/tour-sheets/bulk" && req.method === "POST") {
+            const body = await readBody<{ source_id?: string; items?: Partial<TourSheetItem>[] }>(req);
+            if (!body.source_id) return sendJson(res, 400, { error: "source_id_required" });
+            const items = (body.items || []).map((item) => ({
+              tour_id: String(item.tour_id || ""),
+              sheet_id: String(item.sheet_id || ""),
+              tour_name: String(item.tour_name || "").slice(0, 500),
+              route_name: String(item.route_name || "").slice(0, 1000),
+              date_start: item.date_start || null,
+              date_end: item.date_end || null,
+              free_places: Number(item.free_places) || 0,
+              price_from: Number(item.price_from) || 0,
+            }));
+            const result = await bulkUpsertTourSheets(body.source_id, items);
+            return sendJson(res, 200, result);
+          }
+
+          if (url.pathname === "/api/mbox/tour-sheets" && req.method === "GET") {
+            const search = String(url.searchParams.get("q") || "").trim();
+            const onlyAvailable = url.searchParams.get("available") === "1";
+            if (!search) return sendJson(res, 400, { error: "q_required" });
+            const result = await queryPostgres(
+              `SELECT tour_name, route_name, date_start::text, date_end::text, free_places, price_from
+               FROM tour_sheets
+               WHERE tour_name ILIKE '%' || $1 || '%'
+                 AND (date_end IS NULL OR date_end >= CURRENT_DATE)
+                 AND ($2 = false OR free_places > 0)
+               ORDER BY date_start ASC NULLS LAST
+               LIMIT 60`,
+              [search, onlyAvailable],
+            );
+            return sendJson(res, 200, { sheets: result.rows });
           }
 
           if (url.pathname === "/api/mbox/projects") {
