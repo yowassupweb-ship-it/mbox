@@ -771,18 +771,24 @@ async function groqComplete(messages, tools, purpose = "reply", signal, attempt 
     body: JSON.stringify({ model, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
     signal,
   });
-  if (response.status === 429 && attempt < 2) {
+  if (response.status === 429) {
     // Живое наблюдение 20 августа: TPM-лимит на этом аккаунте — 8000 токенов/минуту, и Groq прямо
     // просит подождать "Please try again in 22.7s" в теле ошибки, а не в заголовке Retry-After
-    // (его тут просто нет). Прежний бэкофф в 1.5-3с был на порядок короче реального окна — retry
-    // бился в тот же самый рейт-лимит второй раз подряд. Разбираем секунды из текста ошибки.
+    // (его тут просто нет). Формат бывает и с часами/минутами ("1h23m4.5s") — старый разбор ловил
+    // только последнее число перед "s" и путал 4.5с с 1ч23м4.5с, поэтому ждал на порядки меньше
+    // нужного и снова бился в тот же лимит. Живое наблюдение 20 августа вечером: дневной лимит
+    // (TPD) 200К токенов на gpt-oss-120b оказался исчерпан ПОЛНОСТЬЮ (реально потрачено 274К) —
+    // в этом случае ждать имеет смысл только до полуночи, а не секунды. Раз ожидание больше
+    // минуты — ретраить бессмысленно и жестоко к живому чату: падаем сразу честной ошибкой,
+    // пусть человек увидит "не получилось", а не молчание на несколько минут.
     const bodyText = await response.text();
     const retryAfterHeader = Number(response.headers.get("retry-after"));
-    const bodyMatch = bodyText.match(/try again in ([\d.]+)s/i);
-    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1]) : NaN;
+    const bodyMatch = bodyText.match(/try again in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s/i);
+    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1] || 0) * 3600 + Number(bodyMatch[2] || 0) * 60 + Number(bodyMatch[3]) : NaN;
     const waitSec = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
+    if (waitSec > 60 || attempt >= 2) throw new Error(`groq 429: лимит исчерпан, ждать ${Math.ceil(waitSec)}с — ${bodyText.slice(0, 300)}`);
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
     return groqComplete(messages, tools, purpose, signal, attempt + 1, model);
   }
@@ -1482,8 +1488,12 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     const props = row.props && typeof row.props === "object" ? row.props : {};
     const keys = Object.keys(props);
     if (!keys.length) return `компания «${company.name}»: свойства не заполнены`;
-    const propsText = keys.map((key) => `${key}: ${String(props[key]).slice(0, 180)}`).join("; ");
-    return `компания «${company.name}» (доступ: ${row.access_level}): ${propsText}`;
+    // Раньше каждое поле резалось до 180 символов — на карточке с десятками полей (юрлицо, тон
+    // общения, правила UX и т.п.) это обрывало содержательные поля на середине фразы, а модель не
+    // могла понять, что ответ на самом деле там был. Режем только итоговую строку целиком, не
+    // разрывая отдельные поля — так "правило владельца..." дочитывается до конца.
+    const propsText = keys.map((key) => `${key}: ${String(props[key])}`).join("\n");
+    return `компания «${company.name}» (доступ: ${row.access_level}):\n${propsText}`.slice(0, 6000);
   }
 
 
@@ -1791,7 +1801,6 @@ async function replyAsJarvis(item) {
       }
     }
     jlog(item.id, `готово: инструменты=[${toolsUsed.join(", ")}]`);
-    jarvisPhase.delete(String(item.id));
     if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
 
     // "Джарвис использовал инструменты: ..." — видимый след того, что реально было вызвано,
@@ -1828,6 +1837,7 @@ async function replyAsJarvis(item) {
     }
   } finally {
     activeJarvisRequests.delete(String(item.id));
+    jarvisPhase.delete(String(item.id));
     try { await client.end(); } catch { /* уже не подключён или подключение сломано — нечего закрывать */ }
   }
 }

@@ -392,18 +392,20 @@ async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose 
     signal,
   });
   // См. server/mbox-server.mjs — тот же ретрай на 429 с уважением Retry-After.
-  if (response.status === 429 && attempt < 2) {
-    // Живое наблюдение 20 августа: TPM-лимит на этом аккаунте — 8000 токенов/минуту, и Groq прямо
-    // просит подождать "Please try again in 22.7s" в теле ошибки, а не в заголовке Retry-After
-    // (его тут просто нет). Прежний бэкофф в 1.5-3с был на порядок короче реального окна — retry
-    // бился в тот же самый рейт-лимит второй раз подряд. Разбираем секунды из текста ошибки.
+  if (response.status === 429) {
+    // Живое наблюдение вечером 20 августа: формат ошибки бывает с часами/минутами ("1h23m4.5s"),
+    // старый разбор ловил только число перед "s" и путал 4.5с с 1ч23м4.5с — ждал на порядки
+    // меньше нужного. В тот же вечер дневной лимит (TPD) 200К токенов на gpt-oss-120b оказался
+    // исчерпан целиком (реально потрачено 274К) — ждать в этом случае имеет смысл только до
+    // полуночи. Если ожидание больше минуты — ретраить бессмысленно, падаем сразу честной ошибкой.
     const bodyText = await response.text();
     const retryAfterHeader = Number(response.headers.get("retry-after"));
-    const bodyMatch = bodyText.match(/try again in ([\d.]+)s/i);
-    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1]) : NaN;
+    const bodyMatch = bodyText.match(/try again in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s/i);
+    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1] || 0) * 3600 + Number(bodyMatch[2] || 0) * 60 + Number(bodyMatch[3]) : NaN;
     const waitSec = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
+    if (waitSec > 60 || attempt >= 2) throw new Error(`groq 429: лимит исчерпан, ждать ${Math.ceil(waitSec)}с — ${bodyText.slice(0, 300)}`);
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
     return groqComplete(messages, tools, purpose, signal, attempt + 1, model);
   }
@@ -1059,8 +1061,10 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     const props = row.props && typeof row.props === "object" ? row.props : {};
     const keys = Object.keys(props);
     if (!keys.length) return `компания «${company.name}»: свойства не заполнены`;
-    const propsText = keys.map((key) => `${key}: ${String(props[key]).slice(0, 180)}`).join("; ");
-    return `компания «${company.name}» (доступ: ${row.access_level}): ${propsText}`;
+    // См. server/mbox-server.mjs — резать целиком, а не по 180 символов на поле: обрывало
+    // содержательные поля (например tone_of_voice) на середине фразы.
+    const propsText = keys.map((key) => `${key}: ${String(props[key])}`).join("\n");
+    return `компания «${company.name}» (доступ: ${row.access_level}):\n${propsText}`.slice(0, 6000);
   }
 
   if (name === "search_memory") {
@@ -1387,6 +1391,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
     }
   } finally {
     activeJarvisRequests.delete(String(item.id));
+    jarvisPhase.delete(String(item.id));
   }
 }
 

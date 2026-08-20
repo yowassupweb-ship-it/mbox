@@ -95,15 +95,18 @@ async function groqChat(messages, { json = false, tools = null, model = groqMode
   });
   // Бесплатный тир Groq режет по запросам в минуту — при систематическом тике раз в минуту плюс
   // живой чат это реальность, не редкость. Одна 429 раньше роняла весь тик без единой попытки повтора.
-  if (response.status === 429 && attempt < 2) {
-    // См. server/mbox-server.mjs — Groq шлёт реальное время ожидания в теле ошибки, не в заголовке.
+  if (response.status === 429) {
+    // См. server/mbox-server.mjs — Groq шлёт реальное время ожидания в теле ошибки, не в заголовке,
+    // и формат бывает с часами/минутами. Если ждать больше минуты (например дневной лимит TPD
+    // исчерпан целиком) — падаем сразу: тик архивариуса раз в минуту, незачем занимать его на часы.
     const bodyText = await response.text();
     const retryAfterHeader = Number(response.headers.get("retry-after"));
-    const bodyMatch = bodyText.match(/try again in ([\d.]+)s/i);
-    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1]) : NaN;
+    const bodyMatch = bodyText.match(/try again in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s/i);
+    const bodyWaitSec = bodyMatch ? Number(bodyMatch[1] || 0) * 3600 + Number(bodyMatch[2] || 0) * 60 + Number(bodyMatch[3]) : NaN;
     const waitSec = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
+    if (waitSec > 60 || attempt >= 2) throw new Error(`groq 429: лимит исчерпан, ждать ${Math.ceil(waitSec)}с — ${bodyText.slice(0, 300)}`);
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
     return groqChat(messages, { json, tools, model }, attempt + 1);
   }
