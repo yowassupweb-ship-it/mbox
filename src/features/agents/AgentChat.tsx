@@ -3,7 +3,7 @@ import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } fr
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
-import { formatSince } from "../../lib/format";
+import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
 
 const JARVIS_NAME = "Джарвис";
@@ -14,8 +14,37 @@ const SLASH_COMMANDS = [
   { value: "agents", hint: "кто сейчас на связи" },
   { value: "blocked", hint: "задачи, которые ждут решения" },
   { value: "who", hint: "что известно про агента" },
+  { value: "jarvis", hint: "из чего состоит Джарвис — агенты, инструменты, скиллы" },
   { value: "clear", hint: "очистить окно" },
 ];
+
+/** Ручной список — тот же набор function-схем живёт в JARVIS_TOOLS на сервере (см.
+ * server/mbox-server.mjs), дублировать через сеть ради справочного текста не стоило. */
+const JARVIS_DESCRIPTION = [
+  "Джарвис — не одна модель, а система из нескольких ролей:",
+  "",
+  "агенты:",
+  "  Прораб (openai/gpt-oss-120b) — ведёт диалог, решает, какой инструмент вызвать. Тесная квота",
+  "    Groq (8К токенов/мин), поэтому бережём его для оркестрации, а не разовых задач.",
+  "  Младший (llama-3.1-8b-instant) — однократные вызовы без своего контекста диалога: пересказ",
+  "    страницы источника данных, классификация факт/лог. Своя, куда более щедрая квота Groq.",
+  "",
+  "tools (настоящие действия, дергают базу):",
+  "  задачи: create_todo, update_todo_status, set_todo_priority, delete_todo, update_todo_note,",
+  "    list_project_todos, search_todos",
+  "  проекты: create_project, delete_project, get_project_info, link_projects, find_file",
+  "  компании: list_companies, get_company_info",
+  "  память: record_memory, search_memory, record_decision, list_recent_activity",
+  "  источники данных: list_data_sources, create_data_source, refresh_data_source, search_tour_dates",
+  "  служебное: get_groq_usage",
+  "",
+  "skills (одноразовые, без оркестрации — отданы Младшему):",
+  "  пересказ веб-страницы источника данных (5-10 пунктов, без воды)",
+  "  классификация записи памяти (факт/лог)",
+  "",
+  "назначение: библиотекарь (память, проекты) + начальник склада (задачи, источники данных)",
+  "+ личный ассистент (чат, вопросы).",
+].join("\n");
 
 const TRIGGER_ICON = { "@": AtSign, "/": Slash, "$": DollarSign, "#": Hash } as const;
 
@@ -30,29 +59,69 @@ function parseMention(raw: string): string {
 
 const MARKDOWN_TOKEN = /(\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|(?<!\w)_[^_\n]+_(?!\w))/g;
 
-/** Модель (например, Джарвис) иногда шлёт **bold**/`code`/*italic* и списки — раньше это лежало
- * в логе буквальными звёздочками. Без внешней библиотеки: разбор построчно + инлайн-токены. */
+function renderInlineMarkdown(content: string, keyPrefix: string): ReactNode[] {
+  const parts = content.split(MARKDOWN_TOKEN).filter((part) => part !== "");
+  return parts.map((part, partIndex) => {
+    const key = `${keyPrefix}-${partIndex}`;
+    if (part.startsWith("**") && part.endsWith("**")) return <b key={key}>{part.slice(2, -2)}</b>;
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
+    if (part.startsWith("_") && part.endsWith("_")) return <em key={key}>{part.slice(1, -1)}</em>;
+    return part;
+  });
+}
+
+/** `| a | b |` + разделитель `|---|---|` — Джарвис пересказывает даты туров именно так, и без
+ * разбора это была нечитаемая простыня труб в моноширинном логе. Только через дефис/двоеточие,
+ * без выравнивания колонок и вложенных markdown-таблиц — этого достаточно для реальных ответов. */
+const TABLE_SEPARATOR_ROW = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/;
+
+function splitTableRow(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+/** Модель (например, Джарвис) иногда шлёт **bold**/`code`/*italic*, списки и markdown-таблицы —
+ * раньше это лежало в логе буквальным текстом со звёздочками и трубами. Без внешней библиотеки:
+ * разбор построчно, таблицы — отдельным блоком поверх обычных строк. */
 function renderMarkdownLite(text: string): ReactNode {
-  return text.split("\n").map((line, lineIndex, lines) => {
+  const lines = text.split("\n");
+  const blocks: ReactNode[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const isTableStart = lines[i].includes("|") && i + 1 < lines.length && TABLE_SEPARATOR_ROW.test(lines[i + 1]);
+    if (isTableStart) {
+      const header = splitTableRow(lines[i]);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+        rows.push(splitTableRow(lines[i]));
+        i += 1;
+      }
+      blocks.push(
+        <table key={`table-${blocks.length}`} className="console-log-table">
+          <thead><tr>{header.map((cell, ci) => <th key={ci}>{renderInlineMarkdown(cell, `th-${ci}`)}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{renderInlineMarkdown(cell, `td-${ri}-${ci}`)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>,
+      );
+      continue;
+    }
+    const line = lines[i];
     const isListItem = /^\s*[-*]\s/.test(line);
     const content = isListItem ? line.replace(/^\s*[-*]\s/, "") : line;
-    const parts = content.split(MARKDOWN_TOKEN).filter((part) => part !== "");
-    const rendered = parts.map((part, partIndex) => {
-      const key = `${lineIndex}-${partIndex}`;
-      if (part.startsWith("**") && part.endsWith("**")) return <b key={key}>{part.slice(2, -2)}</b>;
-      if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
-      if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
-      if (part.startsWith("_") && part.endsWith("_")) return <em key={key}>{part.slice(1, -1)}</em>;
-      return part;
-    });
-    return (
-      <span key={lineIndex}>
+    blocks.push(
+      <span key={`line-${blocks.length}`}>
         {isListItem ? "• " : ""}
-        {rendered}
-        {lineIndex < lines.length - 1 && <br />}
-      </span>
+        {renderInlineMarkdown(content, `line-${blocks.length}`)}
+        {i < lines.length - 1 && <br />}
+      </span>,
     );
-  });
+    i += 1;
+  }
+  return blocks;
 }
 
 /** Активный токен под курсором: символ-триггер сразу после пробела/начала строки и то, что после него набрано. */
@@ -124,6 +193,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
   const [awaitingJarvisId, setAwaitingJarvisId] = useState<string | null>(null);
   const [awaitingJarvisSince, setAwaitingJarvisSince] = useState<number | null>(null);
+  const [awaitingJarvisPhase, setAwaitingJarvisPhase] = useState<string | null>(null);
   // Значение не читается — сам факт смены форсирует re-render, чтобы Date.now() в
   // awaitingJarvisSeconds ниже пересчитывался каждую секунду.
   const [, setElapsedTick] = useState(0);
@@ -197,11 +267,27 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     if (conversation.some((item) => item.agent_name === JARVIS_NAME && String(item.props?.re ?? "") === awaitingJarvisId)) {
       setAwaitingJarvisId(null);
       setAwaitingJarvisSince(null);
+      setAwaitingJarvisPhase(null);
       return;
     }
-    const timeout = window.setTimeout(() => { setAwaitingJarvisId(null); setAwaitingJarvisSince(null); }, 25000);
+    const timeout = window.setTimeout(() => { setAwaitingJarvisId(null); setAwaitingJarvisSince(null); setAwaitingJarvisPhase(null); }, 25000);
     return () => window.clearTimeout(timeout);
   }, [awaitingJarvisId, conversation]);
+
+  // Раньше "думает…" висело одним и тем же текстом весь ответ — жалоба: непонятно, застрял агент
+  // или реально работает. Опрашиваем ту же фазу, что сервер пишет в jarvisPhase (см. server/vite).
+  useEffect(() => {
+    if (!awaitingJarvisId) { setAwaitingJarvisPhase(null); return; }
+    let cancelled = false;
+    const poll = () => {
+      fetchJson<{ phase: string | null }>(`/api/mbox/agent/inbox/${awaitingJarvisId}/phase`)
+        .then((data) => { if (!cancelled) setAwaitingJarvisPhase(data.phase); })
+        .catch(() => {});
+    };
+    poll();
+    const interval = window.setInterval(poll, 1500);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [awaitingJarvisId]);
 
   // Секунды в "думает…" — раньше плашка просто висела без обратной связи, сколько ещё ждать.
   useEffect(() => {
@@ -217,11 +303,18 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     const id = awaitingJarvisId;
     setAwaitingJarvisId(null);
     setAwaitingJarvisSince(null);
+    setAwaitingJarvisPhase(null);
     fetchJson(`/api/mbox/agent/inbox/${id}/cancel`, { method: "POST" }).catch(() => {});
   }, [awaitingJarvisId]);
 
   const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
   const working = states.filter((entry) => entry.state.key === "working");
+  // "N агентов на связи: имена" — раньше жило в шапке страницы и дублировало этот же ростер под
+  // другим текстом. Состав разговора — дело консоли, не глобальной шапки.
+  const online = states.filter((entry) => entry.state.key === "working" || entry.state.key === "thinking");
+  const rosterSummary = online.length
+    ? `${online.length} ${plural(online.length, "агент", "агента", "агентов")} на связи: ${online.map((entry) => entry.agent.name).join(", ")}`
+    : "агентов нет на связи";
 
   const [readAt, setReadAt] = useState(() => {
     const stored = window.localStorage.getItem(READ_KEY);
@@ -297,6 +390,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           "  /status, /agents  — кто сейчас на связи",
           "  /blocked          — задачи, которые ждут решения",
           "  /who <имя>        — что известно про агента",
+          "  /jarvis           — из чего состоит Джарвис: агенты, tools, skills",
           "  /clear            — очистить окно (переписка не удаляется)",
           "  /help             — эта справка",
           "что угодно без / — уходит агентам в общую или адресную (кнопки выше) переписку",
@@ -327,6 +421,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         pushLocal("sys", `${found.agent.name}: ${found.state.label}${found.state.detail ? " — " + found.state.detail : ""} · ${found.agent.kind}${found.agent.client ? " · " + found.agent.client : ""}`);
         return;
       }
+      case "jarvis":
+        pushLocal("sys", JARVIS_DESCRIPTION);
+        return;
       case "clear":
         setLocalLines([]);
         setPending([]);
@@ -416,6 +513,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       {open && (
         <div className="agent-chat-shell console">
           <div className="console-bar">
+            <span className="console-bar-roster">{rosterSummary}</span>
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
           </div>
 
@@ -467,7 +565,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
                 <span className="console-log-actor">·</span>
-                <span className="console-log-text">{JARVIS_NAME} думает… {awaitingJarvisSeconds}с</span>
+                <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || "думает"}… {awaitingJarvisSeconds}с</span>
                 <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
                   <X size={11} />
                 </button>
@@ -504,7 +602,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 onClick={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyDown={onKeyDown}
-                placeholder="команда (/help), @агент, $проект, #артефакт — Shift+Enter для новой строки"
+                placeholder="/команда, @агент; $проект; #артефакт"
                 spellCheck={false}
                 autoComplete="off"
                 autoCapitalize="off"

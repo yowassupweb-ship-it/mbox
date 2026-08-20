@@ -19,21 +19,24 @@
 
 .project-rail::-webkit-scrollbar { display: none; }
 
-/* display: contents — обёртка нужна только в JSX (разделитель + пилюля вместе под одним key),
-   в раскладке её как будто нет: разделитель и пилюля — прямые участники того же flex-ряда. */
-.project-rail-item { display: contents; }
-
-/* Подпись компании-владельца (или «Мои») перед первой пилюлей её группы — раньше все проекты
-   стояли одним неразличимым рядом, и «Вокруг света» (компания-контейнер) выглядела соседкой
-   собственных vs-works/shar-messenger, а не их владельцем. */
-.project-rail-divider {
+/*
+ * Компания как настоящая рамка вокруг своих проектов, а не тонкая подпись сбоку. Раньше "Вокруг
+ * света" (сама компания) стояла отдельной пилюлей рядом с vs-works/shar-messenger — владелец
+ * выглядел соседом собственных владений. Личные проекты — без рамки и без подписи "Мои" вообще:
+ * подписывать нечего, это просто пилюли в общем ряду.
+ */
+.project-company-frame {
   flex: none;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  padding-right: var(--space-3);
-  margin-right: 2px;
-  border-right: var(--border-width) solid var(--border-color);
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 8px;
+  border: var(--border-width) dashed color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+  border-radius: calc(var(--radius-lg) + 8px);
+}
+
+.project-company-label {
+  padding: 0 4px;
   color: var(--text-muted);
   font-size: 11px;
   font-weight: var(--weight-medium);
@@ -42,7 +45,10 @@
   white-space: nowrap;
 }
 
-.project-rail-item:first-child .project-rail-divider { margin-left: 0; }
+.project-company-frame-pills {
+  display: flex;
+  gap: var(--space-2);
+}
 
 .project-pill {
   position: relative;

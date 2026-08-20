@@ -511,10 +511,20 @@
 .agent-chat-shell .console-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 6px 8px;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 6px 10px;
   background: #17171a;
   border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+
+.agent-chat-shell .console-bar-roster {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
 .agent-chat-shell .console-bar .chat-close {
@@ -589,6 +599,22 @@
 .console-log-status { font-style: normal; color: var(--text-muted); }
 .console-log-status.failed { color: var(--state-danger); }
 .console-log-line.failed .console-log-text { color: var(--state-danger); }
+
+.console-log-table {
+  display: block;
+  overflow-x: auto;
+  margin: 6px 0;
+  border-collapse: collapse;
+  font-size: .92em;
+  max-width: 100%;
+}
+.console-log-table th, .console-log-table td {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, .1));
+  text-align: left;
+  white-space: nowrap;
+}
+.console-log-table th { color: var(--text-2); font-weight: 600; background: rgba(255, 255, 255, .04); }
 
 /* Инструменты, реально вызванные для ответа — бейджами сразу под сообщением, а не отдельной
    строкой лога: читается как "приложено к этому ответу", а не как ещё одно сообщение. */

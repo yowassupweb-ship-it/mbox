@@ -737,8 +737,25 @@ const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
 function jlog(inboxId, message) {
   console.log(`[jarvis #${inboxId}] ${message}`);
 }
+
+// Пока в jlog идёт только stdout-трейс, консоль в UI видела один и тот же текст "думает… Nс" от
+// отправки до ответа — по жалобе пользователя (76с на простой поиск, непонятно, что происходит)
+// нужен живой фазовый статус, который фронт может опрашивать. Память только на время запроса,
+// без БД: фаза интересна ровно пока ждём ответ, история не нужна.
+const jarvisPhase = new Map();
+function setPhase(inboxId, phase) {
+  if (!inboxId) return;
+  jarvisPhase.set(String(inboxId), { phase, at: Date.now() });
+}
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+// "Прораб" (GROQ_MODEL, gpt-oss-120b) ведёт диалог и решает, какой инструмент вызвать — сюда лимиты
+// самые тесные (8000 TPM), и загружать его же простым однократным пересказом или классификацией
+// расточительно. "Младший агент" (GROQ_MODEL_JUNIOR) — своя, отдельная квота Groq: у
+// llama-3.1-8b-instant по наблюдению человека 14 400 запросов/сутки и 500К токенов/сутки против
+// 1000 запросов и 200К токенов у 120b. Классификация памяти и пересказ веб-страницы не требуют
+// оркестрации инструментами — это и есть "скиллы", которые логично отдать младшему.
+const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
 
 // Запрос человека может лежать в очереди на прерывание (см. POST /agent/inbox/:id/cancel) —
 // контроллер живёт, пока идёт агентский цикл, и удаляется в finally у replyAsJarvis.
@@ -747,11 +764,11 @@ const activeJarvisRequests = new Map();
 /** Бесплатный тир Groq режет по запросам в минуту — при живом чате (несколько шагов цикла подряд,
  * несколько тиков cron) 429 не редкость. Раньше первая же 429 роняла весь ответ Джарвиса без единой
  * повторной попытки. Retry-After Groq присылает в секундах — уважаем его, если есть. */
-async function groqComplete(messages, tools, purpose = "reply", signal, attempt = 0) {
+async function groqComplete(messages, tools, purpose = "reply", signal, attempt = 0, model = GROQ_MODEL) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
     signal,
   });
   if (response.status === 429 && attempt < 2) {
@@ -767,7 +784,7 @@ async function groqComplete(messages, tools, purpose = "reply", signal, attempt 
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
-    return groqComplete(messages, tools, purpose, signal, attempt + 1);
+    return groqComplete(messages, tools, purpose, signal, attempt + 1, model);
   }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
@@ -776,7 +793,7 @@ async function groqComplete(messages, tools, purpose = "reply", signal, attempt 
   const usage = data.usage || {};
   query(
     "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
-    [purpose, GROQ_MODEL, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
+    [purpose, model, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
   ).catch((error) => console.error(`groq_usage insert failed: ${error.message}`));
   return data.choices?.[0]?.message ?? { content: "" };
 }
@@ -1262,7 +1279,7 @@ async function bulkUpsertTourSheets(sourceId, items) {
   return { upserted: items.length, removed: removed.rows.length };
 }
 
-async function refreshDataSourceById(id) {
+async function refreshDataSourceById(id, { inboxId } = {}) {
   const row = (await query("SELECT id::text, project_id::text, name, url, access_level, kind, last_memory_id::text FROM data_sources WHERE id = $1", [id])).rows[0];
   if (!row) return { ok: false, summary: "", error: "источник не найден" };
 
@@ -1287,13 +1304,19 @@ async function refreshDataSourceById(id) {
     if (!response.ok) throw new Error(`fetch ${response.status}`);
     const html = await response.text();
     const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000);
+    // Пересказ страницы в 5-10 пунктов — не оркестрация инструментами, а одноразовый "скилл".
+    // Отдаём младшей модели: своя, куда более щедрая квота, не трогает тесный бюджет "Прораба".
+    setPhase(inboxId, "Делегирует младшему агенту");
     const digestMessage = await groqComplete(
       [
         { role: "system", content: "Сделай короткую сводку веб-страницы для системы памяти: 5-10 пунктов, факты и цифры, без воды, на русском." },
         { role: "user", content: text || "(пустая страница)" },
       ],
       null,
-      "reply",
+      "skill-webpage-summary",
+      undefined,
+      0,
+      GROQ_MODEL_JUNIOR,
     );
     const digest = String(digestMessage.content || "").trim().slice(0, 3000);
     let memoryId = row.last_memory_id;
@@ -1318,7 +1341,7 @@ async function refreshDataSourceById(id) {
   }
 }
 
-async function runJarvisTool(client, name, rawArgs, projectList) {
+async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
   let args = {};
   try { args = JSON.parse(rawArgs || "{}"); } catch { /* модель иногда шлёт кривой JSON — просто игнорируем аргументы */ }
 
@@ -1626,7 +1649,7 @@ async function runJarvisTool(client, name, rawArgs, projectList) {
     const rows = (await client.query("SELECT id::text, name FROM data_sources")).rows;
     const source = rows.find((s) => s.name.toLowerCase() === q) || rows.find((s) => s.name.toLowerCase().includes(q));
     if (!source) return `не нашёл источник «${args.name}» — есть: ${rows.map((s) => s.name).join(", ") || "источников пока нет"}`;
-    const result = await refreshDataSourceById(source.id);
+    const result = await refreshDataSourceById(source.id, { inboxId });
     return result.ok ? `источник «${source.name}» обновлён: ${result.summary.slice(0, 200)}` : `не удалось обновить «${source.name}»: ${result.error}`;
   }
 
@@ -1742,6 +1765,7 @@ async function replyAsJarvis(item) {
     jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
     for (let step = 0; step < 5; step += 1) {
       jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
+      setPhase(item.id, "Подбирает инструмент/навык");
       const message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal);
       if (!message.tool_calls?.length) {
         reply = message.content || "";
@@ -1752,8 +1776,9 @@ async function replyAsJarvis(item) {
       messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
       for (const call of message.tool_calls) {
         let result;
+        setPhase(item.id, `Применяет инструмент/навык: ${call.function?.name || "?"}`);
         try {
-          result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+          result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList, item.id);
           jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
         } catch (error) {
           result = describeToolFailure(call.function?.name || "инструмент", error);
@@ -1766,6 +1791,7 @@ async function replyAsJarvis(item) {
       }
     }
     jlog(item.id, `готово: инструменты=[${toolsUsed.join(", ")}]`);
+    jarvisPhase.delete(String(item.id));
     if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
 
     // "Джарвис использовал инструменты: ..." — видимый след того, что реально было вызвано,
@@ -3147,6 +3173,12 @@ async function handleApiWithContext(req, res, url) {
     );
     if (result.rows[0]) broadcastChange(req, "update", "agent_inbox", `#${inboxMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
+  }
+
+  const phaseMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)\/phase$/);
+  if (phaseMatch && req.method === "GET") {
+    const entry = jarvisPhase.get(phaseMatch[1]);
+    return sendJson(res, 200, { phase: entry?.phase || null });
   }
 
   const cancelMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)\/cancel$/);

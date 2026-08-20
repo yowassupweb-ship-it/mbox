@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { FolderPlus, Folder, ListTodo, Sliders, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { FolderBoard } from "../features/projects/FolderBoard";
@@ -123,6 +123,21 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
     return [...visible].sort((a, b) => (companyByProjectId.get(a.id) || "").localeCompare(companyByProjectId.get(b.id) || ""));
   }, [visible, companyByProjectId]);
 
+  // Кластеры для рамки: соседние проекты одной компании (после стабильной сортировки groupedVisible
+  // они уже рядом) собираются в один блок с подписью и рамкой; личные — без подписи и без рамки,
+  // просто пилюли в общем ряду. Раньше "своих" тоже подписывали словом "Мои" — лишний шум там,
+  // где и так всё личное по умолчанию.
+  const railClusters = useMemo(() => {
+    const clusters: Array<{ companyLabel: string | null; items: Project[] }> = [];
+    for (const item of groupedVisible) {
+      const label = companyByProjectId.get(item.id) || null;
+      const last = clusters[clusters.length - 1];
+      if (last && last.companyLabel === label) last.items.push(item);
+      else clusters.push({ companyLabel: label, items: [item] });
+    }
+    return clusters;
+  }, [groupedVisible, companyByProjectId]);
+
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -217,57 +232,58 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
     onSaved();
   }
 
+  function renderPill(item: Project) {
+    return (
+      <button
+        key={item.id}
+        role="tab"
+        aria-selected={item.id === project.id}
+        className={[
+          item.id === project.id ? "project-pill is-active" : "project-pill",
+          draggedProjectId === item.id ? "is-dragging" : "",
+          dropTargetId === item.id && draggedProjectId && draggedProjectId !== item.id ? "is-drop-target" : "",
+        ].filter(Boolean).join(" ")}
+        style={{ ["--project-color" as string]: item.color || "#2c2c2e" }}
+        onClick={() => go(item.id, view)}
+        onContextMenu={(event) => { if (onProjectContext) { event.preventDefault(); onProjectContext(item, { x: event.clientX, y: event.clientY }); } }}
+        draggable
+        onDragStart={(event) => { setDraggedProjectId(item.id); event.dataTransfer.setData("text/plain", item.id); event.dataTransfer.effectAllowed = "move"; }}
+        onDragOver={(event) => { if (draggedProjectId && draggedProjectId !== item.id) { event.preventDefault(); setDropTargetId(item.id); } }}
+        onDragLeave={() => setDropTargetId((current) => (current === item.id ? null : current))}
+        onDrop={(event) => {
+          event.preventDefault();
+          const draggedId = event.dataTransfer.getData("text/plain") || draggedProjectId;
+          setDropTargetId(null);
+          if (draggedId) reorderProject(draggedId, item.id);
+        }}
+        onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
+      >
+        {unseenByProject.get(item.id)! > 0 && (
+          <span className="project-pill-unread" title={`${unseenByProject.get(item.id)} непрочитанных`}>{unseenByProject.get(item.id)}</span>
+        )}
+        <span className="project-pill-name">{item.name}</span>
+        <span className="project-pill-meta">
+          <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>
+          <span className="project-pill-props" title="Ключей в props">
+            <Sliders size={10} />{Object.keys(item.props || {}).length}
+          </span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <div className="control-panel">
       <div className="project-rail" ref={railRef} role="tablist" aria-label="Проекты">
-        {groupedVisible.map((item, index) => {
-          const companyLabel = companyByProjectId.get(item.id);
-          // Разрыв группы: подпись перед первым проектом компании и перед первым «моим» после
-          // компаний (или наоборот) — ровно там, где сосед в отсортированном порядке сменился.
-          const prevLabel = index > 0 ? (companyByProjectId.get(groupedVisible[index - 1].id) || null) : undefined;
-          const showDivider = index === 0 || (companyLabel || null) !== prevLabel;
-          return (
-            <div className="project-rail-item" key={item.id}>
-              {showDivider && (
-                <span className="project-rail-divider">{companyLabel || "Мои"}</span>
-              )}
-              <button
-                role="tab"
-                aria-selected={item.id === project.id}
-                className={[
-                  item.id === project.id ? "project-pill is-active" : "project-pill",
-                  draggedProjectId === item.id ? "is-dragging" : "",
-                  dropTargetId === item.id && draggedProjectId && draggedProjectId !== item.id ? "is-drop-target" : "",
-                ].filter(Boolean).join(" ")}
-                style={{ ["--project-color" as string]: item.color || "#2c2c2e" }}
-                onClick={() => go(item.id, view)}
-                onContextMenu={(event) => { if (onProjectContext) { event.preventDefault(); onProjectContext(item, { x: event.clientX, y: event.clientY }); } }}
-                draggable
-                onDragStart={(event) => { setDraggedProjectId(item.id); event.dataTransfer.setData("text/plain", item.id); event.dataTransfer.effectAllowed = "move"; }}
-                onDragOver={(event) => { if (draggedProjectId && draggedProjectId !== item.id) { event.preventDefault(); setDropTargetId(item.id); } }}
-                onDragLeave={() => setDropTargetId((current) => (current === item.id ? null : current))}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const draggedId = event.dataTransfer.getData("text/plain") || draggedProjectId;
-                  setDropTargetId(null);
-                  if (draggedId) reorderProject(draggedId, item.id);
-                }}
-                onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
-              >
-                {unseenByProject.get(item.id)! > 0 && (
-                  <span className="project-pill-unread" title={`${unseenByProject.get(item.id)} непрочитанных`}>{unseenByProject.get(item.id)}</span>
-                )}
-                <span className="project-pill-name">{item.name}</span>
-                <span className="project-pill-meta">
-                  <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>
-                  <span className="project-pill-props" title="Ключей в props">
-                    <Sliders size={10} />{Object.keys(item.props || {}).length}
-                  </span>
-                </span>
-              </button>
-            </div>
-          );
-        })}
+        {railClusters.map((cluster, index) => cluster.companyLabel ? (
+          <div className="project-company-frame" key={`company-${cluster.companyLabel}-${index}`}>
+            <span className="project-company-label">{cluster.companyLabel}</span>
+            <div className="project-company-frame-pills">{cluster.items.map(renderPill)}</div>
+          </div>
+        ) : (
+          // Личное — просто пилюли в общем ряду, без рамки и без подписи "Мои".
+          <Fragment key={`personal-${index}`}>{cluster.items.map(renderPill)}</Fragment>
+        ))}
       </div>
 
       <div className="entity-strip" role="tablist" aria-label="Разделы проекта">

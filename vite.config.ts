@@ -360,8 +360,19 @@ const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
 function jlog(inboxId: unknown, message: string) {
   console.log(`[jarvis #${inboxId}] ${message}`);
 }
+
+// См. server/mbox-server.mjs — тот же живой фазовый статус для консоли в UI, опрашивается через
+// GET /agent/inbox/:id/phase, пока висит "думает…".
+const jarvisPhase = new Map<string, { phase: string; at: number }>();
+function setPhase(inboxId: unknown, phase: string) {
+  if (!inboxId) return;
+  jarvisPhase.set(String(inboxId), { phase, at: Date.now() });
+}
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+// См. server/mbox-server.mjs — "Прораб" (GROQ_MODEL) ведёт диалог, "младший" — своя, куда более
+// щедрая квота Groq для одноразовых скиллов вроде пересказа страницы, без оркестрации инструментами.
+const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
 
 type GroqMessage = {
   role: string;
@@ -373,11 +384,11 @@ type GroqMessage = {
 // Запрос человека может лежать в очереди на прерывание (см. POST /agent/inbox/:id/cancel).
 const activeJarvisRequests = new Map<string, AbortController>();
 
-async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose = "reply", signal?: AbortSignal, attempt = 0): Promise<GroqMessage> {
+async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose = "reply", signal?: AbortSignal, attempt = 0, model = GROQ_MODEL): Promise<GroqMessage> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
     signal,
   });
   // См. server/mbox-server.mjs — тот же ретрай на 429 с уважением Retry-After.
@@ -394,14 +405,14 @@ async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose 
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
-    return groqComplete(messages, tools, purpose, signal, attempt + 1);
+    return groqComplete(messages, tools, purpose, signal, attempt + 1, model);
   }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
   const usage = data.usage || {};
   queryPostgres(
     "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
-    [purpose, GROQ_MODEL, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
+    [purpose, model, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
   ).catch((error: Error) => console.error(`groq_usage insert failed: ${error.message}`));
   return data.choices?.[0]?.message ?? { role: "assistant", content: "" };
 }
@@ -854,7 +865,8 @@ async function bulkUpsertTourSheets(sourceId: string, items: TourSheetItem[]): P
   return { upserted: items.length, removed: removed.rows.length };
 }
 
-async function refreshDataSourceById(id: string): Promise<{ ok: boolean; summary: string; error?: string }> {
+async function refreshDataSourceById(id: string, opts: { inboxId?: unknown } = {}): Promise<{ ok: boolean; summary: string; error?: string }> {
+  const { inboxId } = opts;
   const row = (await queryPostgres("SELECT id::text, project_id::text, name, url, access_level, kind, last_memory_id::text FROM data_sources WHERE id = $1", [id])).rows[0] as { id: string; project_id: string | null; name: string; url: string; access_level: string; kind: string; last_memory_id: string | null } | undefined;
   if (!row) return { ok: false, summary: "", error: "источник не найден" };
 
@@ -879,13 +891,18 @@ async function refreshDataSourceById(id: string): Promise<{ ok: boolean; summary
     if (!response.ok) throw new Error(`fetch ${response.status}`);
     const html = await response.text();
     const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000);
+    // Одноразовый пересказ, не оркестрация — отдаём младшей модели, см. server/mbox-server.mjs.
+    setPhase(inboxId, "Делегирует младшему агенту");
     const digestMessage = await groqComplete(
       [
         { role: "system", content: "Сделай короткую сводку веб-страницы для системы памяти: 5-10 пунктов, факты и цифры, без воды, на русском." },
         { role: "user", content: text || "(пустая страница)" },
       ],
       undefined,
-      "reply",
+      "skill-webpage-summary",
+      undefined,
+      0,
+      GROQ_MODEL_JUNIOR,
     );
     const digest = String(digestMessage.content || "").trim().slice(0, 3000);
     let memoryId = row.last_memory_id;
@@ -910,7 +927,7 @@ async function refreshDataSourceById(id: string): Promise<{ ok: boolean; summary
   }
 }
 
-async function runJarvisTool(client: PoolClient, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[]): Promise<string> {
+async function runJarvisTool(client: PoolClient, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[], inboxId?: unknown): Promise<string> {
   let args: Record<string, unknown> = {};
   try { args = JSON.parse(rawArgs || "{}"); } catch { /* кривой JSON от модели — работаем без аргументов */ }
 
@@ -1207,7 +1224,7 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     const rows = (await client.query("SELECT id::text, name FROM data_sources")).rows as { id: string; name: string }[];
     const source = rows.find((s) => s.name.toLowerCase() === q) || rows.find((s) => s.name.toLowerCase().includes(q));
     if (!source) return `не нашёл источник «${args.name}» — есть: ${rows.map((s) => s.name).join(", ") || "источников пока нет"}`;
-    const result = await refreshDataSourceById(source.id);
+    const result = await refreshDataSourceById(source.id, { inboxId });
     return result.ok ? `источник «${source.name}» обновлён: ${result.summary.slice(0, 200)}` : `не удалось обновить «${source.name}»: ${result.error}`;
   }
 
@@ -1310,6 +1327,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
       for (let step = 0; step < 5; step += 1) {
         jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
+        setPhase(item.id, "Подбирает инструмент/навык");
         const message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal);
         if (!message.tool_calls?.length) {
           reply = message.content || "";
@@ -1320,8 +1338,9 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
         for (const call of message.tool_calls) {
           let result: string;
+          setPhase(item.id, `Применяет инструмент/навык: ${call.function?.name || "?"}`);
           try {
-            result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+            result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList, item.id);
             jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
           } catch (error) {
             result = describeToolFailure(call.function?.name || "инструмент", error);
@@ -1335,6 +1354,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       }
       if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
       jlog(item.id, `готово: инструменты=[${toolsUsed.join(", ")}], ответ="${reply.slice(0, 200)}"`);
+      jarvisPhase.delete(String(item.id));
 
       await client.query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
@@ -3065,6 +3085,12 @@ function mboxDevApi() {
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
+          }
+
+          const phaseMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)\/phase$/);
+          if (phaseMatch && req.method === "GET") {
+            const entry = jarvisPhase.get(phaseMatch[1]);
+            return sendJson(res, 200, { phase: entry?.phase || null });
           }
 
           const cancelMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)\/cancel$/);

@@ -89,7 +89,6 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     // Пилюля в шапке — про постоянных агентов (Джарвис/Claude/Codex), не про человека (Admin
     // тоже "на связи", пока открыт сайт) и не про разовые debug/smoke-сессии.
     const knownAgents = data.agents.filter((agent) => agentFamily(agent.name));
-    const active = knownAgents.filter((agent) => effectiveStatus(agent) === "active");
     const working = knownAgents.filter((agent) => isAgentWorking(agent, data.runs));
     const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
     const onReview = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "review").length, 0);
@@ -111,13 +110,12 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
 
     if (blocked) return { state: "attention" as const, label: `${blocked} ${plural(blocked, "задача заблокирована", "задачи заблокированы", "задач заблокировано")}` };
     if (onReview) return { state: "attention" as const, label: `${onReview} ${plural(onReview, "задача ждёт", "задачи ждут", "задач ждут")} проверки` };
-
     if (leased.length) return { state: "connected" as const, label: `${leased[0].claimed_by} держит «${leased[0].title}»` };
-    if (active.length === 1) return { state: "connected" as const, label: `${active[0].name} на связи, задачу не взял` };
-    if (active.length > 1) return { state: "connected" as const, label: `${active.length} агента на связи: ${active.map((agent) => agent.name).join(", ")}` };
 
-    const idle = [...knownAgents].sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""))[0];
-    return { state: "connected" as const, label: idle ? `Тишина · последний ${idle.name} ${formatSince(idle.last_seen)}` : "Агентов нет на связи" };
+    // Кто просто "на связи" / "тишина" — это состав, не событие: место ему в консоли (заголовок
+    // чата), не в шапке страницы. Раньше пилюля в шапке дублировала ростер консоли тем же текстом
+    // ("2 агента на связи: Claude, Джарвис") — теперь шапка молчит, если сказать нечего.
+    return { state: "connected" as const, label: "MBOX" };
   }, [realtime.state, realtime.label, data.agents, data.inbox, data.projects, data.runs]);
   const agentLabel = headerStatus.label;
   const headerState = headerStatus.state;

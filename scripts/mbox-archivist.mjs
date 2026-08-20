@@ -25,6 +25,9 @@ function jlog(inboxId, message) {
 }
 const groqKey = process.env.GROQ_API_KEY;
 const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+// См. server/mbox-server.mjs — классификация памяти не оркестрирует инструменты, это одноразовый
+// "скилл": отдаём его модели с более щедрой квотой, не тесному бюджету "Прораба".
+const groqModelJunior = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
 // Только для текста, который Джарвис показывает пользователю — сам по себе таймер здесь не настраивается
 // (см. /etc/systemd/system/mbox-archivist.timer на сервере, OnUnitActiveSec).
@@ -78,12 +81,12 @@ async function mboxFetch(path, init = {}) {
   return response.json();
 }
 
-async function groqChat(messages, { json = false, tools = null } = {}, attempt = 0) {
+async function groqChat(messages, { json = false, tools = null, model = groqModel } = {}, attempt = 0) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${groqKey}` },
     body: JSON.stringify({
-      model: groqModel,
+      model,
       messages,
       temperature: 0.2,
       ...(json ? { response_format: { type: "json_object" } } : {}),
@@ -102,14 +105,14 @@ async function groqChat(messages, { json = false, tools = null } = {}, attempt =
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
-    return groqChat(messages, { json, tools }, attempt + 1);
+    return groqChat(messages, { json, tools, model }, attempt + 1);
   }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
   const usage = data.usage || {};
   mboxFetch("/api/mbox/agent/groq-usage", {
     method: "POST",
-    body: JSON.stringify({ purpose: "cron", model: groqModel, prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 }),
+    body: JSON.stringify({ purpose: "cron", model, prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 }),
   }).catch((error) => console.error(`groq_usage log failed: ${error.message}`));
   return tools ? data.choices?.[0]?.message ?? { content: "" } : data.choices?.[0]?.message?.content ?? "";
 }
@@ -976,7 +979,7 @@ async function classifyMemories() {
       },
       { role: "user", content: JSON.stringify(candidates.map((memory) => ({ id: memory.id, title: memory.title, content: (memory.content || "").slice(0, 400) }))) },
     ],
-    { json: true },
+    { json: true, model: groqModelJunior },
   );
 
   let parsed;
