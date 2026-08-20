@@ -3,6 +3,7 @@ import { BookOpen, Flag, Link2, Pencil, Plus, Sparkles, X } from "lucide-react";
 import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
 import { projectMemoryMatches } from "../lib/memory";
+import { MemoryModal } from "../features/memories/MemoryModal";
 import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, Memory, Project } from "../types";
@@ -24,6 +25,7 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
   const railRef = useWheelToHorizontal<HTMLDivElement>();
   const [links, setLinks] = useState<MemoryLink[]>([]);
   const [editing, setEditing] = useState<Memory | null>(null);
+  const [open, setOpen] = useState<Memory | null>(null);
   const [projectId, setProjectId] = useState("");
 
   useEffect(() => {
@@ -166,8 +168,11 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
         }
       >
         <MemoryEditor editing={editing} projects={projects} onSaved={onSaved} onDone={() => setEditing(null)} presetProjectId={projectId} />
-        <MemoryTable memories={visibleMemories} linksByMemory={linksByMemory} onEdit={setEditing} editingId={editing?.id} />
+        <MemoryTable memories={visibleMemories} linksByMemory={linksByMemory} onEdit={setEditing} onOpen={setOpen} editingId={editing?.id} />
       </Panel>
+
+      {/* По id, не по ссылке: после сохранения приходит новый объект memory с тем же id. */}
+      {open && <MemoryModal memory={memories.find((memory) => memory.id === open.id) ?? open} onClose={() => setOpen(null)} onSaved={onSaved} />}
     </>
   );
 }
@@ -269,7 +274,7 @@ function MemoryEditor({ editing, projects, onSaved, onDone, presetProjectId }: {
 }
 
 /* Таблица на узкой ширине разбирается в карточки — подписи колонок подставляются из data-label. */
-function MemoryTable({ memories, linksByMemory, onEdit, editingId }: { memories: Memory[]; linksByMemory: Map<string, LinkView[]>; onEdit: (memory: Memory) => void; editingId?: string }) {
+function MemoryTable({ memories, linksByMemory, onEdit, onOpen, editingId }: { memories: Memory[]; linksByMemory: Map<string, LinkView[]>; onEdit: (memory: Memory) => void; onOpen: (memory: Memory) => void; editingId?: string }) {
   if (!memories.length) return <EmptyState text="Память в базе пока пустая" />;
   return (
     <TableWrap className="memory-table-wrap">
@@ -292,7 +297,9 @@ function MemoryTable({ memories, linksByMemory, onEdit, editingId }: { memories:
             return (
               <tr key={memory.id} className={editingId === memory.id ? "row-editing" : undefined}>
                 <td data-label="ID">#{memory.id}</td>
-                <td data-label="Название">{memory.title}</td>
+                <td data-label="Название">
+                  <button type="button" className="memory-title-open" onClick={() => onOpen(memory)}>{memory.title}</button>
+                </td>
                 <td data-label="Связи">
                   {memLinks.length ? (
                     <div className="memory-links-cell">

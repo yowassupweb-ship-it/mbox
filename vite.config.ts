@@ -352,6 +352,14 @@ async function queryPostgres<T extends QueryResultRow>(sql: string, values: unkn
 // Зеркало server/mbox-server.mjs — прямой ответ Джарвиса из POST /agent/inbox, без ожидания
 // минутного тика systemd-таймера (scripts/mbox-archivist.mjs), который разбирает только память.
 const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
+
+/** Подробный трейс поведения Джарвиса — шаг цикла, какой инструмент с какими аргументами,
+ * что вернул. Раньше в логах было видно только финальный успех/провал, а не то, ПОЧЕМУ модель
+ * решила вызвать именно этот инструмент или почему застряла. dev-сервер держит эти логи в stdout
+ * терминала, где `npm run dev` запущен. */
+function jlog(inboxId: unknown, message: string) {
+  console.log(`[jarvis #${inboxId}] ${message}`);
+}
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
@@ -658,6 +666,47 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "list_data_sources",
+      description: "Список источников данных — внешних сайтов/API, которые MBOX сам периодически перечитывает по графику и держит в памяти свежую сводку.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Ограничить одним проектом, необязательно" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_data_source",
+      description: "Завести новый источник данных: URL, который MBOX будет сам периодически перечитывать и класть сводку в память. Нужен проект ИЛИ компания, к которой привязать.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Короткое название источника, например «Сайт vs-travel.ru»" },
+          url: { type: "string", description: "Полный адрес страницы или API" },
+          project_name: { type: "string", description: "Проект, к которому привязать — если это не компания" },
+          company_name: { type: "string", description: "Компания, к которой привязать — если это не проект" },
+          schedule_minutes: { type: "number", description: "Как часто перечитывать, в минутах. По умолчанию раз в сутки (1440)." },
+        },
+        required: ["name", "url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "refresh_data_source",
+      description: "Перечитать источник данных прямо сейчас, не дожидаясь графика.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "Название источника, максимально похожее на существующее" } },
+        required: ["name"],
+      },
+    },
+  },
 ];
 
 function excerptAround(text: string, query: string, radius: number) {
@@ -705,6 +754,46 @@ async function logJarvisError({ source = "reply", toolName = "", inboxId = null,
     );
   } catch (error) {
     console.error(`jarvis_errors insert failed: ${(error as Error).message}`);
+  }
+}
+
+/** См. server/mbox-server.mjs — общая логика для REST-ручки refresh и инструмента Джарвиса. */
+async function refreshDataSourceById(id: string): Promise<{ ok: boolean; summary: string; error?: string }> {
+  const row = (await queryPostgres("SELECT id::text, project_id::text, name, url, access_level, last_memory_id::text FROM data_sources WHERE id = $1", [id])).rows[0] as { id: string; project_id: string | null; name: string; url: string; access_level: string; last_memory_id: string | null } | undefined;
+  if (!row) return { ok: false, summary: "", error: "источник не найден" };
+  try {
+    const response = await fetch(row.url, { redirect: "follow" });
+    if (!response.ok) throw new Error(`fetch ${response.status}`);
+    const html = await response.text();
+    const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000);
+    const digestMessage = await groqComplete(
+      [
+        { role: "system", content: "Сделай короткую сводку веб-страницы для системы памяти: 5-10 пунктов, факты и цифры, без воды, на русском." },
+        { role: "user", content: text || "(пустая страница)" },
+      ],
+      undefined,
+      "reply",
+    );
+    const digest = String(digestMessage.content || "").trim().slice(0, 3000);
+    let memoryId = row.last_memory_id;
+    if (memoryId) {
+      await queryPostgres("UPDATE memories SET content = $1, updated_at = now() WHERE id = $2", [digest, memoryId]);
+    } else {
+      const createdMemory = await queryPostgres(
+        `INSERT INTO memories(project_id, title, content, entity_type, access_level, tags, metadata)
+         VALUES ($1, $2, $3, 'fact', $4, $5, $6) RETURNING id::text`,
+        [row.project_id, `Источник: ${row.name}`, digest, row.access_level || "agents", ["источник-данных"], JSON.stringify({ source_agent: JARVIS_NAME, data_source_id: row.id, data_source_url: row.url })],
+      );
+      memoryId = (createdMemory.rows[0] as { id: string }).id;
+    }
+    await queryPostgres(
+      "UPDATE data_sources SET last_fetched_at = now(), last_status = 'ok', last_summary = $1, last_memory_id = $2, updated_at = now() WHERE id = $3",
+      [digest.slice(0, 500), memoryId, row.id],
+    );
+    return { ok: true, summary: digest };
+  } catch (error) {
+    await queryPostgres("UPDATE data_sources SET last_fetched_at = now(), last_status = 'error', last_summary = $1, updated_at = now() WHERE id = $2", [String((error as Error).message || error).slice(0, 500), row.id]);
+    return { ok: false, summary: "", error: (error as Error).message || String(error) };
   }
 }
 
@@ -960,6 +1049,54 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     return `найдено в «${project.name}»: ${matches.join(", ")}`;
   }
 
+  if (name === "list_data_sources") {
+    let where = "";
+    const params: unknown[] = [];
+    if (args.project_name) {
+      const project = matchProjectFuzzy(args.project_name, projectList);
+      if (project) { where = "WHERE project_id = $1"; params.push(project.id); }
+    }
+    const rows = (await client.query(`SELECT name, url, schedule_minutes, last_fetched_at::text, last_status FROM data_sources ${where} ORDER BY name`, params)).rows as { name: string; url: string; schedule_minutes: number; last_fetched_at: string | null; last_status: string }[];
+    if (!rows.length) return "источников данных пока нет";
+    const lines = rows.map((s) => `${s.name} (${s.url}) — ${s.last_status}, последнее обновление: ${s.last_fetched_at || "ещё не было"}`);
+    return `источники данных (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "create_data_source") {
+    const sourceName = String(args.name || "").trim();
+    const sourceUrl = String(args.url || "").trim();
+    if (!sourceName || !sourceUrl) return "не создал источник — нужны и название, и адрес";
+    let projectId: string | null = null;
+    let companyId: string | null = null;
+    if (args.project_name) {
+      const project = matchProjectFuzzy(args.project_name, projectList);
+      if (!project) return `не нашёл проект «${args.project_name}»`;
+      projectId = project.id;
+    }
+    if (args.company_name) {
+      const companyList = (await client.query("SELECT id::text, name FROM companies ORDER BY name")).rows as { id: string; name: string }[];
+      const company = matchCompanyFuzzy(args.company_name, companyList);
+      if (!company) return `не нашёл компанию «${args.company_name}»`;
+      companyId = company.id;
+    }
+    if (!projectId && !companyId) return "не создал источник — укажи проект или компанию, к которой привязать";
+    const inserted = await client.query(
+      `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes)
+       VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440)) RETURNING id::text`,
+      [projectId, companyId, sourceName, sourceUrl, Number(args.schedule_minutes) || 0],
+    );
+    return `создан источник «${sourceName}» (#${(inserted.rows[0] as { id: string }).id}), первое чтение — на ближайшем тике архивариуса`;
+  }
+
+  if (name === "refresh_data_source") {
+    const q = String(args.name || "").trim().toLowerCase();
+    const rows = (await client.query("SELECT id::text, name FROM data_sources")).rows as { id: string; name: string }[];
+    const source = rows.find((s) => s.name.toLowerCase() === q) || rows.find((s) => s.name.toLowerCase().includes(q));
+    if (!source) return `не нашёл источник «${args.name}» — есть: ${rows.map((s) => s.name).join(", ") || "источников пока нет"}`;
+    const result = await refreshDataSourceById(source.id);
+    return result.ok ? `источник «${source.name}» обновлён: ${result.summary.slice(0, 200)}` : `не удалось обновить «${source.name}»: ${result.error}`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -996,7 +1133,11 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь файлы), "
         + "list_companies и get_company_info (КОМПАНИЯ — не проект: контейнер верхнего уровня, "
         + "владеет несколькими проектами; вопросы про юрлицо, контакты, бренд, реквизиты, тон общения — "
-        + "это компания, используй эти инструменты, а не get_project_info). Если просят "
+        + "это компания, используй эти инструменты, а не get_project_info), "
+        + "list_data_sources, create_data_source и refresh_data_source (источник данных — внешний сайт или "
+        + "API, который MBOX сам периодически перечитывает по графику и кладёт короткую сводку в память; "
+        + "если просят «следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory). "
+        + "Если просят "
         + "одно из этого — вызови функцию, не пиши текстом, что сделал это. "
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
         + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "
@@ -1032,19 +1173,25 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       const actionLog: string[] = [];
       const toolsUsed: string[] = [];
       let reply = "";
+      jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
       for (let step = 0; step < 5; step += 1) {
+        jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
         const message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal);
         if (!message.tool_calls?.length) {
           reply = message.content || "";
+          jlog(item.id, `шаг ${step}: без tool_calls, финальный текст (${reply.length} символов)`);
           break;
         }
+        jlog(item.id, `шаг ${step}: ${message.tool_calls.length} tool_calls — ${message.tool_calls.map((c) => `${c.function?.name}(${c.function?.arguments})`).join(", ")}`);
         messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
         for (const call of message.tool_calls) {
           let result: string;
           try {
             result = await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList);
+            jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
           } catch (error) {
             result = describeToolFailure(call.function?.name || "инструмент", error);
+            jlog(item.id, `  ${call.function?.name} -> ОШИБКА: ${(error as Error).stack || error}`);
             await logJarvisError({ source: "reply", toolName: call.function?.name || "", inboxId: item.id as string, projectId: (item.project_id as string) || null, message: (error as Error).message || String(error) });
           }
           actionLog.push(result);
@@ -1053,6 +1200,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         }
       }
       if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
+      jlog(item.id, `готово: инструменты=[${toolsUsed.join(", ")}], ответ="${reply.slice(0, 200)}"`);
 
       await client.query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
@@ -1068,7 +1216,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
     if ((error as Error).name === "AbortError") {
       console.error(`Jarvis reply for #${item.id} cancelled by user`);
     } else {
-      console.error(`Jarvis inline reply failed: ${(error as Error).message}`);
+      console.error(`Jarvis inline reply failed for #${item.id}: ${(error as Error).stack || error}`);
       await logJarvisError({ source: "reply", inboxId: item.id as string, projectId: (item.project_id as string) || null, message: (error as Error).message || String(error) });
       // См. server/mbox-server.mjs — молчание после сбоя неотличимо от "ещё думает", лучше честное "не получилось".
       try {
@@ -2182,6 +2330,79 @@ function mboxDevApi() {
                 projects: relations.rows.filter((edge) => edge.company_id === company.id),
               })),
             });
+          }
+
+          const dataSourceMatch = url.pathname.match(/^\/api\/mbox\/data-sources\/(\d+)$/);
+
+          if (url.pathname === "/api/mbox/data-sources") {
+            if (req.method === "POST") {
+              const body = await readBody<Record<string, unknown>>(req);
+              const name = String(body.name ?? "").trim();
+              const sourceUrl = String(body.url ?? "").trim();
+              if (!name || !sourceUrl) return sendJson(res, 400, { error: "name_and_url_required" });
+              if (!body.project_id && !body.company_id) return sendJson(res, 400, { error: "project_id_or_company_id_required" });
+              const result = await queryPostgres(
+                `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes, access_level)
+                 VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440), COALESCE(NULLIF($6, ''), 'agents'))
+                 RETURNING id::text`,
+                [body.project_id || null, body.company_id || null, name, sourceUrl, Number(body.schedule_minutes) || 0, String(body.access_level ?? "")],
+              );
+              broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
+              return sendJson(res, 201, { source: result.rows[0] });
+            }
+            const result = await queryPostgres(
+              `SELECT id::text, project_id::text, company_id::text, name, url, schedule_minutes,
+                      last_fetched_at::text, last_status, last_summary, last_memory_id::text, access_level,
+                      created_at::text, updated_at::text
+               FROM data_sources
+               ORDER BY name`,
+            );
+            return sendJson(res, 200, { sources: result.rows });
+          }
+
+          if (dataSourceMatch && req.method === "PATCH") {
+            const body = await readBody<Record<string, unknown>>(req);
+            const result = await queryPostgres(
+              `UPDATE data_sources SET
+                 name = COALESCE(NULLIF($1, ''), name),
+                 url = COALESCE(NULLIF($2, ''), url),
+                 schedule_minutes = COALESCE(NULLIF($3, 0), schedule_minutes),
+                 last_fetched_at = COALESCE($4, last_fetched_at),
+                 last_status = COALESCE(NULLIF($5, ''), last_status),
+                 last_summary = COALESCE($6, last_summary),
+                 last_memory_id = COALESCE($7, last_memory_id),
+                 access_level = COALESCE(NULLIF($8, ''), access_level),
+                 updated_at = now()
+               WHERE id = $9
+               RETURNING id::text`,
+              [
+                String(body.name ?? ""),
+                String(body.url ?? ""),
+                Number(body.schedule_minutes) || 0,
+                body.last_fetched_at ? new Date(body.last_fetched_at as string) : null,
+                String(body.last_status ?? ""),
+                body.last_summary ?? null,
+                body.last_memory_id || null,
+                String(body.access_level ?? ""),
+                dataSourceMatch[1],
+              ],
+            );
+            if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
+            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { source: result.rows[0] } : { error: "not_found" });
+          }
+
+          if (dataSourceMatch && req.method === "DELETE") {
+            await queryPostgres("DELETE FROM data_sources WHERE id = $1", [dataSourceMatch[1]]);
+            broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
+            return sendJson(res, 200, { ok: true });
+          }
+
+          const dataSourceRefreshMatch = url.pathname.match(/^\/api\/mbox\/data-sources\/(\d+)\/refresh$/);
+          if (dataSourceRefreshMatch && req.method === "POST") {
+            const result = await refreshDataSourceById(dataSourceRefreshMatch[1]);
+            if (result.error === "источник не найден") return sendJson(res, 404, { error: "not_found" });
+            broadcastRealtime(realtimeClients, "entity_changed", { entity: "data_sources" });
+            return sendJson(res, result.ok ? 200 : 502, result);
           }
 
           if (url.pathname === "/api/mbox/projects") {

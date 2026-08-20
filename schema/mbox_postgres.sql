@@ -240,6 +240,27 @@ CREATE TABLE IF NOT EXISTS jarvis_errors (
 
 CREATE INDEX IF NOT EXISTS idx_jarvis_errors_created_at ON jarvis_errors(created_at);
 
+CREATE TABLE IF NOT EXISTS data_sources (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+  company_id BIGINT REFERENCES companies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  schedule_minutes INT NOT NULL DEFAULT 1440,
+  last_fetched_at TIMESTAMPTZ,
+  last_status TEXT NOT NULL DEFAULT 'never',
+  last_summary TEXT NOT NULL DEFAULT '',
+  last_memory_id BIGINT REFERENCES memories(id) ON DELETE SET NULL,
+  access_level TEXT NOT NULL DEFAULT 'agents' CHECK (access_level IN ('private', 'agents', 'public')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (project_id IS NOT NULL OR company_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_sources_project ON data_sources(project_id);
+CREATE INDEX IF NOT EXISTS idx_data_sources_company ON data_sources(company_id);
+CREATE INDEX IF NOT EXISTS idx_data_sources_due ON data_sources(last_fetched_at);
+
 CREATE TABLE IF NOT EXISTS protected_secrets (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,

@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FolderPlus, Folder, ListTodo, Sliders, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { FolderBoard } from "../features/projects/FolderBoard";
-import { projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
+import { entityKindMeta, projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
 import { formatBytes } from "../lib/format";
 import { fetchJson } from "../lib/api";
 import { projectMemoryMatches } from "../lib/memory";
 import { countUnseen, onSeenChange } from "../lib/seen";
 import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
-import type { DecisionEntry, FolderRow, Memory, Project } from "../types";
+import type { Company, DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
 
 // Кроме постоянных сущностей у проекта могут быть свои папки: folder:<id>.
@@ -21,7 +21,7 @@ type View = "todo" | ProjectEntityKind | `folder:${string}`;
 // подключаются через «Добавить папку», как и любая произвольная папка (см. #159 — посты/документы
 // туда же, обычными папками, без отдельной сущности под каждый тип).
 const MANDATORY_ENTITIES: ProjectEntityKind[] = ["memories", "properties", "relations"];
-const OPTIONAL_ENTITIES: ProjectEntityKind[] = ["git", "figma", "stack", "philosophy", "deploy", "access"];
+const OPTIONAL_ENTITIES: ProjectEntityKind[] = ["git", "figma", "stack", "philosophy", "deploy", "access", "sources"];
 const entityOrder: ProjectEntityKind[] = [...MANDATORY_ENTITIES, ...OPTIONAL_ENTITIES];
 
 /** Проекты, заведённые до этой правки, не имеют props.enabled_entities — без этого у них молча
@@ -73,8 +73,9 @@ function parseRoute(key: string): { projectId?: string; view: View } {
   return { projectId: projectId || undefined, view: (known as string[]).includes(view) ? (view as View) : "todo" };
 }
 
-export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNodeKey, onSaved, renderEntity, renderTodoForm, onProjectContext, folders, memories, decisions }: {
+export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onSelectedNodeKey, onSaved, renderEntity, renderTodoForm, onProjectContext, folders, memories, decisions }: {
   projects: Project[];
+  companies: Company[];
   query: string;
   selectedNodeKey: string;
   onSelectedNodeKey: (key: string) => void;
@@ -88,6 +89,21 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
 }) {
   const railRef = useWheelToHorizontal<HTMLDivElement>();
   const route = parseRoute(selectedNodeKey);
+
+  // Раньше все проекты шли одним нерасчленённым рядом, и «Вокруг света» (компания-контейнер)
+  // выглядела строкой того же уровня, что и её собственные vs-works/shar-messenger — хотя по факту
+  // это владелец, а не соседний проект. company->project связи уже есть (graph_edges edge_type=owns),
+  // просто фронт их не читал. Карта project_id -> имя владеющей компании, чтобы подписать пилюлю.
+  const companyByProjectId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const company of companies) {
+      for (const link of company.projects) {
+        if (link.edge_type === "owns") map.set(link.project_id, company.name);
+      }
+    }
+    return map;
+  }, [companies]);
+
   const visible = useMemo(() => {
     const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const filtered = tokens.length
@@ -98,6 +114,14 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
       : projects;
     return [...filtered].sort((a, b) => projectPosition(a, projects.indexOf(a)) - projectPosition(b, projects.indexOf(b)));
   }, [projects, query, memories, decisions]);
+
+  // Позиция (position) — свободный порядок для драга, ничего не знает про компании: проекты одной
+  // компании вполне могли оказаться вперемешку с личными. Стабильная сортировка (Array.sort гарантированно
+  // стабилен с ES2019) добавляет группировку поверх уже отсортированного по позиции списка, не ломая
+  // порядок внутри каждой группы — просто собирает разбросанные группы вместе.
+  const groupedVisible = useMemo(() => {
+    return [...visible].sort((a, b) => (companyByProjectId.get(a.id) || "").localeCompare(companyByProjectId.get(b.id) || ""));
+  }, [visible, companyByProjectId]);
 
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -196,43 +220,54 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
   return (
     <div className="control-panel">
       <div className="project-rail" ref={railRef} role="tablist" aria-label="Проекты">
-        {visible.map((item) => (
-          <button
-            key={item.id}
-            role="tab"
-            aria-selected={item.id === project.id}
-            className={[
-              item.id === project.id ? "project-pill is-active" : "project-pill",
-              draggedProjectId === item.id ? "is-dragging" : "",
-              dropTargetId === item.id && draggedProjectId && draggedProjectId !== item.id ? "is-drop-target" : "",
-            ].filter(Boolean).join(" ")}
-            style={{ ["--project-color" as string]: item.color || "#2c2c2e" }}
-            onClick={() => go(item.id, view)}
-            onContextMenu={(event) => { if (onProjectContext) { event.preventDefault(); onProjectContext(item, { x: event.clientX, y: event.clientY }); } }}
-            draggable
-            onDragStart={(event) => { setDraggedProjectId(item.id); event.dataTransfer.setData("text/plain", item.id); event.dataTransfer.effectAllowed = "move"; }}
-            onDragOver={(event) => { if (draggedProjectId && draggedProjectId !== item.id) { event.preventDefault(); setDropTargetId(item.id); } }}
-            onDragLeave={() => setDropTargetId((current) => (current === item.id ? null : current))}
-            onDrop={(event) => {
-              event.preventDefault();
-              const draggedId = event.dataTransfer.getData("text/plain") || draggedProjectId;
-              setDropTargetId(null);
-              if (draggedId) reorderProject(draggedId, item.id);
-            }}
-            onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
-          >
-            {unseenByProject.get(item.id)! > 0 && (
-              <span className="project-pill-unread" title={`${unseenByProject.get(item.id)} непрочитанных`}>{unseenByProject.get(item.id)}</span>
-            )}
-            <span className="project-pill-name">{item.name}</span>
-            <span className="project-pill-meta">
-              <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>
-              <span className="project-pill-props" title="Ключей в props">
-                <Sliders size={10} />{Object.keys(item.props || {}).length}
-              </span>
-            </span>
-          </button>
-        ))}
+        {groupedVisible.map((item, index) => {
+          const companyLabel = companyByProjectId.get(item.id);
+          // Разрыв группы: подпись перед первым проектом компании и перед первым «моим» после
+          // компаний (или наоборот) — ровно там, где сосед в отсортированном порядке сменился.
+          const prevLabel = index > 0 ? (companyByProjectId.get(groupedVisible[index - 1].id) || null) : undefined;
+          const showDivider = index === 0 || (companyLabel || null) !== prevLabel;
+          return (
+            <div className="project-rail-item" key={item.id}>
+              {showDivider && (
+                <span className="project-rail-divider">{companyLabel || "Мои"}</span>
+              )}
+              <button
+                role="tab"
+                aria-selected={item.id === project.id}
+                className={[
+                  item.id === project.id ? "project-pill is-active" : "project-pill",
+                  draggedProjectId === item.id ? "is-dragging" : "",
+                  dropTargetId === item.id && draggedProjectId && draggedProjectId !== item.id ? "is-drop-target" : "",
+                ].filter(Boolean).join(" ")}
+                style={{ ["--project-color" as string]: item.color || "#2c2c2e" }}
+                onClick={() => go(item.id, view)}
+                onContextMenu={(event) => { if (onProjectContext) { event.preventDefault(); onProjectContext(item, { x: event.clientX, y: event.clientY }); } }}
+                draggable
+                onDragStart={(event) => { setDraggedProjectId(item.id); event.dataTransfer.setData("text/plain", item.id); event.dataTransfer.effectAllowed = "move"; }}
+                onDragOver={(event) => { if (draggedProjectId && draggedProjectId !== item.id) { event.preventDefault(); setDropTargetId(item.id); } }}
+                onDragLeave={() => setDropTargetId((current) => (current === item.id ? null : current))}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const draggedId = event.dataTransfer.getData("text/plain") || draggedProjectId;
+                  setDropTargetId(null);
+                  if (draggedId) reorderProject(draggedId, item.id);
+                }}
+                onDragEnd={() => { setDraggedProjectId(null); setDropTargetId(null); }}
+              >
+                {unseenByProject.get(item.id)! > 0 && (
+                  <span className="project-pill-unread" title={`${unseenByProject.get(item.id)} непрочитанных`}>{unseenByProject.get(item.id)}</span>
+                )}
+                <span className="project-pill-name">{item.name}</span>
+                <span className="project-pill-meta">
+                  <span className="project-pill-count">{item.todos.filter((todo) => !["done", "archived"].includes(todo.status)).length}</span>
+                  <span className="project-pill-props" title="Ключей в props">
+                    <Sliders size={10} />{Object.keys(item.props || {}).length}
+                  </span>
+                </span>
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="entity-strip" role="tablist" aria-label="Разделы проекта">
@@ -325,7 +360,10 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
 
       <section className="control-body">
         <header className="control-body-head">
-          <h2>{view === "todo" ? "Todo" : openFolder ? openFolder.name : projectEntityKinds[view as ProjectEntityKind].label}<span className="muted"> · {project.name}</span></h2>
+          {/* view может указывать на папку, которой уже нет (переключили проект, папку удалили
+              из другой вкладки) — тогда openFolder не находится, но view всё ещё "folder:123", а
+              не имя сущности. Раньше это падало в projectEntityKinds[view].label на undefined. */}
+          <h2>{view === "todo" ? "Todo" : openFolder ? openFolder.name : (entityKindMeta(view)?.label ?? "Раздел")}<span className="muted"> · {project.name}</span></h2>
           <span className="muted">
             {view === "todo" ? `${activeTodos} активно · ${project.todos.length} всего` : openFolder ? formatBytes(openFolder.memory_bytes) : formatBytes(project.memory_bytes)}
           </span>
@@ -344,6 +382,11 @@ export function ProjectsBoard({ projects, query, selectedNodeKey, onSelectedNode
             </>
           ) : openFolder ? (
             <FolderBoard folder={openFolder} project={project} memories={memories} onSaved={onSaved} />
+          ) : view.startsWith("folder:") ? (
+            // Ссылка на папку, которой у ЭТОГО проекта уже нет (удалили, переключили проект) —
+            // не пытаемся притвориться, что view — это имя сущности, иначе AccessPanel рисуется
+            // молча вместо честного «такой папки нет».
+            <EmptyState text="Эта папка не найдена — возможно, её удалили или вы смотрите другой проект." />
           ) : renderEntity(project, view as ProjectEntityKind)}
         </div>
       </section>

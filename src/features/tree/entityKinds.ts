@@ -1,6 +1,6 @@
-import { Brain, Figma, GitBranch, Layers, Link2, Rocket, ShieldCheck, Sliders, Sparkles, type LucideIcon } from "lucide-react";
+import { Brain, Figma, GitBranch, Layers, Link2, Radar, Rocket, ShieldCheck, Sliders, Sparkles, type LucideIcon } from "lucide-react";
 
-export type ProjectEntityKind = "relations" | "properties" | "philosophy" | "deploy" | "stack" | "access" | "git" | "figma" | "memories";
+export type ProjectEntityKind = "relations" | "properties" | "philosophy" | "deploy" | "stack" | "access" | "git" | "figma" | "memories" | "sources";
 
 /** У каждой постоянной сущности проекта своё лицо: иконка и акцент. Раньше все восемь были одинаковой папкой. */
 export const projectEntityKinds: Record<ProjectEntityKind, { icon: LucideIcon; accent: string; label: string }> = {
@@ -13,6 +13,7 @@ export const projectEntityKinds: Record<ProjectEntityKind, { icon: LucideIcon; a
   stack: { icon: Layers, accent: "#7cd8e8", label: "Стек" },
   access: { icon: ShieldCheck, accent: "#f2a0c0", label: "Доступ" },
   memories: { icon: Brain, accent: "#29e0d6", label: "Память" },
+  sources: { icon: Radar, accent: "#ffb454", label: "Источники" },
 };
 
 export function entityKindMeta(kind?: string) {

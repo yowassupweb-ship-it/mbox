@@ -38,6 +38,20 @@
   color: var(--text-main);
 }
 
+/* Название — вход в полноэкранную запись (MemoryModal), не просто текст ячейки. */
+.memory-title-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-main);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+.memory-title-open:hover { color: var(--accent-color); text-decoration: underline; }
+
 /* Ниже 760px таблица в семь колонок нечитаема: разбираем строки в карточки, подписи берём из data-label. */
 @media (max-width: 760px) {
   .memory-table { min-width: 0; }
@@ -320,9 +334,14 @@
   font-size: var(--text-sm);
 }
 
-/* Модалка todo на весь экран */
+/*
+ * Модалка на весь экран — общий каркас для todo и любой другой сущности, которую нужно читать
+ * не в узкой карточке, а развёрнуто. .entity-modal-* — те же правила, что .todo-modal-*, чтобы
+ * не плодить вторую копию CSS ради модалки записи памяти: разница только в содержимом body.
+ */
 
-.todo-modal-scrim {
+.todo-modal-scrim,
+.entity-modal-scrim {
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -333,7 +352,8 @@
   backdrop-filter: blur(6px);
 }
 
-.todo-modal {
+.todo-modal,
+.entity-modal {
   width: min(920px, 100%);
   max-height: min(88vh, 100%);
   display: grid;
@@ -346,23 +366,26 @@
 }
 
 .todo-modal-head,
-.todo-modal-foot {
+.todo-modal-foot,
+.entity-modal-head,
+.entity-modal-foot {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
 }
 
-.todo-modal-head { border-bottom: var(--border-width) solid var(--border-color); }
-.todo-modal-foot { border-top: var(--border-width) solid var(--border-color); }
-.todo-modal-foot-right { margin-left: auto; display: flex; gap: var(--space-2); }
+.todo-modal-head, .entity-modal-head { border-bottom: var(--border-width) solid var(--border-color); }
+.todo-modal-foot, .entity-modal-foot { border-top: var(--border-width) solid var(--border-color); }
+.todo-modal-foot-right, .entity-modal-foot-right { margin-left: auto; display: flex; gap: var(--space-2); }
 
-.todo-modal-title { display: grid; gap: 2px; min-width: 0; }
-.todo-modal-title strong { font-size: var(--text-lg); overflow-wrap: anywhere; }
-.todo-modal-title .muted { font-size: var(--text-xs); }
-.todo-modal-head .icon-button { margin-left: auto; flex: none; }
+.todo-modal-title, .entity-modal-title { display: grid; gap: 2px; min-width: 0; }
+.todo-modal-title strong, .entity-modal-title strong { font-size: var(--text-lg); overflow-wrap: anywhere; }
+.todo-modal-title .muted, .entity-modal-title .muted { font-size: var(--text-xs); }
+.todo-modal-head .icon-button, .entity-modal-head .icon-button { margin-left: auto; flex: none; }
 
-.todo-modal-body {
+.todo-modal-body,
+.entity-modal-body {
   display: grid;
   gap: var(--space-4);
   align-content: start;
@@ -372,7 +395,10 @@
 
 .todo-modal-body input,
 .todo-modal-body textarea,
-.todo-modal-body select {
+.todo-modal-body select,
+.entity-modal-body input,
+.entity-modal-body textarea,
+.entity-modal-body select {
   width: 100%;
   padding: 10px 12px;
   border: var(--border-width) solid var(--border-color);
@@ -382,7 +408,18 @@
   color: var(--text-main);
 }
 
-.todo-modal-body textarea { resize: vertical; line-height: 1.5; }
+.todo-modal-body textarea, .entity-modal-body textarea { resize: vertical; line-height: 1.5; }
+
+/* Текст записи в режиме чтения — не поле ввода, крупнее и вольнее по ширине строки. */
+.entity-modal-text {
+  margin: 0;
+  color: var(--text-main);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 72ch;
+}
 
 .todo-modal-controls {
   display: grid;
@@ -391,8 +428,8 @@
 }
 
 @media (max-width: 720px) {
-  .todo-modal-scrim { padding: 0; }
-  .todo-modal { width: 100%; max-height: 100svh; height: 100svh; border-radius: 0; }
+  .todo-modal-scrim, .entity-modal-scrim { padding: 0; }
+  .todo-modal, .entity-modal { width: 100%; max-height: 100svh; height: 100svh; border-radius: 0; }
   .todo-card-expand { opacity: 1; }
 }
 

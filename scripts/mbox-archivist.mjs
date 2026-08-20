@@ -18,6 +18,11 @@ const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "Admin";
 const password = process.env.MBOX_PASSWORD;
 const agentName = process.env.MBOX_AGENT_NAME || "Джарвис";
+
+/** См. server/mbox-server.mjs — подробный трейс шагов агентного цикла в stdout контейнера. */
+function jlog(inboxId, message) {
+  console.log(`[jarvis #${inboxId}] ${message}`);
+}
 const groqKey = process.env.GROQ_API_KEY;
 const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
@@ -373,6 +378,47 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "list_data_sources",
+      description: "Список источников данных — внешних сайтов/API, которые MBOX сам периодически перечитывает по графику и держит в памяти свежую сводку. Показывает, когда последний раз обновлялся источник и что там нашли.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Ограничить одним проектом, необязательно" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_data_source",
+      description: "Завести новый источник данных: URL, который MBOX будет сам периодически перечитывать и класть сводку в память. Нужен проект ИЛИ компания, к которой привязать.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Короткое название источника, например «Сайт vs-travel.ru»" },
+          url: { type: "string", description: "Полный адрес страницы или API" },
+          project_name: { type: "string", description: "Проект, к которому привязать — если это не компания" },
+          company_name: { type: "string", description: "Компания, к которой привязать — если это не проект" },
+          schedule_minutes: { type: "number", description: "Как часто перечитывать, в минутах. По умолчанию раз в сутки (1440)." },
+        },
+        required: ["name", "url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "refresh_data_source",
+      description: "Перечитать источник данных прямо сейчас, не дожидаясь графика.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "Название источника, максимально похожее на существующее" } },
+        required: ["name"],
+      },
+    },
+  },
 ];
 
 function excerptAround(text, query, radius) {
@@ -661,6 +707,57 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return `найдено в «${project.name}»: ${matches.join(", ")}`;
   }
 
+  if (name === "list_data_sources") {
+    const data = await mboxFetch("/api/mbox/data-sources");
+    let rows = data.sources || [];
+    if (args.project_name) {
+      const project = matchProjectFuzzy(args.project_name, projectList);
+      if (project) rows = rows.filter((s) => s.project_id === project.id);
+    }
+    if (!rows.length) return "источников данных пока нет";
+    const lines = rows.map((s) => `${s.name} (${s.url}) — ${s.last_status}, последнее обновление: ${s.last_fetched_at || "ещё не было"}`);
+    return `источники данных (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "create_data_source") {
+    const sourceName = String(args.name || "").trim();
+    const url = String(args.url || "").trim();
+    if (!sourceName || !url) return "не создал источник — нужны и название, и адрес";
+    let projectId = null;
+    let companyId = null;
+    if (args.project_name) {
+      const project = matchProjectFuzzy(args.project_name, projectList);
+      if (!project) return `не нашёл проект «${args.project_name}»`;
+      projectId = project.id;
+    }
+    if (args.company_name) {
+      const companies = (await mboxFetch("/api/mbox/companies")).companies || [];
+      const company = matchCompanyFuzzy(args.company_name, companies);
+      if (!company) return `не нашёл компанию «${args.company_name}»`;
+      companyId = company.id;
+    }
+    if (!projectId && !companyId) return "не создал источник — укажи проект или компанию, к которой привязать";
+    const created = await mboxFetch("/api/mbox/data-sources", {
+      method: "POST",
+      body: JSON.stringify({ name: sourceName, url, project_id: projectId, company_id: companyId, schedule_minutes: Number(args.schedule_minutes) || 0 }),
+    });
+    return `создан источник «${sourceName}» (#${created.source?.id}), первое чтение — на ближайшем тике`;
+  }
+
+  if (name === "refresh_data_source") {
+    const data = await mboxFetch("/api/mbox/data-sources");
+    const rows = data.sources || [];
+    const q = String(args.name || "").trim().toLowerCase();
+    const source = rows.find((s) => s.name.toLowerCase() === q) || rows.find((s) => s.name.toLowerCase().includes(q));
+    if (!source) return `не нашёл источник «${args.name}» — есть: ${rows.map((s) => s.name).join(", ") || "источников пока нет"}`;
+    try {
+      await refreshOneSource(source);
+      return `источник «${source.name}» обновлён`;
+    } catch (error) {
+      return `не удалось обновить «${source.name}»: ${error.message}`;
+    }
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -726,7 +823,10 @@ async function respondToRequests() {
         + "find_file (найти путь к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь "
         + "файлы), list_companies и get_company_info (КОМПАНИЯ — не проект: контейнер верхнего уровня, "
         + "владеет несколькими проектами; вопросы про юрлицо, контакты, бренд, реквизиты, тон общения — "
-        + "это компания, используй эти инструменты, а не get_project_info). Если "
+        + "это компания, используй эти инструменты, а не get_project_info), list_data_sources, "
+        + "create_data_source и refresh_data_source (источник данных — внешний сайт или API, который MBOX "
+        + "сам периодически перечитывает по графику и кладёт короткую сводку в память; если просят "
+        + "«следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory). Если "
         + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
@@ -755,19 +855,25 @@ async function respondToRequests() {
       const actionLog = [];
       const toolsUsed = [];
       let reply = "";
+      jlog(item.id, `старт (резервный cron): "${String(item.body || "").slice(0, 160)}"`);
       for (let step = 0; step < 5; step += 1) {
+        jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
         const message = await groqChat(messages, { tools: JARVIS_TOOLS });
         if (!message.tool_calls?.length) {
           reply = message.content || "";
+          jlog(item.id, `шаг ${step}: без tool_calls, финальный текст (${reply.length} символов)`);
           break;
         }
+        jlog(item.id, `шаг ${step}: ${message.tool_calls.length} tool_calls — ${message.tool_calls.map((c) => `${c.function?.name}(${c.function?.arguments})`).join(", ")}`);
         messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
         for (const call of message.tool_calls) {
           let result;
           try {
             result = await runJarvisTool(call.function?.name, call.function?.arguments, projectList);
+            jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
           } catch (error) {
             result = describeToolFailure(call.function?.name || "инструмент", error);
+            jlog(item.id, `  ${call.function?.name} -> ОШИБКА: ${error.stack || error}`);
             await logJarvisError({ source: "cron", toolName: call.function?.name || "", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
           }
           actionLog.push(result);
@@ -793,7 +899,7 @@ async function respondToRequests() {
       await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });
       answered += 1;
     } catch (error) {
-      console.error(`request #${item.id} failed: ${error.message}`);
+      console.error(`request #${item.id} failed: ${error.stack || error}`);
       await logJarvisError({ source: "cron", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
       // Тот же принцип, что в server/mbox-server.mjs: молчание после сбоя неотличимо от "ещё думает".
       try {
@@ -860,11 +966,107 @@ async function classifyMemories() {
   return { classified };
 }
 
+/** Голая разметка -> читаемый текст, без внешних библиотек (проект намеренно без лишних зависимостей). */
+function stripHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Забирает URL, сжимает в короткую сводку через Groq, кладёт/обновляет привязанную память. */
+async function refreshOneSource(source) {
+  const response = await fetch(source.url, { redirect: "follow" });
+  if (!response.ok) throw new Error(`fetch ${response.status}`);
+  const html = await response.text();
+  const text = stripHtml(html).slice(0, 6000);
+  const digestRaw = await groqChat([
+    {
+      role: "system",
+      content: "Сделай короткую сводку веб-страницы для системы памяти MBOX: 5-10 пунктов, факты и "
+        + "цифры, без воды и без markdown-заголовков, на русском даже если страница на другом языке. "
+        + "Если страница явно пустая или это заглушка/ошибка — так и напиши одной строкой.",
+    },
+    { role: "user", content: text || "(пустая страница)" },
+  ]);
+  const digest = String(digestRaw || "").trim().slice(0, 3000);
+
+  let memoryId = source.last_memory_id;
+  if (memoryId) {
+    await mboxFetch(`/api/mbox/memories/${memoryId}`, { method: "PATCH", body: JSON.stringify({ content: digest }) });
+  } else {
+    const created = await mboxFetch("/api/mbox/memories", {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: source.project_id || null,
+        title: `Источник: ${source.name}`,
+        content: digest,
+        entity_type: "fact",
+        access_level: source.access_level || "agents",
+        tags: ["источник-данных"],
+        metadata: { source_agent: agentName, data_source_id: source.id, data_source_url: source.url },
+      }),
+    });
+    memoryId = created.memory?.id || null;
+  }
+
+  await mboxFetch(`/api/mbox/data-sources/${source.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      last_fetched_at: new Date().toISOString(),
+      last_status: "ok",
+      last_summary: digest.slice(0, 500),
+      last_memory_id: memoryId,
+    }),
+  });
+}
+
+/** Раз в тик проверяет источники, у которых вышел срок (schedule_minutes с прошлого fetch), и
+ * обновляет не больше нескольких за раз — источников может стать много, а тик один раз в минуту:
+ * не хотим, чтобы один тик разом дёргал полсотни сайтов и утопил лимит запросов к Groq. */
+async function refreshDataSources() {
+  const data = await mboxFetch("/api/mbox/data-sources");
+  const sources = data.sources || [];
+  const now = Date.now();
+  const due = sources.filter((source) => {
+    if (!source.last_fetched_at) return true;
+    const dueAt = new Date(source.last_fetched_at).getTime() + Number(source.schedule_minutes || 1440) * 60000;
+    return now >= dueAt;
+  });
+
+  let refreshed = 0;
+  for (const source of due.slice(0, 3)) {
+    try {
+      await refreshOneSource(source);
+      refreshed += 1;
+      jlog(`source#${source.id}`, `обновлён: ${source.name} (${source.url})`);
+    } catch (error) {
+      console.error(`data source #${source.id} refresh failed: ${error.message}`);
+      await logJarvisError({ source: "cron-datasource", toolName: "refresh", inboxId: null, projectId: source.project_id || null, message: error.message || String(error) });
+      await mboxFetch(`/api/mbox/data-sources/${source.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ last_fetched_at: new Date().toISOString(), last_status: "error", last_summary: String(error.message || error).slice(0, 500) }),
+      }).catch(() => {});
+    }
+  }
+  return { refreshed, due: due.length, total: sources.length };
+}
+
 async function main() {
   await ping("session_start");
   const requests = await respondToRequests().catch((error) => ({ error: error.message }));
   const memory = await classifyMemories().catch((error) => ({ error: error.message }));
-  console.log(JSON.stringify({ at: new Date().toISOString(), agent: agentName, requests, memory }));
+  const sources = await refreshDataSources().catch((error) => ({ error: error.message }));
+  console.log(JSON.stringify({ at: new Date().toISOString(), agent: agentName, requests, memory, sources }));
 }
 
 await main();

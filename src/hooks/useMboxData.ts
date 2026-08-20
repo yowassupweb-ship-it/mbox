@@ -6,6 +6,7 @@ import type {
   AgentRun,
   Artifact,
   AuditEvent,
+  Company,
   DecisionEntry,
   FolderRow,
   GraphEdge,
@@ -20,6 +21,7 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [secrets, setSecrets] = useState<SecretSummary[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
@@ -52,6 +54,7 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
       load<{ memories: Memory[] }>(`/api/mbox/memories${qs}`, { memories: [] }),
       load<{ artifacts: Artifact[] }>(`/api/mbox/artifacts${qs}`, { artifacts: [] }),
       load<{ projects: Project[] }>(`/api/mbox/projects${qs}`, { projects: [] }),
+      load<{ companies: Company[] }>("/api/mbox/companies", { companies: [] }),
       load<{ folders: FolderRow[] }>(`/api/mbox/folders${qs}`, { folders: [] }),
       load<{ secrets: SecretSummary[] }>("/api/mbox/secrets", { secrets: [] }),
       load<{ events: AuditEvent[] }>("/api/mbox/history", { events: [] }),
@@ -61,11 +64,12 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
       load<{ runs: AgentRun[] }>("/api/mbox/agent/runs", { runs: [] }),
       load<{ decisions: DecisionEntry[] }>("/api/mbox/decisions", { decisions: [] }),
     ])
-      .then(([memoryData, artifactData, projectData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
+      .then(([memoryData, artifactData, projectData, companyData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
         if (!alive) return;
         setMemories(memoryData.memories);
         setArtifacts(artifactData.artifacts);
         setProjects(projectData.projects);
+        setCompanies(companyData.companies);
         setFolders(folderData.folders);
         setSecrets(secretData.secrets);
         setAuditEvents(historyData.events);
@@ -74,7 +78,7 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
         setInbox(inboxData.inbox);
         setRuns(runsData.runs);
         setDecisions(decisionData.decisions);
-        setOffline(failed === 11);
+        setOffline(failed === 12);
         setLoading(false);
       })
       .catch((cause) => {
@@ -92,5 +96,5 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
     };
   }, [query, revision, onAuthExpired]);
 
-  return { memories, artifacts, projects, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload };
+  return { memories, artifacts, projects, companies, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload };
 }

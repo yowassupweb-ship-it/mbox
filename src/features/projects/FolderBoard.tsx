@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { useState, type MouseEvent } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { formatSince } from "../../lib/format";
+import { MemoryModal } from "../memories/MemoryModal";
 import type { FolderRow, Memory, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
 
@@ -20,21 +21,30 @@ export function FolderBoard({ folder, project, memories, onSaved }: {
   onSaved: () => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const [open, setOpen] = useState<Memory | null>(null);
   const items = memories.filter((memory) => memory.folder_id === folder.id);
+
+  // Открытая запись живёт по id, а не по ссылке на объект: после сохранения приходит новый memory
+  // с тем же id — без этого модалка после save() потеряла бы связь со свежими данными и закрылась.
+  const openMemory = open ? items.find((memory) => memory.id === open.id) ?? open : null;
 
   return (
     <div className="folder-board">
+      <div className="folder-board-add">
+        {adding ? (
+          <NewNote folder={folder} project={project} onDone={() => setAdding(false)} onSaved={onSaved} />
+        ) : (
+          <Button variant="ghost" icon={Plus} onClick={() => setAdding(true)}>Добавить запись</Button>
+        )}
+      </div>
+
       {items.length ? (
         <div className="folder-notes">
-          {items.map((memory) => <FolderNote key={memory.id} memory={memory} onSaved={onSaved} />)}
+          {items.map((memory) => <FolderNote key={memory.id} memory={memory} onOpen={() => setOpen(memory)} onSaved={onSaved} />)}
         </div>
-      ) : <EmptyState text={`В папке «${folder.name}» пока пусто. Первая запись — ниже.`} />}
+      ) : <EmptyState text={`В папке «${folder.name}» пока пусто. Первая запись — выше.`} />}
 
-      {adding ? (
-        <NewNote folder={folder} project={project} onDone={() => setAdding(false)} onSaved={onSaved} />
-      ) : (
-        <Button variant="ghost" icon={Plus} onClick={() => setAdding(true)}>Добавить запись</Button>
-      )}
+      {openMemory && <MemoryModal memory={openMemory} onClose={() => setOpen(null)} onSaved={onSaved} />}
     </div>
   );
 }
@@ -77,56 +87,26 @@ function NewNote({ folder, project, onDone, onSaved }: { folder: FolderRow; proj
   );
 }
 
-function FolderNote({ memory, onSaved }: { memory: Memory; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(memory.title);
-  const [content, setContent] = useState(memory.content);
-  const [state, setState] = useState<SaveState>("idle");
-
-  // По содержимому, а не по ссылке: перезагрузка раз в пять секунд иначе затирала бы правку.
-  useEffect(() => {
-    setTitle(memory.title);
-    setContent(memory.content);
-    setState("idle");
-  }, [memory.id, memory.title, memory.content]);
-
-  async function save() {
-    setState("saving");
-    try {
-      await saveEntity("/api/mbox/memories", memory.id, { title, content });
-      setState("saved");
-      setEditing(false);
-      onSaved();
-    } catch {
-      setState("error");
-    }
-  }
-
-  async function remove() {
+/**
+ * Превью в узкой карточке колоночной вёрстки. Раньше карточка сама была инлайн-редактором —
+ * править можно было только в тесноте той же ширины, что и readonly-вид, и открыть запись
+ * во весь экран было нельзя вообще. Теперь карточка — это только вход: клик открывает
+ * MemoryModal, где и читать длинный текст, и править удобно.
+ */
+function FolderNote({ memory, onOpen, onSaved }: { memory: Memory; onOpen: () => void; onSaved: () => void }) {
+  async function remove(event: MouseEvent) {
+    event.stopPropagation();
     if (!window.confirm(`Удалить запись «${memory.title}»?`)) return;
     await fetchJson(`/api/mbox/memories/${memory.id}`, { method: "DELETE" });
     onSaved();
   }
 
-  if (editing) {
-    return (
-      <article className="folder-note is-editing">
-        <TextInput label="Заголовок" value={title} onChange={(event) => { setTitle(event.target.value); setState("idle"); }} />
-        <TextArea label="Текст" value={content} rows={8} onChange={(event) => { setContent(event.target.value); setState("idle"); }} />
-        <div className="folder-note-actions">
-          <Button variant="ghost" icon={X} onClick={() => { setEditing(false); setTitle(memory.title); setContent(memory.content); }}>Отмена</Button>
-          <SaveButton state={state} idleLabel="Сохранить" onClick={save} />
-        </div>
-      </article>
-    );
-  }
-
   return (
-    <article className="folder-note">
+    <article className="folder-note" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>
       <header>
         <strong>{memory.title}</strong>
-        <button type="button" onClick={() => setEditing(true)} aria-label="Править запись"><Pencil size={15} /></button>
-        <button type="button" onClick={() => void remove()} aria-label="Удалить запись"><Trash2 size={15} /></button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(); }} aria-label="Открыть запись"><Pencil size={15} /></button>
+        <button type="button" onClick={remove} aria-label="Удалить запись"><Trash2 size={15} /></button>
       </header>
       {memory.content && <p>{memory.content}</p>}
       <footer>{formatSince(memory.updated_at)}</footer>

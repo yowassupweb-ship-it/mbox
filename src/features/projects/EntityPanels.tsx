@@ -6,6 +6,7 @@ import type { Memory, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
 import { PropsEditor } from "./PropsEditor";
 import { RelationsPanel } from "./RelationsPanel";
+import { DataSourcesPanel } from "./DataSourcesPanel";
 import type { ProjectEntityKind } from "../tree/entityKinds";
 
 /** Единая точка входа для постоянных сущностей проекта. */
@@ -18,6 +19,7 @@ export function ProjectEntityView({ project, projects, memories, kind, onSaved }
   if (kind === "deploy") return <DeployPanel project={project} onSaved={onSaved} />;
   if (kind === "philosophy") return <PhilosophyPanel project={project} onSaved={onSaved} />;
   if (kind === "memories") return <MemoriesPanel project={project} memories={memories} />;
+  if (kind === "sources") return <DataSourcesPanel project={project} />;
   return <AccessPanel project={project} onSaved={onSaved} />;
 }
 

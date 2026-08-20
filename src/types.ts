@@ -15,6 +15,45 @@ export type Memory = {
   updated_at: string;
 };
 
+export type DataSource = {
+  id: string;
+  project_id: string | null;
+  company_id: string | null;
+  name: string;
+  url: string;
+  schedule_minutes: number;
+  last_fetched_at: string | null;
+  last_status: string;
+  last_summary: string;
+  last_memory_id: string | null;
+  access_level: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyProjectLink = {
+  id: string;
+  company_id: string;
+  company_name: string;
+  project_id: string;
+  project_name: string;
+  edge_type: string;
+};
+
+export type Company = {
+  id: string;
+  folder_id: string | null;
+  name: string;
+  status: string;
+  props: Record<string, string>;
+  color: string;
+  access_level: string;
+  memory_bytes: number;
+  created_at: string;
+  updated_at: string;
+  projects: CompanyProjectLink[];
+};
+
 export type Artifact = {
   id: string;
   folder_id: string | null;

@@ -19,6 +19,31 @@
 
 .project-rail::-webkit-scrollbar { display: none; }
 
+/* display: contents — обёртка нужна только в JSX (разделитель + пилюля вместе под одним key),
+   в раскладке её как будто нет: разделитель и пилюля — прямые участники того же flex-ряда. */
+.project-rail-item { display: contents; }
+
+/* Подпись компании-владельца (или «Мои») перед первой пилюлей её группы — раньше все проекты
+   стояли одним неразличимым рядом, и «Вокруг света» (компания-контейнер) выглядела соседкой
+   собственных vs-works/shar-messenger, а не их владельцем. */
+.project-rail-divider {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding-right: var(--space-3);
+  margin-right: 2px;
+  border-right: var(--border-width) solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.project-rail-item:first-child .project-rail-divider { margin-left: 0; }
+
 .project-pill {
   position: relative;
   flex: none;
@@ -467,12 +492,32 @@
 
 /* Содержимое папки проекта: записи и форма новой записи. */
 
-.folder-board { display: grid; gap: var(--space-4); justify-items: start; }
-
-.folder-notes {
+/* Кнопка «Добавить запись» и форма — не в общем потоке с записями, а закреплённая шапка блока:
+   при росте числа записей вниз кнопка раньше уезжала под них и требовала прокрутки, чтобы её найти. */
+.folder-board {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-  gap: var(--space-3);
+  gap: var(--space-4);
+  justify-items: start;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.folder-board-add {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  width: 100%;
+}
+
+/*
+ * CSS grid — не то, что нужно здесь: в обычной сетке все ячейки одной строки делят высоту самой
+ * высокой из них, поэтому короткая запись рядом с длинной раздувается пустым местом до её высоты.
+ * columns — многоколоночная вёрстка вроде газетной: каждая карточка сохраняет свою естественную
+ * высоту, следующая тут же встаёт под ней в той же колонке. break-inside: avoid не даёт карточке
+ * разорваться пополам между колонками.
+ */
+.folder-notes {
+  columns: 300px;
+  column-gap: var(--space-3);
   width: 100%;
 }
 
@@ -481,10 +526,12 @@
   gap: var(--space-2);
   align-content: start;
   padding: var(--space-4);
+  margin-bottom: var(--space-3);
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-lg);
   background: var(--element-bg);
   box-shadow: var(--container-inset);
+  break-inside: avoid;
 }
 
 .folder-note header {
@@ -520,7 +567,10 @@
 }
 
 .folder-note footer { color: var(--text-muted); font-size: var(--text-xs); }
-.folder-note.is-editing { grid-column: 1 / -1; }
+
+/* column-span: all вынимает карточку из колоночного потока на всю ширину — аналог grid-column:1/-1
+   для columns-вёрстки. Пока редактируешь, форма не должна жаться в узкую колонку. */
+.folder-note.is-editing { column-span: all; }
 
 .folder-note-form {
   display: grid;
@@ -529,6 +579,55 @@
 }
 
 .folder-note-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+
+/* Источники данных: внешний URL, который MBOX сам перечитывает по графику. */
+
+.sources-panel { width: 100%; }
+
+.source-rows { display: grid; gap: var(--space-3); width: 100%; margin-bottom: var(--space-4); }
+
+.source-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+  box-shadow: var(--container-inset);
+}
+
+.source-row-main { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; min-width: 0; }
+.source-row-main strong { overflow-wrap: anywhere; }
+
+.source-url {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.source-url:hover { color: var(--accent-color); text-decoration: underline; }
+
+.source-row-meta { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; font-size: var(--text-xs); }
+
+.source-status { display: inline-flex; align-items: center; gap: 4px; font-weight: var(--weight-medium); color: var(--text-muted); }
+.source-status.status-ok { color: var(--state-ok-soft); }
+.source-status.status-error { color: var(--state-danger); }
+
+.source-summary {
+  margin: 0;
+  color: #d8dfeb;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.source-row-actions { display: flex; gap: var(--space-2); }
+
+.source-form { display: grid; gap: var(--space-3); width: min(100%, 520px); }
+.source-form-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 
 /* Постоянные сущности проекта. У каждой своя форма, а не общая textarea. */
 
