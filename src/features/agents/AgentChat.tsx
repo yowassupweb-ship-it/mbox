@@ -163,7 +163,14 @@ function ThinkingSpinner() {
     const timer = window.setInterval(() => setFrame((value) => (value + 1) % THINKING_FRAMES.length), 220);
     return () => window.clearInterval(timer);
   }, []);
-  return <img className="console-thinking-spinner" src={THINKING_FRAMES[frame]} width={16} height={16} alt="" />;
+  return <img className="console-thinking-spinner" src={THINKING_FRAMES[frame]} width={32} height={32} alt="" />;
+}
+
+// Пока сервер не прислал реальную фазу (setPhase в replyAsJarvis) — вместо голого "думает"
+// каждый раз берётся случайный вариант, с лёгкой самоиронией.
+const THINKING_VERBS = ["думает", "размышляет", "подбирает инструмент", "готовится", "прикидывает"];
+function randomThinkingVerb() {
+  return THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)];
 }
 
 type LogLine = {
@@ -211,6 +218,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [awaitingJarvisId, setAwaitingJarvisId] = useState<string | null>(null);
   const [awaitingJarvisSince, setAwaitingJarvisSince] = useState<number | null>(null);
   const [awaitingJarvisPhase, setAwaitingJarvisPhase] = useState<string | null>(null);
+  const [awaitingJarvisVerb, setAwaitingJarvisVerb] = useState("думает");
   // Значение не читается — сам факт смены форсирует re-render, чтобы Date.now() в
   // awaitingJarvisSeconds ниже пересчитывался каждую секунду.
   const [, setElapsedTick] = useState(0);
@@ -519,6 +527,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if ((!mentionTarget || mentionTarget.toLowerCase() === JARVIS_NAME.toLowerCase()) && result.inbox_item?.id) {
         setAwaitingJarvisId(result.inbox_item.id);
         setAwaitingJarvisSince(Date.now());
+        setAwaitingJarvisVerb(randomThinkingVerb());
       }
       // Помечаем отправленным сразу. Ждать onSaved нельзя: он тянет одиннадцать ручек
       // через туннель к боевой базе, и «отправляется» висело бы секундами.
@@ -617,7 +626,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
                 <ThinkingSpinner />
-                <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || "думает"}… {awaitingJarvisSeconds}с</span>
+                <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || awaitingJarvisVerb}… {awaitingJarvisSeconds}с</span>
                 <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
                   <X size={11} />
                 </button>

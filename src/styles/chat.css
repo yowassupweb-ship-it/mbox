@@ -492,7 +492,10 @@
     position: fixed;
     top: 0;
     right: 0;
-    bottom: calc(59px + env(safe-area-inset-bottom));
+    /* Сплошная панель, не пузырь — тут видна даже мелкая щель. 51px = реальная высота
+       .bottom-nav (padding 7+7 + min-height 36 + бордер 1), а не 59px "с запасом", как у
+       плавающей версии — там 8px люфта были незаметны, тут читались как явный зазор. */
+    bottom: calc(51px + env(safe-area-inset-bottom));
     width: var(--console-panel-width, 33vw);
     max-height: none;
     height: auto;
