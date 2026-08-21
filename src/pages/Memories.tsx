@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { BookOpen, Flag, Link2, Maximize2, Pencil, Plus, Sparkles, X } from "lucide-react";
+import { Flag, Link2, Maximize2, Pencil, Plus, Sparkles, X } from "lucide-react";
 import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
 import { projectMemoryMatches } from "../lib/memory";
@@ -152,7 +152,6 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
 
       <Panel
         title="Память"
-        icon={BookOpen}
         actions={
           <div className="memory-panel-actions">
             {factsCount > 0 && (

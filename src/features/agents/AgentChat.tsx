@@ -862,7 +862,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               floating/fullscreen режимах уже, тянуть нечего. */}
           <div className="console-resize-handle" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Изменить ширину консоли" />
           <div className="console-bar">
-            <span className="console-bar-roster">{rosterSummary}</span>
+            <div className="console-bar-roster" title={rosterSummary}>
+              {online.length ? online.map(({ agent, state }) => (
+                <span className="console-bar-agent" key={agent.id}>
+                  <AgentAvatar name={agent.name} status={state.key} live={state.key === "working"} size={20} />
+                  <span className="console-bar-agent-name">{agent.name}</span>
+                </span>
+              )) : <span className="console-bar-agent muted">агентов нет на связи</span>}
+            </div>
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
           </div>
 
