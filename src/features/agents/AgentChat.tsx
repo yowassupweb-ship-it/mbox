@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -192,6 +192,7 @@ type LogLine = {
   pending?: "sending" | "sent" | "failed";
   toolsUsed?: string[];
   actions?: MessageAction[];
+  postBuilder?: PostPart[];
 };
 
 /** props.actions — структурированный выбор (варианты поста, да/нет-развилки), которые todo #203
@@ -206,6 +207,27 @@ function parseActions(raw: unknown): MessageAction[] | undefined {
   return actions.length ? actions : undefined;
 }
 
+export type PostPart = { key: string; label: string; options: string[] };
+
+/** props.post_builder — черновик поста по частям (заголовок/тело/CTA и т.п.), у каждой части
+ * несколько вариантов, собираются в консоли свайпом карточек, не выбором одного целого варианта.
+ * Часть скилла "Обучение на контенте": владелец должен собрать свой идеал из кусков, а не просто
+ * выбрать А/Б/В целиком. */
+function parsePostBuilder(raw: unknown): PostPart[] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const parts = (raw as { parts?: unknown }).parts;
+  if (!Array.isArray(parts)) return undefined;
+  const result = parts
+    .filter((p): p is { key: unknown; label: unknown; options: unknown } => typeof p === "object" && p !== null)
+    .map((p) => ({
+      key: String((p as { key?: unknown }).key ?? ""),
+      label: String((p as { label?: unknown }).label ?? ""),
+      options: Array.isArray((p as { options?: unknown }).options) ? (p as { options: unknown[] }).options.map((o) => String(o)).filter(Boolean) : [],
+    }))
+    .filter((p) => p.key && p.label && p.options.length > 0);
+  return result.length ? result : undefined;
+}
+
 /**
  * Чат — настоящая консоль, не мессенджер: моноширинный лог строк вместо пузырей, слэш-команды
  * работают локально (без похода в MCP-очередь), обычный текст уходит агентам как раньше.
@@ -215,6 +237,111 @@ function parseActions(raw: unknown): MessageAction[] | undefined {
  * написанное на первом же своём действии — и теперь не теряет его, пока реально не ответит
  * (см. pendingMessages в scripts/mbox-mcp-server.mjs).
  */
+const SWIPE_THRESHOLD_PX = 60;
+
+/**
+ * Одна часть поста (заголовок/тело/CTA/...) — карточка с несколькими вариантами, листается свайпом
+ * (pointer drag) или стрелками. Отдельная карточка на часть, не общий выбор "весь пост целиком":
+ * скилл "Обучение на контенте" собирает идеал из кусков, а не заставляет брать готовый вариант.
+ */
+function PostPartCard({ part, index, onChange }: { part: PostPart; index: number; onChange: (index: number) => void }) {
+  const dragStartX = useRef<number | null>(null);
+  const [dragDx, setDragDx] = useState(0);
+
+  function go(delta: number) {
+    const next = (index + delta + part.options.length) % part.options.length;
+    onChange(next);
+  }
+
+  function onPointerDown(event: ReactPointerEvent) {
+    dragStartX.current = event.clientX;
+    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+  }
+  function onPointerMove(event: ReactPointerEvent) {
+    if (dragStartX.current === null) return;
+    setDragDx(event.clientX - dragStartX.current);
+  }
+  function onPointerUp() {
+    if (dragDx > SWIPE_THRESHOLD_PX) go(-1);
+    else if (dragDx < -SWIPE_THRESHOLD_PX) go(1);
+    dragStartX.current = null;
+    setDragDx(0);
+  }
+
+  return (
+    <div className="post-part-card">
+      <div className="post-part-head">
+        <span className="post-part-label">{part.label}</span>
+        <span className="post-part-count">{index + 1}/{part.options.length}</span>
+      </div>
+      <div
+        className="post-part-swipe"
+        style={{ transform: dragDx ? `translateX(${dragDx}px)` : undefined }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        {renderMarkdownLite(part.options[index] ?? "")}
+      </div>
+      <div className="post-part-nav">
+        <button type="button" onClick={() => go(-1)} aria-label={`${part.label}: предыдущий вариант`}>‹</button>
+        <span className="post-part-dots">
+          {part.options.map((_, i) => <i key={i} className={i === index ? "is-active" : ""} />)}
+        </span>
+        <button type="button" onClick={() => go(1)} aria-label={`${part.label}: следующий вариант`}>›</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Сборка целого поста из выбранных частей + критика с "переделать". "Готово" отправляет собранный
+ * текст обычным сообщением (тем же путём, что и клик по кнопке варианта) — дальше с ним работает
+ * тот, кто отвечает в этом чате (обычно Claude, скилл рассчитан на старшую модель).
+ */
+function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: string) => void }) {
+  const [selected, setSelected] = useState<number[]>(() => parts.map(() => 0));
+  const [critique, setCritique] = useState("");
+
+  function assembled() {
+    return parts.map((part, i) => `${part.label}: ${part.options[selected[i]] ?? ""}`).join("\n\n");
+  }
+
+  function setPart(partIndex: number, optionIndex: number) {
+    setSelected((current) => current.map((v, i) => (i === partIndex ? optionIndex : v)));
+  }
+
+  return (
+    <div className="post-builder">
+      {parts.map((part, i) => (
+        <PostPartCard key={part.key} part={part} index={selected[i]} onChange={(next) => setPart(i, next)} />
+      ))}
+      <div className="post-builder-actions">
+        <button type="button" className="post-builder-done" onClick={() => onSend(`Собрал финальный вариант:\n\n${assembled()}`)}>
+          ✓ Готово
+        </button>
+      </div>
+      <div className="post-builder-critique">
+        <textarea
+          value={critique}
+          onChange={(event) => setCritique(event.target.value)}
+          placeholder="Что переделать? (необязательно — можно просто нажать «Готово» на подходящем)"
+          rows={2}
+        />
+        <button
+          type="button"
+          className="post-builder-redo"
+          disabled={!critique.trim()}
+          onClick={() => { onSend(`Переделай: ${critique.trim()}`); setCritique(""); }}
+        >
+          ↻ Переделать
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, onSaved }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
@@ -436,6 +563,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         ? (item.props.tools_used as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
       actions: parseActions(item.props?.actions),
+      postBuilder: parsePostBuilder(item.props?.post_builder),
     }));
     const fromPending: LogLine[] = stillPending.map((item) => ({
       id: item.id,
@@ -650,6 +778,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                           </button>
                         ))}
                       </span>
+                    )}
+                    {!!line.postBuilder?.length && (
+                      <PostBuilderCard parts={line.postBuilder} onSend={(text) => void send(text)} />
                     )}
                   </div>
                 </div>

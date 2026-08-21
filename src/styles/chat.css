@@ -729,6 +729,120 @@
 
 .console-action-btn:hover { background: color-mix(in srgb, var(--accent-color) 26%, transparent); border-color: color-mix(in srgb, var(--accent-color) 40%, transparent); }
 
+/* Конструктор поста по частям (props.post_builder) — карточка на часть (заголовок/тело/CTA),
+   листается свайпом или стрелками; "Готово" собирает выбранные части в одно сообщение. */
+.post-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 480px;
+}
+
+.post-part-card {
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .03);
+  overflow: hidden;
+}
+
+.post-part-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+
+.post-part-count { opacity: .6; }
+
+.post-part-swipe {
+  padding: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  transition: transform .08s ease;
+}
+
+.post-part-swipe:active { cursor: grabbing; }
+
+.post-part-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 4px 8px 8px;
+}
+
+.post-part-nav button {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+
+.post-part-nav button:hover { color: var(--text-main); }
+
+.post-part-dots { display: flex; gap: 5px; }
+.post-part-dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(255, 255, 255, .2); font-style: normal; }
+.post-part-dots i.is-active { background: var(--accent-color); }
+
+.post-builder-actions { display: flex; justify-content: flex-end; }
+
+.post-builder-done {
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--state-success, #3ecf8e) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--state-success, #3ecf8e) 16%, transparent);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.post-builder-critique {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.post-builder-critique textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .02);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.post-builder-redo {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.post-builder-redo:disabled { opacity: .4; cursor: not-allowed; }
+.post-builder-redo:not(:disabled):hover { color: var(--text-main); border-color: rgba(255, 255, 255, .3); }
+
 .console-log-line.typing { opacity: .7; }
 
 .console-cancel-btn {
