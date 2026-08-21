@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
+import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
@@ -208,6 +209,35 @@ const THINKING_VERBS = [
   "не торопится, как подобает",
   "консультируется с внутренним голосом",
   "делает вид, что всё под контролем",
+  "варит кофе для процессора",
+  "считает ворон в облаке",
+  "гуглит, но не признаётся",
+  "спрашивает совета у осьминога",
+  "перебирает варианты щупальцами",
+  "притворяется занятым",
+  "делает умное лицо",
+  "тянет резину",
+  "ищет вдохновение",
+  "медитирует над задачей",
+  "разговаривает сам с собой",
+  "смотрит в потолок с важным видом",
+  "перекладывает биты с места на место",
+  "запрашивает мудрость предков",
+  "втайне сомневается",
+  "листает справочник хорошего дворецкого",
+  "поправляет бабочку",
+  "прочищает горло",
+  "выигрывает время",
+  "советуется с чайником",
+  "созывает внутренний консилиум",
+  "делает вид, что всё сложно",
+  "притормаживает для эффекта",
+  "наслаждается драматической паузой",
+  "аккуратно паникует",
+  "вспоминает, зачем пришёл",
+  "торжественно молчит",
+  "нагоняет важности",
+  "делает три дела одновременно (на самом деле нет)",
 ];
 // Исключаем текущий вариант, чтобы плашка не «мигала» одним и тем же словом два раза подряд.
 function randomThinkingVerb(exclude?: string) {
@@ -871,6 +901,13 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               )) : <span className="console-bar-agent muted">агентов нет на связи</span>}
             </div>
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
+          </div>
+
+          {/* Действия, требующие решения человека (requires_human) — раньше жили только на
+              Обзоре, в консоли их не было видно вовсе, приходилось ждать, пока агент сам
+              не подвиснет с вопросом в логе. Тот же компонент, что на Обзоре — не дублируем логику. */}
+          <div className="console-needs-answer">
+            <NeedsAnswer inbox={inbox} onSaved={onSaved} />
           </div>
 
           <div className="console-log" ref={scrollRef}>

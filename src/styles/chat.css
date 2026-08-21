@@ -613,6 +613,22 @@
 }
 .agent-chat-shell .console-bar .chat-close:hover { color: var(--text-main); }
 
+/* Не растягивается (flex: none) — лог занимает всё оставшееся место. Если запросов накопилось
+   много, сама секция скроллится, не толкая шапку/поле ввода за пределы экрана. */
+.console-needs-answer {
+  flex: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 10px 14px 0;
+}
+
+.console-needs-answer:empty { display: none; }
+
+.console-needs-answer .needs-answer {
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+
 .console-log {
   flex: 1 1 auto;
   min-height: 0;
