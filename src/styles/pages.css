@@ -1430,6 +1430,7 @@ time {
      местами ломая раскладку страницы — теперь сама лента скроллится по горизонтали. */
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .console-line {
@@ -1441,6 +1442,11 @@ time {
   white-space: nowrap;
 }
 .console-line:hover { background: rgba(255, 255, 255, .03); }
+
+/* Обёртка time+actor+action существует только для мобильной раскладки ниже (группирует их в
+   одну перенос-строку). На десктопе она прозрачна для grid — её дети остаются обычными
+   колонками той же сетки .console-line, разметка не дублируется под два разных брейкпоинта. */
+.console-line-top { display: contents; }
 
 .c-time { color: #6b7280; }
 .c-actor { color: #cdd8ea; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
@@ -1458,11 +1464,32 @@ time {
 .act-heartbeat { opacity: .72; }
 
 @media (max-width: 720px) {
-  /* Остальное приложение переходит на мобильную раскладку при 720px (см. responsive.css) — этот
-     брейкпоинт был на 640px, поэтому в промежутке 641–720px жёсткая 5-колоночная сетка лога всё
-     ещё съезжала за край экрана. */
-  .console-line { grid-template-columns: 60px 1fr; grid-auto-flow: row; white-space: normal; row-gap: 0; }
-  .c-entity, .c-act, .c-actor { grid-column: 2; }
+  /* Жёсткая 5-колоночная сетка на телефоне не сжимается читаемо ни при каком grid-template —
+     переходим на две строки: время+актор+действие сверху (перенос разрешён), сущность и
+     сообщение снизу приглушённым текстом. Не таблица, а карточка лога — как строка в Termux. */
+  .console-body { overflow-x: hidden; -webkit-overflow-scrolling: auto; }
+
+  .console-line {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 14px;
+    white-space: normal;
+  }
+
+  .console-line-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .c-time { flex: none; }
+
+  .c-entity, .c-msg {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
 }
 
 /* SQL-действия из триггеров аудита (INSERT/UPDATE/DELETE) */

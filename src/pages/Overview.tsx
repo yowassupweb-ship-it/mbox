@@ -65,9 +65,11 @@ function ChangeLog({ events }: { events: AuditEvent[] }) {
       <div className="console-body">
         {rows.length ? rows.map((event) => (
           <div className={`console-line act-${(event.action || "").toLowerCase()}`} key={event.id}>
-            <span className="c-time">{formatClock(event.created_at)}</span>
-            <span className="c-actor">{event.actor || "system"}</span>
-            <span className="c-act">{event.action}</span>
+            <span className="console-line-top">
+              <span className="c-time">{formatClock(event.created_at)}</span>
+              <span className="c-actor">{event.actor || "system"}</span>
+              <span className="c-act">{event.action}</span>
+            </span>
             <span className="c-entity">{event.entity_type}{event.entity_id ? `#${event.entity_id}` : ""}</span>
             <span className="c-msg">{event.summary || "—"}</span>
           </div>

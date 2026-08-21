@@ -597,6 +597,19 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return () => window.clearInterval(interval);
   }, [awaitingJarvisSince]);
 
+  // На телефоне консоль — полноэкранный оверлей (position: fixed; inset: 0, см. chat.css), но
+  // страница ЗА ним оставалась живой и скроллящейся: резиновый оттяг документа на iOS/Android
+  // приподнимал body и на долю секунды показывал задний слой из-под консоли, будто она
+  // полупрозрачная. На широком экране консоль — пристыкованная боковая панель, а не оверлей,
+  // фон под ней и должен скроллиться — блокируем только в мобильном режиме.
+  useEffect(() => {
+    if (!open) return;
+    if (!window.matchMedia("(max-width: 720px)").matches) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [open]);
+
   const awaitingJarvisSeconds = awaitingJarvisSince ? Math.max(0, Math.floor((Date.now() - awaitingJarvisSince) / 1000)) : 0;
 
   const cancelJarvis = useCallback(() => {
