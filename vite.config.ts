@@ -897,6 +897,157 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_memory",
+      description: "Отредактировать существующую запись памяти по её ID — заголовок, содержание (дописать или заменить) или теги.",
+      parameters: {
+        type: "object",
+        properties: {
+          memory_id: { type: "string", description: "Номер записи (ID)" },
+          title: { type: "string", description: "Новый заголовок, необязательно" },
+          content: { type: "string", description: "Новое содержание, необязательно" },
+          mode: { type: "string", enum: ["append", "replace"], description: "Как применить content: append — дописать к текущему, replace (по умолчанию) — заменить целиком" },
+          tags: { type: "array", items: { type: "string" }, description: "Новый набор тегов — ЗАМЕНЯЕТ старый целиком, необязательно" },
+        },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_memory",
+      description: "Удалить запись памяти насовсем по её ID. Необратимо.",
+      parameters: {
+        type: "object",
+        properties: { memory_id: { type: "string", description: "Номер записи (ID) для удаления" } },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_company",
+      description: "Завести новую компанию в MBOX — контейнер верхнего уровня, который потом может владеть несколькими проектами.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Название новой компании" },
+          props: { type: "object", description: "Произвольные свойства ключ-значение (юрлицо, контакты и т.п.), необязательно" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_company_info",
+      description: "Дополнить или изменить карточку компании — записать новые свойства (юрлицо, контакты, бренд и т.п.) поверх существующих, старые не заполненные поля не трогает.",
+      parameters: {
+        type: "object",
+        properties: {
+          company_name: { type: "string", description: "Название компании, максимально похожее на существующую" },
+          props: { type: "object", description: "Свойства ключ-значение для добавления/обновления" },
+        },
+        required: ["company_name", "props"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_project_info",
+      description: "Изменить карточку проекта — стек, ссылку на git, деплой или статус. Указывай только то, что нужно поменять.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+          stack: { type: "array", items: { type: "string" }, description: "Новый технологический стек, необязательно" },
+          git_url: { type: "string", description: "Новая ссылка на репозиторий, необязательно" },
+          deploy_provider: { type: "string", description: "Новый провайдер деплоя, необязательно" },
+          deploy_target: { type: "string", description: "Новая цель деплоя, необязательно" },
+          status: { type: "string", description: "Новый статус проекта, необязательно" },
+        },
+        required: ["project_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_folder",
+      description: "Создать новую папку для организации памяти/артефактов/проектов/задач/скриптов/агентских областей.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Название новой папки" },
+          entity_type: { type: "string", enum: ["memory", "artifact", "project", "todo", "script", "agent_scope"], description: "Тип содержимого папки" },
+          parent_name: { type: "string", description: "Название родительской папки, если это вложенная папка, необязательно" },
+        },
+        required: ["name", "entity_type"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_folders",
+      description: "Посмотреть список существующих папок, можно ограничить типом содержимого.",
+      parameters: {
+        type: "object",
+        properties: { entity_type: { type: "string", enum: ["memory", "artifact", "project", "todo", "script", "agent_scope"], description: "Ограничить одним типом, необязательно" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "link_memories",
+      description: "Связать две записи памяти между собой отношением — например «связано», «противоречит», «уточняет».",
+      parameters: {
+        type: "object",
+        properties: {
+          memory_a_id: { type: "string", description: "Номер первой записи (ID)" },
+          memory_b_id: { type: "string", description: "Номер второй записи (ID)" },
+          relation: { type: "string", description: "Тип связи одним-двумя словами, по умолчанию «related»" },
+          description: { type: "string", description: "Пояснение связи, необязательно" },
+        },
+        required: ["memory_a_id", "memory_b_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_artifacts",
+      description: "Посмотреть список артефактов (осознанных находок/материалов, не сырого контента) — можно ограничить проектом.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Ограничить одним проектом, необязательно" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_artifact",
+      description: "Создать новый артефакт — осознанную находку или материал (например компонент, конфиг, решение), в отличие от сырой записи памяти.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Название артефакта" },
+          category: { type: "string", description: "Категория артефакта, например «component», «config», «decision»" },
+          content: { type: "string", description: "Содержимое артефакта" },
+          project_name: { type: "string", description: "Проект, к которому привязать, необязательно" },
+        },
+        required: ["name", "category", "content"],
+      },
+    },
+  },
 ];
 
 type PostStat = { id: string; title: string; hasPhoto: boolean; reactionsTotal: number; postedAt: string | null; rate: number };
@@ -1504,6 +1655,162 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     return `постов в базе: ${total}, с реакциями: ${withReactions} (${((withReactions / total) * 100).toFixed(0)}%), с фото: ${withPhoto} (${((withPhoto / total) * 100).toFixed(0)}%), средняя скорость реакций ${avgRate.toFixed(2)}/день. Для конкретики используй mode=top/bottom/by_photo.`;
   }
 
+  if (name === "update_memory") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи — возьми его из результатов search_memory";
+    const existing = (await client.query("SELECT id::text, title, content, tags FROM memories WHERE id = $1", [id])).rows[0] as { id: string; title: string; content: string; tags: string[] } | undefined;
+    if (!existing) return `запись #${id} не нашлась — возможно, удалена или номер неверный`;
+    const title = args.title !== undefined ? String(args.title).trim() : existing.title;
+    let content = existing.content;
+    if (args.content !== undefined) {
+      const newContent = String(args.content);
+      const mode = args.mode === "append" ? "append" : "replace";
+      content = mode === "append" && existing.content ? `${existing.content}\n\n${newContent}` : newContent;
+    }
+    const tags = Array.isArray(args.tags) ? (args.tags as unknown[]).map(String) : existing.tags;
+    await client.query(
+      "UPDATE memories SET title = $1, content = $2, tags = $3, updated_at = now() WHERE id = $4",
+      [title, content, tags, id],
+    );
+    await recordMemoryAction({ memoryId: id, actor: JARVIS_NAME, action: "update", note: "memory updated via Jarvis tool" });
+    return `обновлена запись памяти «${title}» (#${id})`;
+  }
+
+  if (name === "delete_memory") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи для удаления";
+    const existing = (await client.query("SELECT id::text, title FROM memories WHERE id = $1", [id])).rows[0] as { id: string; title: string } | undefined;
+    if (!existing) return `запись #${id} не нашлась — возможно, уже удалена или номер неверный`;
+    await recordMemoryAction({ memoryId: id, actor: JARVIS_NAME, action: "delete", note: "memory deleted via Jarvis tool" });
+    await client.query("DELETE FROM memories WHERE id = $1", [id]);
+    return `удалена запись памяти «${existing.title}» (#${id})`;
+  }
+
+  if (name === "create_company") {
+    const companyName = String(args.name || "").trim();
+    if (!companyName) return "не создал компанию — нет названия";
+    const existing = (await client.query("SELECT id::text, name FROM companies WHERE lower(name) = lower($1)", [companyName])).rows[0] as { id: string; name: string } | undefined;
+    if (existing) return `компания «${existing.name}» уже существует — используй update_company_info, чтобы дополнить её`;
+    const props = args.props && typeof args.props === "object" ? args.props : {};
+    const inserted = await client.query(
+      "INSERT INTO companies(name, status, props, access_level) VALUES ($1, 'active', $2, 'private') RETURNING id::text",
+      [companyName, JSON.stringify(props)],
+    );
+    return `создана компания «${companyName}» (#${(inserted.rows[0] as { id: string }).id})`;
+  }
+
+  if (name === "update_company_info") {
+    const companyList = (await client.query("SELECT id::text, name FROM companies ORDER BY name")).rows as { id: string; name: string }[];
+    const company = matchCompanyFuzzy(args.company_name, companyList);
+    if (!company) return `не нашёл компанию «${args.company_name}» — есть: ${companyList.map((c) => c.name).join(", ") || "компаний пока нет"}`;
+    const props = args.props && typeof args.props === "object" ? args.props as Record<string, unknown> : null;
+    if (!props || !Object.keys(props).length) return "нечего обновлять — не переданы свойства";
+    await client.query("UPDATE companies SET props = props || $1::jsonb, updated_at = now() WHERE id = $2", [JSON.stringify(props), company.id]);
+    return `у компании «${company.name}» обновлены свойства: ${Object.keys(props).join(", ")}`;
+  }
+
+  if (name === "update_project_info") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (args.stack !== undefined) { params.push(JSON.stringify(Array.isArray(args.stack) ? (args.stack as unknown[]).map(String) : [])); sets.push(`stack = $${params.length}`); }
+    if (args.git_url !== undefined) { params.push(String(args.git_url).trim()); sets.push(`git_url = $${params.length}`); }
+    if (args.deploy_provider !== undefined) { params.push(String(args.deploy_provider).trim()); sets.push(`deploy_provider = $${params.length}`); }
+    if (args.deploy_target !== undefined) { params.push(String(args.deploy_target).trim()); sets.push(`deploy_target = $${params.length}`); }
+    if (args.status !== undefined) { params.push(String(args.status).trim()); sets.push(`status = $${params.length}`); }
+    if (!sets.length) return "нечего обновлять — не переданы новые значения";
+    params.push(project.id);
+    await client.query(`UPDATE projects SET ${sets.join(", ")}, updated_at = now() WHERE id = $${params.length}`, params);
+    return `у проекта «${project.name}» обновлено: ${sets.map((s) => s.split(" = ")[0]).join(", ")}`;
+  }
+
+  if (name === "create_folder") {
+    const folderName = String(args.name || "").trim();
+    const entityTypes = ["memory", "artifact", "project", "todo", "script", "agent_scope"];
+    const entityType = entityTypes.includes(String(args.entity_type)) ? String(args.entity_type) : null;
+    if (!folderName || !entityType) return "не создал папку — нужны и название, и корректный тип (memory/artifact/project/todo/script/agent_scope)";
+    let parentId: string | null = null;
+    if (args.parent_name) {
+      const parent = (await client.query("SELECT id::text, name FROM folders WHERE name = $1", [String(args.parent_name).trim()])).rows[0] as { id: string; name: string } | undefined;
+      if (!parent) return `не нашёл родительскую папку «${args.parent_name}»`;
+      parentId = parent.id;
+    }
+    const existing = (await client.query(
+      "SELECT id::text FROM folders WHERE name = $1 AND parent_id IS NOT DISTINCT FROM $2",
+      [folderName, parentId],
+    )).rows[0];
+    if (existing) return `папка «${folderName}» уже существует на этом уровне`;
+    const inserted = await client.query(
+      "INSERT INTO folders(parent_id, name, entity_type, access_level) VALUES ($1, $2, $3, 'agents') RETURNING id::text",
+      [parentId, folderName, entityType],
+    );
+    return `создана папка «${folderName}» (тип ${entityType}${args.parent_name ? `, внутри «${args.parent_name}»` : ""}) (#${(inserted.rows[0] as { id: string }).id})`;
+  }
+
+  if (name === "list_folders") {
+    const entityTypes = ["memory", "artifact", "project", "todo", "script", "agent_scope"];
+    const entityType = entityTypes.includes(String(args.entity_type)) ? String(args.entity_type) : null;
+    const rows = (await client.query(
+      `SELECT f.name, f.entity_type, pf.name AS parent_name
+       FROM folders f LEFT JOIN folders pf ON pf.id = f.parent_id
+       WHERE $1::text IS NULL OR f.entity_type = $1
+       ORDER BY f.entity_type, f.name`,
+      [entityType],
+    )).rows as { name: string; entity_type: string; parent_name: string | null }[];
+    if (!rows.length) return entityType ? `папок типа «${entityType}» пока нет` : "папок пока нет";
+    const lines = rows.map((f) => `${f.name}${f.parent_name ? ` (в «${f.parent_name}»)` : ""} [${f.entity_type}]`);
+    return `папки (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "link_memories") {
+    const idA = String(args.memory_a_id || "").trim();
+    const idB = String(args.memory_b_id || "").trim();
+    if (!idA || !/^\d+$/.test(idA) || !idB || !/^\d+$/.test(idB)) return "нужны числовые ID обеих записей";
+    if (idA === idB) return "нельзя связать запись саму с собой";
+    const rows = (await client.query("SELECT id::text, title FROM memories WHERE id IN ($1, $2)", [idA, idB])).rows as { id: string; title: string }[];
+    const memA = rows.find((r) => r.id === idA);
+    const memB = rows.find((r) => r.id === idB);
+    if (!memA) return `запись #${idA} не нашлась`;
+    if (!memB) return `запись #${idB} не нашлась`;
+    const relation = String(args.relation || "").trim() || "related";
+    await client.query(
+      `INSERT INTO memory_links(from_memory_id, to_memory_id, link_type, description)
+       VALUES ($1, $2, $3, $4)`,
+      [idA, idB, relation, String(args.description || "")],
+    );
+    return `связал «${memA.title}» (#${idA}) → «${memB.title}» (#${idB}) отношением «${relation}»`;
+  }
+
+  if (name === "list_artifacts") {
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    if (args.project_name && !project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const rows = (await client.query(
+      `SELECT name, category, version, status FROM artifacts
+       WHERE $1::bigint IS NULL OR project_id = $1::bigint
+       ORDER BY updated_at DESC LIMIT 20`,
+      [project?.id || null],
+    )).rows as { name: string; category: string; version: string; status: string }[];
+    if (!rows.length) return project ? `у проекта «${project.name}» артефактов пока нет` : "артефактов пока нет";
+    const lines = rows.map((a) => `«${a.name}» (${a.category}, ${a.version}, ${a.status})`);
+    return `артефакты${project ? ` проекта «${project.name}»` : ""} (${rows.length}${rows.length === 20 ? "+" : ""}): ${lines.join("; ")}`;
+  }
+
+  if (name === "create_artifact") {
+    const artifactName = String(args.name || "").trim();
+    const category = String(args.category || "").trim();
+    const content = String(args.content || "").trim();
+    if (!artifactName || !category || !content) return "не создал артефакт — нужны название, категория и содержание";
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    if (args.project_name && !project) return `не нашёл проект «${args.project_name}»`;
+    const inserted = await client.query(
+      `INSERT INTO artifacts(project_id, name, category, version, status, content, access_level)
+       VALUES ($1, $2, $3, 'v1', 'created', $4, 'agents') RETURNING id::text`,
+      [project?.id || null, artifactName, category, content],
+    );
+    return `создан артефакт «${artifactName}» (${category})${project ? ` в проекте «${project.name}»` : ""} (#${(inserted.rows[0] as { id: string }).id})`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -1558,7 +1865,17 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "используй это для вопросов «какие даты у тура X» или «сколько мест на тур Y», не выдумывай цифры "
         + "и не ищи в памяти), analyze_posts (реальные инсайты по постам Telegram-канала — что заходит, что "
         + "нет, топ/антитоп по скорости набора реакций с поправкой на давность, сравнение с фото/без — "
-        + "используй это на вопросы про эффективность контента, не выдумывай форматы и цифры). Если просят "
+        + "используй это на вопросы про эффективность контента, не выдумывай форматы и цифры), "
+        + "update_memory (отредактировать запись памяти по ID — заголовок/содержание/теги, content можно "
+        + "дописать или заменить целиком), delete_memory (удалить запись памяти по ID, необратимо), "
+        + "create_company (завести новую компанию, необязательно сразу со свойствами), update_company_info "
+        + "(дописать/обновить свойства существующей компании поверх текущих, не стирая остальные), "
+        + "update_project_info (изменить стек/git/деплой/статус проекта — указывай только то, что реально "
+        + "меняешь), create_folder и list_folders (папки для организации памяти/артефактов/проектов/задач/"
+        + "скриптов/агентских областей), link_memories (связать две записи памяти отношением — «связано», "
+        + "«противоречит», «уточняет» и т.п., по ID), list_artifacts и create_artifact (артефакт — осознанная "
+        + "находка/материал вроде компонента, конфига или зафиксированного решения, в отличие от сырой записи "
+        + "памяти через record_memory). Если просят "
         + "одно из этого — вызови функцию, не пиши текстом, что сделал это. "
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
         + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "

@@ -529,6 +529,157 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_memory",
+      description: "Отредактировать существующую запись памяти по её ID — заголовок, содержание (дописать или заменить) или теги.",
+      parameters: {
+        type: "object",
+        properties: {
+          memory_id: { type: "string", description: "Номер записи (ID)" },
+          title: { type: "string", description: "Новый заголовок, необязательно" },
+          content: { type: "string", description: "Новое содержание, необязательно" },
+          mode: { type: "string", enum: ["append", "replace"], description: "Как применить content: append — дописать к текущему, replace (по умолчанию) — заменить целиком" },
+          tags: { type: "array", items: { type: "string" }, description: "Новый набор тегов — ЗАМЕНЯЕТ старый целиком, необязательно" },
+        },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_memory",
+      description: "Удалить запись памяти насовсем по её ID. Необратимо.",
+      parameters: {
+        type: "object",
+        properties: { memory_id: { type: "string", description: "Номер записи (ID) для удаления" } },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_company",
+      description: "Завести новую компанию в MBOX — контейнер верхнего уровня, который потом может владеть несколькими проектами.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Название новой компании" },
+          props: { type: "object", description: "Произвольные свойства ключ-значение (юрлицо, контакты и т.п.), необязательно" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_company_info",
+      description: "Дополнить или изменить карточку компании — записать новые свойства (юрлицо, контакты, бренд и т.п.) поверх существующих, старые не заполненные поля не трогает.",
+      parameters: {
+        type: "object",
+        properties: {
+          company_name: { type: "string", description: "Название компании, максимально похожее на существующую" },
+          props: { type: "object", description: "Свойства ключ-значение для добавления/обновления" },
+        },
+        required: ["company_name", "props"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_project_info",
+      description: "Изменить карточку проекта — стек, ссылку на git, деплой или статус. Указывай только то, что нужно поменять.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+          stack: { type: "array", items: { type: "string" }, description: "Новый технологический стек, необязательно" },
+          git_url: { type: "string", description: "Новая ссылка на репозиторий, необязательно" },
+          deploy_provider: { type: "string", description: "Новый провайдер деплоя, необязательно" },
+          deploy_target: { type: "string", description: "Новая цель деплоя, необязательно" },
+          status: { type: "string", description: "Новый статус проекта, необязательно" },
+        },
+        required: ["project_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_folder",
+      description: "Создать новую папку для организации памяти/артефактов/проектов/задач/скриптов/агентских областей.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Название новой папки" },
+          entity_type: { type: "string", enum: ["memory", "artifact", "project", "todo", "script", "agent_scope"], description: "Тип содержимого папки" },
+          parent_name: { type: "string", description: "Название родительской папки, если это вложенная папка, необязательно" },
+        },
+        required: ["name", "entity_type"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_folders",
+      description: "Посмотреть список существующих папок, можно ограничить типом содержимого.",
+      parameters: {
+        type: "object",
+        properties: { entity_type: { type: "string", enum: ["memory", "artifact", "project", "todo", "script", "agent_scope"], description: "Ограничить одним типом, необязательно" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "link_memories",
+      description: "Связать две записи памяти между собой отношением — например «связано», «противоречит», «уточняет».",
+      parameters: {
+        type: "object",
+        properties: {
+          memory_a_id: { type: "string", description: "Номер первой записи (ID)" },
+          memory_b_id: { type: "string", description: "Номер второй записи (ID)" },
+          relation: { type: "string", description: "Тип связи одним-двумя словами, по умолчанию «related»" },
+          description: { type: "string", description: "Пояснение связи, необязательно" },
+        },
+        required: ["memory_a_id", "memory_b_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_artifacts",
+      description: "Посмотреть список артефактов (осознанных находок/материалов, не сырого контента) — можно ограничить проектом.",
+      parameters: {
+        type: "object",
+        properties: { project_name: { type: "string", description: "Ограничить одним проектом, необязательно" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_artifact",
+      description: "Создать новый артефакт — осознанную находку или материал (например компонент, конфиг, решение), в отличие от сырой записи памяти.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Название артефакта" },
+          category: { type: "string", description: "Категория артефакта, например «component», «config», «decision»" },
+          content: { type: "string", description: "Содержимое артефакта" },
+          project_name: { type: "string", description: "Проект, к которому привязать, необязательно" },
+        },
+        required: ["name", "category", "content"],
+      },
+    },
+  },
 ];
 
 function excerptAround(text, query, radius) {
@@ -878,6 +1029,151 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return `найдено (${rows.length}): ${lines.join("; ")}`;
   }
 
+  if (name === "update_memory") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи — возьми его из результатов search_memory";
+    let existing;
+    try {
+      existing = (await mboxFetch(`/api/mbox/memories/${id}`)).memory;
+    } catch { existing = null; }
+    if (!existing) return `запись #${id} не нашлась — возможно, удалена или номер неверный`;
+    const title = args.title !== undefined ? String(args.title).trim() : existing.title;
+    let content = existing.content;
+    if (args.content !== undefined) {
+      const newContent = String(args.content);
+      const mode = args.mode === "append" ? "append" : "replace";
+      content = mode === "append" && existing.content ? `${existing.content}\n\n${newContent}` : newContent;
+    }
+    const tags = Array.isArray(args.tags) ? args.tags.map(String) : existing.tags;
+    await mboxFetch(`/api/mbox/memories/${id}`, { method: "PATCH", body: JSON.stringify({ title, content, tags }) });
+    return `обновлена запись памяти «${title}» (#${id})`;
+  }
+
+  if (name === "delete_memory") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи для удаления";
+    let existing;
+    try {
+      existing = (await mboxFetch(`/api/mbox/memories/${id}`)).memory;
+    } catch { existing = null; }
+    if (!existing) return `запись #${id} не нашлась — возможно, уже удалена или номер неверный`;
+    await mboxFetch(`/api/mbox/memories/${id}`, { method: "DELETE" });
+    return `удалена запись памяти «${existing.title}» (#${id})`;
+  }
+
+  if (name === "create_company") {
+    const companyName = String(args.name || "").trim();
+    if (!companyName) return "не создал компанию — нет названия";
+    const existingList = ((await mboxFetch("/api/mbox/companies")).companies || []);
+    const existing = existingList.find((c) => c.name.toLowerCase() === companyName.toLowerCase());
+    if (existing) return `компания «${existing.name}» уже существует — используй update_company_info, чтобы дополнить её`;
+    const props = args.props && typeof args.props === "object" ? args.props : {};
+    const created = await mboxFetch("/api/mbox/companies", { method: "POST", body: JSON.stringify({ name: companyName, props }) });
+    return `создана компания «${companyName}» (#${created.company?.id ?? "?"})`;
+  }
+
+  if (name === "update_company_info") {
+    const companyList = ((await mboxFetch("/api/mbox/companies")).companies || []);
+    const company = matchCompanyFuzzy(args.company_name, companyList);
+    if (!company) return `не нашёл компанию «${args.company_name}» — есть: ${companyList.map((c) => c.name).join(", ") || "компаний пока нет"}`;
+    const newProps = args.props && typeof args.props === "object" ? args.props : null;
+    if (!newProps || !Object.keys(newProps).length) return "нечего обновлять — не переданы свойства";
+    const existingProps = company.props && typeof company.props === "object" ? company.props : {};
+    const mergedProps = { ...existingProps, ...newProps };
+    await mboxFetch(`/api/mbox/companies/${company.id}`, { method: "PATCH", body: JSON.stringify({ props: mergedProps }) });
+    return `у компании «${company.name}» обновлены свойства: ${Object.keys(newProps).join(", ")}`;
+  }
+
+  if (name === "update_project_info") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const patch = {};
+    const changed = [];
+    if (args.stack !== undefined) { patch.stack = Array.isArray(args.stack) ? args.stack.map(String) : []; changed.push("stack"); }
+    if (args.git_url !== undefined) { patch.git_url = String(args.git_url).trim(); changed.push("git_url"); }
+    if (args.deploy_provider !== undefined) { patch.deploy_provider = String(args.deploy_provider).trim(); changed.push("deploy_provider"); }
+    if (args.deploy_target !== undefined) { patch.deploy_target = String(args.deploy_target).trim(); changed.push("deploy_target"); }
+    if (args.status !== undefined) { patch.status = String(args.status).trim(); changed.push("status"); }
+    if (!changed.length) return "нечего обновлять — не переданы новые значения";
+    await mboxFetch(`/api/mbox/projects/${project.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    return `у проекта «${project.name}» обновлено: ${changed.join(", ")}`;
+  }
+
+  if (name === "create_folder") {
+    const folderName = String(args.name || "").trim();
+    const entityTypes = ["memory", "artifact", "project", "todo", "script", "agent_scope"];
+    const entityType = entityTypes.includes(args.entity_type) ? args.entity_type : null;
+    if (!folderName || !entityType) return "не создал папку — нужны и название, и корректный тип (memory/artifact/project/todo/script/agent_scope)";
+    const folders = ((await mboxFetch("/api/mbox/folders")).folders || []);
+    let parentId = null;
+    if (args.parent_name) {
+      const parent = folders.find((f) => f.name === String(args.parent_name).trim());
+      if (!parent) return `не нашёл родительскую папку «${args.parent_name}»`;
+      parentId = parent.id;
+    }
+    const existing = folders.find((f) => f.name === folderName && (f.parent_id || null) === parentId);
+    if (existing) return `папка «${folderName}» уже существует на этом уровне`;
+    const created = await mboxFetch("/api/mbox/folders", { method: "POST", body: JSON.stringify({ parent_id: parentId, name: folderName, entity_type: entityType }) });
+    return `создана папка «${folderName}» (тип ${entityType}${args.parent_name ? `, внутри «${args.parent_name}»` : ""}) (#${created.folder?.id ?? "?"})`;
+  }
+
+  if (name === "list_folders") {
+    const entityTypes = ["memory", "artifact", "project", "todo", "script", "agent_scope"];
+    const entityType = entityTypes.includes(args.entity_type) ? args.entity_type : null;
+    let rows = ((await mboxFetch("/api/mbox/folders")).folders || []);
+    if (entityType) rows = rows.filter((f) => f.entity_type === entityType);
+    if (!rows.length) return entityType ? `папок типа «${entityType}» пока нет` : "папок пока нет";
+    const lines = rows.map((f) => {
+      const parent = f.parent_id ? rows.find((p) => p.id === f.parent_id) : null;
+      return `${f.name}${parent ? ` (в «${parent.name}»)` : ""} [${f.entity_type}]`;
+    });
+    return `папки (${rows.length}): ${lines.join("; ")}`;
+  }
+
+  if (name === "link_memories") {
+    const idA = String(args.memory_a_id || "").trim();
+    const idB = String(args.memory_b_id || "").trim();
+    if (!idA || !/^\d+$/.test(idA) || !idB || !/^\d+$/.test(idB)) return "нужны числовые ID обеих записей";
+    if (idA === idB) return "нельзя связать запись саму с собой";
+    let memA;
+    let memB;
+    try { memA = (await mboxFetch(`/api/mbox/memories/${idA}`)).memory; } catch { memA = null; }
+    try { memB = (await mboxFetch(`/api/mbox/memories/${idB}`)).memory; } catch { memB = null; }
+    if (!memA) return `запись #${idA} не нашлась`;
+    if (!memB) return `запись #${idB} не нашлась`;
+    const relation = String(args.relation || "").trim() || "related";
+    await mboxFetch("/api/mbox/memory-links", {
+      method: "POST",
+      body: JSON.stringify({ from_memory_id: idA, to_memory_id: idB, link_type: relation, description: String(args.description || "") }),
+    });
+    return `связал «${memA.title}» (#${idA}) → «${memB.title}» (#${idB}) отношением «${relation}»`;
+  }
+
+  if (name === "list_artifacts") {
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    if (args.project_name && !project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    let rows = ((await mboxFetch("/api/mbox/artifacts")).artifacts || []);
+    if (project) rows = rows.filter((a) => a.project_id === project.id);
+    rows = rows.slice(0, 20);
+    if (!rows.length) return project ? `у проекта «${project.name}» артефактов пока нет` : "артефактов пока нет";
+    const lines = rows.map((a) => `«${a.name}» (${a.category}, ${a.version}, ${a.status})`);
+    return `артефакты${project ? ` проекта «${project.name}»` : ""} (${rows.length}${rows.length === 20 ? "+" : ""}): ${lines.join("; ")}`;
+  }
+
+  if (name === "create_artifact") {
+    const artifactName = String(args.name || "").trim();
+    const category = String(args.category || "").trim();
+    const content = String(args.content || "").trim();
+    if (!artifactName || !category || !content) return "не создал артефакт — нужны название, категория и содержание";
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    if (args.project_name && !project) return `не нашёл проект «${args.project_name}»`;
+    const created = await mboxFetch("/api/mbox/artifacts", {
+      method: "POST",
+      body: JSON.stringify({ project_id: project?.id || null, name: artifactName, category, version: "v1", status: "created", content, access_level: "agents" }),
+    });
+    return `создан артефакт «${artifactName}» (${category})${project ? ` в проекте «${project.name}»` : ""} (#${created.artifact?.id ?? "?"})`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -952,7 +1248,17 @@ async function respondToRequests() {
         + "сам периодически перечитывает по графику и кладёт короткую сводку в память; если просят "
         + "«следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory), "
         + "search_tour_dates (даты и свободные места по названию тура из разобранного фида vs-travel.ru — "
-        + "используй это для «какие даты у тура X» или «сколько мест на тур Y», не выдумывай цифры). Если "
+        + "используй это для «какие даты у тура X» или «сколько мест на тур Y», не выдумывай цифры), "
+        + "update_memory (отредактировать запись памяти по ID — заголовок/содержание/теги, content можно "
+        + "дописать или заменить целиком), delete_memory (удалить запись памяти по ID, необратимо), "
+        + "create_company (завести новую компанию, необязательно сразу со свойствами), update_company_info "
+        + "(дописать/обновить свойства существующей компании поверх текущих, не стирая остальные), "
+        + "update_project_info (изменить стек/git/деплой/статус проекта — указывай только то, что реально "
+        + "меняешь), create_folder и list_folders (папки для организации памяти/артефактов/проектов/задач/"
+        + "скриптов/агентских областей), link_memories (связать две записи памяти отношением — «связано», "
+        + "«противоречит», «уточняет» и т.п., по ID), list_artifacts и create_artifact (артефакт — осознанная "
+        + "находка/материал вроде компонента, конфига или зафиксированного решения, в отличие от сырой записи "
+        + "памяти через record_memory). Если "
         + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
         + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
         + "другим по очереди, пока не выполнишь все, не только первое. Если просят что-то другое, для чего нет функции — честно скажи, что не умеешь этого "
