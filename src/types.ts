@@ -153,6 +153,14 @@ export type ServerMetrics = {
   captured_at: string;
 };
 
+export type GroqUsageByModel = {
+  model: string;
+  total_tokens: string;
+  tokens_24h: string;
+  tokens_today: string;
+  calls_total: number;
+};
+
 export type GroqUsage = {
   total_tokens: string;
   tokens_24h: string;
@@ -160,6 +168,7 @@ export type GroqUsage = {
   calls_total: number;
   calls_24h: number;
   last_call_at: string | null;
+  by_model?: GroqUsageByModel[];
 };
 
 export type SecretSummary = {

@@ -615,15 +615,29 @@ function ServerBoard({ pulse }: { pulse: number }) {
   }, [pulse]);
 
   const usagePanel = usage && (
-    <Panel title="Джарвис / Groq" icon={Zap}>
+    <Panel title="Джарвис / расход токенов" icon={Zap}>
       <div className="entity-list">
-        <EntityLine title="Токенов сегодня" value={Number(usage.tokens_today).toLocaleString("ru-RU")} />
-        <EntityLine title="Токенов за 24ч" value={Number(usage.tokens_24h).toLocaleString("ru-RU")} />
-        <EntityLine title="Токенов всего" value={Number(usage.total_tokens).toLocaleString("ru-RU")} />
+        <EntityLine title="Токенов сегодня (все модели)" value={Number(usage.tokens_today).toLocaleString("ru-RU")} />
+        <EntityLine title="Токенов за 24ч (все модели)" value={Number(usage.tokens_24h).toLocaleString("ru-RU")} />
+        <EntityLine title="Токенов всего (все модели)" value={Number(usage.total_tokens).toLocaleString("ru-RU")} />
         <EntityLine title="Вызовов за 24ч" value={String(usage.calls_24h)} />
         <EntityLine title="Вызовов всего" value={String(usage.calls_total)} />
         <EntityLine title="Последний вызов" value={usage.last_call_at ? formatDateTime(usage.last_call_at) : "ещё не было"} />
       </div>
+      {/* Джарвис говорит и на Gemini, и на Groq (два резервных под-агента) — оба логируются в один
+          счётчик groq_usage, название таблицы историческое. Без разбивки по модели цифры выше
+          читались так, будто расход весь на Groq, хотя основная нагрузка обычно на Gemini. */}
+      {usage.by_model && usage.by_model.length > 0 && (
+        <div className="entity-list" style={{ marginTop: 10 }}>
+          {usage.by_model.map((row) => (
+            <EntityLine
+              key={row.model}
+              title={row.model}
+              value={`${Number(row.total_tokens).toLocaleString("ru-RU")} всего · ${Number(row.tokens_today).toLocaleString("ru-RU")} сегодня · ${row.calls_total} вызовов`}
+            />
+          ))}
+        </div>
+      )}
     </Panel>
   );
 
