@@ -188,10 +188,31 @@ function ThinkingSpinner() {
 }
 
 // Пока сервер не прислал реальную фазу (setPhase в replyAsJarvis) — вместо голого "думает"
-// каждый раз берётся случайный вариант, с лёгкой самоиронией.
-const THINKING_VERBS = ["думает", "размышляет", "подбирает инструмент", "готовится", "прикидывает"];
-function randomThinkingVerb() {
-  return THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)];
+// плашка перебирает случайные варианты (см. интервал в AgentChat), с лёгкой самоиронией.
+const THINKING_VERBS = [
+  "думает",
+  "размышляет",
+  "подбирает инструмент",
+  "готовится",
+  "прикидывает",
+  "взвешивает варианты",
+  "листает память",
+  "советуется с базой",
+  "собирается с мыслями",
+  "наводит справки",
+  "сверяется с протоколом",
+  "приводит мысли в порядок",
+  "изображает бурную деятельность",
+  "принимает благородный вид",
+  "тщательно обдумывает",
+  "не торопится, как подобает",
+  "консультируется с внутренним голосом",
+  "делает вид, что всё под контролем",
+];
+// Исключаем текущий вариант, чтобы плашка не «мигала» одним и тем же словом два раза подряд.
+function randomThinkingVerb(exclude?: string) {
+  const pool = exclude ? THINKING_VERBS.filter((verb) => verb !== exclude) : THINKING_VERBS;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 type MessageAction = { label: string; value: string };
@@ -564,6 +585,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   useEffect(() => {
     if (!awaitingJarvisSince) return;
     const interval = window.setInterval(() => setElapsedTick((value) => value + 1), 1000);
+    return () => window.clearInterval(interval);
+  }, [awaitingJarvisSince]);
+
+  // Пока не пришла настоящая фаза с сервера, плашка сама по себе выглядела застывшей — один и
+  // тот же случайный глагол висел весь цикл ожидания. Перебираем каждые 2с, реальная фаза
+  // (awaitingJarvisPhase) всё равно перебивает это в рендере, когда она известна.
+  useEffect(() => {
+    if (!awaitingJarvisSince) return;
+    const interval = window.setInterval(() => setAwaitingJarvisVerb((current) => randomThinkingVerb(current)), 2000);
     return () => window.clearInterval(interval);
   }, [awaitingJarvisSince]);
 

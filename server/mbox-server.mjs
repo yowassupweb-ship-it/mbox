@@ -4238,7 +4238,7 @@ function serveStatic(req, res, url) {
   const safeTarget = target.startsWith(publicDir) ? target : path.join(publicDir, "index.html");
   const file = fs.existsSync(safeTarget) && fs.statSync(safeTarget).isFile() ? safeTarget : path.join(publicDir, "index.html");
   const ext = path.extname(file);
-  const type = ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : ext === ".html" ? "text/html; charset=utf-8" : ext === ".webmanifest" ? "application/manifest+json" : ext === ".png" ? "image/png" : "application/octet-stream";
+  const type = ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : ext === ".html" ? "text/html; charset=utf-8" : ext === ".webmanifest" ? "application/manifest+json" : ext === ".png" ? "image/png" : ext === ".ico" ? "image/x-icon" : "application/octet-stream";
   res.writeHead(200, { "content-type": type, "cache-control": ext === ".html" ? "no-store" : "no-cache" });
   fs.createReadStream(file).pipe(res);
 }
