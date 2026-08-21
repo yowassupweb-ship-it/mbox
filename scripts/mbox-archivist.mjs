@@ -28,6 +28,10 @@ const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // См. server/mbox-server.mjs — классификация памяти не оркестрирует инструменты, это одноразовый
 // "скилл": отдаём его модели с более щедрой квотой, не тесному бюджету "Прораба".
 const groqModelJunior = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
+// См. server/mbox-server.mjs — Gemini теперь "прораб" вместо gpt-oss-120b, тот остаётся резервом
+// на этот же ответ при ошибке/лимите Gemini.
+const geminiKey = process.env.GEMINI_API_KEY || "";
+const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
 // Только для текста, который Джарвис показывает пользователю — сам по себе таймер здесь не настраивается
 // (см. /etc/systemd/system/mbox-archivist.timer на сервере, OnUnitActiveSec).
@@ -118,6 +122,85 @@ async function groqChat(messages, { json = false, tools = null, model = groqMode
     body: JSON.stringify({ purpose: "cron", model, prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 }),
   }).catch((error) => console.error(`groq_usage log failed: ${error.message}`));
   return tools ? data.choices?.[0]?.message ?? { content: "" } : data.choices?.[0]?.message?.content ?? "";
+}
+
+// См. server/mbox-server.mjs для полного объяснения (JSON Schema -> Gemini functionDeclarations,
+// OpenAI-messages -> Gemini contents, обязательный round-trip thoughtSignature).
+function toGeminiSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  const out = Array.isArray(schema) ? [...schema] : { ...schema };
+  if (typeof out.type === "string") out.type = out.type.toUpperCase();
+  if (out.properties) out.properties = Object.fromEntries(Object.entries(out.properties).map(([key, value]) => [key, toGeminiSchema(value)]));
+  if (out.items) out.items = toGeminiSchema(out.items);
+  return out;
+}
+
+function toGeminiTools(openAiTools) {
+  if (!openAiTools?.length) return undefined;
+  return [{ functionDeclarations: openAiTools.map((t) => ({ name: t.function.name, description: t.function.description, parameters: toGeminiSchema(t.function.parameters) })) }];
+}
+
+function toGeminiContents(messages) {
+  const contents = [];
+  for (const m of messages) {
+    if (m.role === "system") continue;
+    if (m.role === "user") { contents.push({ role: "user", parts: [{ text: m.content || "" }] }); continue; }
+    if (m.role === "assistant") {
+      if (m.tool_calls?.length) {
+        contents.push({
+          role: "model",
+          parts: m.tool_calls.map((tc) => ({
+            functionCall: { name: tc.function.name, args: JSON.parse(tc.function.arguments || "{}") },
+            ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
+          })),
+        });
+      } else {
+        contents.push({ role: "model", parts: [{ text: m.content || "" }] });
+      }
+      continue;
+    }
+    if (m.role === "tool") {
+      contents.push({ role: "user", parts: [{ functionResponse: { name: m.name || "tool", response: { result: m.content } } }] });
+    }
+  }
+  return contents;
+}
+
+async function geminiChat(messages, tools, purpose = "reply") {
+  const systemText = messages.find((m) => m.role === "system")?.content || "";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": geminiKey },
+    body: JSON.stringify({
+      contents: toGeminiContents(messages),
+      ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
+      ...(tools ? { tools: toGeminiTools(tools) } : {}),
+      generationConfig: { temperature: 0.2 },
+    }),
+  });
+  if (!response.ok) {
+    const error = new Error(`gemini ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  const usage = data.usageMetadata || {};
+  mboxFetch("/api/mbox/agent/groq-usage", {
+    method: "POST",
+    body: JSON.stringify({ purpose, model: geminiModel, prompt_tokens: usage.promptTokenCount || 0, completion_tokens: usage.candidatesTokenCount || 0, total_tokens: usage.totalTokenCount || 0 }),
+  }).catch((error) => console.error(`gemini usage log failed: ${error.message}`));
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const functionParts = parts.filter((p) => p.functionCall);
+  const text = parts.filter((p) => p.text).map((p) => p.text).join("");
+  if (!functionParts.length) return { content: text };
+  return {
+    content: text,
+    tool_calls: functionParts.map((p, index) => ({
+      id: p.functionCall.id || `gem_${Date.now()}_${index}`,
+      thoughtSignature: p.thoughtSignature,
+      function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+    })),
+  };
 }
 
 // То же единственное реальное действие, что и в мгновенном пути (server/mbox-server.mjs,
@@ -843,9 +926,9 @@ async function respondToRequests() {
         + `задержался, пришёл через резервный проверочный цикл (раз в ${TIMER_MINUTES_HINT} минуту): значит, `
         + "основной путь не сработал с первого раза, например из-за обновления сервера в этот момент — это "
         + "редкий случай, а не то, как ты работаешь всегда. Не говори, что всегда отвечаешь через периодические "
-        + `проверки — это не так. Модель, на которой ты работаешь — ${groqModel} `
-        + `через Groq API (бесплатный тир). Если спросят, какая ты модель — отвечай честно этим названием, `
-        + `не выдумывай другое (не GPT-4 и не Claude). Отвечай коротко и по делу, на русском. У тебя есть `
+        + `проверки — это не так. Ты обычно работаешь на модели ${geminiModel} (Gemini), а если она недоступна `
+        + `— на резервной ${groqModel} через Groq API. Если спросят, какая ты модель — называй ту, что реально `
+        + `сейчас отвечает (обычно Gemini). Отвечай коротко и по делу, на русском. У тебя есть `
         + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
         + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
         + "record_memory (записать долгоживущий факт), list_project_todos (заголовки задач проекта), "
@@ -894,10 +977,24 @@ async function respondToRequests() {
       const actionLog = [];
       const toolsUsed = [];
       let reply = "";
+      // См. server/mbox-server.mjs — Gemini-прораб, переключение на Groq при ошибке без метания
+      // между провайдерами внутри одного цикла.
+      let provider = geminiKey ? "gemini" : "groq";
+      async function complete(msgs) {
+        if (provider === "gemini") {
+          try {
+            return await geminiChat(msgs, JARVIS_TOOLS, "reply");
+          } catch (error) {
+            jlog(item.id, `Gemini недоступен (${error.message}) — переключаюсь на Groq до конца этого ответа`);
+            provider = "groq";
+          }
+        }
+        return groqChat(msgs, { tools: JARVIS_TOOLS });
+      }
       jlog(item.id, `старт (резервный cron): "${String(item.body || "").slice(0, 160)}"`);
       for (let step = 0; step < 5; step += 1) {
-        jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
-        const message = await groqChat(messages, { tools: JARVIS_TOOLS });
+        jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
+        const message = await complete(messages);
         if (!message.tool_calls?.length) {
           reply = message.content || "";
           jlog(item.id, `шаг ${step}: без tool_calls, финальный текст (${reply.length} символов)`);
@@ -917,7 +1014,7 @@ async function respondToRequests() {
           }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
-          messages.push({ role: "tool", tool_call_id: call.id, content: result });
+          messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }
       if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";

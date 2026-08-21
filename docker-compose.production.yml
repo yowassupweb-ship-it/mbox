@@ -16,6 +16,9 @@ services:
       MBOX_AGENT_NAME: ${MBOX_AGENT_NAME:-Джарвис}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_MODEL_JUNIOR: ${GROQ_MODEL_JUNIOR:-llama-3.1-8b-instant}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
     networks:
       - mbox-net
 

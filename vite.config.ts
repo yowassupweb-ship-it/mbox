@@ -373,12 +373,17 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // См. server/mbox-server.mjs — "Прораб" (GROQ_MODEL) ведёт диалог, "младший" — своя, куда более
 // щедрая квота Groq для одноразовых скиллов вроде пересказа страницы, без оркестрации инструментами.
 const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
+// См. server/mbox-server.mjs — Gemini теперь "прораб" вместо gpt-oss-120b (250K TPM против 8000),
+// gpt-oss-120b остаётся резервом на этот же ответ при ошибке/лимите Gemini.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 type GroqMessage = {
   role: string;
   content: string | null;
+  name?: string;
   tool_call_id?: string;
-  tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
+  tool_calls?: Array<{ id?: string; thoughtSignature?: string; function?: { name?: string; arguments?: string } }>;
 };
 
 // Запрос человека может лежать в очереди на прерывание (см. POST /agent/inbox/:id/cancel).
@@ -417,6 +422,87 @@ async function groqComplete(messages: GroqMessage[], tools?: unknown[], purpose 
     [purpose, model, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
   ).catch((error: Error) => console.error(`groq_usage insert failed: ${error.message}`));
   return data.choices?.[0]?.message ?? { role: "assistant", content: "" };
+}
+
+// См. server/mbox-server.mjs для полного объяснения этой пары функций (JSON Schema -> Gemini
+// functionDeclarations, OpenAI-messages -> Gemini contents, thoughtSignature round-trip).
+function toGeminiSchema(schema: any): any {
+  if (!schema || typeof schema !== "object") return schema;
+  const out: any = Array.isArray(schema) ? [...schema] : { ...schema };
+  if (typeof out.type === "string") out.type = out.type.toUpperCase();
+  if (out.properties) out.properties = Object.fromEntries(Object.entries(out.properties).map(([key, value]) => [key, toGeminiSchema(value)]));
+  if (out.items) out.items = toGeminiSchema(out.items);
+  return out;
+}
+
+function toGeminiTools(openAiTools?: any[]) {
+  if (!openAiTools?.length) return undefined;
+  return [{ functionDeclarations: openAiTools.map((t) => ({ name: t.function.name, description: t.function.description, parameters: toGeminiSchema(t.function.parameters) })) }];
+}
+
+function toGeminiContents(messages: GroqMessage[]) {
+  const contents: Array<{ role: string; parts: any[] }> = [];
+  for (const m of messages) {
+    if (m.role === "system") continue;
+    if (m.role === "user") { contents.push({ role: "user", parts: [{ text: m.content || "" }] }); continue; }
+    if (m.role === "assistant") {
+      if (m.tool_calls?.length) {
+        contents.push({
+          role: "model",
+          parts: m.tool_calls.map((tc) => ({
+            functionCall: { name: tc.function?.name, args: JSON.parse(tc.function?.arguments || "{}") },
+            ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
+          })),
+        });
+      } else {
+        contents.push({ role: "model", parts: [{ text: m.content || "" }] });
+      }
+      continue;
+    }
+    if (m.role === "tool") {
+      contents.push({ role: "user", parts: [{ functionResponse: { name: m.name || "tool", response: { result: m.content } } }] });
+    }
+  }
+  return contents;
+}
+
+async function geminiComplete(messages: GroqMessage[], tools: unknown[] | undefined, purpose = "reply", signal?: AbortSignal): Promise<GroqMessage> {
+  const systemText = messages.find((m) => m.role === "system")?.content || "";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: toGeminiContents(messages),
+      ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
+      ...(tools ? { tools: toGeminiTools(tools as any[]) } : {}),
+      generationConfig: { temperature: 0.2 },
+    }),
+    signal,
+  });
+  if (!response.ok) {
+    const error: any = new Error(`gemini ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  const usage = data.usageMetadata || {};
+  queryPostgres(
+    "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
+    [purpose, GEMINI_MODEL, usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, usage.totalTokenCount || 0],
+  ).catch((error: Error) => console.error(`gemini usage insert failed: ${error.message}`));
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const functionParts = parts.filter((p: any) => p.functionCall);
+  const text = parts.filter((p: any) => p.text).map((p: any) => p.text).join("");
+  if (!functionParts.length) return { role: "assistant", content: text };
+  return {
+    role: "assistant",
+    content: text,
+    tool_calls: functionParts.map((p: any, index: number) => ({
+      id: p.functionCall.id || `gem_${Date.now()}_${index}`,
+      thoughtSignature: p.thoughtSignature,
+      function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+    })),
+  };
 }
 
 // Раньше Джарвис только писал текстом "задача добавлена", ничего не создав — модель не отличает
@@ -1269,8 +1355,9 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
                 (SELECT count(*) FROM memories)::int AS memories_total`,
       )).rows[0] as { todos_total: number; todos_open: number; memories_total: number };
       const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
-        + `Ты работаешь на модели ${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — отвечай честно этим `
-        + "названием, не выдумывай другое. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
+        + `Ты обычно работаешь на модели ${GEMINI_MODEL} (Gemini), а если она недоступна — на резервной `
+        + `${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — называй ту, что реально сейчас `
+        + "отвечает (обычно Gemini), не выдумывай третье название. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
         + "create_todo, create_project, delete_project (необратимо, точное название), update_todo_status, "
         + "set_todo_priority, delete_todo (необратимо, точный заголовок), record_memory (записать долгоживущий "
         + "факт), list_project_todos (заголовки задач проекта), get_project_info (git/стек/деплой/доступ и "
@@ -1328,11 +1415,25 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       const actionLog: string[] = [];
       const toolsUsed: string[] = [];
       let reply = "";
+      // См. server/mbox-server.mjs — Gemini-прораб с переключением на Groq при ошибке, не мечась
+      // между провайдерами внутри одного цикла.
+      let provider = GEMINI_API_KEY ? "gemini" : "groq";
+      async function complete(msgs: GroqMessage[]): Promise<GroqMessage> {
+        if (provider === "gemini") {
+          try {
+            return await geminiComplete(msgs, JARVIS_TOOLS, "reply", controller.signal);
+          } catch (error) {
+            jlog(item.id, `Gemini недоступен (${(error as Error).message}) — переключаюсь на Groq до конца этого ответа`);
+            provider = "groq";
+          }
+        }
+        return groqComplete(msgs, JARVIS_TOOLS, "reply", controller.signal);
+      }
       jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
       for (let step = 0; step < 5; step += 1) {
-        jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
+        jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
         setPhase(item.id, "Подбирает инструмент/навык");
-        const message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal);
+        const message = await complete(messages);
         if (!message.tool_calls?.length) {
           reply = message.content || "";
           jlog(item.id, `шаг ${step}: без tool_calls, финальный текст (${reply.length} символов)`);
@@ -1353,7 +1454,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
           }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
-          messages.push({ role: "tool", tool_call_id: call.id, content: result });
+          messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }
       if (!reply) reply = actionLog.join("; ") || "не смог выполнить действие";
