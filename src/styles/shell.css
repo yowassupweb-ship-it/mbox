@@ -293,7 +293,7 @@
 
 /* В прилипшем положении шапка стоит выше и ближе к верху окна, но не касается края. */
 .topbar-logo { flex: none; }
-.realtime-pill strong.is-brand { font-family: var(--font-pixel); font-size: 18px; letter-spacing: .02em; }
+.realtime-pill strong.is-brand { font-family: var(--font-pixel); font-size: 18px; letter-spacing: .02em; margin-left: -5px; }
 
 .topbar {
   position: sticky;
@@ -443,6 +443,10 @@
   animation: status-pop .18s ease-out;
 }
 
+.agent-status-popover.closing {
+  animation: status-pop-out .16s ease-in forwards;
+}
+
 .agent-status-popover > strong {
   display: block;
   margin-bottom: 10px;
@@ -474,6 +478,11 @@
 @keyframes status-pop {
   from { opacity: 0; transform: translateX(42px) translateY(-6px) scale(.98); }
   to { opacity: 1; transform: translateX(42px) translateY(0) scale(1); }
+}
+
+@keyframes status-pop-out {
+  from { opacity: 1; transform: translateX(42px) translateY(0) scale(1); }
+  to { opacity: 0; transform: translateX(42px) translateY(-6px) scale(.98); }
 }
 
 .bottom-nav .nav-item {

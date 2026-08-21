@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { BookOpen, ClipboardCheck, FolderKanban, HelpCircle } from "lucide-react";
+import { ClipboardCheck, HelpCircle } from "lucide-react";
 import { AgentWorkBoard } from "../features/agents/AgentWorkBoard";
 import { NeedsAnswer } from "../features/agents/NeedsAnswer";
 import { ReviewQueue } from "../features/projects/ReviewQueue";
@@ -9,7 +9,6 @@ import type { Artifact, Memory, Project } from "../types";
 import { EmptyState, Metric, MetricGrid, Panel } from "../ui";
 
 const BOTTOM_ICONS = "/assets/icons/bottom-menu";
-const ENTITY_ICONS = "/assets/icons/icons";
 
 export function Overview({ data }: { data: MboxData }) {
   const totalBytes = sumBytes([
@@ -33,7 +32,6 @@ export function Overview({ data }: { data: MboxData }) {
         <Metric title="Память" value={data.memories.length} subtitle={formatBytes(totalBytes)} image={`${BOTTOM_ICONS}/память.png`} />
         <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/артефакты.png`} />
         <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/проекты.png`} />
-        <Metric title="Секреты" value={data.secrets.length} subtitle={formatBytes(sumBytes(data.secrets.map((item) => item.memory_bytes)))} image={`${ENTITY_ICONS}/дсотуп.png`} />
       </MetricGrid>
       {reviewCount > 0 && (
         <Panel title={`На проверке · ${reviewCount}`} icon={ClipboardCheck} className="review-panel">
@@ -41,10 +39,10 @@ export function Overview({ data }: { data: MboxData }) {
         </Panel>
       )}
       <div className="content-grid overview-grid">
-        <Panel title="Последние сущности" icon={BookOpen}>
+        <Panel title="Последние сущности">
           <EntityFeed memories={data.memories} projects={data.projects} artifacts={data.artifacts} />
         </Panel>
-        <Panel title="Проекты" icon={FolderKanban}>
+        <Panel title="Проекты">
           <ProjectList projects={data.projects.slice(0, 5)} />
         </Panel>
       </div>

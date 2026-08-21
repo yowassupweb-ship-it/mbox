@@ -1,5 +1,5 @@
 import { AlertTriangle, Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES } from "./AgentAvatar";
 
 export type AgentRosterEntry = {
@@ -44,9 +44,29 @@ export function TopBar({
   busy = false,
 }: TopBarProps) {
   const [open, setOpen] = useState(false);
+  const [popoverMounted, setPopoverMounted] = useState(false);
+  const [popoverClosing, setPopoverClosing] = useState(false);
+  const closeTimer = useRef<number | undefined>(undefined);
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy);
+
+  // Попап раньше пропадал мгновенно при закрытии — CSS-анимация играла только на открытии.
+  // Держим DOM ещё один тик, проигрываем обратную анимацию, и только потом размонтируем.
+  useEffect(() => {
+    window.clearTimeout(closeTimer.current);
+    if (open) {
+      setPopoverClosing(false);
+      setPopoverMounted(true);
+    } else if (popoverMounted) {
+      setPopoverClosing(true);
+      closeTimer.current = window.setTimeout(() => {
+        setPopoverMounted(false);
+        setPopoverClosing(false);
+      }, 160);
+    }
+    return () => window.clearTimeout(closeTimer.current);
+  }, [open]);
 
   return (
     <header className="topbar">
@@ -66,8 +86,8 @@ export function TopBar({
         <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
         {notice && <span>{notice}</span>}
       </button>
-      {open && (
-        <div className="agent-status-popover" role="dialog" aria-label="Статус агентов">
+      {popoverMounted && (
+        <div className={`agent-status-popover${popoverClosing ? " closing" : ""}`} role="dialog" aria-label="Статус агентов">
           {attentionTodos.length > 0 && (
             <section className="popover-section">
               <strong><AlertTriangle size={14} /> Требует внимания</strong>
