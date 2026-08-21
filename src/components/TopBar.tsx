@@ -82,7 +82,7 @@ export function TopBar({
             ))}
           </span>
         )}
-        <img className="topbar-logo" src={busy ? logoFrame : WORKING_FRAMES[0]} width={48} height={48} alt="" />
+        <img className="topbar-logo" src={busy ? logoFrame : WORKING_FRAMES[0]} width={32} height={32} alt="" />
         <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
         {notice && <span>{notice}</span>}
       </button>
