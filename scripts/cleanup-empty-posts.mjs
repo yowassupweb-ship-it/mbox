@@ -27,7 +27,7 @@ async function main() {
   console.log(`found ${empty.length} empty historical posts`);
   let removed = 0;
   let done = 0;
-  const CONCURRENCY = 8;
+  const CONCURRENCY = 2;
   async function worker(queue) {
     for (const memory of queue) {
       try {

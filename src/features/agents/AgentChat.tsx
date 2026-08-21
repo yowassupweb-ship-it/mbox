@@ -173,6 +173,8 @@ function randomThinkingVerb() {
   return THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)];
 }
 
+type MessageAction = { label: string; value: string };
+
 type LogLine = {
   id: string;
   kind: "in" | "out" | "sys" | "cmd";
@@ -181,7 +183,20 @@ type LogLine = {
   at: string;
   pending?: "sending" | "sent" | "failed";
   toolsUsed?: string[];
+  actions?: MessageAction[];
 };
+
+/** props.actions — структурированный выбор (варианты поста, да/нет-развилки), которые todo #203
+ * просил показывать кнопками, а не заставлять печатать текст вручную. Валидируем форму на входе:
+ * агент может прислать что угодно в props, доверять чужому JSON нельзя. */
+function parseActions(raw: unknown): MessageAction[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const actions = raw
+    .filter((item): item is { label: unknown; value: unknown } => typeof item === "object" && item !== null)
+    .map((item) => ({ label: String((item as { label?: unknown }).label ?? ""), value: String((item as { value?: unknown }).value ?? "") }))
+    .filter((item) => item.label && item.value);
+  return actions.length ? actions : undefined;
+}
 
 /**
  * Чат — настоящая консоль, не мессенджер: моноширинный лог строк вместо пузырей, слэш-команды
@@ -412,6 +427,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       toolsUsed: Array.isArray(item.props?.tools_used)
         ? (item.props.tools_used as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
+      actions: parseActions(item.props?.actions),
     }));
     const fromPending: LogLine[] = stillPending.map((item) => ({
       id: item.id,
@@ -493,12 +509,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     }
   }
 
-  async function send() {
-    const raw = text.trim();
+  // overrideText — клик по кнопке варианта (см. parseActions/props.actions) шлёт готовый ответ
+  // тем же путём, что и обычное сообщение, без похода через textarea/историю ввода.
+  async function send(overrideText?: string) {
+    const raw = (overrideText ?? text).trim();
     if (!raw) return;
-    setHistory((current) => [...current, raw]);
-    setHistoryPos(-1);
-    setText("");
+    if (overrideText === undefined) {
+      setHistory((current) => [...current, raw]);
+      setHistoryPos(-1);
+      setText("");
+    }
 
     if (raw.startsWith("/")) {
       runCommand(raw);
@@ -611,6 +631,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                       <span className="console-tools-used">
                         {line.toolsUsed.map((tool) => (
                           <span key={tool} className="console-tool-chip"><Wrench size={10} />{tool}</span>
+                        ))}
+                      </span>
+                    )}
+                    {!!line.actions?.length && (
+                      <span className="console-actions">
+                        {line.actions.map((action) => (
+                          <button key={action.value} type="button" className="console-action-btn" onClick={() => void send(action.value)}>
+                            {action.label}
+                          </button>
                         ))}
                       </span>
                     )}
