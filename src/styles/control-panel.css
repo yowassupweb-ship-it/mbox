@@ -638,7 +638,10 @@
   overflow-wrap: anywhere;
 }
 
-.folder-note footer { color: var(--text-muted); font-size: var(--text-xs); }
+.folder-note footer { display: flex; align-items: center; gap: var(--space-3); color: var(--text-muted); font-size: var(--text-xs); }
+
+.folder-note-likes { display: inline-flex; align-items: center; gap: 4px; color: var(--state-danger); }
+.folder-note-likes svg { fill: currentColor; }
 
 /* column-span: all вынимает карточку из колоночного потока на всю ширину — аналог grid-column:1/-1
    для columns-вёрстки. Пока редактируешь, форма не должна жаться в узкую колонку. */

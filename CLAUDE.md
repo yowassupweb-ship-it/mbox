@@ -42,6 +42,9 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    Они уже разошлись: в dev-версии нет `agent_runs`, `agent_inbox`, `decision_log`, `/todos/:id/claim`,
    `/agent/next-task`, `/agent/context`, секретов и установки `mbox.actor` для аудита; зато есть
    `/api/mbox/status`, которого нет в проде. **Правя ручку, правь обе или сознательно решай, что нет.**
+   Пример сознательного решения: `kind='telegram_channel'` в `refreshDataSourceById` реализован
+   только в `server/mbox-server.mjs` (это то, что реально дёргает архивариус в проде) — в
+   `vite.config.ts` его нет.
 2. **Прод отдаёт закоммиченный билд.** Изменение в `src/` не попадёт в прод без `npm run build` и
    коммита `public/`. `--emptyOutDir false` не чистит старые хеш-бандлы — мусор в `public/assets`
    накапливается, удалять руками.

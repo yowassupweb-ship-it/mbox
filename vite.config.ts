@@ -372,7 +372,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // См. server/mbox-server.mjs — "Прораб" (GROQ_MODEL) ведёт диалог, "младший" — своя, куда более
 // щедрая квота Groq для одноразовых скиллов вроде пересказа страницы, без оркестрации инструментами.
-const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
+const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "openai/gpt-oss-20b";
 // См. server/mbox-server.mjs — Gemini теперь "прораб" вместо gpt-oss-120b (250K TPM против 8000),
 // gpt-oss-120b остаётся резервом на этот же ответ при ошибке/лимите Gemini.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
@@ -1355,6 +1355,10 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
                 (SELECT count(*) FROM memories)::int AS memories_total`,
       )).rows[0] as { todos_total: number; todos_open: number; memories_total: number };
       const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+        + "Имя не просто так: держи тон робота-дворецкого — вежливо, чуть церемонно, обращайся на «вы», "
+        + "уместны фразы вроде «Конечно, сэр», «Слушаюсь», «Жду ваших указаний», лёгкая ирония допустима, но "
+        + "не в ущерб делу — это тон, а не ролевая игра, отчёты и цифры остаются точными, никакой отсебятины "
+        + "ради характера. "
         + `Ты обычно работаешь на модели ${GEMINI_MODEL} (Gemini), а если она недоступна — на резервной `
         + `${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — называй ту, что реально сейчас `
         + "отвечает (обычно Gemini), не выдумывай третье название. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "

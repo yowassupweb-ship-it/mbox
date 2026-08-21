@@ -289,6 +289,22 @@ CREATE INDEX IF NOT EXISTS idx_tour_sheets_source ON tour_sheets(source_id);
 CREATE INDEX IF NOT EXISTS idx_tour_sheets_name_trgm ON tour_sheets USING gin (tour_name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_tour_sheets_date_start ON tour_sheets(date_start);
 
+-- Свободные структурные факты источника, которых нет в отдельных колонках. Первый потребитель —
+-- kind='telegram_channel': хранит telegram_offset (курсор getUpdates) и telegram_folder_id (папка
+-- "Посты", создаётся лениво при первом тике), чтобы не перечитывать/пересоздавать их каждый раз.
+ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS props JSONB NOT NULL DEFAULT '{}';
+
+-- Посты Telegram-канала — НЕ артефакты (артефакт — осознанная находка, пост — сырая масса контента,
+-- решение владельца). Каждый пост — memories-строка с entity_type='post': это единственная
+-- сущность MBOX, которая уже умеет folder_id + tags + metadata + полнотекстовый поиск, то есть
+-- ровно то, что нужно посту, без новой таблицы. metadata хранит сырые факты (message_id, source_id,
+-- posted_at, reactions_total, reactions_breakdown, has_photo, media_type) — "полезная математика"
+-- (процентиль с поправкой на длительность) считается из них по требованию, не хранится готовым
+-- числом. Дедуп по (source_id, message_id) в metadata — см. idx_memories_telegram_post.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_telegram_post
+  ON memories (((metadata->>'source_id')), ((metadata->>'message_id')))
+  WHERE entity_type = 'post';
+
 CREATE TABLE IF NOT EXISTS protected_secrets (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,

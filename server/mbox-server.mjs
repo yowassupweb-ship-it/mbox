@@ -755,7 +755,9 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // llama-3.1-8b-instant по наблюдению человека 14 400 запросов/сутки и 500К токенов/сутки против
 // 1000 запросов и 200К токенов у 120b. Классификация памяти и пересказ веб-страницы не требуют
 // оркестрации инструментами — это и есть "скиллы", которые логично отдать младшему.
-const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant";
+// llama-3.1-8b-instant снят Groq с обслуживания (404 model_not_found на боевом трафике,
+// 2026-08-21) — переведено на GPT-семейство Groq (openai/gpt-oss-20b), как просил владелец.
+const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "openai/gpt-oss-20b";
 // Gemini берёт роль "прораба" у gpt-oss-120b: та же оркестрация диалога и выбора инструмента, но
 // TPM-квота на порядок шире (250K против 8000 у Groq), поэтому именно gpt-oss-120b постоянно
 // упирался в лимиты на живом трафике. gpt-oss-120b не выброшен — это резерв: если Gemini недоступен
@@ -763,6 +765,10 @@ const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "llama-3.1-8b-instant
 // в replyAsJarvis). Токен и раскладку моделей человек оставил в todo #197.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+
+// Бот на getUpdates (не webhook, не MTProto) — один токен на всю систему, как GROQ_API_KEY/
+// GEMINI_API_KEY: используется только data_sources с kind='telegram_channel'.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
 // Запрос человека может лежать в очереди на прерывание (см. POST /agent/inbox/:id/cancel) —
 // контроллер живёт, пока идёт агентский цикл, и удаляется в finally у replyAsJarvis.
@@ -1192,7 +1198,7 @@ const JARVIS_TOOLS = [
           project_name: { type: "string", description: "Проект, к которому привязать — если это не компания" },
           company_name: { type: "string", description: "Компания, к которой привязать — если это не проект" },
           schedule_minutes: { type: "number", description: "Как часто перечитывать, в минутах. По умолчанию раз в сутки (1440)." },
-          kind: { type: "string", enum: ["webpage", "tours_xml"], description: "webpage (по умолчанию) — обычная страница, пересказывается через Groq. tours_xml — структурированный XML-фид туров вида vs-travel.ru/prices/tours.xml, разбирается в таблицу дат/мест, не пересказывается." },
+          kind: { type: "string", enum: ["webpage", "tours_xml", "telegram_channel"], description: "webpage (по умолчанию) — обычная страница, пересказывается через Groq. tours_xml — структурированный XML-фид туров вида vs-travel.ru/prices/tours.xml, разбирается в таблицу дат/мест, не пересказывается. telegram_channel — бот (TELEGRAM_BOT_TOKEN), добавленный админом в канал, забирает новые посты и реакции через getUpdates; url — ссылка на канал (справочно, для чтения не используется)." },
         },
         required: ["name", "url"],
       },
@@ -1378,9 +1384,121 @@ async function bulkUpsertTourSheets(sourceId, items) {
   return { upserted: items.length, removed: removed.rows.length };
 }
 
+/** Пост — не артефакт (артефакт — осознанная находка, пост — сырая масса контента), поэтому
+ * живёт в memories с entity_type='post': эта сущность уже умеет folder_id + tags + metadata +
+ * поиск, ровно то, что нужно, без новой таблицы. Дедуп по (source_id, message_id) в metadata —
+ * см. idx_memories_telegram_post. */
+async function findTelegramPostMemory(sourceId, messageId) {
+  const result = await query(
+    "SELECT id::text, metadata FROM memories WHERE entity_type = 'post' AND metadata->>'source_id' = $1 AND metadata->>'message_id' = $2",
+    [String(sourceId), String(messageId)],
+  );
+  return result.rows[0] || null;
+}
+
+/** Ленивое создание папки "Посты" (folders.entity_type='memory') на первом тике источника —
+ * id кладётся в data_sources.props.telegram_folder_id, чтобы не искать/создавать её каждый раз.
+ * Ищем по имени БЕЗ привязки к parent_id/project_id: папку "Посты" под проектом "Вокруг света"
+ * владелец уже завёл руками через UI (id 21) — переиспользуем её, а не плодим вторую global. */
+async function ensureTelegramPostsFolder(row) {
+  const cached = row.props?.telegram_folder_id;
+  if (cached) return cached;
+  const existing = await query("SELECT id::text FROM folders WHERE name = 'Посты' ORDER BY id LIMIT 1");
+  const folderId = existing.rows[0]?.id
+    || (await query("INSERT INTO folders(parent_id, name, entity_type, access_level) VALUES (NULL, 'Посты', 'memory', 'agents') RETURNING id::text")).rows[0].id;
+  await query("UPDATE data_sources SET props = props || $1::jsonb WHERE id = $2", [JSON.stringify({ telegram_folder_id: folderId }), row.id]);
+  return folderId;
+}
+
+/** Telegram Bot API отдаёт факт реакции отдельным апдейтом message_reaction_count — только
+ * агрегированные счётчики по каналу (боты не видят, кто именно поставил реакцию), и он может
+ * прийти раньше или позже самого channel_post с тем же message_id. Апсертим оба по частям: если
+ * записи под message_id ещё нет, реакция создаёт "заготовку" без текста, а пост её потом дополняет
+ * (или наоборот). Раскладка на подробное суммари по каждому посту (редакционный разбор) — отдельная,
+ * сознательно не автоматическая задача поверх этих сырых записей, не часть этого тика; здесь только
+ * сырые факты в metadata. "Полезная математика" (процентиль с поправкой на длительность с момента
+ * публикации) не считается и не хранится здесь — строится из metadata по требованию (см. скилл
+ * "Обучение на контенте"), чтобы не протухала. */
+async function refreshTelegramChannel(row) {
+  if (!TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN не задан — источник kind='telegram_channel' не может обновиться");
+  const folderId = await ensureTelegramPostsFolder(row);
+  const offset = Number(row.props?.telegram_offset) || 0;
+  const allowedUpdates = encodeURIComponent(JSON.stringify(["channel_post", "edited_channel_post", "message_reaction_count"]));
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${offset}&timeout=0&allowed_updates=${allowedUpdates}`);
+  const data = await response.json();
+  if (!data.ok) throw new Error(data.description || `telegram getUpdates ${response.status}`);
+  const updates = data.result || [];
+
+  let newPosts = 0;
+  let reactionUpdates = 0;
+  let maxUpdateId = offset - 1;
+  for (const update of updates) {
+    maxUpdateId = Math.max(maxUpdateId, update.update_id);
+    const post = update.channel_post || update.edited_channel_post;
+    if (post) {
+      const text = post.text || post.caption || "";
+      const hasPhoto = Array.isArray(post.photo) && post.photo.length > 0;
+      const mediaType = post.video ? "video_file" : post.voice ? "voice_message" : post.audio ? "audio_file"
+        : post.animation ? "animation" : post.sticker ? "sticker" : post.document ? "document" : "";
+      const postedAt = new Date(post.date * 1000);
+      const title = text.trim().slice(0, 80) || `Пост от ${postedAt.toLocaleDateString("ru-RU")}`;
+      const existing = await findTelegramPostMemory(row.id, post.message_id);
+      const metadata = {
+        source_id: String(row.id), message_id: String(post.message_id), posted_at: postedAt.toISOString(),
+        has_photo: hasPhoto, media_type: mediaType,
+        reactions_total: existing?.metadata?.reactions_total || 0, reactions_breakdown: existing?.metadata?.reactions_breakdown || {},
+      };
+      if (existing) {
+        await query("UPDATE memories SET title = $1, content = $2, metadata = $3, updated_at = now() WHERE id = $4", [title, text, JSON.stringify(metadata), existing.id]);
+      } else {
+        await query(
+          "INSERT INTO memories(folder_id, title, content, entity_type, access_level, metadata) VALUES ($1, $2, $3, 'post', 'agents', $4)",
+          [folderId, title, text, JSON.stringify(metadata)],
+        );
+      }
+      newPosts += 1;
+    }
+    const reactionCount = update.message_reaction_count;
+    if (reactionCount) {
+      const breakdown = {};
+      let total = 0;
+      for (const r of reactionCount.reactions || []) {
+        const key = r.type?.emoji || r.type?.custom_emoji_id || r.type?.type || "?";
+        breakdown[key] = r.total_count;
+        total += r.total_count;
+      }
+      const existing = await findTelegramPostMemory(row.id, reactionCount.message_id);
+      if (existing) {
+        const metadata = { ...existing.metadata, reactions_total: total, reactions_breakdown: breakdown };
+        await query("UPDATE memories SET metadata = $1, updated_at = now() WHERE id = $2", [JSON.stringify(metadata), existing.id]);
+      } else {
+        const metadata = { source_id: String(row.id), message_id: String(reactionCount.message_id), reactions_total: total, reactions_breakdown: breakdown };
+        await query(
+          "INSERT INTO memories(folder_id, title, content, entity_type, access_level, metadata) VALUES ($1, $2, '', 'post', 'agents', $3)",
+          [folderId, `Пост #${reactionCount.message_id}`, JSON.stringify(metadata)],
+        );
+      }
+      reactionUpdates += 1;
+    }
+  }
+  await query("UPDATE data_sources SET props = props || $1::jsonb WHERE id = $2", [JSON.stringify({ telegram_offset: maxUpdateId + 1 }), row.id]);
+  return `новых/изменённых постов: ${newPosts}, обновлений реакций: ${reactionUpdates}`;
+}
+
 async function refreshDataSourceById(id, { inboxId } = {}) {
-  const row = (await query("SELECT id::text, project_id::text, name, url, access_level, kind, last_memory_id::text FROM data_sources WHERE id = $1", [id])).rows[0];
+  const row = (await query("SELECT id::text, project_id::text, name, url, access_level, kind, last_memory_id::text, props FROM data_sources WHERE id = $1", [id])).rows[0];
   if (!row) return { ok: false, summary: "", error: "источник не найден" };
+
+  if (row.kind === "telegram_channel") {
+    try {
+      const summary = await refreshTelegramChannel(row);
+      await query("UPDATE data_sources SET last_fetched_at = now(), last_status = 'ok', last_summary = $1, updated_at = now() WHERE id = $2", [summary, row.id]);
+      return { ok: true, summary };
+    } catch (error) {
+      await query("UPDATE data_sources SET last_fetched_at = now(), last_status = 'error', last_summary = $1, updated_at = now() WHERE id = $2", [String(error.message || error).slice(0, 500), row.id]);
+      return { ok: false, summary: "", error: error.message || String(error) };
+    }
+  }
 
   if (row.kind === "tours_xml") {
     try {
@@ -1738,7 +1856,7 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
       companyId = company.id;
     }
     if (!projectId && !companyId) return "не создал источник — укажи проект или компанию, к которой привязать";
-    const kind = args.kind === "tours_xml" ? "tours_xml" : "webpage";
+    const kind = ["tours_xml", "telegram_channel"].includes(args.kind) ? args.kind : "webpage";
     const inserted = await client.query(
       `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes, kind)
        VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440), $6) RETURNING id::text`,
@@ -1804,6 +1922,10 @@ async function replyAsJarvis(item) {
               (SELECT count(*) FROM memories)::int AS memories_total`,
     )).rows[0];
     const systemPrompt = `Ты ${JARVIS_NAME} — лёгкий постоянный помощник в MBOX (личная система памяти и проектов). `
+      + "Имя не просто так: держи тон робота-дворецкого — вежливо, чуть церемонно, обращайся на «вы», "
+      + "уместны фразы вроде «Конечно, сэр», «Слушаюсь», «Жду ваших указаний», лёгкая ирония допустима, но "
+      + "не в ущерб делу — это тон, а не ролевая игра, отчёты и цифры остаются точными, никакой отсебятины "
+      + "ради характера. "
       + `Ты обычно работаешь на модели ${GEMINI_MODEL} (Gemini), а если она недоступна — на резервной `
       + `${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — называй ту, что реально сейчас `
       + "отвечает (обычно Gemini), не выдумывай третье название. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
@@ -2777,6 +2899,18 @@ async function handleApiWithContext(req, res, url) {
       [search, onlyAvailable],
     );
     return sendJson(res, 200, { sheets: result.rows });
+  }
+
+  if (url.pathname === "/api/mbox/telegram-posts" && req.method === "GET") {
+    const sourceId = String(url.searchParams.get("source_id") || "").trim();
+    if (!sourceId) return sendJson(res, 400, { error: "source_id_required" });
+    const result = await query(
+      `SELECT id::text, title, content, metadata
+       FROM memories WHERE entity_type = 'post' AND metadata->>'source_id' = $1
+       ORDER BY (metadata->>'reactions_total')::int DESC NULLS LAST LIMIT 300`,
+      [sourceId],
+    );
+    return sendJson(res, 200, { posts: result.rows });
   }
 
 

@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Heart, Pencil, Plus, Trash2 } from "lucide-react";
 import { fetchJson, saveEntity } from "../../lib/api";
-import { formatSince } from "../../lib/format";
+import { formatDate, formatSince } from "../../lib/format";
 import { MemoryModal } from "../memories/MemoryModal";
 import type { FolderRow, Memory, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
@@ -101,6 +101,12 @@ function FolderNote({ memory, onOpen, onSaved }: { memory: Memory; onOpen: () =>
     onSaved();
   }
 
+  // Посты (entity_type='post') несут сырые факты вовлечённости в metadata, а не в отдельных
+  // колонках — карточка не показывала их вовсе, лайки были "невидимыми" для владельца.
+  const isPost = memory.entity_type === "post";
+  const reactionsTotal = isPost ? Number(memory.metadata?.reactions_total) || 0 : 0;
+  const postedAt = isPost && typeof memory.metadata?.posted_at === "string" ? memory.metadata.posted_at : null;
+
   return (
     <article className="folder-note" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>
       <header>
@@ -109,7 +115,14 @@ function FolderNote({ memory, onOpen, onSaved }: { memory: Memory; onOpen: () =>
         <button type="button" onClick={remove} aria-label="Удалить запись"><Trash2 size={15} /></button>
       </header>
       {memory.content && <p>{memory.content}</p>}
-      <footer>{formatSince(memory.updated_at)}</footer>
+      <footer>
+        {isPost
+          ? <>
+              <span className="folder-note-likes"><Heart size={13} />{reactionsTotal}</span>
+              {postedAt ? formatDate(postedAt) : formatSince(memory.updated_at)}
+            </>
+          : formatSince(memory.updated_at)}
+      </footer>
     </article>
   );
 }
