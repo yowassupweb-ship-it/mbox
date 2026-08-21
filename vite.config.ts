@@ -1370,14 +1370,17 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
   }
 
   if (name === "get_groq_usage") {
-    const row = (await client.query(
-      `SELECT COALESCE(SUM(total_tokens), 0)::text AS total,
+    const rows = (await client.query(
+      `SELECT model,
+              COALESCE(SUM(total_tokens), 0)::text AS total,
               COALESCE(SUM(total_tokens) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::text AS last_24h,
               COALESCE(SUM(total_tokens) FILTER (WHERE created_at > date_trunc('day', now())), 0)::text AS today,
               COUNT(*)::int AS calls_total
-       FROM groq_usage`,
-    )).rows[0] as { total: string; last_24h: string; today: string; calls_total: number };
-    return `токены Groq: сегодня ${row.today}, за последние 24ч ${row.last_24h}, всего ${row.total} (звонков к Groq: ${row.calls_total})`;
+       FROM groq_usage GROUP BY model ORDER BY SUM(total_tokens) DESC`,
+    )).rows as { model: string; total: string; last_24h: string; today: string; calls_total: number }[];
+    if (!rows.length) return "расхода токенов пока не зафиксировано";
+    const lines = rows.map((r) => `${r.model || "?"}: сегодня ${r.today}, за 24ч ${r.last_24h}, всего ${r.total} (${r.calls_total} вызовов)`);
+    return `расход токенов по моделям — ${lines.join("; ")}. У Gemini нет известного жёсткого лимита в этом коде, это только счётчик фактического расхода, не "остаток".`;
   }
 
   if (name === "list_recent_activity") {
@@ -1541,7 +1544,8 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "отличие от list_project_todos/search_todos, которые отдают только обрезанные превью), update_todo_note "
         + "(дописать или заменить описание задачи), link_projects (связать два проекта отношением — «использует», "
         + "«зависит от» и т.п.), record_decision (записать ВЫБОР между вариантами и почему — не факт, для фактов "
-        + "record_memory), get_groq_usage (сколько токенов Groq потрачено на тебя — сегодня/за сутки/всего), "
+        + "record_memory), get_groq_usage (расход токенов по моделям, которыми ты говоришь — и Groq, и Gemini, "
+        + "сегодня/за сутки/всего; у Gemini нет известного жёсткого лимита, это просто счётчик расхода), "
         + "list_recent_activity (последние события в проекте или во всём MBOX), find_file (найти путь "
         + "к файлу в структуре репозитория — только пути, без содержимого, ты не читаешь файлы), "
         + "list_companies и get_company_info (КОМПАНИЯ — не проект: контейнер верхнего уровня, "
@@ -1559,7 +1563,15 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
         + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "
         + "только первое. Если просят что-то другое, для чего нет функции — "
-        + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Тебе видна история разговора "
+        + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Кроме тебя в MBOX работает "
+        + "Claude — отдельный, куда более мощный агент (через Claude Code), который занимается тяжёлыми "
+        + "задачами: разработкой самого MBOX, деплоем на прод, глубоким анализом больших массивов данных "
+        + "(например, разбором постов Telegram-канала для скилла контента). Если просят что-то из этого — не "
+        + "делай вид, что справишься сам, скажи прямо, что это к Claude, не к тебе. Модели, которые говорят "
+        + "твоим голосом: сам ты обычно на Gemini, в резерве — Groq (\"Прораб\", openai/gpt-oss-120b — ведёт "
+        + "диалог и решает, какой инструмент вызвать; \"Младший\", openai/gpt-oss-20b — разовые задачи без "
+        + "диалога вроде пересказа страницы или классификации памяти). Claude — это отдельный агент на своей "
+        + "модели (Claude Sonnet), не ещё одна твоя резервная модель, не путай. Тебе видна история разговора "
         + "(не только последнее сообщение), но действие вызывай ТОЛЬКО когда об этом явно просят прямо сейчас — "
         + "фразы вроде «буду делать проект на стеке X» или «планирую X» это описание планов, а не команда, не "
         + "создавай ничего в ответ на них. Когда человек явно просит создать проект, а раньше в разговоре уже "
