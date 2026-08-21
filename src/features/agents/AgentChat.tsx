@@ -248,7 +248,9 @@ function PostPartCard({ part, index, onChange, onReject, onRate }: {
   part: PostPart; index: number; onChange: (index: number) => void; onReject: (comment: string) => void; onRate: (score: number) => void;
 }) {
   const dragStartX = useRef<number | null>(null);
+  const dragStartY = useRef<number | null>(null);
   const [dragDx, setDragDx] = useState(0);
+  const [swiping, setSwiping] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [comment, setComment] = useState("");
   const [rated, setRated] = useState<number | null>(null);
@@ -275,16 +277,32 @@ function PostPartCard({ part, index, onChange, onReject, onRate }: {
 
   function onPointerDown(event: ReactPointerEvent) {
     dragStartX.current = event.clientX;
-    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+    dragStartY.current = event.clientY;
+    // Не захватываем указатель сразу — иначе браузер не может выделить текст обычным
+    // click+drag, любое касание текста читалось бы как начало свайпа. Ловим курсор только
+    // когда движение реально горизонтальное (см. onPointerMove) — до этого момента это
+    // обычное выделение текста, браузер обрабатывает его сам.
   }
   function onPointerMove(event: ReactPointerEvent) {
-    if (dragStartX.current === null) return;
-    setDragDx(event.clientX - dragStartX.current);
+    if (dragStartX.current === null || dragStartY.current === null) return;
+    const dx = event.clientX - dragStartX.current;
+    const dy = event.clientY - dragStartY.current;
+    if (!swiping && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      if (Math.abs(dx) <= Math.abs(dy)) { dragStartX.current = null; dragStartY.current = null; return; } // вертикальное/диагональное — это выделение, отдаём браузеру
+      setSwiping(true);
+      (event.target as HTMLElement).setPointerCapture(event.pointerId);
+      window.getSelection()?.removeAllRanges();
+    }
+    if (swiping) setDragDx(dx);
   }
   function onPointerUp() {
-    if (dragDx > SWIPE_THRESHOLD_PX) go(-1);
-    else if (dragDx < -SWIPE_THRESHOLD_PX) go(1);
+    if (swiping) {
+      if (dragDx > SWIPE_THRESHOLD_PX) go(-1);
+      else if (dragDx < -SWIPE_THRESHOLD_PX) go(1);
+    }
     dragStartX.current = null;
+    dragStartY.current = null;
+    setSwiping(false);
     setDragDx(0);
   }
 
