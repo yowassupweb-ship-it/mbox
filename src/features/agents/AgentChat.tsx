@@ -268,6 +268,11 @@ function PostPartCard({ part, index, onChange }: { part: PostPart; index: number
     setDragDx(0);
   }
 
+  // Заголовок — это то, что реально решает, откроют ли пост; в листалке он тонул в том же
+  // размере шрифта, что и тело. key/label проверяем оба — агент может прислать "title" или
+  // человекочитаемое "Заголовок", один из них обычно совпадает.
+  const isTitle = part.key.toLowerCase() === "title" || part.label.toLowerCase().includes("заголов");
+
   return (
     <div className="post-part-card">
       <div className="post-part-head">
@@ -275,7 +280,7 @@ function PostPartCard({ part, index, onChange }: { part: PostPart; index: number
         <span className="post-part-count">{index + 1}/{part.options.length}</span>
       </div>
       <div
-        className="post-part-swipe"
+        className={`post-part-swipe${isTitle ? " is-title" : ""}`}
         style={{ transform: dragDx ? `translateX(${dragDx}px)` : undefined }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
