@@ -244,17 +244,29 @@ const SWIPE_THRESHOLD_PX = 60;
  * (pointer drag) или стрелками. Отдельная карточка на часть, не общий выбор "весь пост целиком":
  * скилл "Обучение на контенте" собирает идеал из кусков, а не заставляет брать готовый вариант.
  */
-function PostPartCard({ part, index, onChange, onReject }: { part: PostPart; index: number; onChange: (index: number) => void; onReject: (comment: string) => void }) {
+function PostPartCard({ part, index, onChange, onReject, onRate }: {
+  part: PostPart; index: number; onChange: (index: number) => void; onReject: (comment: string) => void; onRate: (score: number) => void;
+}) {
   const dragStartX = useRef<number | null>(null);
   const [dragDx, setDragDx] = useState(0);
   const [rejecting, setRejecting] = useState(false);
   const [comment, setComment] = useState("");
+  const [rated, setRated] = useState<number | null>(null);
+
+  function submitRate(score: number) {
+    setRated(score);
+    onRate(score);
+  }
 
   function submitReject() {
     onReject(comment.trim());
     setComment("");
     setRejecting(false);
   }
+
+  // Оценка привязана к КОНКРЕТНОМУ показанному варианту — при листании на другой вариант
+  // прежняя оценка больше не про него, сбрасываем, иначе цифра врёт про новый текст.
+  useEffect(() => { setRated(null); }, [index]);
 
   function go(delta: number) {
     const next = (index + delta + part.options.length) % part.options.length;
@@ -307,6 +319,20 @@ function PostPartCard({ part, index, onChange, onReject }: { part: PostPart; ind
           ✕ отклонить
         </button>
       </div>
+      <div className="post-part-rating">
+        <span className="post-part-rating-label">оценка:</span>
+        {[1, 2, 3, 4, 5].map((score) => (
+          <button
+            key={score}
+            type="button"
+            className={rated !== null && score <= rated ? "is-rated" : ""}
+            onClick={() => submitRate(score)}
+            aria-label={`Оценить «${part.label}» на ${score} из 5`}
+          >
+            {rated !== null && score <= rated ? "★" : "☆"}
+          </button>
+        ))}
+      </div>
       {rejecting && (
         <div className="post-part-reject">
           <textarea
@@ -349,6 +375,7 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
           index={selected[i]}
           onChange={(next) => setPart(i, next)}
           onReject={(comment) => onSend(`Отклонить часть «${part.label}»${comment ? `: ${comment}` : " (без комментария)"}`)}
+          onRate={(score) => onSend(`Оценка части «${part.label}» (вариант ${selected[i] + 1}/${part.options.length}): ${score}/5`)}
         />
       ))}
       <div className="post-builder-actions">

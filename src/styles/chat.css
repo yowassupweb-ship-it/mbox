@@ -814,6 +814,33 @@
 }
 .post-part-reject-toggle:hover { opacity: 1; color: var(--state-danger); }
 
+.post-part-rating {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 8px 6px;
+}
+
+.post-part-rating-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-2);
+  margin-right: 4px;
+}
+
+.post-part-rating button {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, .3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 1px 2px;
+}
+
+.post-part-rating button.is-rated { color: #f5c542; }
+.post-part-rating button:hover { color: #f5c542; }
+
 .post-part-reject {
   display: flex;
   gap: 6px;
