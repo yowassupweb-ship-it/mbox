@@ -1077,6 +1077,54 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_memory",
+      description: "Вывести ПОЛНЫЙ текст записи памяти по её номеру (ID) — search_memory отдаёт только короткий обрезанный summary, этим инструментом читай запись целиком, когда попросят «выведи полностью», «покажи запись #N» и т.п.",
+      parameters: {
+        type: "object",
+        properties: { memory_id: { type: "string", description: "Номер записи (ID), обычно виден в результатах search_memory" } },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_memory_actions",
+      description: "История изменений конкретной записи памяти по её ID (кто и когда создавал/правил/удалял) — используй для вопросов «кто это записал», «когда правили в последний раз».",
+      parameters: {
+        type: "object",
+        properties: { memory_id: { type: "string", description: "Номер записи (ID)" } },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_memory_links",
+      description: "Связанные записи памяти для конкретной записи по её ID — используй на вопросы «с чем это связано», «что ещё касается этой темы».",
+      parameters: {
+        type: "object",
+        properties: { memory_id: { type: "string", description: "Номер записи (ID)" } },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_task",
+      description: "Вывести ПОЛНУЮ карточку задачи (описание, статус, приоритет, проект) по её номеру (ID) — list_project_todos и search_todos отдают только обрезанные превью, этим инструментом читай задачу целиком по номеру.",
+      parameters: {
+        type: "object",
+        properties: { todo_id: { type: "string", description: "Номер задачи (ID)" } },
+        required: ["todo_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_todos",
       description: "Найти задачи по тексту в заголовке ИЛИ в описании (note) — list_project_todos видит только заголовки, этот инструмент ищет по содержимому задачи.",
       parameters: {
@@ -1769,6 +1817,61 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     return rows.map((m) => `«${m.title}»${m.project_name ? ` (${m.project_name})` : ""}: ${m.content.slice(0, 160)}`).join(" | ");
   }
 
+  if (name === "get_memory") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи — возьми его из результатов search_memory";
+    const row = (await client.query(
+      `SELECT m.title, m.content, m.tags, m.entity_type, p.name AS project_name
+       FROM memories m LEFT JOIN projects p ON p.id = m.project_id
+       WHERE m.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return `запись #${id} не нашлась — возможно, удалена или номер неверный`;
+    const tags = Array.isArray(row.tags) && row.tags.length ? ` [теги: ${row.tags.join(", ")}]` : "";
+    return `«${row.title}»${row.project_name ? ` (${row.project_name})` : ""}${tags}:\n${row.content}`;
+  }
+
+  if (name === "get_memory_actions") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи";
+    const rows = (await client.query(
+      "SELECT actor, action, note, created_at::text FROM memory_actions WHERE memory_id = $1 ORDER BY created_at DESC LIMIT 20",
+      [id],
+    )).rows;
+    if (!rows.length) return `по записи #${id} истории действий нет`;
+    return rows.map((r) => `${r.actor} — ${r.action}${r.note ? ` (${r.note})` : ""} · ${r.created_at}`).join("; ");
+  }
+
+  if (name === "list_memory_links") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи";
+    const rows = (await client.query(
+      `SELECT l.link_type, l.description,
+              CASE WHEN l.from_memory_id = $1 THEN mt.title ELSE mf.title END AS other_title,
+              CASE WHEN l.from_memory_id = $1 THEN mt.id ELSE mf.id END AS other_id
+       FROM memory_links l
+       JOIN memories mf ON mf.id = l.from_memory_id
+       JOIN memories mt ON mt.id = l.to_memory_id
+       WHERE l.from_memory_id = $1 OR l.to_memory_id = $1`,
+      [id],
+    )).rows;
+    if (!rows.length) return `у записи #${id} связей пока нет`;
+    return rows.map((r) => `«${r.other_title}» (#${r.other_id}) — ${r.link_type}${r.description ? `: ${r.description}` : ""}`).join("; ");
+  }
+
+  if (name === "get_task") {
+    const id = String(args.todo_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID задачи";
+    const row = (await client.query(
+      `SELECT t.title, t.note, t.status, t.priority, t.claimed_by, p.name AS project_name
+       FROM todos t LEFT JOIN projects p ON p.id = t.project_id
+       WHERE t.id = $1`,
+      [id],
+    )).rows[0];
+    if (!row) return `задача #${id} не нашлась — возможно, удалена или номер неверный`;
+    return `«${row.title}»${row.project_name ? ` (${row.project_name})` : ""} — статус: ${row.status}, приоритет: ${row.priority}${row.claimed_by ? `, в работе у: ${row.claimed_by}` : ""}. Описание: ${row.note || "пусто"}`;
+  }
+
   if (name === "search_todos") {
     const q = String(args.query || "").trim();
     if (!q) return "не искал — пустой запрос";
@@ -2009,7 +2112,11 @@ async function replyAsJarvis(item) {
       + "используй именно этот инструмент, не search_memory: там технические итоги прогонов агентов, а не "
       + "описание проекта), search_todos (искать по тексту задачи, включая описание — если list_project_todos "
       + "не нашёл нужное, попробуй search_todos, там ищется больше, чем просто заголовок), search_memory "
-      + "(искать конкретные факты/решения по ключевым словам, НЕ для общего описания проекта), update_todo_note "
+      + "(искать конкретные факты/решения по ключевым словам, НЕ для общего описания проекта — отдаёт только "
+      + "обрезанный отрывок; если попросят «выведи полностью» или дали номер записи — дочитывай get_memory), "
+      + "get_memory (полный текст записи памяти по ID), get_memory_actions (кто и когда правил запись по её ID), "
+      + "list_memory_links (что связано с записью по её ID), get_task (полная карточка задачи по её ID — в "
+      + "отличие от list_project_todos/search_todos, которые отдают только обрезанные превью), update_todo_note "
       + "(дописать или заменить описание задачи), link_projects (связать два проекта отношением — «использует», "
       + "«зависит от» и т.п.), record_decision (записать ВЫБОР между вариантами и почему — не факт, для фактов "
       + "record_memory), get_groq_usage (сколько токенов Groq потрачено на тебя — сегодня/за сутки/всего), "
