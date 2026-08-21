@@ -363,6 +363,7 @@
   font-weight: var(--weight-bold);
   line-height: 17px;
   text-align: center;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 

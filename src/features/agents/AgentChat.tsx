@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -195,6 +195,11 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const stored = Number(window.localStorage.getItem("mbox.console.width"));
+    return stored > 0 ? stored : Math.round(window.innerWidth / 3);
+  });
+  const resizingRef = useRef(false);
   const [text, setText] = useState("");
   const [cursor, setCursor] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
@@ -348,6 +353,38 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     window.localStorage.setItem(READ_KEY, last);
     setReadAt(last);
   }, [open, unread, unreadItems]);
+
+  // Консоль на широком экране — не плавающий пузырь, а пристыкованная справа панель, которая
+  // РЕАЛЬНО сдвигает контент (не перекрывает его): .workspace читает --console-width как
+  // margin-right (см. chat.css, брейкпоинт ≥1201px — на более узких экранах поведение старое,
+  // не трогаем уже выверенную мобильную раскладку). На уже открытых узких экранах переменная
+  // просто не используется соответствующим медиа-запросом.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--console-width", open ? `${panelWidth}px` : "0px");
+    return () => { document.documentElement.style.setProperty("--console-width", "0px"); };
+  }, [open, panelWidth]);
+
+  function startResize(event: ReactMouseEvent) {
+    event.preventDefault();
+    resizingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    function onMove(moveEvent: MouseEvent) {
+      if (!resizingRef.current) return;
+      const next = Math.min(Math.max(window.innerWidth - moveEvent.clientX, 320), Math.round(window.innerWidth * 0.7));
+      setPanelWidth(next);
+    }
+    function onUp() {
+      resizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setPanelWidth((current) => { window.localStorage.setItem("mbox.console.width", String(current)); return current; });
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   useEffect(() => {
     if (!pending.length) return;
@@ -523,7 +560,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   return (
     <div className="agent-chat">
       {open && (
-        <div className="agent-chat-shell console">
+        <div className="agent-chat-shell console" style={{ ["--console-panel-width" as string]: `${panelWidth}px` }}>
+          {/* Только на пристыкованной раскладке (см. брейкпоинт ≥1201px в chat.css) — на
+              floating/fullscreen режимах уже, тянуть нечего. */}
+          <div className="console-resize-handle" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Изменить ширину консоли" />
           <div className="console-bar">
             <span className="console-bar-roster">{rosterSummary}</span>
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
