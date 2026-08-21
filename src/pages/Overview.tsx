@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Archive, BookOpen, ClipboardCheck, FolderKanban, HelpCircle, ShieldCheck } from "lucide-react";
+import { BookOpen, ClipboardCheck, FolderKanban, HelpCircle } from "lucide-react";
 import { AgentWorkBoard } from "../features/agents/AgentWorkBoard";
 import { NeedsAnswer } from "../features/agents/NeedsAnswer";
 import { ReviewQueue } from "../features/projects/ReviewQueue";
@@ -7,6 +7,9 @@ import type { MboxData } from "../hooks/useMboxData";
 import { formatBytes, sumBytes } from "../lib/format";
 import type { Artifact, Memory, Project } from "../types";
 import { EmptyState, Metric, MetricGrid, Panel } from "../ui";
+
+const BOTTOM_ICONS = "/assets/icons/bottom-menu";
+const ENTITY_ICONS = "/assets/icons/icons";
 
 export function Overview({ data }: { data: MboxData }) {
   const totalBytes = sumBytes([
@@ -27,10 +30,10 @@ export function Overview({ data }: { data: MboxData }) {
         </Panel>
       )}
       <MetricGrid>
-        <Metric title="Память" value={data.memories.length} subtitle={formatBytes(totalBytes)} icon={BookOpen} />
-        <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} icon={Archive} />
-        <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} icon={FolderKanban} />
-        <Metric title="Секреты" value={data.secrets.length} subtitle={formatBytes(sumBytes(data.secrets.map((item) => item.memory_bytes)))} icon={ShieldCheck} />
+        <Metric title="Память" value={data.memories.length} subtitle={formatBytes(totalBytes)} image={`${BOTTOM_ICONS}/память.png`} />
+        <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/артефакты.png`} />
+        <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/проекты.png`} />
+        <Metric title="Секреты" value={data.secrets.length} subtitle={formatBytes(sumBytes(data.secrets.map((item) => item.memory_bytes)))} image={`${ENTITY_ICONS}/дсотуп.png`} />
       </MetricGrid>
       {reviewCount > 0 && (
         <Panel title={`На проверке · ${reviewCount}`} icon={ClipboardCheck} className="review-panel">

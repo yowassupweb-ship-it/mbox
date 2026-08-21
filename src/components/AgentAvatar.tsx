@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 export type AgentIdentity = {
   key: string;
@@ -47,19 +47,36 @@ export function agentIdentity(name: string): AgentIdentity {
   return { key: "generic", label: raw, accent: `hsl(${hue} 62% 60%)`, glyph: <text x="12" y="12" textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight="760" fill="currentColor">{initials}</text> };
 }
 
+// Кадры маскота MBOX (осьминог): 1 — логотип в покое, 2-4 — шевелит щупальцами. Пока агент реально
+// работает (live), аватарка вместо статичной иконки идентичности крутит эту анимацию — заметный
+// живой сигнал "что-то происходит", а не просто цветная точка-статус в углу.
+const WORKING_FRAMES = [1, 2, 3, 4].map((n) => `/assets/icons/big-logo-spinner/${n}.png`);
+
+function useWorkingFrame(active: boolean) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) { setFrame(0); return; }
+    const timer = window.setInterval(() => setFrame((value) => (value + 1) % WORKING_FRAMES.length), 260);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return WORKING_FRAMES[frame];
+}
+
 export function AgentAvatar({ name, status = "idle", live = false, size = 34 }: { name: string; status?: string; live?: boolean; size?: number }) {
   const identity = agentIdentity(name);
   const stateClass = live ? "working" : status;
   const glyphScale = identity.key === "generic" ? 0.62 : 0.56;
+  const workingFrame = useWorkingFrame(live);
+  const imageSrc = live ? workingFrame : identity.image;
   return (
     <span
-      className={`agent-avatar ${identity.key} ${stateClass}${identity.image ? " has-image" : ""}`}
+      className={`agent-avatar ${identity.key} ${stateClass}${imageSrc ? " has-image" : ""}`}
       style={{ ["--agent-accent" as string]: identity.accent, width: size, height: size }}
       title={`${identity.label} · ${status}`}
       aria-label={`${identity.label}, ${status}`}
     >
-      {identity.image ? (
-        <img src={identity.image} width={Math.round(size * 0.8)} height={Math.round(size * 0.8)} alt="" style={{ borderRadius: "50%" }} />
+      {imageSrc ? (
+        <img src={imageSrc} width={Math.round(size * 0.88)} height={Math.round(size * 0.88)} alt="" />
       ) : (
         <svg viewBox="0 0 24 24" width={Math.round(size * glyphScale)} height={Math.round(size * glyphScale)} role="img" aria-hidden="true">
           {identity.glyph}

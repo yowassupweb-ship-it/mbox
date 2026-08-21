@@ -14,10 +14,10 @@ export function Panel({ title, icon: Icon, actions, className = "", children }: 
   );
 }
 
-export function Metric({ title, value, subtitle, icon: Icon }: { title: string; value: number | string; subtitle: string; icon: LucideIcon }) {
+export function Metric({ title, value, subtitle, icon: Icon, image }: { title: string; value: number | string; subtitle: string; icon?: LucideIcon; image?: string }) {
   return (
     <article className="metric-card">
-      <div className="metric-icon"><Icon size={20} /></div>
+      <div className="metric-icon">{image ? <img src={image} width={26} height={26} alt="" /> : Icon ? <Icon size={20} /> : null}</div>
       <span>{title}</span>
       <div className="metric-card-row">
         <strong>{value}</strong>

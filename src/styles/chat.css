@@ -580,6 +580,8 @@
   color: var(--text-2);
 }
 
+.console-thinking-spinner { flex: none; }
+
 .console-log-line.in .console-log-actor { color: var(--accent-color); }
 .console-log-line.out .console-log-actor { color: var(--state-ok); }
 .console-log-line.sys .console-log-actor { color: var(--text-muted); }

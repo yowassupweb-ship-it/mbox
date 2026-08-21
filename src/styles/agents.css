@@ -99,6 +99,15 @@
 
 .agent-avatar svg { display: block; }
 
+/* Иконки-изображения (Claude/Gemini/GPT/человек) уже цветные сами по себе — цветной кружок-подложка
+   под ними читался как лишняя рамка, а не как часть иконки. Фон = фон страницы, кружок остаётся
+   только у generic-аватарок (буква/инициалы), которым он и даёт единственный цветовой сигнал. */
+.agent-avatar.has-image {
+  background: var(--container-bg, #1c1c1e);
+  box-shadow: none;
+  outline: none;
+}
+
 .agent-avatar::after {
   content: "";
   position: absolute;

@@ -154,6 +154,18 @@ function agentState(agent: AgentActivity, runs: AgentRun[]) {
   return { key: "offline", label: "отключён", detail: formatSince(agent.last_seen) };
 }
 
+const THINKING_FRAMES = [1, 2, 3, 4, 5].map((n) => `/assets/icons/ai-thinking-spinner/${n}.png`);
+
+/** Живой спиннер вместо статичного "думает…" — кадры лежат в public/assets/icons/ai-thinking-spinner. */
+function ThinkingSpinner() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setFrame((value) => (value + 1) % THINKING_FRAMES.length), 220);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <img className="console-thinking-spinner" src={THINKING_FRAMES[frame]} width={16} height={16} alt="" />;
+}
+
 type LogLine = {
   id: string;
   kind: "in" | "out" | "sys" | "cmd";
@@ -564,7 +576,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             {awaitingJarvisId && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
-                <span className="console-log-actor">·</span>
+                <ThinkingSpinner />
                 <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || "думает"}… {awaitingJarvisSeconds}с</span>
                 <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
                   <X size={11} />

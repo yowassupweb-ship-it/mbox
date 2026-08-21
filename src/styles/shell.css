@@ -293,7 +293,7 @@
 
 /* В прилипшем положении шапка стоит выше и ближе к верху окна, но не касается края. */
 .topbar-logo { flex: none; }
-.realtime-pill strong.is-brand { font-family: var(--font-pixel); font-size: 11px; letter-spacing: .02em; }
+.realtime-pill strong.is-brand { font-family: var(--font-pixel); font-size: 18px; letter-spacing: .02em; }
 
 .topbar {
   position: sticky;
