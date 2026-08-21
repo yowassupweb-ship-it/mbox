@@ -1939,13 +1939,22 @@ function mboxDevApi() {
         ".ico": "image/x-icon", ".png": "image/png", ".svg": "image/svg+xml", ".txt": "text/plain", ".json": "application/json",
       };
       server.middlewares.use((req, res, next) => {
-        const pathname = (req.url || "").split("?")[0];
-        if (req.method !== "GET" || pathname.startsWith("/assets/") || pathname === "/" || pathname === "/index.html") return next();
+        // req.url приходит percent-encoded (Node его не декодирует сам) — иконки с кириллицей в
+        // имени (память.png и т.п.) никогда не совпадали с реальным файлом на диске и тихо
+        // проваливались в next() -> SPA-фолбэк, который отдавал index.html с 200 OK вместо картинки.
+        const pathname = decodeURIComponent((req.url || "").split("?")[0]);
+        // /assets/ обычно зарезервирован под хешированный прод-бандл (index-*.js/css), которого в
+        // dev не существует — но /assets/icons/ это настоящие статические файлы (иконки, аватарки),
+        // не бандл, их эта раздача должна пропускать наравне с остальным public/.
+        if (req.method !== "GET" || (pathname.startsWith("/assets/") && !pathname.startsWith("/assets/icons/")) || pathname === "/" || pathname === "/index.html") return next();
         const ext = path.extname(pathname);
         if (!ext || !(ext in PUBLIC_MIME)) return next();
         const filePath = path.join(process.cwd(), "public", pathname);
         if (!filePath.startsWith(path.join(process.cwd(), "public")) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return next();
         res.setHeader("content-type", PUBLIC_MIME[ext]);
+        // Иконки менялись несколько раз под одним и тем же путём во время итерации — без этого
+        // браузер держал старую (сломанную) версию в кеше и путал "уже почини" с "ещё не почини".
+        res.setHeader("cache-control", "no-cache");
         fs.createReadStream(filePath).pipe(res);
       });
 

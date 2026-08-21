@@ -50,6 +50,7 @@ export function TopBar({
         <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Поиск" />
       </div>
       <button className={`realtime-pill monostatus ${realtimeState}`} type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <img className="topbar-logo" src="/assets/icons/icons/logo.png" width={20} height={20} alt="" />
         {stack.length > 0 && (
           <span className="pill-avatars" aria-hidden="true">
             {stack.map((agent) => (
@@ -57,7 +58,7 @@ export function TopBar({
             ))}
           </span>
         )}
-        <strong>{realtimeLabel}</strong>
+        <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
         {notice && <span>{notice}</span>}
       </button>
       {open && (

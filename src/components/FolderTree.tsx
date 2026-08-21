@@ -60,11 +60,11 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
   }
 
   if (!hasChildren) {
-    const FileIcon = kind?.icon ?? (node.type === "todo" ? ListTodo : node.type === "git_group" ? GitBranch : FileText);
+    const FallbackIcon = node.type === "todo" ? ListTodo : node.type === "git_group" ? GitBranch : FileText;
     return (
       <div className={rowClass} style={rowStyle} data-kind={node.entityKind} onClick={() => onSelect?.(node)} onContextMenu={openContext}>
         {node.type === "todo" && node.status === "doing" && <span className="todo-spinner" aria-label="В работе" />}
-        <FileIcon size={18} />
+        {kind ? <img src={kind.image} width={18} height={18} alt="" /> : <FallbackIcon size={18} />}
         <span>{node.name}</span>
         {node.meta && <small>{node.meta}</small>}
       </div>
@@ -74,7 +74,7 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
   return (
     <div className="tree-branch">
       {(() => {
-        const BranchIcon = kind?.icon ?? (node.type === "todo_group" ? ListTodo : node.type === "git_group" ? GitBranch : Folder);
+        const FallbackIcon = node.type === "todo_group" ? ListTodo : node.type === "git_group" ? GitBranch : Folder;
         return (
       <button
         className={rowClass}
@@ -87,7 +87,7 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
         onContextMenu={openContext}
       >
         <ChevronRight className="tree-chevron" size={17} />
-        <BranchIcon size={18} />
+        {kind ? <img src={kind.image} width={18} height={18} alt="" /> : <FallbackIcon size={18} />}
         <span>{node.name}</span>
         {node.meta && <small>{node.meta}</small>}
       </button>

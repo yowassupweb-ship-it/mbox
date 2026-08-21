@@ -148,7 +148,7 @@
 
 .entity-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(50%, 132px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: var(--space-2);
 }
 
@@ -167,6 +167,16 @@
 }
 
 .entity-tile svg { grid-area: icon; color: var(--kind-accent, #d4dceb); }
+/* Растровые иконки (public/assets/icons) вместо lucide — без grid-area они уходили в
+   авто-размещение грида и расплющивались по ширине колонки. flex:none + object-fit — квадратные
+   пропорции не едут, сколько бы ни задали width/height в JSX. */
+.entity-tile img {
+  grid-area: icon;
+  flex: none;
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+}
 .entity-tile b { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-medium); }
 .entity-tile small { grid-area: meta; color: var(--text-muted); font-size: var(--text-xs); }
 

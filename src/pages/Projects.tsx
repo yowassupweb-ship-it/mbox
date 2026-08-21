@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderPlus, Folder, ListTodo, Sliders, Trash2 } from "lucide-react";
+import { Sliders, Trash2 } from "lucide-react";
 import { TodoCardGrid } from "../features/projects/TodoCards";
 import { FolderBoard } from "../features/projects/FolderBoard";
 import { entityKindMeta, projectEntityKinds, type ProjectEntityKind } from "../features/tree/entityKinds";
@@ -11,6 +11,8 @@ import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { Company, DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
+
+const ICONS = "/assets/icons/icons";
 
 // Кроме постоянных сущностей у проекта могут быть свои папки: folder:<id>.
 type View = "todo" | ProjectEntityKind | `folder:${string}`;
@@ -294,13 +296,12 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
           style={{ ["--kind-accent" as string]: "#8ab4ff" }}
           onClick={() => go(project.id, "todo")}
         >
-          <ListTodo size={17} />
+          <img src={`${ICONS}/todo.png`} width={60} height={60} alt="" />
           <b>Todo</b>
           <small>{activeTodos} активно</small>
         </button>
         {visibleEntityOrder.map((kind) => {
           const meta = projectEntityKinds[kind];
-          const Icon = meta.icon;
           return (
             <button
               key={kind}
@@ -310,7 +311,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
               style={{ ["--kind-accent" as string]: meta.accent }}
               onClick={() => go(project.id, kind)}
             >
-              <Icon size={17} />
+              <img src={meta.image} width={60} height={60} alt="" />
               <b>{meta.label}</b>
               <small>{entitySummary(project, kind, memories)}</small>
             </button>
@@ -326,7 +327,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
             style={{ ["--kind-accent" as string]: folder.color || "#9aa5b7" }}
             onClick={() => go(project.id, `folder:${folder.id}` as View)}
           >
-            <Folder size={17} />
+            <img src={`${ICONS}/папка.png`} width={60} height={60} alt="" />
             <b>{folder.name}</b>
             <small>папка</small>
           </button>
@@ -334,7 +335,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
 
         <div className="entity-add-wrap">
           <button className="entity-tile is-add" type="button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((value) => !value)}>
-            <FolderPlus size={17} />
+            <img src={`${ICONS}/добавть.png`} width={60} height={60} alt="" />
             <b>Папка</b>
             <small>добавить</small>
           </button>
@@ -345,10 +346,9 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
                   <strong>Разделы проекта</strong>
                   {addableEntities.map((kind) => {
                     const meta = projectEntityKinds[kind];
-                    const Icon = meta.icon;
                     return (
                       <button key={kind} type="button" role="menuitem" onClick={() => void enableEntity(kind)}>
-                        <Icon size={15} style={{ color: meta.accent }} />
+                        <img src={meta.image} width={15} height={15} alt="" />
                         {meta.label}
                       </button>
                     );
@@ -358,15 +358,15 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
               <div className="entity-add-group">
                 <strong>Быстрые папки</strong>
                 <button type="button" role="menuitem" onClick={() => void createFolder("Посты")}>
-                  <Folder size={15} /> Посты
+                  <img src={`${ICONS}/посты.png`} width={15} height={15} alt="" /> Посты
                 </button>
                 <button type="button" role="menuitem" onClick={() => void createFolder("Документы")}>
-                  <Folder size={15} /> Документы
+                  <img src={`${ICONS}/документы.png`} width={15} height={15} alt="" /> Документы
                 </button>
               </div>
               <div className="entity-add-group">
                 <button type="button" role="menuitem" onClick={() => void createFolder()}>
-                  <FolderPlus size={15} /> Своя папка…
+                  <img src={`${ICONS}/папка.png`} width={15} height={15} alt="" /> Своя папка…
                 </button>
               </div>
             </div>
