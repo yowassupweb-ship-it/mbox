@@ -2151,7 +2151,10 @@ async function handleApiWithContext(req, res, url) {
       const seenAgo = row.last_seen ? now - new Date(row.last_seen).getTime() : Infinity;
       const online = row.online || row.live_runs > 0;
       return {
-        id: row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "agent",
+        // [^a-z0-9] раньше резало кириллицу целиком — "Джарвис" схлопывался в "" и падал на
+        // фолбэк "agent", который совпадал с id реального агента с именем "Agent". Общий React-key
+        // на двух разных агентах — и ростер начинал плодить призрачные дубли строк при пересортировке.
+        id: row.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/(^-|-$)/g, "") || row.name,
         name: row.name,
         kind: row.kind,
         status: online ? "active" : seenAgo < 24 * 3600 * 1000 ? "idle" : "offline",

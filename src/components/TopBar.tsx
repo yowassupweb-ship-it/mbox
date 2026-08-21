@@ -1,6 +1,6 @@
 import { AlertTriangle, Search } from "lucide-react";
 import { useState } from "react";
-import { AgentAvatar } from "./AgentAvatar";
+import { AgentAvatar, useWorkingFrame, WORKING_FRAMES } from "./AgentAvatar";
 
 export type AgentRosterEntry = {
   id: string;
@@ -24,6 +24,9 @@ type TopBarProps = {
   roster?: AgentRosterEntry[];
   attentionTodos?: AttentionTodo[];
   onOpenTodo?: (projectId: string) => void;
+  /** Загрузка данных, работа агента, раздумья Джарвиса — любой признак активности приложения:
+   * лого-осьминог в шапке начинает шевелить щупальцами вместо статичной позы. */
+  busy?: boolean;
 };
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
@@ -38,10 +41,12 @@ export function TopBar({
   roster = [],
   attentionTodos = [],
   onOpenTodo,
+  busy = false,
 }: TopBarProps) {
   const [open, setOpen] = useState(false);
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
+  const logoFrame = useWorkingFrame(busy);
 
   return (
     <header className="topbar">
@@ -57,7 +62,7 @@ export function TopBar({
             ))}
           </span>
         )}
-        <img className="topbar-logo" src="/assets/icons/icons/logo.png" width={32} height={32} alt="" />
+        <img className="topbar-logo" src={busy ? logoFrame : WORKING_FRAMES[0]} width={48} height={48} alt="" />
         <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
         {notice && <span>{notice}</span>}
       </button>

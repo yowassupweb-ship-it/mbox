@@ -424,11 +424,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return [...fromConversation, ...fromPending, ...localLines].sort((a, b) => a.at.localeCompare(b.at));
   }, [conversation, stillPending, localLines]);
 
+  // "Всегда проматывать вниз при новом сообщении" — раньше зависело только от lines.length,
+  // а индикатор "Джарвис думает…" не входит в lines (отдельный conditional-рендер), поэтому его
+  // появление/пропажа меняло высоту контента без прокрутки следом.
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [open, lines.length]);
+  }, [open, lines.length, awaitingJarvisId, working.length]);
 
   function pushLocal(kind: "sys" | "cmd", text: string) {
     setLocalLines((current) => [...current, { id: `local-${Date.now()}-${Math.random()}`, kind, actor: kind === "cmd" ? "Ты" : "mbox", text, at: new Date().toISOString() }]);
@@ -625,11 +628,13 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             {awaitingJarvisId && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
-                <ThinkingSpinner />
-                <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || awaitingJarvisVerb}… {awaitingJarvisSeconds}с</span>
-                <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
-                  <X size={11} />
-                </button>
+                <span className="console-thinking-row">
+                  <ThinkingSpinner />
+                  <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || awaitingJarvisVerb}… {awaitingJarvisSeconds}с</span>
+                  <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
+                    <X size={11} />
+                  </button>
+                </span>
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import type { SectionKey } from "../types";
+import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 
 type NavSection = {
   key: SectionKey;
@@ -15,9 +16,10 @@ type BottomNavProps = {
 };
 
 export function BottomNav({ sections, activeSection, onSelect, hrefFor, badges }: BottomNavProps) {
+  const innerRef = useWheelToHorizontal<HTMLDivElement>();
   return (
     <nav className="bottom-nav" aria-label="Основные разделы">
-      <div className="bottom-nav-inner">
+      <div className="bottom-nav-inner" ref={innerRef}>
         {sections.map(({ key, label, image }) => (
           <a className={activeSection === key ? "nav-item active" : "nav-item"} href={hrefFor(key)} key={key} onClick={(event) => {
             event.preventDefault();

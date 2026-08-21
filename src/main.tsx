@@ -198,6 +198,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
           roster={agentRoster}
           attentionTodos={attentionTodos}
           onOpenTodo={(projectId) => setRoute("projects", query, `${projectId}:todo`, "push")}
+          busy={data.loading || headerState === "working"}
         />
         {data.offline && <OfflineBanner onRetry={data.reload} />}
         {data.loading && <p className="muted empty-state">Загрузка данных</p>}

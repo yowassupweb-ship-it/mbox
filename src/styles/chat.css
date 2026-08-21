@@ -503,10 +503,20 @@
     border-top: 0;
     border-right: 0;
     border-bottom: 0;
+    /* Раньше панель просто появлялась целиком в момент монтирования (React {open && ...}) —
+       .workspace плавно сдвигался (transition ниже), а сама панель влетала мгновенно, без
+       анимации — рывок, "страница дёргается". animation, а не transition: элемент только что
+       смонтирован, состояния "до" ещё не было, transition тут не сыграет. */
+    animation: console-dock-in .2s var(--ease-out, ease-out);
+  }
+
+  @keyframes console-dock-in {
+    from { transform: translateX(16px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
   }
 
   .workspace {
-    transition: margin-right .18s var(--ease-out, ease);
+    transition: margin-right .2s var(--ease-out, ease);
     margin-right: var(--console-width, 0px);
   }
 }
@@ -630,6 +640,10 @@
 }
 
 .console-thinking-spinner { flex: none; }
+/* .console-log-line — column-flex (шапка time/actor сверху, текст снизу), поэтому спиннер как
+   прямой сосед console-log-text уезжал НАД строкой вместо позиции перед именем. Оборачиваем
+   спиннер+текст+кнопку прерывания в свой горизонтальный ряд. */
+.console-thinking-row { display: flex; align-items: center; gap: 6px; }
 
 .console-log-line.in .console-log-actor { color: var(--accent-color); }
 .console-log-line.out .console-log-actor { color: var(--state-ok); }

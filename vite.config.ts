@@ -2065,7 +2065,7 @@ function mboxDevApi() {
               const seenAgo = row.last_seen ? now - new Date(row.last_seen).getTime() : Infinity;
               const online = Boolean(row.online) || row.live_runs > 0;
               return {
-                id: row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "agent",
+                id: row.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/(^-|-$)/g, "") || row.name,
                 name: row.name,
                 kind: row.kind,
                 status: online ? "active" : seenAgo < 24 * 3600 * 1000 ? "idle" : "offline",

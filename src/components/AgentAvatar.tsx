@@ -29,14 +29,10 @@ export function agentIdentity(name: string): AgentIdentity {
     return { key: "gemini", label: raw, accent: "#1a73e8", image: `${AVATARS}/gemini.png` };
   }
   // Джарвис — «свой», постоянный агент MBOX (scripts/mbox-archivist.mjs), не сторонний бренд.
-  // Фирменный цвет MBOX вместо хеша, чтобы глаз сразу выделял его среди Claude/Codex/Gemini.
+  // Аватарка — сам маскот MBOX (осьминог из логотипа), не буква: Джарвис и есть MBOX, в отличие
+  // от гостящих в системе внешних брендов (Claude/Codex/Gemini).
   if (key.includes("джарвис") || key.includes("jarvis")) {
-    return {
-      key: "generic",
-      label: raw,
-      accent: "#29e0d6",
-      glyph: <text x="12" y="12" textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight="760" fill="currentColor">Д</text>,
-    };
+    return { key: "jarvis", label: raw, accent: "#29e0d6", image: "/assets/icons/icons/logo.png" };
   }
   // Человек — тоже «свой», не бренд ИИ, отдельная аватарка из того же набора.
   if (key.includes("человек") || key === "admin" || key.includes("human")) {
@@ -50,9 +46,9 @@ export function agentIdentity(name: string): AgentIdentity {
 // Кадры маскота MBOX (осьминог): 1 — логотип в покое, 2-4 — шевелит щупальцами. Пока агент реально
 // работает (live), аватарка вместо статичной иконки идентичности крутит эту анимацию — заметный
 // живой сигнал "что-то происходит", а не просто цветная точка-статус в углу.
-const WORKING_FRAMES = [1, 2, 3, 4].map((n) => `/assets/icons/big-logo-spinner/${n}.png`);
+export const WORKING_FRAMES = [1, 2, 3, 4].map((n) => `/assets/icons/big-logo-spinner/${n}.png`);
 
-function useWorkingFrame(active: boolean) {
+export function useWorkingFrame(active: boolean) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     if (!active) { setFrame(0); return; }

@@ -90,6 +90,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
   onProjectContext?: (project: Project, position: { x: number; y: number }) => void;
 }) {
   const railRef = useWheelToHorizontal<HTMLDivElement>();
+  const entityStripRef = useWheelToHorizontal<HTMLDivElement>();
   const route = parseRoute(selectedNodeKey);
 
   // Раньше все проекты шли одним нерасчленённым рядом, и «Вокруг света» (компания-контейнер)
@@ -288,7 +289,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
         ))}
       </div>
 
-      <div className="entity-strip" role="tablist" aria-label="Разделы проекта">
+      <div className="entity-strip" ref={entityStripRef} role="tablist" aria-label="Разделы проекта">
         <button
           role="tab"
           aria-selected={view === "todo"}
