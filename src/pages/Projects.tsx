@@ -327,7 +327,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
             style={{ ["--kind-accent" as string]: folder.color || "#9aa5b7" }}
             onClick={() => go(project.id, `folder:${folder.id}` as View)}
           >
-            <img src={`${ICONS}/папка.png`} width={60} height={60} alt="" />
+            <img src={`${ICONS}/${folder.name === "Посты" ? "посты" : folder.name === "Документы" ? "документы" : "папка"}.png`} width={60} height={60} alt="" />
             <b>{folder.name}</b>
             <small>папка</small>
           </button>
