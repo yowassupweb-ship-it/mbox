@@ -29,3 +29,14 @@ Thumbs.db
 *.sql
 !schema/*.sql
 .codex-inbox-watcher.*.log
+__pycache__/
+*.pyc
+
+# Разовые скрипты выгружают промежуточные данные/логи сюда — рабочие дампы, не код.
+scripts/digest_batches/
+scripts/digest_results*.json
+scripts/last500.json
+scripts/next_batch.json
+scripts/next_batch.sql
+scripts/push_digest_log.txt
+scripts/check_meta.txt
