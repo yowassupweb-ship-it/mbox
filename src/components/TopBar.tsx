@@ -46,10 +46,13 @@ export function TopBar({
   const [open, setOpen] = useState(false);
   const [popoverMounted, setPopoverMounted] = useState(false);
   const [popoverClosing, setPopoverClosing] = useState(false);
+  const [logoBurst, setLogoBurst] = useState(false);
   const closeTimer = useRef<number | undefined>(undefined);
+  const burstTimer = useRef<number | undefined>(undefined);
+  const firstRun = useRef(true);
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
-  const logoFrame = useWorkingFrame(busy);
+  const logoFrame = useWorkingFrame(busy || logoBurst);
 
   // Попап раньше пропадал мгновенно при закрытии — CSS-анимация играла только на открытии.
   // Держим DOM ещё один тик, проигрываем обратную анимацию, и только потом размонтируем.
@@ -68,6 +71,16 @@ export function TopBar({
     return () => window.clearTimeout(closeTimer.current);
   }, [open]);
 
+  // Открытие/закрытие менюшки — тоже триггер: лого-осьминог должен шевелить щупальцами
+  // на сам переход, не только пока данные грузятся или агент работает.
+  useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; return; }
+    setLogoBurst(true);
+    window.clearTimeout(burstTimer.current);
+    burstTimer.current = window.setTimeout(() => setLogoBurst(false), 500);
+    return () => window.clearTimeout(burstTimer.current);
+  }, [open]);
+
   return (
     <header className="topbar">
       <div className="search-shell">
@@ -82,7 +95,7 @@ export function TopBar({
             ))}
           </span>
         )}
-        <img className="topbar-logo" src={busy ? logoFrame : WORKING_FRAMES[0]} width={32} height={32} alt="" />
+        <img className="topbar-logo" src={busy || logoBurst ? logoFrame : WORKING_FRAMES[0]} width={32} height={32} alt="" />
         <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
         {notice && <span>{notice}</span>}
       </button>
