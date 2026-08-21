@@ -244,9 +244,17 @@ const SWIPE_THRESHOLD_PX = 60;
  * (pointer drag) или стрелками. Отдельная карточка на часть, не общий выбор "весь пост целиком":
  * скилл "Обучение на контенте" собирает идеал из кусков, а не заставляет брать готовый вариант.
  */
-function PostPartCard({ part, index, onChange }: { part: PostPart; index: number; onChange: (index: number) => void }) {
+function PostPartCard({ part, index, onChange, onReject }: { part: PostPart; index: number; onChange: (index: number) => void; onReject: (comment: string) => void }) {
   const dragStartX = useRef<number | null>(null);
   const [dragDx, setDragDx] = useState(0);
+  const [rejecting, setRejecting] = useState(false);
+  const [comment, setComment] = useState("");
+
+  function submitReject() {
+    onReject(comment.trim());
+    setComment("");
+    setRejecting(false);
+  }
 
   function go(delta: number) {
     const next = (index + delta + part.options.length) % part.options.length;
@@ -295,7 +303,22 @@ function PostPartCard({ part, index, onChange }: { part: PostPart; index: number
           {part.options.map((_, i) => <i key={i} className={i === index ? "is-active" : ""} />)}
         </span>
         <button type="button" onClick={() => go(1)} aria-label={`${part.label}: следующий вариант`}>›</button>
+        <button type="button" className="post-part-reject-toggle" onClick={() => setRejecting((v) => !v)}>
+          ✕ отклонить
+        </button>
       </div>
+      {rejecting && (
+        <div className="post-part-reject">
+          <textarea
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            placeholder={`Что не так с частью «${part.label}»?`}
+            rows={2}
+            autoFocus
+          />
+          <button type="button" onClick={submitReject}>Отклонить</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -320,7 +343,13 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
   return (
     <div className="post-builder">
       {parts.map((part, i) => (
-        <PostPartCard key={part.key} part={part} index={selected[i]} onChange={(next) => setPart(i, next)} />
+        <PostPartCard
+          key={part.key}
+          part={part}
+          index={selected[i]}
+          onChange={(next) => setPart(i, next)}
+          onReject={(comment) => onSend(`Отклонить часть «${part.label}»${comment ? `: ${comment}` : " (без комментария)"}`)}
+        />
       ))}
       <div className="post-builder-actions">
         <button type="button" className="post-builder-done" onClick={() => onSend(`Собрал финальный вариант:\n\n${assembled()}`)}>
