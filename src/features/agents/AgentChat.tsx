@@ -393,7 +393,10 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
           index={selected[i]}
           onChange={(next) => setPart(i, next)}
           onReject={(comment) => onSend(`Отклонить часть «${part.label}»${comment ? `: ${comment}` : " (без комментария)"}`)}
-          onRate={(score) => onSend(`Оценка части «${part.label}» (вариант ${selected[i] + 1}/${part.options.length}): ${score}/5`)}
+          // Явный адресат @Claude — иначе непомеченное сообщение подхватывает и Джарвис
+          // (см. respondToRequests в mbox-archivist.mjs), и звёздочка-клик триггерит его ответ
+          // почём зря. Рейтинг — сигнал для Claude, не вопрос, требующий чьей-то реакции.
+          onRate={(score) => onSend(`@Claude Оценка части «${part.label}» (вариант ${selected[i] + 1}/${part.options.length}): ${score}/5`)}
         />
       ))}
       <div className="post-builder-actions">
