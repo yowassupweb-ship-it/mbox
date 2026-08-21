@@ -1,6 +1,12 @@
 import { AlertTriangle, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { AgentAvatar, useWorkingFrame, WORKING_FRAMES } from "./AgentAvatar";
+import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
+
+// Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
+// полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
+// реальных констант анимации, чтобы не разъезжаться при будущих правках скорости/числа кадров.
+const LOGO_BURST_LOOPS = 4;
+const LOGO_BURST_MS = LOGO_BURST_LOOPS * WORKING_FRAMES.length * WORKING_FRAME_INTERVAL_MS;
 
 export type AgentRosterEntry = {
   id: string;
@@ -77,7 +83,7 @@ export function TopBar({
     if (firstRun.current) { firstRun.current = false; return; }
     setLogoBurst(true);
     window.clearTimeout(burstTimer.current);
-    burstTimer.current = window.setTimeout(() => setLogoBurst(false), 500);
+    burstTimer.current = window.setTimeout(() => setLogoBurst(false), LOGO_BURST_MS);
     return () => window.clearTimeout(burstTimer.current);
   }, [open]);
 

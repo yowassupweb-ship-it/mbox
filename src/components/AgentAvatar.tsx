@@ -47,12 +47,13 @@ export function agentIdentity(name: string): AgentIdentity {
 // работает (live), аватарка вместо статичной иконки идентичности крутит эту анимацию — заметный
 // живой сигнал "что-то происходит", а не просто цветная точка-статус в углу.
 export const WORKING_FRAMES = [1, 2, 3, 4].map((n) => `/assets/icons/big-logo-spinner/${n}.png`);
+export const WORKING_FRAME_INTERVAL_MS = 210;
 
 export function useWorkingFrame(active: boolean) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     if (!active) { setFrame(0); return; }
-    const timer = window.setInterval(() => setFrame((value) => (value + 1) % WORKING_FRAMES.length), 260);
+    const timer = window.setInterval(() => setFrame((value) => (value + 1) % WORKING_FRAMES.length), WORKING_FRAME_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [active]);
   return WORKING_FRAMES[frame];

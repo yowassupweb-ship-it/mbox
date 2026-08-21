@@ -1231,7 +1231,54 @@ const JARVIS_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "analyze_posts",
+      description: "Найти реальные инсайты по постам Telegram-канала (memories entity_type='post', папка «Посты»): что заходит, что нет, сравнение с фото/без, топ и антитоп. Считает по-настоящему из сырых данных (лайки/дата публикации) — не выдумывай цифры и форматы, отвечай на вопросы про эффективность контента ТОЛЬКО этим инструментом.",
+      parameters: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["summary", "top", "bottom", "by_photo"],
+            description: "summary (по умолчанию) — общая сводка; top/bottom — лучшие/худшие посты по скорости набора реакций (с поправкой на давность публикации); by_photo — сравнение постов с фото и без.",
+          },
+          limit: { type: "number", description: "Сколько постов показать для top/bottom, по умолчанию 10" },
+        },
+      },
+    },
+  },
 ];
+
+/** Скорость набора реакций с поправкой на давность — иначе пост, висящий сутки, нечестно
+ * проигрывает посту, висящему год. Та же формула, что задокументирована в скилле "Обучение на
+ * контенте" (MBOX memory #148) — держать в одном месте нельзя, инструмент и текст скилла живут
+ * в разных системах, но логика должна совпадать буквально. */
+function postEngagementRate(reactionsTotal, postedAt) {
+  const posted = postedAt ? new Date(postedAt).getTime() : NaN;
+  const days = Number.isFinite(posted) ? Math.max(1, (Date.now() - posted) / 86400000) : 1;
+  return reactionsTotal / days;
+}
+
+async function loadPostStats() {
+  const rows = (await query(
+    "SELECT id::text, title, content, metadata FROM memories WHERE entity_type = 'post'",
+  )).rows;
+  return rows.map((row) => {
+    const metadata = row.metadata || {};
+    const reactionsTotal = Number(metadata.reactions_total) || 0;
+    const postedAt = typeof metadata.posted_at === "string" ? metadata.posted_at : null;
+    return {
+      id: row.id,
+      title: row.title,
+      hasPhoto: Boolean(metadata.has_photo),
+      reactionsTotal,
+      postedAt,
+      rate: postEngagementRate(reactionsTotal, postedAt),
+    };
+  });
+}
 
 /** Кусок текста вокруг найденного совпадения — иначе модель видит заголовок без query и решает,
  * что результат нерелевантный, хотя совпадение реально есть в note. */
@@ -1892,6 +1939,32 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     return `найдено (${rows.length}): ${lines.join("; ")}`;
   }
 
+  if (name === "analyze_posts") {
+    const posts = await loadPostStats();
+    if (!posts.length) return "постов в базе пока нет — папка «Посты» пуста";
+    const mode = ["top", "bottom", "by_photo"].includes(args.mode) ? args.mode : "summary";
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+
+    if (mode === "top" || mode === "bottom") {
+      const sorted = [...posts].sort((a, b) => mode === "top" ? b.rate - a.rate : a.rate - b.rate).slice(0, limit);
+      const lines = sorted.map((p) => `«${p.title}» — ${p.reactionsTotal} реакций${p.postedAt ? `, ${p.postedAt.slice(0, 10)}` : ""}, скорость ${p.rate.toFixed(2)}/день${p.hasPhoto ? ", с фото" : ""}`);
+      return `${mode === "top" ? "лучшие" : "худшие"} по скорости набора реакций (${sorted.length} из ${posts.length}): ${lines.join("; ")}`;
+    }
+
+    if (mode === "by_photo") {
+      const withPhoto = posts.filter((p) => p.hasPhoto);
+      const withoutPhoto = posts.filter((p) => !p.hasPhoto);
+      const avg = (list) => list.length ? list.reduce((sum, p) => sum + p.rate, 0) / list.length : 0;
+      return `с фото: ${withPhoto.length} постов, средняя скорость ${avg(withPhoto).toFixed(2)}/день; без фото: ${withoutPhoto.length} постов, средняя скорость ${avg(withoutPhoto).toFixed(2)}/день`;
+    }
+
+    const total = posts.length;
+    const withReactions = posts.filter((p) => p.reactionsTotal > 0).length;
+    const avgRate = posts.reduce((sum, p) => sum + p.rate, 0) / total;
+    const withPhoto = posts.filter((p) => p.hasPhoto).length;
+    return `постов в базе: ${total}, с реакциями: ${withReactions} (${((withReactions / total) * 100).toFixed(0)}%), с фото: ${withPhoto} (${((withPhoto / total) * 100).toFixed(0)}%), средняя скорость реакций ${avgRate.toFixed(2)}/день. Для конкретики используй mode=top/bottom/by_photo.`;
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -1950,7 +2023,9 @@ async function replyAsJarvis(item) {
       + "если просят «следи за сайтом X» или «проверяй раз в день Y» — заведи источник, не record_memory), "
       + "search_tour_dates (даты и свободные места по названию тура из разобранного фида vs-travel.ru — "
       + "используй это для вопросов «какие даты у тура X» или «сколько мест на тур Y», не выдумывай цифры "
-      + "и не ищи в памяти). Если просят "
+      + "и не ищи в памяти), analyze_posts (реальные инсайты по постам Telegram-канала — что заходит, что "
+      + "нет, топ/антитоп по скорости набора реакций с поправкой на давность, сравнение с фото/без — "
+      + "используй это на вопросы про эффективность контента, не выдумывай форматы и цифры). Если просят "
       + "одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
       + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не только повтор "
       + "одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не только первое. "
