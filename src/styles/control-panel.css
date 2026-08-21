@@ -13,6 +13,9 @@
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
+  /* overflow-x: auto без overflow-y здесь тихо форсит overflow-y тоже в auto (спека CSS) — бейдж
+     непрочитанных на пилюле (top: -7px, торчит над пилюлей) резался этим верхним краем. */
+  padding-top: 10px;
   padding-bottom: var(--space-1);
   scrollbar-width: none;
 }
@@ -99,11 +102,12 @@
   top: -7px;
   right: -7px;
   min-width: 20px;
-  height: 20px;
+  min-height: 20px;
   padding: 0 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
   border-radius: var(--radius-pill);
   background: var(--state-live);
   color: #06120e;
@@ -303,6 +307,44 @@
 }
 
 .todo-board-tools .muted { font-size: var(--text-sm); }
+
+.todo-unseen-toggle {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.todo-unseen-toggle:hover { color: var(--text-main); }
+
+.todo-unseen-list {
+  list-style: none;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  display: grid;
+  gap: 2px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--container-bg);
+}
+
+.todo-unseen-list button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+}
+.todo-unseen-list button:hover { background: var(--element-bg); }
+.todo-unseen-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Счётчик непрочитанного в нижней навигации */
 

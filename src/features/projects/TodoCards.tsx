@@ -26,6 +26,7 @@ export function TodoCardGrid({ project, onSaved }: { project: Project; onSaved: 
   const [dragId, setDragId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const [seenVersion, setSeenVersion] = useState(0);
+  const [unseenListOpen, setUnseenListOpen] = useState(false);
 
   useEffect(() => setOrder(orderTodos(project.todos)), [project.todos]);
 
@@ -65,16 +66,37 @@ export function TodoCardGrid({ project, onSaved }: { project: Project; onSaved: 
 
   const marks = order.map((todo) => ({ key: `todo:${todo.id}`, bytes: todo.memory_bytes }));
   const unseen = countUnseen(marks);
+  // Раньше "N непрочитанных" не говорило, ЧТО именно изменилось — приходилось листать всю доску
+  // в поисках свежей отметки. Список раскрывается по клику на счётчик, каждая строка кликабельна.
+  const unseenTodos = order
+    .map((todo) => ({ todo, delta: seenDelta(`todo:${todo.id}`, todo.memory_bytes) }))
+    .filter((item) => item.delta.state !== "seen");
 
   return (
     <>
       {unseen > 0 && (
         <div className="todo-board-tools">
-          <span className="muted">{unseen} непрочитанных</span>
-          <Button variant="ghost" icon={CheckCheck} onClick={() => { markAllSeen(marks); setSeenVersion((value) => value + 1); }}>
+          <button type="button" className="todo-unseen-toggle" onClick={() => setUnseenListOpen((value) => !value)} aria-expanded={unseenListOpen}>
+            {unseen} непрочитанных
+          </button>
+          <Button variant="ghost" icon={CheckCheck} onClick={() => { markAllSeen(marks); setSeenVersion((value) => value + 1); setUnseenListOpen(false); }}>
             Прочитать всё
           </Button>
         </div>
+      )}
+      {unseen > 0 && unseenListOpen && (
+        <ul className="todo-unseen-list">
+          {unseenTodos.map(({ todo, delta }) => (
+            <li key={todo.id}>
+              <button type="button" onClick={() => { setOpenTodo(todo); setUnseenListOpen(false); }}>
+                <span className={`diff-badge ${delta.state === "new" ? "is-new" : delta.delta > 0 ? "is-plus" : "is-minus"}`}>
+                  {delta.state === "new" ? "новое" : formatDelta(delta.delta)}
+                </span>
+                <span className="todo-unseen-title">{todo.title}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
 
       <div className="todo-kanban" role="group" aria-label="Доска задач по статусам">
@@ -312,7 +334,11 @@ export function AddTodoForm({ project, onSaved }: { project: Project; onSaved: (
     setState("saving");
     setError("");
     try {
-      await saveEntity("/api/mbox/todos", "", { project_id: project.id, title: title.trim(), note, status, priority, access_level: "private" });
+      // Автор своей же задачи не должен видеть её как непрочитанную — раньше отметка «просмотрено»
+      // появлялась только при открытии карточки, а до этого новая задача висела «новой» даже у
+      // того, кто её только что создал.
+      const created = await saveEntity("/api/mbox/todos", "", { project_id: project.id, title: title.trim(), note, status, priority, access_level: "private" }) as { todo?: { id: string; memory_bytes: number } };
+      if (created.todo) markSeen(`todo:${created.todo.id}`, created.todo.memory_bytes);
       setTitle("");
       setNote("");
       setStatus("open");

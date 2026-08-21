@@ -2977,7 +2977,7 @@ async function handleApiWithContext(req, res, url) {
     const result = await query(
       `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
        VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'open'), COALESCE(NULLIF($5, ''), 'normal'), $6, COALESCE(NULLIF($7, ''), 'private'))
-       RETURNING id::text`,
+       RETURNING id::text, pg_column_size(todos)::int AS memory_bytes`,
       [body.project_id, String(body.title || "").trim(), String(body.note || ""), String(body.status || ""), String(body.priority || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {}), String(body.access_level || "")],
     );
     broadcastChange(req, "create", "todos", String(body.title || "").trim());
