@@ -116,24 +116,6 @@ export type GraphEdge = {
   valid_until: string | null;
 };
 
-export type GraphNode = {
-  id: string;
-  label: string;
-  group: string;
-  x: number;
-  y: number;
-  color: string;
-  projectId?: string;
-};
-
-export type GraphVisualEdge = {
-  key: string;
-  from: GraphNode;
-  to: GraphNode;
-  edge_type: string;
-  relation: boolean;
-};
-
 export type Todo = {
   id: string;
   project_id: string;

@@ -36,7 +36,6 @@ import { MemoryBoard } from "./pages/Memories";
 import { ArtifactsBoard } from "./pages/Artifacts";
 import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
 import { ProjectsBoard } from "./pages/Projects";
-import { GraphBoard } from "./pages/Graph";
 import { AgentChat } from "./features/agents/AgentChat";
 import { AddTodoForm, TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
@@ -47,7 +46,7 @@ import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
 import type {
   AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, DecisionEntry, FolderRow,
-  GraphEdge, GraphNode, GraphVisualEdge, GroqUsage, Me, Memory, Project,
+  GraphEdge, GroqUsage, Me, Memory, Project,
   SecretSummary, SectionKey, ServerMetrics, Todo,
 } from "./types";
 import "./styles.css";
@@ -185,9 +184,13 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     return () => window.removeEventListener("popstate", syncFromLocation);
   }, []);
 
+  const currentProjectName = section === "projects" && selectedNodeKey
+    ? data.projects.find((project) => project.id === selectedNodeKey.split(":")[0])?.name
+    : undefined;
+
   return (
-    <div className={section === "graph" ? "app dark graph-app" : "app dark"}>
-      <main className={section === "graph" ? "workspace graph-mode" : "workspace"}>
+    <div className="app dark">
+      <main className="workspace">
         <TopBar
           query={query}
           onQueryChange={setQuery}
@@ -206,7 +209,6 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "memories" && <MemoryBoard memories={data.memories} projects={data.projects} decisions={data.decisions} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} projects={data.projects} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
         {section === "projects" && <ProjectsBoard projects={data.projects} companies={data.companies} folders={data.folders} memories={data.memories} decisions={data.decisions} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} memories={data.memories} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
-        {section === "graph" && <GraphBoard folders={data.folders} memories={data.memories} decisions={data.decisions} projects={data.projects} edges={data.graphEdges} onSaved={data.reload} />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "settings" && (
           <SettingsBoard
@@ -215,7 +217,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
           />
         )}
       </main>
-      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} onSaved={data.reload} />
+      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
       {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
       <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} badges={{ projects: unseenTodos }} />
     </div>

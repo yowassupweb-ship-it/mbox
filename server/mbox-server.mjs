@@ -1192,7 +1192,7 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "get_groq_usage",
-      description: "Посмотреть, сколько токенов Groq потрачено на тебя самого — сегодня, за сутки и всего.",
+      description: "Посмотреть расход токенов ПО ВСЕМ моделям, которыми ты говоришь — и Groq, и Gemini (обе логируются в один и тот же счётчик) — с разбивкой по модели, сегодня/за сутки/всего. Название историческое, но это НЕ только Groq: используй именно этот инструмент, если спросят про расход Gemini, а не отвечай, что не умеешь это узнать.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -1445,6 +1445,21 @@ const JARVIS_TOOLS = [
           project_name: { type: "string", description: "Проект, к которому привязать, необязательно" },
         },
         required: ["name", "category", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delegate_to_junior",
+      description: "Делегировать младшей модели небольшую самостоятельную текстовую подзадачу (черновик, сводка, пересказ, классификация) внутри цепочки действий — экономит твой контекст: результат приходит готовым, ты не тратишь токены на сам черновик. НЕ для задач, которые сами требуют вызова инструментов — младшая модель не имеет доступа к инструментам, только текст на входе и текст на выходе.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "Что должна сделать младшая модель, одним предложением" },
+          input: { type: "string", description: "Исходный текст/данные для обработки" },
+        },
+        required: ["task", "input"],
       },
     },
   },
@@ -2381,6 +2396,24 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     return `создан артефакт «${artifactName}» (${category})${project ? ` в проекте «${project.name}»` : ""} (#${inserted.rows[0].id})`;
   }
 
+  if (name === "delegate_to_junior") {
+    const task = String(args.task || "").trim();
+    if (!task) return "не делегировал — нет описания задачи";
+    setPhase(inboxId, "Делегирует младшему агенту");
+    const delegateMessage = await groqComplete(
+      [
+        { role: "system", content: `Выполни задачу коротко и по делу, на русском: ${task}` },
+        { role: "user", content: String(args.input || "") || "(нет входных данных)" },
+      ],
+      null,
+      "skill-delegate-junior",
+      undefined,
+      0,
+      GROQ_MODEL_JUNIOR,
+    );
+    return String(delegateMessage.content || "").trim().slice(0, 3000) || "младший агент не вернул ответ";
+  }
+
   return `неизвестное действие: ${name}`;
 }
 
@@ -2456,10 +2489,17 @@ async function replyAsJarvis(item) {
       + "скриптов/агентских областей), link_memories (связать две записи памяти отношением — «связано», "
       + "«противоречит», «уточняет» и т.п., по ID), list_artifacts и create_artifact (артефакт — осознанная "
       + "находка/материал вроде компонента, конфига или зафиксированного решения, в отличие от сырой записи "
-      + "памяти через record_memory). Если просят "
+      + "памяти через record_memory), delegate_to_junior (скинуть младшей модели маленький самостоятельный "
+      + "текстовый кусок — черновик, сводку, пересказ, классификацию — внутри цепочки действий, чтобы не "
+      + "тратить свой контекст на сам черновик; не годится для того, что само требует вызова инструментов). "
+      + "Если просят "
       + "одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
       + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не только повтор "
-      + "одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не только первое. "
+      + "одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не только первое; "
+      + "не останавливайся после первого шага и не переспрашивай подтверждение между шагами, если человек уже "
+      + "описал всю последовательность в одном сообщении — уверенно доводи комбо из 3-5 инструментов до конца "
+      + "за один ответ, а мелкие текстовые подзадачи внутри такой цепочки отдавай delegate_to_junior вместо "
+      + "того, чтобы писать черновик самому. "
       + "Если просят что-то другое, для чего нет функции — "
       + "честно скажи, что не умеешь этого делать, а не притворяйся, что сделал. Кроме тебя в MBOX работает "
       + "Claude — отдельный, куда более мощный агент (через Claude Code), который занимается тяжёлыми задачами: "
@@ -2479,7 +2519,10 @@ async function replyAsJarvis(item) {
       + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Известные компании: `
       + `${companyNames.join(", ") || "нет компаний"}. Сводка по MBOX прямо сейчас: всего задач `
       + `${stats.todos_total}, из них незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total}. `
-      + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь.";
+      + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь."
+      + (item.props?.current_project_name
+        ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
+        : "");
     // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — если человек в прошлом сообщении назвал
     // стек или ссылку, а в этом попросил "создай проект", Джарвис не мог их связать. Подтягиваем
     // последние сообщения разговора (включая только что вставленное — оно уже в базе) как реальную
@@ -2519,7 +2562,7 @@ async function replyAsJarvis(item) {
       return groqComplete(msgs, JARVIS_TOOLS, "reply", controller.signal);
     }
     jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
-    for (let step = 0; step < 5; step += 1) {
+    for (let step = 0; step < 8; step += 1) {
       jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
       setPhase(item.id, "Подбирает инструмент/навык");
       const message = await complete(messages);
@@ -2702,7 +2745,19 @@ async function handleApiWithContext(req, res, url) {
          (SELECT count(*) FROM groq_usage WHERE created_at > now() - interval '24 hours')::int AS calls_24h,
          (SELECT max(created_at)::text FROM groq_usage) AS last_call_at`,
     );
-    return sendJson(res, 200, result.rows[0]);
+    // by_model — добавлено для delegate/get_groq_usage-инструмента резервного cron-пути
+    // (scripts/mbox-archivist.mjs), у которого нет прямого доступа к БД, только REST. Поля выше
+    // (total_tokens и т.п.) — блендированная сумма по ОБЕИМ моделям (см. INSERT из geminiComplete),
+    // старые потребители этой ручки не ломаются, by_model — чистое дополнение.
+    const byModel = await query(
+      `SELECT model,
+              COALESCE(sum(total_tokens), 0)::bigint AS total_tokens,
+              COALESCE(sum(total_tokens) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::bigint AS tokens_24h,
+              COALESCE(sum(total_tokens) FILTER (WHERE created_at > date_trunc('day', now())), 0)::bigint AS tokens_today,
+              count(*)::int AS calls_total
+       FROM groq_usage GROUP BY model ORDER BY sum(total_tokens) DESC`,
+    );
+    return sendJson(res, 200, { ...result.rows[0], by_model: byModel.rows });
   }
 
   if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "POST") {
@@ -3447,6 +3502,14 @@ async function handleApiWithContext(req, res, url) {
       `SELECT p.id::text, p.name, p.status, p.stack, p.git_url, p.deploy_target, p.deploy_provider, p.props, p.color, p.access_level,
               pg_column_size(p)::int AS memory_bytes
        FROM projects p
+       LEFT JOIN LATERAL (
+         SELECT (SELECT count(*) FROM todos t WHERE t.project_id = p.id)
+                + (SELECT count(*) FROM memories m WHERE m.project_id = p.id)
+                + 3 * (
+                  (SELECT count(*) FROM todos t WHERE t.project_id = p.id AND t.updated_at >= now() - interval '30 days')
+                  + (SELECT count(*) FROM memories m WHERE m.project_id = p.id AND m.updated_at >= now() - interval '30 days')
+                ) AS activity_score
+       ) activity ON true
        WHERE $1 = ''
           OR p.name ILIKE '%' || $1 || '%'
           OR p.status ILIKE '%' || $1 || '%'
@@ -3485,7 +3548,7 @@ async function handleApiWithContext(req, res, url) {
             WHERE ((e.from_entity = 'project' AND e.from_id = p.id) OR (e.to_entity = 'project' AND e.to_id = p.id))
               AND (e.edge_type ILIKE '%' || $1 || '%' OR e.title ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.owner ILIKE '%' || $1 || '%' OR e.group_entity ILIKE '%' || $1 || '%')
           )
-       ORDER BY p.updated_at DESC
+       ORDER BY activity.activity_score DESC, p.updated_at DESC
        LIMIT $2 OFFSET $3`,
       [q, limit, offset],
     );
@@ -3851,33 +3914,6 @@ async function handleApiWithContext(req, res, url) {
     });
   }
 
-  // Расстановка узлов карты. Общая для всех, поэтому без привязки к пользователю.
-  if (url.pathname === "/api/mbox/graph/positions") {
-    if (req.method === "POST") {
-      const body = await readBody(req);
-      const items = Array.isArray(body.positions) ? body.positions : [body];
-      const rows = items
-        .filter((item) => item && item.entity_type && item.entity_id)
-        .map((item) => [String(item.entity_type), String(item.entity_id), Number(item.x) || 0, Number(item.y) || 0]);
-      if (!rows.length) return sendJson(res, 400, { error: "positions_required" });
-      const values = rows.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, now())`).join(", ");
-      await query(
-        `INSERT INTO graph_positions(entity_type, entity_id, x, y, updated_at)
-         VALUES ${values}
-         ON CONFLICT (entity_type, entity_id)
-         DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, updated_at = now()`,
-        rows.flat(),
-      );
-      return sendJson(res, 200, { ok: true, saved: rows.length });
-    }
-    if (req.method === "DELETE") {
-      await query("DELETE FROM graph_positions");
-      return sendJson(res, 200, { ok: true });
-    }
-    const result = await query("SELECT entity_type, entity_id, x, y FROM graph_positions");
-    return sendJson(res, 200, { positions: result.rows });
-  }
-
   // Отметки «просмотрено», привязанные к пользователю, а не к браузеру.
   if (url.pathname === "/api/mbox/seen") {
     const user = await currentUser(req);
@@ -3925,7 +3961,7 @@ async function handleApiWithContext(req, res, url) {
       if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
         // .catch() обязателен на fire-and-forget вызове: необработанный reject роняет весь процесс.
         // replyAsJarvis теперь сама не должна выбрасывать наружу, но это последний рубеж, не первый.
-        replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body })
+        replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props })
           .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
       }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
@@ -4202,7 +4238,7 @@ function serveStatic(req, res, url) {
   const safeTarget = target.startsWith(publicDir) ? target : path.join(publicDir, "index.html");
   const file = fs.existsSync(safeTarget) && fs.statSync(safeTarget).isFile() ? safeTarget : path.join(publicDir, "index.html");
   const ext = path.extname(file);
-  const type = ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : ext === ".html" ? "text/html; charset=utf-8" : "application/octet-stream";
+  const type = ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : ext === ".html" ? "text/html; charset=utf-8" : ext === ".webmanifest" ? "application/manifest+json" : ext === ".png" ? "image/png" : "application/octet-stream";
   res.writeHead(200, { "content-type": type, "cache-control": ext === ".html" ? "no-store" : "no-cache" });
   fs.createReadStream(file).pipe(res);
 }

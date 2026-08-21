@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { BookOpen, Flag, Link2, Pencil, Plus, Sparkles, X } from "lucide-react";
+import { BookOpen, Flag, Link2, Maximize2, Pencil, Plus, Sparkles, X } from "lucide-react";
 import { fetchJson, saveEntity } from "../lib/api";
 import { formatBytes, formatDate, plural } from "../lib/format";
 import { projectMemoryMatches } from "../lib/memory";
@@ -7,7 +7,7 @@ import { MemoryModal } from "../features/memories/MemoryModal";
 import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, Memory, Project } from "../types";
-import { Button, EmptyState, ErrorText, Panel, SaveButton, Select, type SaveState, TableWrap, TextArea, TextInput } from "../ui";
+import { Button, EmptyState, ErrorText, Panel, SaveButton, Select, type SaveState, TextArea, TextInput } from "../ui";
 
 type MemoryLink = {
   id: string;
@@ -168,7 +168,7 @@ export function MemoryBoard({ memories, projects, decisions, onSaved }: { memori
         }
       >
         <MemoryEditor editing={editing} projects={projects} onSaved={onSaved} onDone={() => setEditing(null)} presetProjectId={projectId} />
-        <MemoryTable memories={visibleMemories} linksByMemory={linksByMemory} onEdit={setEditing} onOpen={setOpen} editingId={editing?.id} />
+        <MemoryCardGrid memories={visibleMemories} linksByMemory={linksByMemory} onEdit={setEditing} onOpen={setOpen} editingId={editing?.id} />
       </Panel>
 
       {/* По id, не по ссылке: после сохранения приходит новый объект memory с тем же id. */}
@@ -273,59 +273,54 @@ function MemoryEditor({ editing, projects, onSaved, onDone, presetProjectId }: {
   );
 }
 
-/* Таблица на узкой ширине разбирается в карточки — подписи колонок подставляются из data-label. */
-function MemoryTable({ memories, linksByMemory, onEdit, onOpen, editingId }: { memories: Memory[]; linksByMemory: Map<string, LinkView[]>; onEdit: (memory: Memory) => void; onOpen: (memory: Memory) => void; editingId?: string }) {
+/** Та же карточная сетка, что и на «Проектах»/«Обзоре» (todo-note-card) — раньше запись памяти
+ * жила строкой плоской HTML-таблицы, на общем фоне страниц с карточками и пилюлями это читалось
+ * как чужеродный кусок другого интерфейса. Название открывает MemoryModal, как раньше. */
+function MemoryCardGrid({ memories, linksByMemory, onEdit, onOpen, editingId }: { memories: Memory[]; linksByMemory: Map<string, LinkView[]>; onEdit: (memory: Memory) => void; onOpen: (memory: Memory) => void; editingId?: string }) {
   if (!memories.length) return <EmptyState text="Память в базе пока пустая" />;
   return (
-    <TableWrap className="memory-table-wrap">
-      <table className="memory-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Название</th>
-            <th>Связи</th>
-            <th>Теги</th>
-            <th>Доступ</th>
-            <th>Размер</th>
-            <th>Обновлено</th>
-            <th aria-label="Действия"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {memories.map((memory) => {
-            const memLinks = linksByMemory.get(memory.id) ?? [];
-            return (
-              <tr key={memory.id} className={editingId === memory.id ? "row-editing" : undefined}>
-                <td data-label="ID">#{memory.id}</td>
-                <td data-label="Название">
-                  <button type="button" className="memory-title-open" onClick={() => onOpen(memory)}>{memory.title}</button>
-                </td>
-                <td data-label="Связи">
-                  {memLinks.length ? (
-                    <div className="memory-links-cell">
-                      {memLinks.slice(0, 4).map((link, index) => (
-                        <span className={`memory-link-chip ${link.dir}`} key={`${link.otherId}-${index}`} title={`${link.dir === "out" ? "→" : "←"} ${link.type}: ${link.otherTitle}`}>
-                          <Link2 size={11} />
-                          <em>{link.type}</em>
-                          {link.otherTitle}
-                        </span>
-                      ))}
-                      {memLinks.length > 4 && <span className="memory-link-more">+{memLinks.length - 4}</span>}
-                    </div>
-                  ) : <span className="muted">—</span>}
-                </td>
-                <td data-label="Теги">{memory.tags.join(", ") || "нет"}</td>
-                <td data-label="Доступ">{memory.access_level}</td>
-                <td data-label="Размер">{formatBytes(memory.memory_bytes)}</td>
-                <td data-label="Обновлено">{formatDate(memory.updated_at)}</td>
-                <td data-label="" className="row-actions">
-                  <Button variant="icon" icon={Pencil} aria-label={`Изменить запись #${memory.id}`} onClick={() => onEdit(memory)} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </TableWrap>
+    <div className="memory-card-grid">
+      {memories.map((memory) => {
+        const memLinks = linksByMemory.get(memory.id) ?? [];
+        return (
+          <article className={editingId === memory.id ? "memory-note-card is-editing" : "memory-note-card"} key={memory.id}>
+            <div className="todo-note-card-head">
+              <button type="button" className="memory-title-open" onClick={() => onOpen(memory)} title={memory.title}>{memory.title}</button>
+              <button className="todo-card-expand" type="button" onClick={() => onOpen(memory)} aria-label="Открыть на весь экран" title="Открыть на весь экран">
+                <Maximize2 size={15} />
+              </button>
+            </div>
+
+            {memory.content && <p className="todo-note-card-body">{memory.content}</p>}
+
+            <div className="todo-note-card-meta">
+              <span className="todo-chip muted">#{memory.id}</span>
+              <span className="todo-chip">{memory.access_level}</span>
+              <span className="todo-chip muted">{formatBytes(memory.memory_bytes)}</span>
+              <span className="todo-chip muted">{formatDate(memory.updated_at)}</span>
+              {memory.tags.map((tag) => <span className="todo-chip" key={tag}>{tag}</span>)}
+            </div>
+
+            {memLinks.length > 0 && (
+              <div className="memory-links-cell">
+                {memLinks.slice(0, 4).map((link, index) => (
+                  <span className={`memory-link-chip ${link.dir}`} key={`${link.otherId}-${index}`} title={`${link.dir === "out" ? "→" : "←"} ${link.type}: ${link.otherTitle}`}>
+                    <Link2 size={11} />
+                    <em>{link.type}</em>
+                    {link.otherTitle}
+                  </span>
+                ))}
+                {memLinks.length > 4 && <span className="memory-link-more">+{memLinks.length - 4}</span>}
+              </div>
+            )}
+
+            <div className="todo-card-actions">
+              <Button variant="ghost" onClick={() => onOpen(memory)}>Открыть</Button>
+              <Button variant="icon" icon={Pencil} aria-label={`Изменить запись #${memory.id}`} onClick={() => onEdit(memory)} />
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }

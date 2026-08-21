@@ -37,14 +37,27 @@ const JARVIS_DESCRIPTION = [
   "tools (настоящие действия, дергают базу):",
   "  задачи: create_todo, update_todo_status, set_todo_priority, delete_todo, update_todo_note,",
   "    list_project_todos, search_todos, get_task (полная карточка задачи по ID)",
-  "  проекты: create_project, delete_project, get_project_info, link_projects, find_file",
-  "  компании: list_companies, get_company_info",
-  "  память: record_memory, search_memory, record_decision, list_recent_activity, get_memory",
+  "  проекты: create_project, delete_project, update_project_info (стек/git/деплой/статус),",
+  "    get_project_info, link_projects, find_file",
+  "  компании: list_companies, get_company_info, create_company, update_company_info",
+  "  память: record_memory, update_memory (правка по ID), delete_memory, search_memory, get_memory",
   "    (полный текст записи по ID), get_memory_actions (история правок записи), list_memory_links",
-  "    (что связано с записью)",
+  "    (что связано с записью), link_memories (связать две записи отношением)",
+  "  папки: create_folder, list_folders",
+  "  артефакты: create_artifact, list_artifacts",
+  "  решения: record_decision",
   "  источники данных: list_data_sources, create_data_source, refresh_data_source, search_tour_dates,",
   "    analyze_posts (инсайты по постам Telegram-канала: топ/антитоп, сравнение с фото/без)",
-  "  служебное: get_groq_usage (расход токенов по всем моделям, включая Gemini — без известного лимита)",
+  "  служебное: get_groq_usage (расход токенов по всем моделям, включая Gemini — без известного лимита),",
+  "    list_recent_activity, delegate_to_junior (скинуть Младшему мелкую текстовую подзадачу — черновик,",
+  "    сводку, пересказ — внутри цепочки действий, не тратя контекст самого Джарвиса)",
+  "",
+  "комбо: Джарвис уверенно выполняет цепочку из 3-5 инструментов в одном ответе, не останавливаясь",
+  "  после первого шага и не переспрашивая между шагами, если вся последовательность уже описана",
+  "  одним сообщением (потолок — 8 шагов цикла на ответ).",
+  "",
+  "контекст: если сообщение отправлено со страницы конкретного проекта, Джарвис видит, какой именно",
+  "  проект сейчас открыт, и по умолчанию имеет в виду его, если проект не назван явно.",
   "",
   "skills (одноразовые, без оркестрации — отданы Младшему):",
   "  пересказ веб-страницы источника данных (5-10 пунктов, без воды)",
@@ -424,13 +437,14 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
   );
 }
 
-export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, onSaved }: {
+export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
   projects: Project[];
   artifacts: Artifact[];
   projectId?: string;
+  currentProjectName?: string;
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -749,6 +763,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     setPending((current) => [...current, { id: localId, body, sent: false }]);
 
     try {
+      const messageProps: Record<string, unknown> = {};
+      if (mentionTarget) messageProps.to = mentionTarget;
+      if (currentProjectName) messageProps.current_project_name = currentProjectName;
       const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -760,7 +777,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           body,
           priority: "high",
           requires_human: false,
-          props: mentionTarget ? { to: mentionTarget } : {},
+          props: messageProps,
         }),
       });
       // Джарвис отвечает и на нетегнутые сообщения (см. scripts/mbox-archivist.mjs), поэтому

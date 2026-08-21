@@ -10,11 +10,22 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="MBOX" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>MBOX</title>
-    <script type="module" crossorigin src="/assets/index-Cbib1kEV.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-D1YzccJ4.css">
+    <script type="module" crossorigin src="/assets/index-DFW4-j6Y.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BLbn80qZ.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Регистрация после load, не до — не задерживать первую отрисовку ради установки SW.
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
