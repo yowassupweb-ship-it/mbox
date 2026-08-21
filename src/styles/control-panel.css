@@ -141,6 +141,19 @@
 }
 .project-pill-props svg { flex: none; }
 
+/* Витрина на Overview: те же пилюли, но не рельс с драгом — просто кликабельная сетка. */
+.overview-project-rail {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.overview-project-rail .project-pill {
+  cursor: pointer;
+}
+.overview-project-rail .project-pill:hover {
+  color: var(--text-main);
+  border-color: color-mix(in srgb, var(--project-color, var(--accent-color)) 45%, var(--border-color));
+}
+
 .project-pill.is-active {
   color: var(--text-main);
   background: var(--element-bg);
