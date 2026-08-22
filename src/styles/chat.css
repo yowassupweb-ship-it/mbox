@@ -227,6 +227,11 @@
 .agent-chat-toggle:hover { transform: translateY(-1px); }
 .agent-chat-toggle:active { transform: translateY(1px); box-shadow: var(--container-inset); }
 
+.agent-chat-toggle-logo {
+  flex: none;
+  object-fit: contain;
+}
+
 .agent-chat-toggle-label {
   font-size: 10px;
   font-weight: var(--weight-medium);
@@ -308,7 +313,8 @@
   }
 
   /* На круглой кнопке одна лишь иконка и держит внимание — 11px в 50px круге терялась. */
-  .agent-chat-toggle svg {
+  .agent-chat-toggle svg,
+  .agent-chat-toggle-logo {
     width: 20px;
     height: 20px;
   }

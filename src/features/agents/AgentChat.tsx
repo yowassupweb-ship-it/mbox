@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } from "lucide-react";
+import { AtSign, ChevronRight, DollarSign, Hash, Slash, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -1022,7 +1022,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       )}
 
       <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
-        <Terminal size={11} />
+        <img className="agent-chat-toggle-logo" src="/assets/icons/icons/галочка.png" width={13} height={13} alt="" />
         <span className="agent-chat-toggle-label">Консоль</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}
