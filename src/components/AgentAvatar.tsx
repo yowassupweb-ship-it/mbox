@@ -29,8 +29,10 @@ export function agentIdentity(name: string): AgentIdentity {
     return { key: "gemini", label: raw, accent: "#1a73e8", image: `${AVATARS}/gemini.png` };
   }
   // Джарвис — «свой», постоянный агент MBOX (scripts/mbox-archivist.mjs), не сторонний бренд.
+  // Аватарка — сам маскот MBOX (осьминог из логотипа), не буква: Джарвис и есть MBOX, в отличие
+  // от гостящих в системе внешних брендов (Claude/Codex/Gemini).
   if (key.includes("джарвис") || key.includes("jarvis")) {
-    return { key: "jarvis", label: raw, accent: "#29e0d6", image: "/assets/icons/icons/галочка.png" };
+    return { key: "jarvis", label: raw, accent: "#29e0d6", image: "/assets/icons/icons/logo.png" };
   }
   // Человек — тоже «свой», не бренд ИИ, отдельная аватарка из того же набора.
   if (key.includes("человек") || key === "admin" || key.includes("human")) {
