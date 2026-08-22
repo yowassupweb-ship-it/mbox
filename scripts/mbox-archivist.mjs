@@ -69,6 +69,143 @@ async function cloudflareSummarize(transcript) {
   }
 }
 
+/** Просит Cloudflare рассудить: из уже отфильтрованных эвристикой кандидатов (старые логи по
+ * закрытым задачам) выбрать самые бесспорные на удаление, с короткой причиной на каждый. Строгий
+ * JSON не гарантирован моделью — при любом сбое парсинга просто возвращаем null, вызывающий код
+ * должен откатиться на эвристический порядок (взять самые старые), не падать и не выдумывать. */
+async function cloudflareJudgeStaleMemories(candidates) {
+  if (!cloudflareAccountId || !cloudflareApiToken) return null;
+  try {
+    const listing = candidates.map((m) => `#${m.id}: «${m.title}» — ${(m.content || "").slice(0, 200).replace(/\s+/g, " ")}`).join("\n");
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cloudflareAccountId}/ai/run/${cloudflareModel}`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${cloudflareApiToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: "Ты помогаешь чистить память MBOX. Все записи ниже уже прошли фильтр: это технические "
+                + "логи (не факты/решения), привязанные к задачам, которые уже закрыты (done/archived), и им "
+                + "больше 21 дня. Из них выбери те, что БЕССПОРНО можно удалить — рутинный технический след "
+                + "без единого факта, который мог бы пригодиться позже. Если сомневаешься — не включай, "
+                + "лучше оставить лишнее, чем стереть что-то ценное. Ответь СТРОГО JSON без пояснений: "
+                + '{"delete":[{"id":"...","reason":"..."}]}, reason — 3-6 слов на русском.',
+            },
+            { role: "user", content: listing },
+          ],
+        }),
+      },
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data?.result?.response;
+    if (typeof text !== "string") return null;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    const ids = new Set(candidates.map((m) => String(m.id)));
+    const picks = Array.isArray(parsed.delete)
+      ? parsed.delete.filter((p) => p && ids.has(String(p.id))).map((p) => ({ id: String(p.id), reason: String(p.reason || "").slice(0, 120) }))
+      : [];
+    return picks.length ? picks : null;
+  } catch {
+    return null;
+  }
+}
+
+// Раз в CLEANUP_INTERVAL_HOURS часов ищет старые технические логи, привязанные к уже закрытым
+// задачам — состояние (когда проверяли в последний раз) хранится в props MBOX-проекта, не в
+// отдельной таблице: props уже используется как место для структурных фактов (см. CLAUDE.md).
+const CLEANUP_INTERVAL_HOURS = Number(process.env.ARCHIVIST_CLEANUP_INTERVAL_HOURS || 24);
+const CLEANUP_STALE_DAYS = Number(process.env.ARCHIVIST_CLEANUP_STALE_DAYS || 21);
+const CLEANUP_BATCH_SIZE = Number(process.env.ARCHIVIST_CLEANUP_BATCH_SIZE || 8);
+const CLEANUP_PROPOSAL_TITLE_PREFIX = "Уборка памяти:";
+
+async function reviewStaleMemories() {
+  const projectsData = await mboxFetch("/api/mbox/projects?q=MBOX");
+  const mboxProject = (projectsData.projects || []).find((p) => p.name === "MBOX");
+  if (!mboxProject) return { skipped: true, reason: "проект MBOX не найден" };
+
+  const props = mboxProject.props && typeof mboxProject.props === "object" ? mboxProject.props : {};
+  const lastRun = props.memory_cleanup_last_run ? new Date(props.memory_cleanup_last_run).getTime() : 0;
+  if (Date.now() - lastRun < CLEANUP_INTERVAL_HOURS * 3600000) return { skipped: true, reason: "ещё не пора" };
+
+  // Не копим второе предложение поверх неотвеченного первого — дождаться ответа на уже заданный вопрос.
+  const inboxData = await mboxFetch("/api/mbox/agent/inbox");
+  const pending = (inboxData.inbox || []).some((item) => item.status !== "done" && String(item.title || "").startsWith(CLEANUP_PROPOSAL_TITLE_PREFIX));
+  if (pending) return { skipped: true, reason: "предыдущее предложение ещё без ответа" };
+
+  const memData = await mboxFetch("/api/mbox/memories");
+  const allMemories = memData.memories || [];
+  const doneTodoIds = new Set();
+  for (const project of projectsData.projects || []) {
+    for (const todo of project.todos || []) {
+      if (todo.status === "done" || todo.status === "archived") doneTodoIds.add(String(todo.id));
+    }
+  }
+  // Если у всех проектов список todos не пришёл (например, ручка отдала укороченный ответ) —
+  // лучше не находить кандидатов вовсе, чем по ошибке принять "нет привязки" за "задача закрыта".
+  const projectsHaveTodos = (projectsData.projects || []).some((p) => Array.isArray(p.todos));
+  if (!projectsHaveTodos) return { skipped: true, reason: "не удалось получить статусы задач" };
+
+  const cutoffMs = Date.now() - CLEANUP_STALE_DAYS * 86400000;
+  const candidates = allMemories.filter((memory) => {
+    if (new Date(memory.updated_at).getTime() > cutoffMs) return false;
+    const tags = Array.isArray(memory.tags) ? memory.tags : [];
+    const looksLikeLog = memory.entity_type === "log" || tags.includes("agent-work");
+    if (!looksLikeLog) return false;
+    const linkedTodoId = memory.todo_id || memory.metadata?.todo_id;
+    // Без привязки к задаче вообще — тоже кандидат (осиротевший технический след); с привязкой —
+    // только если та самая задача уже закрыта, иначе это ещё живой рабочий контекст, не трогаем.
+    if (linkedTodoId && !doneTodoIds.has(String(linkedTodoId))) return false;
+    return true;
+  }).sort((a, b) => a.updated_at.localeCompare(b.updated_at));
+
+  async function saveState(extra) {
+    await mboxFetch(`/api/mbox/projects/${mboxProject.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ props: { ...props, memory_cleanup_last_run: new Date().toISOString(), ...extra } }),
+    });
+  }
+
+  if (!candidates.length) {
+    await saveState({ memory_cleanup_last_result: "нет кандидатов" });
+    return { checked: allMemories.length, candidates: 0, proposed: 0 };
+  }
+
+  const judged = await cloudflareJudgeStaleMemories(candidates.slice(0, 40));
+  const picks = judged && judged.length
+    ? judged.slice(0, CLEANUP_BATCH_SIZE)
+    : candidates.slice(0, CLEANUP_BATCH_SIZE).map((m) => ({ id: String(m.id), reason: "старый технический лог по уже закрытой задаче" }));
+  const byId = new Map(candidates.map((m) => [String(m.id), m]));
+  const lines = picks.map((p) => `#${p.id} «${byId.get(p.id)?.title || "?"}» — ${p.reason}`).join("\n");
+  const idList = picks.map((p) => `#${p.id}`).join(", ");
+
+  await mboxFetch("/api/mbox/agent/inbox", {
+    method: "POST",
+    body: JSON.stringify({
+      agent_name: agentName,
+      project_id: mboxProject.id,
+      item_type: "question",
+      title: `${CLEANUP_PROPOSAL_TITLE_PREFIX} ${picks.length} записей на удаление`,
+      body: `Нашёл ${picks.length} записей памяти — технические логи старше ${CLEANUP_STALE_DAYS} дней, привязанные `
+        + `к уже закрытым задачам (или вовсе без привязки), фактов не несут:\n\n${lines}\n\nВсего похожих кандидатов: ${candidates.length}. Удалить эти?`,
+      priority: "normal",
+      requires_human: true,
+      props: {
+        actions: [
+          { label: `Удалить все (${picks.length})`, value: `Удали записи памяти ${idList} — подтверждаю, это устаревшие технические логи по закрытым задачам.` },
+          { label: "Оставить как есть", value: "Не удаляй эти записи памяти, оставь как есть." },
+        ],
+      },
+    }),
+  });
+  await saveState({ memory_cleanup_last_result: `предложено ${picks.length} из ${candidates.length} кандидатов` });
+  return { checked: allMemories.length, candidates: candidates.length, proposed: picks.length, viaCloudflare: Boolean(judged) };
+}
+
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
 // Только для текста, который Джарвис показывает пользователю — сам по себе таймер здесь не настраивается
 // (см. /etc/systemd/system/mbox-archivist.timer на сервере, OnUnitActiveSec).
@@ -1626,7 +1763,8 @@ async function main() {
   const requests = await respondToRequests().catch((error) => ({ error: error.message }));
   const memory = await classifyMemories().catch((error) => ({ error: error.message }));
   const sources = await refreshDataSources().catch((error) => ({ error: error.message }));
-  console.log(JSON.stringify({ at: new Date().toISOString(), agent: agentName, requests, memory, sources }));
+  const cleanup = await reviewStaleMemories().catch((error) => ({ error: error.message }));
+  console.log(JSON.stringify({ at: new Date().toISOString(), agent: agentName, requests, memory, sources, cleanup }));
 }
 
 await main();
