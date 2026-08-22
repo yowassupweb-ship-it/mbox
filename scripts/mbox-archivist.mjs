@@ -1704,7 +1704,7 @@ async function respondToRequests() {
       const KEEP_RAW = 50;
       const OLDER_CAP = 60;
       const history = inbox
-        .filter((row) => ["question", "answer"].includes(row.item_type) && (row.agent_name === "Человек" || row.agent_name === agentName))
+        .filter((row) => ["question", "answer"].includes(row.item_type) && (row.agent_name === "Человек" || row.agent_name === "Claude" || row.agent_name === agentName))
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .slice(-(KEEP_RAW + OLDER_CAP));
 

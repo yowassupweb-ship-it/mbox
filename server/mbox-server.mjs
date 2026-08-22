@@ -2806,7 +2806,7 @@ async function replyAsJarvis(item) {
     const OLDER_CAP = 60;
     const history = (await client.query(
       `SELECT agent_name, body, title FROM agent_inbox
-       WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = $1)
+       WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = 'Claude' OR agent_name = $1)
        ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
       [JARVIS_NAME],
     )).rows.reverse();
@@ -4290,11 +4290,28 @@ async function handleApiWithContext(req, res, url) {
       broadcastChange(req, "create", "agent_inbox", String(body.title || "").trim());
       const senderName = String(body.agent_name || actorFromReq(req));
       const addressedTo = body.props && typeof body.props === "object" ? String(body.props.to || "") : "";
-      if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
-        // .catch() обязателен на fire-and-forget вызове: необработанный reject роняет весь процесс.
-        // replyAsJarvis теперь сама не должна выбрасывать наружу, но это последний рубеж, не первый.
-        replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props })
-          .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
+      if ((senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
+        // Claude тоже может триггерить живой ответ Джарвиса (по просьбе человека — "агенты
+        // общаются, но с ограничениями") — но без верхнего предела это открытая дверь для
+        // зацикливания ботов друг на друге. Ограничение: если среди последних 6 сообщений треда
+        // не было ни одного от живого "Человек", новый агент-агент автоответ не запускаем — ждём,
+        // пока человек снова включится. У самого "Человек" лимита нет и не будет.
+        let allowChain = senderName === "Человек";
+        if (!allowChain) {
+          const recentChain = await query(
+            "SELECT agent_name FROM agent_inbox WHERE item_type IN ('question', 'answer') AND project_id IS NOT DISTINCT FROM $1 ORDER BY created_at DESC LIMIT 6",
+            [body.project_id || null],
+          );
+          allowChain = recentChain.rows.some((row) => row.agent_name === "Человек");
+        }
+        if (allowChain) {
+          // .catch() обязателен на fire-and-forget вызове: необработанный reject роняет весь процесс.
+          // replyAsJarvis теперь сама не должна выбрасывать наружу, но это последний рубеж, не первый.
+          replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props })
+            .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
+        } else {
+          console.log(`[jarvis] агент-агент цепочка достигла лимита без человека — авто-ответ на #${result.rows[0].id} пропущен`);
+        }
       }
       // Маркер для внешнего слежения (Claude через SSH-тейл логов вместо опроса по таймеру) —
       // адресату "Claude" ответ не генерируется автоматически, только этот сигнал в stdout.

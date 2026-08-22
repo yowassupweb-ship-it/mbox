@@ -2191,7 +2191,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       // разговора (см. комментарий в server/mbox-server.mjs), включая только что вставленное.
       const history = (await client.query(
         `SELECT agent_name, body, title FROM agent_inbox
-         WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = $1)
+         WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = 'Claude' OR agent_name = $1)
          ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
         [JARVIS_NAME],
       )).rows.reverse() as { agent_name: string; body: string; title: string }[];
@@ -4002,9 +4002,22 @@ function mboxDevApi() {
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
             const senderName = String(body.agent_name || "Agent");
             const addressedTo = body.props && typeof body.props === "object" ? String((body.props as Record<string, unknown>).to || "") : "";
-            if (senderName === "Человек" && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
-              replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props }, realtimeClients)
-                .catch((error: Error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
+            if ((senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
+              // См. server/mbox-server.mjs — тот же лимит против зацикливания агентов.
+              let allowChain = senderName === "Человек";
+              if (!allowChain) {
+                const recentChain = await queryPostgres<{ agent_name: string }>(
+                  "SELECT agent_name FROM agent_inbox WHERE item_type IN ('question', 'answer') AND project_id IS NOT DISTINCT FROM $1 ORDER BY created_at DESC LIMIT 6",
+                  [body.project_id || null],
+                );
+                allowChain = recentChain.rows.some((row) => row.agent_name === "Человек");
+              }
+              if (allowChain) {
+                replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props }, realtimeClients)
+                  .catch((error: Error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
+              } else {
+                console.log(`[jarvis] агент-агент цепочка достигла лимита без человека — авто-ответ на #${result.rows[0].id} пропущен`);
+              }
             }
             if (addressedTo === "Claude" && result.rows[0]) {
               console.log(`[claude-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
