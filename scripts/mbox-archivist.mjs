@@ -62,11 +62,54 @@ async function cloudflareSummarize(transcript) {
     );
     if (!response.ok) return null;
     const data = await response.json();
+    // См. server/mbox-server.mjs — Cloudflare-расход раньше нигде не логировался.
+    const usage = data?.result?.usage || {};
+    mboxFetch("/api/mbox/agent/groq-usage", {
+      method: "POST",
+      body: JSON.stringify({ purpose: "history-compression", model: cloudflareModel, prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 }),
+    }).catch((error) => console.error(`cloudflare usage log failed: ${error.message}`));
     const text = data?.result?.response;
     return typeof text === "string" && text.trim() ? text.trim() : null;
   } catch {
     return null;
   }
+}
+
+// Fast-path — см. server/mbox-server.mjs. Детерминированные факты из БД (через REST, у этого
+// файла нет прямого доступа к БД), отвечаем мгновенно без обращения к Gemini/Groq. Намеренно
+// узкий список паттернов.
+async function tryFastPath(text) {
+  const q = String(text || "").toLowerCase();
+
+  if (/токен/.test(q) && /(сколько|расход|потрач|статистик|баланс)/.test(q)) {
+    const usage = await mboxFetch("/api/mbox/agent/groq-usage");
+    const byModel = Array.isArray(usage.by_model) ? usage.by_model : [];
+    if (!byModel.length) return "⚡ Расход токенов пока нулевой — ни одного вызова ещё не залогировано.";
+    const lines = byModel.map((m) => `${m.model}: сегодня ${m.tokens_today}, за 24ч ${m.tokens_24h}, всего ${m.total_tokens} (${m.calls_total} вызовов)`);
+    return `⚡ Расход токенов по моделям:\n${lines.join("\n")}\n\nИтого по всем моделям: ${usage.total_tokens}.`;
+  }
+
+  if (/(сколько|число|количество).*(задач|todo)/.test(q) && !/(в проекте|по проекту|про |о\s)/.test(q)) {
+    const data = await mboxFetch("/api/mbox/projects");
+    const todos = (data.projects || []).flatMap((p) => p.todos || []);
+    const open = todos.filter((t) => !["done", "archived"].includes(t.status)).length;
+    return `⚡ Задач всего: ${todos.length}, из них не закрыто (open/next/doing/blocked/review): ${open}.`;
+  }
+
+  if (/(сколько|число|количество).*(запис|памят)/.test(q)) {
+    const data = await mboxFetch("/api/mbox/memories");
+    return `⚡ Записей в памяти: ${data.total ?? (data.memories || []).length}.`;
+  }
+
+  if (/(статус|состояние).*сервер|как\s+(там\s+)?сервер/.test(q)) {
+    const data = await mboxFetch("/api/mbox/server");
+    const m = data.metrics;
+    if (!m) return "⚡ Метрик сервера пока нет.";
+    return `⚡ Сервер ${m.hostname}: CPU ${m.cpu_percent}%, память ${m.memory_used_mb}/${m.memory_total_mb} МБ, `
+      + `диск ${m.disk_used_mb}/${m.disk_total_mb} МБ, нагрузка ${m.load_1} (снято ${m.captured_at}).`;
+  }
+
+  return null;
 }
 
 /** Просит Cloudflare рассудить: из уже отфильтрованных эвристикой кандидатов (старые логи по
@@ -1536,6 +1579,27 @@ async function respondToRequests() {
   let answered = 0;
   for (const item of mine) {
     try {
+      const fastPathReply = await tryFastPath(item.body || item.title);
+      if (fastPathReply) {
+        jlog(item.id, `fast-path: "${String(item.body || "").slice(0, 80)}" -> без обращения к LLM`);
+        await mboxFetch("/api/mbox/agent/inbox", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: item.project_id || null,
+            agent_name: agentName,
+            item_type: "answer",
+            title: `Ответ: ${(item.title || "").slice(0, 100)}`,
+            body: fastPathReply,
+            priority: "normal",
+            requires_human: false,
+            props: { to: "Человек", re: item.id, tools_used: [], fast_path: true },
+          }),
+        });
+        await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });
+        answered += 1;
+        continue;
+      }
+
       // Этот файл — только РЕЗЕРВНЫЙ путь. Основной механизм отвечает за секунды, вызываясь прямо из
       // POST /agent/inbox (см. replyAsJarvis в server/mbox-server.mjs), без ожидания таймера. Сюда
       // сообщение попадает, только если основной путь не сработал (например, редеплой сервера убил

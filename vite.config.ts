@@ -408,12 +408,63 @@ async function cloudflareSummarize(transcript: string): Promise<string | null> {
       },
     );
     if (!response.ok) return null;
-    const data = await response.json() as { result?: { response?: unknown } };
+    const data = await response.json() as { result?: { response?: unknown; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } } };
+    // См. server/mbox-server.mjs — Cloudflare-расход раньше нигде не логировался.
+    const usage = data?.result?.usage || {};
+    queryPostgres(
+      "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
+      ["history-compression", CLOUDFLARE_MODEL, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
+    ).catch((error: Error) => console.error(`cloudflare usage insert failed: ${error.message}`));
     const text = data?.result?.response;
     return typeof text === "string" && text.trim() ? text.trim() : null;
   } catch {
     return null;
   }
+}
+
+// Fast-path — см. server/mbox-server.mjs. Детерминированные факты из БД, отвечаем мгновенно
+// без обращения к Gemini/Groq. Намеренно узкий список паттернов.
+async function tryFastPath(client: PoolClient, text: unknown): Promise<string | null> {
+  const q = String(text || "").toLowerCase();
+
+  if (/токен/.test(q) && /(сколько|расход|потрач|статистик|баланс)/.test(q)) {
+    const rows = (await client.query(
+      `SELECT model,
+              sum(total_tokens)::bigint AS total,
+              sum(total_tokens) FILTER (WHERE created_at > date_trunc('day', now()))::bigint AS today,
+              sum(total_tokens) FILTER (WHERE created_at > now() - interval '24 hours')::bigint AS last24h,
+              count(*)::int AS calls
+       FROM groq_usage GROUP BY model ORDER BY sum(total_tokens) DESC`,
+    )).rows as { model: string; total: string; today: string | null; last24h: string | null; calls: number }[];
+    if (!rows.length) return "⚡ Расход токенов пока нулевой — ни одного вызова ещё не залогировано.";
+    const lines = rows.map((r) => `${r.model}: сегодня ${r.today || 0}, за 24ч ${r.last24h || 0}, всего ${r.total} (${r.calls} вызовов)`);
+    const grandTotal = rows.reduce((sum, r) => sum + Number(r.total), 0);
+    return `⚡ Расход токенов по моделям:\n${lines.join("\n")}\n\nИтого по всем моделям: ${grandTotal}.`;
+  }
+
+  if (/(сколько|число|количество).*(задач|todo)/.test(q) && !/(в проекте|по проекту|про |о\s)/.test(q)) {
+    const row = (await client.query(
+      `SELECT count(*)::int AS total, count(*) FILTER (WHERE status NOT IN ('done', 'archived'))::int AS open
+       FROM todos`,
+    )).rows[0] as { total: number; open: number };
+    return `⚡ Задач всего: ${row.total}, из них не закрыто (open/next/doing/blocked/review): ${row.open}.`;
+  }
+
+  if (/(сколько|число|количество).*(запис|памят)/.test(q)) {
+    const row = (await client.query("SELECT count(*)::int AS total FROM memories")).rows[0] as { total: number };
+    return `⚡ Записей в памяти: ${row.total}.`;
+  }
+
+  if (/(статус|состояние).*сервер|как\s+(там\s+)?сервер/.test(q)) {
+    const row = (await client.query(
+      "SELECT hostname, load_1, cpu_percent, memory_used_mb, memory_total_mb, disk_used_mb, disk_total_mb, captured_at::text FROM server_metrics ORDER BY captured_at DESC LIMIT 1",
+    )).rows[0] as { hostname: string; load_1: number; cpu_percent: number; memory_used_mb: number; memory_total_mb: number; disk_used_mb: number; disk_total_mb: number; captured_at: string } | undefined;
+    if (!row) return "⚡ Метрик сервера пока нет.";
+    return `⚡ Сервер ${row.hostname}: CPU ${row.cpu_percent}%, память ${row.memory_used_mb}/${row.memory_total_mb} МБ, `
+      + `диск ${row.disk_used_mb}/${row.disk_total_mb} МБ, нагрузка ${row.load_1} (снято ${row.captured_at}).`;
+  }
+
+  return null;
 }
 
 type GroqMessage = {
@@ -2002,6 +2053,20 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
     const client = await getPool().connect();
     try {
       await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
+
+      const fastPathReply = await tryFastPath(client, item.body || item.title);
+      if (fastPathReply) {
+        jlog(item.id, `fast-path: "${String(item.body || "").slice(0, 80)}" -> без обращения к LLM`);
+        await client.query(
+          `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+           VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
+          [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, fastPathReply, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], fast_path: true })],
+        );
+        await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
+        broadcastRealtime(clients, "entity_changed", { entity: "agent_inbox" });
+        return;
+      }
+
       const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows as { id: string; name: string }[];
       const companyNames = ((await client.query("SELECT name FROM companies ORDER BY name")).rows as { name: string }[]).map((c) => c.name);
       const stats = (await client.query(
