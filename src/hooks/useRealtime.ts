@@ -42,6 +42,10 @@ export function useRealtime(onEntityChanged: () => void) {
       socket.onopen = () => {
         setState("connected");
         setLabel("Агент подключен");
+        // Реконнект (после деплоя/обрыва сети) сам по себе не тащит свежие данные — REST-кэш
+        // на клиенте остаётся из ДО обрыва состояния, пока не прилетит entity_changed/agent_presence.
+        // Без этого ростер (шапка, консоль) может часами показывать устаревших "офлайн" агентов.
+        scheduleReload();
       };
 
       socket.onmessage = (event) => {

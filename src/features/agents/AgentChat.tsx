@@ -923,7 +923,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-bar-agent" key={agent.id} title={`${agent.name} · ${state.label}${state.detail ? " — " + state.detail : ""}`}>
                   <AgentAvatar name={agent.name} status={state.key} live={state.key === "working"} size={20} />
                   <span className="console-bar-agent-name">{agent.name}</span>
-                  {state.key === "working" && <span className="console-bar-agent-phase">{state.label}</span>}
+                  {(state.key === "working" ? state.label : agent.client) && (
+                    <span className="console-bar-agent-phase">{state.key === "working" ? state.label : agent.client}</span>
+                  )}
                 </span>
               )) : <span className="console-bar-agent muted">агентов нет на связи</span>}
             </div>
