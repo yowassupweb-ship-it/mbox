@@ -1363,12 +1363,14 @@ async function respondToRequests() {
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .slice(-8);
 
-      // Сжатие истории — см. server/mbox-server.mjs. Включается только на достаточно длинной
-      // истории и только если Cloudflare реально настроен, иначе поведение не меняется. Без
-      // setPhase здесь — этот файл не пишет фазы в UI (только основной путь, см. комментарий выше).
+      // Сжатие истории — см. server/mbox-server.mjs. Сводка идёт ВНУТРЬ системного промпта, не
+      // отдельным message с role:"system" в истории — toGeminiContents пропускает (continue) любой
+      // message с role:"system", кроме самого первого; посреди истории такая сводка молча
+      // терялась бы на основном (Gemini) пути. Без setPhase здесь — этот файл не пишет фазы в UI.
       const toRole = (row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title });
-      const COMPRESS_FROM = 6;
+      const COMPRESS_FROM = 4;
       let historyMessages = history.map(toRole);
+      let finalSystemPrompt = systemPrompt;
       if (history.length >= COMPRESS_FROM && cloudflareAccountId && cloudflareApiToken) {
         const older = history.slice(0, -2);
         const recent = history.slice(-2);
@@ -1376,14 +1378,15 @@ async function respondToRequests() {
         const summary = await cloudflareSummarize(transcript);
         if (summary) {
           jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
-          historyMessages = [{ role: "system", content: `Сводка более раннего разговора: ${summary}` }, ...recent.map(toRole)];
+          finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
+          historyMessages = recent.map(toRole);
         }
       }
 
       // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — модель часто
       // выполняет только первое из нескольких запрошенных действий; цикл даёт ей шанс продолжить.
       const messages = [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: finalSystemPrompt },
         ...historyMessages,
       ];
       const actionLog = [];

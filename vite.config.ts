@@ -1988,11 +1988,14 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         [JARVIS_NAME],
       )).rows.reverse() as { agent_name: string; body: string; title: string }[];
 
-      // Сжатие истории — см. комментарий в server/mbox-server.mjs. Включается только на достаточно
-      // длинной истории и только если Cloudflare реально настроен, иначе поведение не меняется.
+      // Сжатие истории — см. комментарий в server/mbox-server.mjs. Сводка идёт ВНУТРЬ системного
+      // промпта, не отдельным message с role:"system" в истории — toGeminiContents пропускает
+      // (continue) любой message с role:"system", кроме самого первого; посреди истории такая
+      // сводка молча терялась бы на основном (Gemini) пути.
       const toRole = (row: { agent_name: string; body: string; title: string }) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
-      const COMPRESS_FROM = 6;
+      const COMPRESS_FROM = 4;
       let historyMessages: GroqMessage[] = history.map(toRole);
+      let finalSystemPrompt = systemPrompt;
       if (history.length >= COMPRESS_FROM && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
         const older = history.slice(0, -2);
         const recent = history.slice(-2);
@@ -2001,7 +2004,8 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         const summary = await cloudflareSummarize(transcript);
         if (summary) {
           jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
-          historyMessages = [{ role: "system", content: `Сводка более раннего разговора: ${summary}` }, ...recent.map(toRole)];
+          finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
+          historyMessages = recent.map(toRole);
         }
       }
 
@@ -2009,7 +2013,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       // в server/mbox-server.mjs. Модель часто выполняет только первое из нескольких запрошенных
       // действий за раз; цикл даёт ей шанс продолжить следующим шагом.
       const messages: GroqMessage[] = [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: finalSystemPrompt },
         ...historyMessages,
       ];
       const actionLog: string[] = [];

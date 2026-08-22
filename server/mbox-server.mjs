@@ -2582,10 +2582,14 @@ async function replyAsJarvis(item) {
     // не перестанет вызывать функции (или не упрёмся в потолок шагов).
     const toRole = (row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
     // Сжатие включается только на достаточно длинной истории (иначе короткий обмен репликами
-    // сжимать нечего и незачем) и только если Cloudflare реально настроен — иначе historyMessages
-    // ровно то же самое, что было раньше (полная история без деградации).
-    const COMPRESS_FROM = 6;
+    // сжимать нечего и незачем) и только если Cloudflare реально настроен — иначе поведение не
+    // меняется. Сводка идёт ВНУТРЬ системного промпта, не отдельным message с role:"system" в
+    // истории — toGeminiContents(messages) явно пропускает (continue) любой message с role:"system",
+    // кроме самого первого, который geminiComplete отдельно вынимает под systemInstruction. Сводка
+    // как message посреди истории молча терялась бы на основном (Gemini) пути.
+    const COMPRESS_FROM = 4;
     let historyMessages = history.map(toRole);
+    let finalSystemPrompt = systemPrompt;
     if (history.length >= COMPRESS_FROM && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
       const older = history.slice(0, -2);
       const recent = history.slice(-2);
@@ -2594,11 +2598,12 @@ async function replyAsJarvis(item) {
       const summary = await cloudflareSummarize(transcript);
       if (summary) {
         jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
-        historyMessages = [{ role: "system", content: `Сводка более раннего разговора: ${summary}` }, ...recent.map(toRole)];
+        finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
+        historyMessages = recent.map(toRole);
       }
     }
     const messages = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: finalSystemPrompt },
       ...historyMessages,
     ];
     const actionLog = [];
