@@ -209,6 +209,7 @@ export type AgentActivity = {
   events: number;
   runs: number;
   live_runs: number;
+  phase: string | null;
   first_seen: string | null;
   last_seen: string | null;
 };

@@ -171,7 +171,10 @@ function agentState(agent: AgentActivity, runs: AgentRun[]) {
   const live = liveRunOf(runs, agent.name);
   if (live) return { key: "working", label: "работает", detail: live.goal };
   const status = effectiveStatus(agent);
-  if (status === "active") return { key: "thinking", label: "на связи", detail: "ждёт задачу" };
+  // phase — живой сигнал, который агент сам присылает через POST /agent/ping (не выдумываем
+  // "думает" статично: если фазы нет, значит агент сейчас реально ничего не делает).
+  if (status === "active" && agent.phase) return { key: "working", label: agent.phase, detail: agent.client };
+  if (status === "active") return { key: "thinking", label: "на связи", detail: agent.client || "ждёт задачу" };
   if (status === "idle") return { key: "idle", label: "ожидает", detail: formatSince(agent.last_seen) };
   return { key: "offline", label: "отключён", detail: formatSince(agent.last_seen) };
 }
@@ -917,9 +920,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           <div className="console-bar">
             <div className="console-bar-roster" title={rosterSummary}>
               {online.length ? online.map(({ agent, state }) => (
-                <span className="console-bar-agent" key={agent.id}>
+                <span className="console-bar-agent" key={agent.id} title={`${agent.name} · ${state.label}${state.detail ? " — " + state.detail : ""}`}>
                   <AgentAvatar name={agent.name} status={state.key} live={state.key === "working"} size={20} />
                   <span className="console-bar-agent-name">{agent.name}</span>
+                  {state.key === "working" && <span className="console-bar-agent-phase">{state.label}</span>}
                 </span>
               )) : <span className="console-bar-agent muted">агентов нет на связи</span>}
             </div>

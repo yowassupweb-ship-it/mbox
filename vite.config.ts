@@ -369,6 +369,20 @@ function setPhase(inboxId: unknown, phase: string) {
   if (!inboxId) return;
   jarvisPhase.set(String(inboxId), { phase, at: Date.now() });
 }
+
+const AGENT_PHASE_TTL_MS = 5 * 60 * 1000;
+const agentPhase = new Map<string, { phase: string; at: number }>();
+function setAgentPhase(agentName: string, phase: string) {
+  if (!agentName) return;
+  if (phase) agentPhase.set(agentName, { phase, at: Date.now() });
+  else agentPhase.delete(agentName);
+}
+function getAgentPhase(agentName: string): string | null {
+  const entry = agentPhase.get(agentName);
+  if (!entry || Date.now() - entry.at > AGENT_PHASE_TTL_MS) return null;
+  return entry.phase;
+}
+
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // См. server/mbox-server.mjs — "Прораб" (GROQ_MODEL) ведёт диалог, "младший" — своя, куда более
@@ -2887,6 +2901,7 @@ function mboxDevApi() {
                 events: row.events,
                 runs: row.runs,
                 live_runs: row.live_runs,
+                phase: getAgentPhase(row.name),
                 first_seen: row.first_seen,
                 last_seen: row.last_seen,
               };
@@ -2896,7 +2911,7 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/agent/ping" && req.method === "POST") {
-            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string }>(req);
+            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string; phase?: string }>(req);
             const name = String(body.agent || req.headers["x-mbox-agent"] || "Agent").trim() || "Agent";
             const started = body.event === "session_start";
             const result = await queryPostgres<{ agent_name: string; kind: string; client: string; scope: string; sessions: number; last_seen: string }>(
@@ -2911,6 +2926,11 @@ function mboxDevApi() {
                RETURNING agent_name, kind, client, scope, sessions, last_seen::text`,
               [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
             );
+            if (started) broadcastRealtime(realtimeClients, "agent_presence", { agent: name, event: "session_start" });
+            if (typeof body.phase === "string") {
+              setAgentPhase(name, body.phase.trim());
+              broadcastRealtime(realtimeClients, "agent_presence", { agent: name, event: "phase" });
+            }
             return sendJson(res, 200, { presence: result.rows[0] });
           }
 

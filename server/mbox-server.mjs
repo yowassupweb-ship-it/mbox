@@ -758,6 +758,22 @@ function setPhase(inboxId, phase) {
   if (!inboxId) return;
   jarvisPhase.set(String(inboxId), { phase, at: Date.now() });
 }
+
+// Тот же принцип "живая фаза без БД", но per-agent, а не per-inbox-item — нужен внешним агентам
+// (Claude через POST /agent/ping), у которых нет одного inbox_id на весь цикл работы.
+const AGENT_PHASE_TTL_MS = 5 * 60 * 1000;
+const agentPhase = new Map();
+function setAgentPhase(agentName, phase) {
+  if (!agentName) return;
+  if (phase) agentPhase.set(agentName, { phase, at: Date.now() });
+  else agentPhase.delete(agentName);
+}
+function getAgentPhase(agentName) {
+  const entry = agentPhase.get(agentName);
+  if (!entry || Date.now() - entry.at > AGENT_PHASE_TTL_MS) return null;
+  return entry.phase;
+}
+
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // "Прораб" (GROQ_MODEL, gpt-oss-120b) ведёт диалог и решает, какой инструмент вызвать — сюда лимиты
@@ -3025,6 +3041,10 @@ async function handleApiWithContext(req, res, url) {
       [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
     );
     if (started) broadcastRealtime("agent_presence", { agent: name, event: "session_start" });
+    if (typeof body.phase === "string") {
+      setAgentPhase(name, body.phase.trim());
+      broadcastRealtime("agent_presence", { agent: name, event: "phase" });
+    }
     return sendJson(res, 200, { presence: result.rows[0] });
   }
 
@@ -3149,6 +3169,7 @@ async function handleApiWithContext(req, res, url) {
         events: row.events,
         runs: row.runs,
         live_runs: row.live_runs,
+        phase: getAgentPhase(row.name),
         first_seen: row.first_seen,
         last_seen: row.last_seen,
       };
