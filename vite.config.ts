@@ -2071,6 +2071,10 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       ];
       const actionLog: string[] = [];
       const toolsUsed: string[] = [];
+      // Полный пошаговый трейс — см. server/mbox-server.mjs. В props, не в body: props не
+      // попадают в historyMessages, так что этот подробный вывод не вернётся Джарвису на
+      // следующем шаге — только человеку в консоль.
+      const detailedTrace: string[] = [];
       let reply = "";
       // См. server/mbox-server.mjs — Gemini-прораб с переключением на Groq при ошибке, не мечась
       // между провайдерами внутри одного цикла.
@@ -2111,6 +2115,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
           }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
+          detailedTrace.push(`${call.function?.name || "?"}(${call.function?.arguments || ""}) -> ${result}`);
           messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }
@@ -2121,7 +2126,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
       await client.query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed })],
+        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace })],
       );
       await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     } finally {
@@ -2882,14 +2887,18 @@ function mboxDevApi() {
             const result = await queryPostgres(
               `SELECT id::text, folder_id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
                       pg_column_size(memories)::int AS memory_bytes,
-                      created_at::text, updated_at::text
+                      created_at::text, updated_at::text,
+                      count(*) OVER()::int AS total_count,
+                      sum(pg_column_size(memories)) OVER()::bigint AS total_bytes
                FROM memories
                WHERE $1 = '' OR search_vector @@ plainto_tsquery('simple', $1) OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR tags::text ILIKE '%' || $1 || '%'
                ORDER BY updated_at DESC
                LIMIT 300`,
               [q],
             );
-            return sendJson(res, 200, { memories: result.rows });
+            const total = (result.rows[0] as { total_count?: number } | undefined)?.total_count ?? result.rows.length;
+            const totalBytes = Number((result.rows[0] as { total_bytes?: number } | undefined)?.total_bytes ?? 0);
+            return sendJson(res, 200, { memories: result.rows.map(({ total_count, total_bytes, ...row }: any) => row), total, total_bytes: totalBytes });
           }
 
           if (url.pathname === "/api/mbox/memories/search") {

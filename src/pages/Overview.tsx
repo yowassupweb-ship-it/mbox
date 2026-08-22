@@ -13,7 +13,7 @@ const BOTTOM_ICONS = "/assets/icons/bottom-menu";
 
 export function Overview({ data, onOpenProject }: { data: MboxData; onOpenProject: (projectId: string) => void }) {
   const totalBytes = sumBytes([
-    ...data.memories.map((item) => item.memory_bytes),
+    data.memoriesTotalBytes,
     ...data.artifacts.map((item) => item.memory_bytes),
     ...data.projects.map((item) => item.memory_bytes),
     ...data.secrets.map((item) => item.memory_bytes),
@@ -30,7 +30,7 @@ export function Overview({ data, onOpenProject }: { data: MboxData; onOpenProjec
         </Panel>
       )}
       <MetricGrid>
-        <Metric title="Память" value={data.memories.length} subtitle={formatBytes(totalBytes)} image={`${BOTTOM_ICONS}/память.png`} />
+        <Metric title="Память" value={data.memoriesTotal} subtitle={formatBytes(data.memoriesTotalBytes)} image={`${BOTTOM_ICONS}/память.png`} />
         <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/артефакты.png`} />
         <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/проекты.png`} />
       </MetricGrid>

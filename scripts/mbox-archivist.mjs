@@ -1444,6 +1444,10 @@ async function respondToRequests() {
       ];
       const actionLog = [];
       const toolsUsed = [];
+      // Полный пошаговый трейс — см. server/mbox-server.mjs. В props, не в body: props не
+      // попадают в historyMessages, так что этот подробный вывод не вернётся Джарвису на
+      // следующем шаге — только человеку в консоль.
+      const detailedTrace = [];
       let reply = "";
       // См. server/mbox-server.mjs — Gemini-прораб, переключение на Groq при ошибке без метания
       // между провайдерами внутри одного цикла.
@@ -1482,6 +1486,7 @@ async function respondToRequests() {
           }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
+          detailedTrace.push(`${call.function?.name || "?"}(${call.function?.arguments || ""}) -> ${result}`);
           messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }
@@ -1497,7 +1502,7 @@ async function respondToRequests() {
           body: reply,
           priority: "normal",
           requires_human: false,
-          props: { to: "Человек", re: item.id, tools_used: toolsUsed },
+          props: { to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace },
         }),
       });
       await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });

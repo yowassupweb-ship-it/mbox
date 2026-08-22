@@ -255,6 +255,7 @@ type LogLine = {
   at: string;
   pending?: "sending" | "sent" | "failed";
   toolsUsed?: string[];
+  trace?: string[];
   actions?: MessageAction[];
   postBuilder?: PostPart[];
 };
@@ -718,6 +719,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       toolsUsed: Array.isArray(item.props?.tools_used)
         ? (item.props.tools_used as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
+      // Пошаговый трейс (что вызвано, с чем, что вернулось) — техническая деталь для проверки,
+      // не для Джарвиса: это props, а не body, поэтому в его собственную историю не попадает
+      // (см. комментарий в replyAsJarvis на сервере).
+      trace: Array.isArray(item.props?.trace)
+        ? (item.props.trace as unknown[]).filter((t): t is string => typeof t === "string")
+        : undefined,
       actions: parseActions(item.props?.actions),
       postBuilder: parsePostBuilder(item.props?.post_builder),
     }));
@@ -942,6 +949,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                           <span key={tool} className="console-tool-chip"><Wrench size={10} />{tool}</span>
                         ))}
                       </span>
+                    )}
+                    {!!line.trace?.length && (
+                      <pre className="console-trace">{line.trace.join("\n")}</pre>
                     )}
                     {!!line.actions?.length && (
                       <span className="console-actions">

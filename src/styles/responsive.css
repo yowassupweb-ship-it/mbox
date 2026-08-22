@@ -111,9 +111,15 @@
     align-items: start;
   }
 
-  .top-actions,
-  .metrics-grid {
+  .top-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: grid;
+  }
+
+  /* Друг под другом на телефоне — плитка "Память 300 · 1.4 MB" на двух колонках выглядела тесно,
+     значение и подпись сталкивались. Одна колонка, полная ширина. */
+  .metrics-grid {
+    grid-template-columns: 1fr;
     display: grid;
   }
 

@@ -743,6 +743,23 @@
 
 .console-tool-chip svg { color: var(--accent-color); flex: none; }
 
+/* Полный пошаговый трейс — что вызвано, с чем, что вернулось. Техническая деталь для проверки,
+   поэтому мельче и тише основного текста, моноширинным, с переносом длинных строк аргументов/
+   результатов вместо горизонтального скролла. */
+.console-trace {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, .06);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .03);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Варианты выбора (props.actions) — кнопки под сообщением вместо "напечатай А/Б/В руками".
    Клик шлёт action.value обычным сообщением тем же путём, что и текст из composer'а. */
 .console-actions {

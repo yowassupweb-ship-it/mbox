@@ -2661,6 +2661,10 @@ async function replyAsJarvis(item) {
     ];
     const actionLog = [];
     const toolsUsed = [];
+    // Полный пошаговый трейс — что вызвано, с чем, что вернулось. В props, не в body: props не
+    // попадают в historyMessages (там читаются только body/title), так что этот подробный вывод
+    // никогда не вернётся Джарвису на следующем шаге — только человеку в консоль.
+    const detailedTrace = [];
     let reply = "";
     // Прораб — Gemini; при первой же ошибке (429, недоступность, отсутствие ключа) переключаемся
     // на Groq gpt-oss-120b и остаёмся на нём до конца ЭТОГО ответа — не мечемся между провайдерами
@@ -2703,6 +2707,7 @@ async function replyAsJarvis(item) {
         }
         actionLog.push(result);
         if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
+        detailedTrace.push(`${call.function?.name || "?"}(${call.function?.arguments || ""}) -> ${result}`);
         messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
       }
     }
@@ -2715,7 +2720,7 @@ async function replyAsJarvis(item) {
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed })],
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace })],
     );
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });
@@ -3060,14 +3065,21 @@ async function handleApiWithContext(req, res, url) {
     const result = await query(
       `SELECT id::text, folder_id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
               pg_column_size(memories)::int AS memory_bytes,
-              created_at::text, updated_at::text
+              created_at::text, updated_at::text,
+              count(*) OVER()::int AS total_count,
+              sum(pg_column_size(memories)) OVER()::bigint AS total_bytes
        FROM memories
        WHERE $1 = '' OR search_vector @@ plainto_tsquery('simple', $1) OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR tags::text ILIKE '%' || $1 || '%'
        ORDER BY updated_at DESC
        LIMIT 300`,
       [q],
     );
-    return sendJson(res, 200, { memories: result.rows });
+    // total/totalBytes — реальные числа по ВСЕМ подходящим записям (до LIMIT 300), не по
+    // result.rows.length/сумме memory_bytes отданных строк. Раньше карточка "Память" на Обзоре
+    // считала по data.memories (обрезанному до 300), то есть буквально упиралась в потолок LIMIT.
+    const total = result.rows[0]?.total_count ?? result.rows.length;
+    const totalBytes = Number(result.rows[0]?.total_bytes ?? 0);
+    return sendJson(res, 200, { memories: result.rows.map(({ total_count, total_bytes, ...row }) => row), total, total_bytes: totalBytes });
   }
 
   if (url.pathname === "/api/mbox/memories/search") {

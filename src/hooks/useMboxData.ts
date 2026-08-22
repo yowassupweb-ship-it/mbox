@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AuthError, fetchOr } from "../lib/api";
+import { sumBytes } from "../lib/format";
 import type {
   AgentActivity,
   AgentInboxItem,
@@ -19,6 +20,10 @@ export type MboxData = ReturnType<typeof useMboxData>;
 
 export function useMboxData(query: string, onAuthExpired?: () => void) {
   const [memories, setMemories] = useState<Memory[]>([]);
+  // Отдельно от memories.length/memory_bytes-суммы — те всегда упираются в LIMIT 300 ответа,
+  // а тут настоящие числа по всем подходящим записям (см. count(*) OVER() в ручке).
+  const [memoriesTotal, setMemoriesTotal] = useState(0);
+  const [memoriesTotalBytes, setMemoriesTotalBytes] = useState(0);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -51,7 +56,7 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
     }
 
     Promise.all([
-      load<{ memories: Memory[] }>(`/api/mbox/memories${qs}`, { memories: [] }),
+      load<{ memories: Memory[]; total?: number; total_bytes?: number }>(`/api/mbox/memories${qs}`, { memories: [] }),
       load<{ artifacts: Artifact[] }>(`/api/mbox/artifacts${qs}`, { artifacts: [] }),
       load<{ projects: Project[] }>(`/api/mbox/projects${qs}`, { projects: [] }),
       load<{ companies: Company[] }>(`/api/mbox/companies${qs}`, { companies: [] }),
@@ -67,6 +72,8 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
       .then(([memoryData, artifactData, projectData, companyData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
         if (!alive) return;
         setMemories(memoryData.memories);
+        setMemoriesTotal(memoryData.total ?? memoryData.memories.length);
+        setMemoriesTotalBytes(memoryData.total_bytes ?? sumBytes(memoryData.memories.map((m) => m.memory_bytes)));
         setArtifacts(artifactData.artifacts);
         setProjects(projectData.projects);
         setCompanies(companyData.companies);
@@ -96,5 +103,5 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
     };
   }, [query, revision, onAuthExpired]);
 
-  return { memories, artifacts, projects, companies, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload };
+  return { memories, memoriesTotal, memoriesTotalBytes, artifacts, projects, companies, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload };
 }
