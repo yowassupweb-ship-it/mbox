@@ -4271,6 +4271,11 @@ async function handleApiWithContext(req, res, url) {
         replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props })
           .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
       }
+      // Маркер для внешнего слежения (Claude через SSH-тейл логов вместо опроса по таймеру) —
+      // адресату "Claude" ответ не генерируется автоматически, только этот сигнал в stdout.
+      if (senderName === "Человек" && addressedTo === "Claude" && result.rows[0]) {
+        console.log(`[claude-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
+      }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
     }
     const result = await query("SELECT id::text, project_id::text, agent_name, item_type, title, body, status, priority, requires_human, props, pg_column_size(agent_inbox)::int AS memory_bytes, created_at::text, updated_at::text FROM agent_inbox ORDER BY updated_at DESC LIMIT 200");

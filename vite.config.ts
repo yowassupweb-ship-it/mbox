@@ -3984,6 +3984,9 @@ function mboxDevApi() {
               replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props }, realtimeClients)
                 .catch((error: Error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
             }
+            if (senderName === "Человек" && addressedTo === "Claude" && result.rows[0]) {
+              console.log(`[claude-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
+            }
             return sendJson(res, 201, { inbox_item: result.rows[0] });
           }
 
