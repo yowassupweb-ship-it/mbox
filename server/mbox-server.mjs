@@ -2008,12 +2008,21 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
     const rows = (await client.query(
-      "SELECT title, status, priority FROM todos WHERE project_id = $1 ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC LIMIT 20",
+      `SELECT title, status, priority, count(*) OVER()::int AS total_count
+       FROM todos WHERE project_id = $1
+       ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC
+       LIMIT 20`,
       [project.id],
     )).rows;
     if (!rows.length) return `у проекта «${project.name}» пока нет задач`;
+    // Точное total_count вместо эвристики "ровно 20 -> наверное есть ещё" — та не отличала
+    // "правда 20 всего" от "20+, обрезано", и молчала про усечение, если total оказывался < 20
+    // (не могло случиться при limit 20, но принцип тот же риск, что был в list_project_todos
+    // резервного cron-пути — модель уверенно заявляла "это все задачи").
+    const total = rows[0].total_count;
+    const truncated = total > rows.length;
     const lines = rows.map((t) => `[${t.status}/${t.priority}] ${t.title}`);
-    return `задачи проекта «${project.name}» (${rows.length}${rows.length === 20 ? "+" : ""}): ${lines.join("; ")}`;
+    return `задачи проекта «${project.name}» (показаны ${rows.length}${truncated ? ` из ${total} — список НЕ полный, для остальных используй search_todos` : ""}): ${lines.join("; ")}`;
   }
 
   if (name === "get_project_info") {

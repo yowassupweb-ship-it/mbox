@@ -1055,10 +1055,15 @@ async function runJarvisTool(name, rawArgs, projectList) {
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
     const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
-    const todos = (context.todos || []).slice(0, 20);
+    const allTodos = context.todos || [];
+    const todos = allTodos.slice(0, 20);
     if (!todos.length) return `у проекта «${project.name}» пока нет задач`;
     const lines = todos.map((t) => `[${t.status}/${t.priority}] ${t.title}`);
-    return `задачи проекта «${project.name}» (${todos.length}): ${lines.join("; ")}`;
+    // Раньше здесь молча резалось до 20 без единого намёка на усечение — модель уверенно
+    // заявляла "это все задачи", хотя реальных было больше. context.todos.length — точное
+    // число ДО среза, это не как в SQL LIMIT, где точный total не бесплатен.
+    const truncated = allTodos.length > todos.length;
+    return `задачи проекта «${project.name}» (показаны ${todos.length}${truncated ? ` из ${allTodos.length} — список НЕ полный, для остальных используй search_todos` : ""}): ${lines.join("; ")}`;
   }
 
   if (name === "get_project_info") {
