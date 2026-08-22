@@ -23,6 +23,13 @@ const agentName = process.env.MBOX_AGENT_NAME || "Джарвис";
 function jlog(inboxId, message) {
   console.log(`[jarvis #${inboxId}] ${message}`);
 }
+
+/** Живая фаза для ростера MBOX (см. setAgentPhase на сервере) — fire-and-forget, не блокирует
+ * цикл ожиданием сети. Резервный cron живёт минутными тиками, лишняя задержка на каждый шаг
+ * агентного цикла тут дороже, чем в живом чате (server/mbox-server.mjs). */
+function phase(text) {
+  ping(undefined, text).catch(() => {});
+}
 const groqKey = process.env.GROQ_API_KEY;
 const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 // См. server/mbox-server.mjs — классификация памяти не оркестрирует инструменты, это одноразовый
@@ -1544,7 +1551,7 @@ async function runJarvisTool(name, rawArgs, projectList) {
   return `неизвестное действие: ${name}`;
 }
 
-async function ping(event) {
+async function ping(event, phase) {
   try {
     await mboxFetch("/api/mbox/agent/ping", {
       method: "POST",
@@ -1554,6 +1561,7 @@ async function ping(event) {
         kind: "cron_archivist",
         client: "Jarvis",
         scope: "memories,agent_inbox",
+        ...(typeof phase === "string" ? { phase } : {}),
       }),
     });
   } catch (error) {
@@ -1720,6 +1728,7 @@ async function respondToRequests() {
         const summary = await cloudflareSummarize(transcript);
         if (summary) {
           jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
+          phase("Сжимает историю диалога (Cloudflare)");
           detailedTrace.push(`Сжатие истории: ${older.length} старых сообщений упакованы в сводку (${summary.length} символов), последние ${recent.length} остались как есть.`);
           finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
           historyMessages = recent.map(toRole);
@@ -1748,8 +1757,10 @@ async function respondToRequests() {
         return groqChat(msgs, { tools: JARVIS_TOOLS });
       }
       jlog(item.id, `старт (резервный cron): "${String(item.body || "").slice(0, 160)}"`);
+      phase(`Отвечает: "${String(item.title || item.body || "").slice(0, 80)}"`);
       for (let step = 0; step < 8; step += 1) {
         jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
+        phase("Подбирает инструмент/навык");
         const message = await complete(messages);
         if (!message.tool_calls?.length) {
           reply = message.content || "";
@@ -1760,6 +1771,7 @@ async function respondToRequests() {
         messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
         for (const call of message.tool_calls) {
           let result;
+          phase(`Применяет инструмент/навык: ${call.function?.name || "?"}`);
           try {
             result = await runJarvisTool(call.function?.name, call.function?.arguments, projectList);
             jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
@@ -1792,7 +1804,9 @@ async function respondToRequests() {
       });
       await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });
       answered += 1;
+      phase("");
     } catch (error) {
+      phase("");
       console.error(`request #${item.id} failed: ${error.stack || error}`);
       await logJarvisError({ source: "cron", inboxId: item.id, projectId: item.project_id || null, message: error.message || String(error) });
       // Тот же принцип, что в server/mbox-server.mjs: молчание после сбоя неотличимо от "ещё думает".

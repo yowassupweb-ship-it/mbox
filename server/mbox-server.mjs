@@ -757,6 +757,9 @@ const jarvisPhase = new Map();
 function setPhase(inboxId, phase) {
   if (!inboxId) return;
   jarvisPhase.set(String(inboxId), { phase, at: Date.now() });
+  // Тот же сигнал — в общий per-agent статус, чтобы ростер (шапка/консоль) видел "Джарвис делает X"
+  // живьём, а не только страница с конкретным inbox-item, которую опрашивает awaitingJarvisId.
+  setAgentPhase(JARVIS_NAME, phase);
 }
 
 // Тот же принцип "живая фаза без БД", но per-agent, а не per-inbox-item — нужен внешним агентам
@@ -2936,6 +2939,7 @@ async function replyAsJarvis(item) {
   } finally {
     activeJarvisRequests.delete(String(item.id));
     jarvisPhase.delete(String(item.id));
+    setAgentPhase(JARVIS_NAME, "");
     try { await client.end(); } catch { /* уже не подключён или подключение сломано — нечего закрывать */ }
   }
 }

@@ -368,6 +368,7 @@ const jarvisPhase = new Map<string, { phase: string; at: number }>();
 function setPhase(inboxId: unknown, phase: string) {
   if (!inboxId) return;
   jarvisPhase.set(String(inboxId), { phase, at: Date.now() });
+  setAgentPhase(JARVIS_NAME, phase);
 }
 
 const AGENT_PHASE_TTL_MS = 5 * 60 * 1000;
@@ -2310,6 +2311,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
   } finally {
     activeJarvisRequests.delete(String(item.id));
     jarvisPhase.delete(String(item.id));
+    setAgentPhase(JARVIS_NAME, "");
   }
 }
 
