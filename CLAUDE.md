@@ -36,6 +36,16 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
 `.env.local` (в .gitignore) держит `DATABASE_URL` и `MBOX_REMOTE_DATABASE`. `.env`/`.env.local`
 читаются самописным парсером в `server/mbox-server.mjs:88` и `vite.config.ts`, не через dotenv.
 
+Модели Джарвиса — все опциональны через env, без ключа соответствующая возможность просто не
+включается (без деградации остального):
+- `GEMINI_API_KEY`/`GEMINI_MODEL` — основной "прораб".
+- `GROQ_API_KEY`/`GROQ_MODEL`/`GROQ_MODEL_JUNIOR` — резервный прораб + младший агент для скиллов.
+- `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_MODEL` — Workers AI, сжимает историю
+  диалога в компактную сводку перед отправкой прорабу на длинных разговорах (todo #195). Без этих
+  двух значений история просто идёт целиком, как раньше. Token — в дашборде Cloudflare
+  (My Profile → API Tokens → Create Token, права `Workers AI:Read`), Account ID — на странице
+  любого домена/Workers в том же дашборде, справа в сайдбаре.
+
 ## Ключевые подводные камни
 
 1. **API написан дважды.** `vite.config.ts` и `server/mbox-server.mjs` — независимые реализации.

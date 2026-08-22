@@ -32,6 +32,43 @@ const groqModelJunior = process.env.GROQ_MODEL_JUNIOR || "openai/gpt-oss-20b";
 // на этот же ответ при ошибке/лимите Gemini.
 const geminiKey = process.env.GEMINI_API_KEY || "";
 const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+// См. server/mbox-server.mjs — сжатие истории диалога перед отправкой Прорабу, третий провайдер
+// (Cloudflare Workers AI), опционально: без обоих значений сжатие просто не включается.
+const cloudflareAccountId = process.env.CLOUDFLARE_ACCOUNT_ID || "";
+const cloudflareApiToken = process.env.CLOUDFLARE_API_TOKEN || "";
+const cloudflareModel = process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+
+async function cloudflareSummarize(transcript) {
+  if (!cloudflareAccountId || !cloudflareApiToken) return null;
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cloudflareAccountId}/ai/run/${cloudflareModel}`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${cloudflareApiToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: "Сожми переписку в компактную сводку на русском для другой модели, которая продолжит "
+                + "разговор: кто о чём просил, что уже сделано или решено, какие конкретные факты (ID, даты, "
+                + "числа, названия) упоминались — их терять нельзя. 4-8 предложений, без вступлений вроде "
+                + "\"вот сводка\", сразу по делу.",
+            },
+            { role: "user", content: transcript },
+          ],
+        }),
+      },
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data?.result?.response;
+    return typeof text === "string" && text.trim() ? text.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 const MEMORY_BATCH = Number(process.env.ARCHIVIST_MEMORY_BATCH || 10);
 // Только для текста, который Джарвис показывает пользователю — сам по себе таймер здесь не настраивается
 // (см. /etc/systemd/system/mbox-archivist.timer на сервере, OnUnitActiveSec).
@@ -1326,11 +1363,28 @@ async function respondToRequests() {
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .slice(-8);
 
+      // Сжатие истории — см. server/mbox-server.mjs. Включается только на достаточно длинной
+      // истории и только если Cloudflare реально настроен, иначе поведение не меняется. Без
+      // setPhase здесь — этот файл не пишет фазы в UI (только основной путь, см. комментарий выше).
+      const toRole = (row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title });
+      const COMPRESS_FROM = 6;
+      let historyMessages = history.map(toRole);
+      if (history.length >= COMPRESS_FROM && cloudflareAccountId && cloudflareApiToken) {
+        const older = history.slice(0, -2);
+        const recent = history.slice(-2);
+        const transcript = older.map((row) => `${row.agent_name === agentName ? agentName : "Человек"}: ${row.body || row.title}`).join("\n");
+        const summary = await cloudflareSummarize(transcript);
+        if (summary) {
+          jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
+          historyMessages = [{ role: "system", content: `Сводка более раннего разговора: ${summary}` }, ...recent.map(toRole)];
+        }
+      }
+
       // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — модель часто
       // выполняет только первое из нескольких запрошенных действий; цикл даёт ей шанс продолжить.
       const messages = [
         { role: "system", content: systemPrompt },
-        ...history.map((row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title })),
+        ...historyMessages,
       ];
       const actionLog = [];
       const toolsUsed = [];

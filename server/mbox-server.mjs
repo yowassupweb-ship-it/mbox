@@ -766,6 +766,13 @@ const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "openai/gpt-oss-20b";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
+// Сжатие истории диалога перед отправкой Прорабу (см. cloudflareSummarize ниже, todo #195) —
+// третий, независимый провайдер: Cloudflare Workers AI, не Groq/Gemini. Опционально: если оба
+// значения не заданы, сжатие просто не включается и история идёт как раньше, без деградации.
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
+const CLOUDFLARE_MODEL = process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+
 // Бот на getUpdates (не webhook, не MTProto) — один токен на всю систему, как GROQ_API_KEY/
 // GEMINI_API_KEY: используется только data_sources с kind='telegram_channel'.
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -901,6 +908,41 @@ async function geminiComplete(messages, tools, purpose = "reply", signal) {
       function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
     })),
   };
+}
+
+// Сжимает старую часть истории диалога в компактную сводку на русском — не оркестрация
+// инструментами, одноразовый вызов текст-в-текст, поэтому отдельный дешёвый провайдер (Cloudflare
+// Workers AI), не Прораб. Возвращает null при любой проблеме (нет ключа, сеть, пустой ответ) —
+// вызывающий код обязан откатиться на несжатую историю, не пробрасывать ошибку в живой ответ.
+async function cloudflareSummarize(transcript) {
+  if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) return null;
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${CLOUDFLARE_MODEL}`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: "Сожми переписку в компактную сводку на русском для другой модели, которая продолжит "
+                + "разговор: кто о чём просил, что уже сделано или решено, какие конкретные факты (ID, даты, "
+                + "числа, названия) упоминались — их терять нельзя. 4-8 предложений, без вступлений вроде "
+                + "\"вот сводка\", сразу по делу.",
+            },
+            { role: "user", content: transcript },
+          ],
+        }),
+      },
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data?.result?.response;
+    return typeof text === "string" && text.trim() ? text.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 // Раньше Джарвис только генерировал текст и мог написать "задача добавлена", ничего не сделав —
@@ -2538,9 +2580,26 @@ async function replyAsJarvis(item) {
     // каждое действие. Вместо надежды на параллельные tool_calls гоняем обычный agentic-цикл:
     // выполняем то, что модель попросила, отдаём результат обратно и спрашиваем снова, пока она
     // не перестанет вызывать функции (или не упрёмся в потолок шагов).
+    const toRole = (row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
+    // Сжатие включается только на достаточно длинной истории (иначе короткий обмен репликами
+    // сжимать нечего и незачем) и только если Cloudflare реально настроен — иначе historyMessages
+    // ровно то же самое, что было раньше (полная история без деградации).
+    const COMPRESS_FROM = 6;
+    let historyMessages = history.map(toRole);
+    if (history.length >= COMPRESS_FROM && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
+      const older = history.slice(0, -2);
+      const recent = history.slice(-2);
+      const transcript = older.map((row) => `${row.agent_name === JARVIS_NAME ? JARVIS_NAME : "Человек"}: ${row.body || row.title}`).join("\n");
+      setPhase(item.id, "Сжимает историю диалога (Cloudflare)");
+      const summary = await cloudflareSummarize(transcript);
+      if (summary) {
+        jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
+        historyMessages = [{ role: "system", content: `Сводка более раннего разговора: ${summary}` }, ...recent.map(toRole)];
+      }
+    }
     const messages = [
       { role: "system", content: systemPrompt },
-      ...history.map((row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title })),
+      ...historyMessages,
     ];
     const actionLog = [];
     const toolsUsed = [];

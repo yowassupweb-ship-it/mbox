@@ -378,6 +378,43 @@ const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "openai/gpt-oss-20b";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
+// См. server/mbox-server.mjs — сжатие истории диалога перед отправкой Прорабу, третий провайдер
+// (Cloudflare Workers AI), опционально: без обоих значений сжатие просто не включается.
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "";
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || "";
+const CLOUDFLARE_MODEL = process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+
+async function cloudflareSummarize(transcript: string): Promise<string | null> {
+  if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) return null;
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${CLOUDFLARE_MODEL}`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: "Сожми переписку в компактную сводку на русском для другой модели, которая продолжит "
+                + "разговор: кто о чём просил, что уже сделано или решено, какие конкретные факты (ID, даты, "
+                + "числа, названия) упоминались — их терять нельзя. 4-8 предложений, без вступлений вроде "
+                + "\"вот сводка\", сразу по делу.",
+            },
+            { role: "user", content: transcript },
+          ],
+        }),
+      },
+    );
+    if (!response.ok) return null;
+    const data = await response.json() as { result?: { response?: unknown } };
+    const text = data?.result?.response;
+    return typeof text === "string" && text.trim() ? text.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 type GroqMessage = {
   role: string;
   content: string | null;
@@ -1951,12 +1988,29 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         [JARVIS_NAME],
       )).rows.reverse() as { agent_name: string; body: string; title: string }[];
 
+      // Сжатие истории — см. комментарий в server/mbox-server.mjs. Включается только на достаточно
+      // длинной истории и только если Cloudflare реально настроен, иначе поведение не меняется.
+      const toRole = (row: { agent_name: string; body: string; title: string }) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
+      const COMPRESS_FROM = 6;
+      let historyMessages: GroqMessage[] = history.map(toRole);
+      if (history.length >= COMPRESS_FROM && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
+        const older = history.slice(0, -2);
+        const recent = history.slice(-2);
+        const transcript = older.map((row) => `${row.agent_name === JARVIS_NAME ? JARVIS_NAME : "Человек"}: ${row.body || row.title}`).join("\n");
+        setPhase(item.id, "Сжимает историю диалога (Cloudflare)");
+        const summary = await cloudflareSummarize(transcript);
+        if (summary) {
+          jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
+          historyMessages = [{ role: "system", content: `Сводка более раннего разговора: ${summary}` }, ...recent.map(toRole)];
+        }
+      }
+
       // Agentic-цикл вместо надежды на параллельные tool_calls за один запрос — см. комментарий
       // в server/mbox-server.mjs. Модель часто выполняет только первое из нескольких запрошенных
       // действий за раз; цикл даёт ей шанс продолжить следующим шагом.
       const messages: GroqMessage[] = [
         { role: "system", content: systemPrompt },
-        ...history.map((row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title })),
+        ...historyMessages,
       ];
       const actionLog: string[] = [];
       const toolsUsed: string[] = [];
