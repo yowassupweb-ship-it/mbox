@@ -4273,7 +4273,8 @@ async function handleApiWithContext(req, res, url) {
       }
       // Маркер для внешнего слежения (Claude через SSH-тейл логов вместо опроса по таймеру) —
       // адресату "Claude" ответ не генерируется автоматически, только этот сигнал в stdout.
-      if (senderName === "Человек" && addressedTo === "Claude" && result.rows[0]) {
+      // Ловит и человека, и Джарвиса (если тот сам адресует ответ Claude через props.to).
+      if (addressedTo === "Claude" && result.rows[0]) {
         console.log(`[claude-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
       }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
