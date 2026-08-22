@@ -1552,7 +1552,7 @@ async function ping(event) {
         agent: agentName,
         event,
         kind: "cron_archivist",
-        client: "mbox-archivist (Groq)",
+        client: "Jarvis",
         scope: "memories,agent_inbox",
       }),
     });
