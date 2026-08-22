@@ -54,15 +54,15 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
       load<{ memories: Memory[] }>(`/api/mbox/memories${qs}`, { memories: [] }),
       load<{ artifacts: Artifact[] }>(`/api/mbox/artifacts${qs}`, { artifacts: [] }),
       load<{ projects: Project[] }>(`/api/mbox/projects${qs}`, { projects: [] }),
-      load<{ companies: Company[] }>("/api/mbox/companies", { companies: [] }),
+      load<{ companies: Company[] }>(`/api/mbox/companies${qs}`, { companies: [] }),
       load<{ folders: FolderRow[] }>(`/api/mbox/folders${qs}`, { folders: [] }),
-      load<{ secrets: SecretSummary[] }>("/api/mbox/secrets", { secrets: [] }),
-      load<{ events: AuditEvent[] }>("/api/mbox/history", { events: [] }),
+      load<{ secrets: SecretSummary[] }>(`/api/mbox/secrets${qs}`, { secrets: [] }),
+      load<{ events: AuditEvent[] }>(`/api/mbox/history${qs}`, { events: [] }),
       load<{ agents: AgentActivity[] }>("/api/mbox/agents", { agents: [] }),
       load<{ edges: GraphEdge[] }>("/api/mbox/graph/edges", { edges: [] }),
       load<{ inbox: AgentInboxItem[] }>("/api/mbox/agent/inbox", { inbox: [] }),
       load<{ runs: AgentRun[] }>("/api/mbox/agent/runs", { runs: [] }),
-      load<{ decisions: DecisionEntry[] }>("/api/mbox/decisions", { decisions: [] }),
+      load<{ decisions: DecisionEntry[] }>(`/api/mbox/decisions${qs}`, { decisions: [] }),
     ])
       .then(([memoryData, artifactData, projectData, companyData, folderData, secretData, historyData, agentData, edgeData, inboxData, runsData, decisionData]) => {
         if (!alive) return;

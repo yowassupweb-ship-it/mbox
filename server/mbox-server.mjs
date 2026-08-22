@@ -3009,7 +3009,7 @@ async function handleApiWithContext(req, res, url) {
               pg_column_size(memories)::int AS memory_bytes,
               created_at::text, updated_at::text
        FROM memories
-       WHERE $1 = '' OR search_vector @@ plainto_tsquery('simple', $1) OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%'
+       WHERE $1 = '' OR search_vector @@ plainto_tsquery('simple', $1) OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR tags::text ILIKE '%' || $1 || '%'
        ORDER BY updated_at DESC
        LIMIT 300`,
       [q],
@@ -3823,8 +3823,11 @@ async function handleApiWithContext(req, res, url) {
               pg_column_size(audit_events)::int AS memory_bytes,
               created_at::text
        FROM audit_events
+       WHERE $1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
+          OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%'
        ORDER BY created_at DESC
        LIMIT 200`,
+      [q],
     );
     return sendJson(res, 200, { events: result.rows });
   }
@@ -4130,7 +4133,15 @@ async function handleApiWithContext(req, res, url) {
       broadcastChange(req, "create", "decision_log", String(body.title || "").trim());
       return sendJson(res, 201, { decision: result.rows[0] });
     }
-    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props, pg_column_size(decision_log)::int AS memory_bytes, created_at::text FROM decision_log ORDER BY created_at DESC LIMIT 200");
+    const result = await query(
+      `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props,
+              pg_column_size(decision_log)::int AS memory_bytes, created_at::text
+       FROM decision_log
+       WHERE $1 = '' OR actor ILIKE '%' || $1 || '%' OR title ILIKE '%' || $1 || '%' OR decision ILIKE '%' || $1 || '%'
+          OR rationale ILIKE '%' || $1 || '%' OR impact ILIKE '%' || $1 || '%'
+       ORDER BY created_at DESC LIMIT 200`,
+      [q],
+    );
     return sendJson(res, 200, { decisions: result.rows });
   }
 
@@ -4261,7 +4272,14 @@ async function handleApiWithContext(req, res, url) {
       broadcastChange(req, "create", "secrets", title);
       return sendJson(res, 201, { secret: result.rows[0] });
     }
-    const result = await query("SELECT id::text, project_id::text, title, login, url, access_level, agent_share_state, pg_column_size(protected_secrets)::int AS memory_bytes, approved_until::text, updated_at::text FROM protected_secrets ORDER BY updated_at DESC LIMIT 100");
+    const result = await query(
+      `SELECT id::text, project_id::text, title, login, url, access_level, agent_share_state,
+              pg_column_size(protected_secrets)::int AS memory_bytes, approved_until::text, updated_at::text
+       FROM protected_secrets
+       WHERE $1 = '' OR title ILIKE '%' || $1 || '%' OR login ILIKE '%' || $1 || '%' OR url ILIKE '%' || $1 || '%'
+       ORDER BY updated_at DESC LIMIT 100`,
+      [q],
+    );
     return sendJson(res, 200, { secrets: result.rows });
   }
 
