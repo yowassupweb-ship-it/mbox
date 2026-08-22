@@ -743,9 +743,36 @@
 
 .console-tool-chip svg { color: var(--accent-color); flex: none; }
 
+/* Заметные действия (создано/удалено/объединено) — видны сразу, обычным текстом, без разворачивания. */
+.console-highlights {
+  margin-top: 4px;
+  display: grid;
+  gap: 2px;
+}
+
+.console-highlight-line {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 /* Полный пошаговый трейс — что вызвано, с чем, что вернулось. Техническая деталь для проверки,
-   поэтому мельче и тише основного текста, моноширинным, с переносом длинных строк аргументов/
-   результатов вместо горизонтального скролла. */
+   по умолчанию свёрнута (details/summary, без JS-состояния) — не для обычного чтения на каждый
+   ответ, мельче и тише основного текста, моноширинным, с переносом длинных строк вместо
+   горизонтального скролла. */
+.console-trace-details {
+  margin-top: 4px;
+}
+
+.console-trace-details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+}
+
 .console-trace {
   margin: 4px 0 0;
   padding: 6px 8px;

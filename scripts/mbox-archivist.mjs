@@ -384,6 +384,13 @@ async function geminiChat(messages, tools, purpose = "reply") {
 // но без этого он продолжал бы писать "задача добавлена", ничего не создав.
 const TODO_STATUSES = ["open", "next", "doing", "blocked", "review", "done", "archived"];
 const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
+// Инструменты, чей результат стоит показать сразу, не разворачивая весь трейс — см.
+// server/mbox-server.mjs.
+const HIGHLIGHT_TOOLS = new Set([
+  "create_todo", "delete_todo", "merge_todos",
+  "record_memory", "update_memory", "delete_memory",
+  "create_project", "create_company", "create_artifact",
+]);
 
 const JARVIS_TOOLS = [
   {
@@ -496,6 +503,26 @@ const JARVIS_TOOLS = [
           merged_note: { type: "string", description: "Описание новой объединённой задачи, необязательно" },
         },
         required: ["project_name", "todo_ids", "merged_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_memory_cleanup",
+      description: "Найти кандидатов на удаление в памяти — устаревшие технические логи (не факты/решения), "
+        + "которые старше stale_days и привязаны к уже закрытым задачам (или вовсе без привязки). Вся тяжёлая "
+        + "работа (поиск по базе, сверка со статусами задач) происходит на сервере — ты получаешь только "
+        + "готовый компактный список ID, не тратишь свой контекст на чтение самих записей. Используй, когда "
+        + "просят «прибраться в памяти» или «удали старые логи» — это НЕ то же самое, что глубокий смысловой "
+        + "разбор дублей, для которого зовут Claude. После вызова ПОКАЖИ список человеку и жди подтверждения, "
+        + "прежде чем звать delete_memory на конкретные ID — не удаляй сразу без явного согласия в этом же "
+        + "разговоре.",
+      parameters: {
+        type: "object",
+        properties: {
+          stale_days: { type: "number", description: "Считать устаревшим то, что не менялось дольше стольких дней. По умолчанию 21." },
+        },
       },
     },
   },
@@ -1039,6 +1066,32 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return `объединил ${rows.length} задач (${rows.map((r) => `#${r.id} «${r.title}»`).join(", ")}) в новую «${mergedTitle}» (#${newId}, приоритет ${mergedPriority}); исходные переведены в архив с пометкой`;
   }
 
+  if (name === "review_memory_cleanup") {
+    const staleDays = Math.min(Math.max(Number(args.stale_days) || 21, 7), 90);
+    const memData = await mboxFetch("/api/mbox/memories?sort=oldest");
+    const cutoffMs = Date.now() - staleDays * 86400000;
+    const rows = (memData.memories || []).filter((m) => {
+      if (new Date(m.updated_at).getTime() > cutoffMs) return false;
+      const tags = Array.isArray(m.tags) ? m.tags : [];
+      return m.entity_type === "log" || tags.includes("agent-work");
+    }).slice(0, 15);
+    if (!rows.length) return `не нашёл кандидатов на уборку — нет технических логов старше ${staleDays} дней`;
+    const projectsData = await mboxFetch("/api/mbox/projects");
+    const doneTodoIds = new Set();
+    for (const project of projectsData.projects || []) {
+      for (const todo of project.todos || []) {
+        if (todo.status === "done" || todo.status === "archived") doneTodoIds.add(String(todo.id));
+      }
+    }
+    const candidates = rows.filter((m) => {
+      const linkedTodoId = m.todo_id || m.metadata?.todo_id;
+      return !linkedTodoId || doneTodoIds.has(String(linkedTodoId));
+    });
+    if (!candidates.length) return `нашёл ${rows.length} старых технических логов, но все привязаны к ещё открытым задачам — не трогаю`;
+    const lines = candidates.map((m) => `#${m.id} «${m.title}»`).join(", ");
+    return `кандидаты на удаление (${candidates.length} из ${rows.length} проверенных, технические логи старше ${staleDays} дней, без связи с открытыми задачами): ${lines}. Покажи это человеку и жди подтверждения, прежде чем звать delete_memory на конкретные ID.`;
+  }
+
   if (name === "record_memory") {
     const title = String(args.title || "").trim();
     const content = String(args.content || "").trim();
@@ -1497,6 +1550,13 @@ async function respondToRequests() {
         + `сейчас отвечает (обычно Gemini). Отвечай коротко и по делу, на русском. У тебя есть `
         + "НАСТОЯЩИЕ инструменты: create_todo, create_project, delete_project (необратимо, точное "
         + "название), update_todo_status, set_todo_priority, delete_todo (необратимо, точный заголовок), "
+        + "merge_todos (объединить несколько задач проекта в одну по их числовым ID — исходные не удаляются, "
+        + "уходят в архив с пометкой; сам подбирай ID через list_project_todos/search_todos, если просят "
+        + "«прибраться» или «объедини задачи про X»), review_memory_cleanup (найти в памяти устаревшие "
+        + "технические логи по уже закрытым задачам — вся тяжёлая работа на сервере, тебе приходит готовый "
+        + "компактный список ID; после вызова покажи список человеку и жди подтверждения, прежде чем звать "
+        + "delete_memory — не удаляй сразу; для глубокого смыслового разбора дублей это не замена, такое — "
+        + "к Claude), "
         + "record_memory (записать долгоживущий факт), list_project_todos (заголовки задач проекта), "
         + "get_project_info (git/стек/деплой/доступ и описание проекта из props — если просят РАССКАЗАТЬ/"
         + "ОПИСАТЬ проект, роль, контекст — используй именно этот инструмент, не search_memory: там технические "
@@ -1551,36 +1611,47 @@ async function respondToRequests() {
         + "т.п.) — подставь их в create_project сам, не переспрашивай то, что уже прозвучало. Если деталей "
         + "вообще не было — создавай хотя бы с одним названием, не устраивай анкету из вопросов. Известные "
         + `проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Известные компании: `
-        + `${companyNames.join(", ") || "нет компаний"}.`
+        + `${companyNames.join(", ") || "нет компаний"}. `
+        + "Если результат инструмента явно помечен как неполный (например «показаны 20 из 102 — список НЕ "
+        + "полный») — никогда не достраивай остальное своими словами («всё остальное готово/сделано» и т.п.), "
+        + "это додумывание за пределами того, что реально видно; честно скажи, что показана только часть, и "
+        + "предложи уточнить через search_todos."
         + (item.props?.current_project_name
           ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
           : "");
 
       // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — используем уже загруженный inbox
       // (см. выше в этой функции) как настоящую историю разговора, а не только последнюю реплику.
+      // KEEP_RAW/OLDER_CAP — см. server/mbox-server.mjs (inbox #546, todo #214): последние 50
+      // сообщений дословно, до 60 старых сверх того сжимаются в сводку за раз.
+      const KEEP_RAW = 50;
+      const OLDER_CAP = 60;
       const history = inbox
         .filter((row) => ["question", "answer"].includes(row.item_type) && (row.agent_name === "Человек" || row.agent_name === agentName))
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .slice(-8);
+        .slice(-(KEEP_RAW + OLDER_CAP));
 
-      // Сжатие — см. server/mbox-server.mjs. Срабатывает только когда история заполнена под
-      // потолок И там реально много текста — иначе лишний последовательный запрос к Cloudflare
-      // перед каждым обращением к Gemini заметно замедлял простые быстрые ответы. Без setPhase
-      // здесь — этот файл не пишет фазы в UI.
       const toRole = (row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title });
-      const COMPRESS_FROM = 8;
-      const COMPRESS_MIN_CHARS = 1200;
+      const actionLog = [];
+      const toolsUsed = [];
+      // Полный пошаговый трейс — см. server/mbox-server.mjs. В props, не в body: props не
+      // попадают в historyMessages, так что этот подробный вывод не вернётся Джарвису на
+      // следующем шаге — только человеку в консоль. Уведомление о сжатии тоже сюда.
+      const detailedTrace = [];
+      // Заметные действия — см. server/mbox-server.mjs. Видны сразу, без разворачивания трейса.
+      const highlights = [];
+      // Сжатие — см. server/mbox-server.mjs. Срабатывает только когда сообщений реально больше
+      // 50. Без setPhase здесь — этот файл не пишет фазы в UI.
       let historyMessages = history.map(toRole);
       let finalSystemPrompt = systemPrompt;
-      const olderForCompression = history.slice(0, -2);
-      const olderCharCount = olderForCompression.reduce((sum, row) => sum + (row.body || row.title || "").length, 0);
-      if (history.length >= COMPRESS_FROM && olderCharCount >= COMPRESS_MIN_CHARS && cloudflareAccountId && cloudflareApiToken) {
-        const older = olderForCompression;
-        const recent = history.slice(-2);
+      if (history.length > KEEP_RAW && cloudflareAccountId && cloudflareApiToken) {
+        const older = history.slice(0, history.length - KEEP_RAW);
+        const recent = history.slice(history.length - KEEP_RAW);
         const transcript = older.map((row) => `${row.agent_name === agentName ? agentName : "Человек"}: ${row.body || row.title}`).join("\n");
         const summary = await cloudflareSummarize(transcript);
         if (summary) {
           jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
+          detailedTrace.push(`Сжатие истории: ${older.length} старых сообщений упакованы в сводку (${summary.length} символов), последние ${recent.length} остались как есть.`);
           finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
           historyMessages = recent.map(toRole);
         }
@@ -1592,12 +1663,6 @@ async function respondToRequests() {
         { role: "system", content: finalSystemPrompt },
         ...historyMessages,
       ];
-      const actionLog = [];
-      const toolsUsed = [];
-      // Полный пошаговый трейс — см. server/mbox-server.mjs. В props, не в body: props не
-      // попадают в historyMessages, так что этот подробный вывод не вернётся Джарвису на
-      // следующем шаге — только человеку в консоль.
-      const detailedTrace = [];
       let reply = "";
       // См. server/mbox-server.mjs — Gemini-прораб, переключение на Groq при ошибке без метания
       // между провайдерами внутри одного цикла.
@@ -1637,6 +1702,7 @@ async function respondToRequests() {
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
           detailedTrace.push(`${detailedTrace.length + 1}. ${call.function?.name || "?"}\n   аргументы: ${call.function?.arguments || "—"}\n   результат: ${result}`);
+          if (call.function?.name && HIGHLIGHT_TOOLS.has(call.function.name)) highlights.push(result);
           messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }
@@ -1652,7 +1718,7 @@ async function respondToRequests() {
           body: reply,
           priority: "normal",
           requires_human: false,
-          props: { to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace },
+          props: { to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights },
         }),
       });
       await mboxFetch(`/api/mbox/agent/inbox/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });

@@ -962,6 +962,13 @@ async function cloudflareSummarize(transcript) {
 // системном промпте не выдумывать выполненные действия.
 const TODO_STATUSES = ["open", "next", "doing", "blocked", "review", "done", "archived"];
 const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
+// Инструменты, чей результат стоит показать сразу, не разворачивая весь трейс — создание/
+// удаление/объединение сущностей, то, что человек реально хочет видеть с первого взгляда.
+const HIGHLIGHT_TOOLS = new Set([
+  "create_todo", "delete_todo", "merge_todos",
+  "record_memory", "update_memory", "delete_memory",
+  "create_project", "create_company", "create_artifact",
+]);
 
 const JARVIS_TOOLS = [
   {
@@ -1074,6 +1081,26 @@ const JARVIS_TOOLS = [
           merged_note: { type: "string", description: "Описание новой объединённой задачи, необязательно" },
         },
         required: ["project_name", "todo_ids", "merged_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_memory_cleanup",
+      description: "Найти кандидатов на удаление в памяти — устаревшие технические логи (не факты/решения), "
+        + "которые старше stale_days и привязаны к уже закрытым задачам (или вовсе без привязки). Вся тяжёлая "
+        + "работа (поиск по базе, сверка со статусами задач) происходит на сервере — ты получаешь только "
+        + "готовый компактный список ID, не тратишь свой контекст на чтение самих записей. Используй, когда "
+        + "просят «прибраться в памяти» или «удали старые логи» — это НЕ то же самое, что глубокий смысловой "
+        + "разбор дублей, для которого зовут Claude. После вызова ПОКАЖИ список человеку и жди подтверждения, "
+        + "прежде чем звать delete_memory на конкретные ID — не удаляй сразу без явного согласия в этом же "
+        + "разговоре.",
+      parameters: {
+        type: "object",
+        properties: {
+          stale_days: { type: "number", description: "Считать устаревшим то, что не менялось дольше стольких дней. По умолчанию 21." },
+        },
       },
     },
   },
@@ -1991,6 +2018,28 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     return `объединил ${rows.length} задач (${rows.map((r) => `#${r.id} «${r.title}»`).join(", ")}) в новую «${mergedTitle}» (#${newId}, приоритет ${mergedPriority}); исходные переведены в архив с пометкой`;
   }
 
+  if (name === "review_memory_cleanup") {
+    const staleDays = Math.min(Math.max(Number(args.stale_days) || 21, 7), 90);
+    const rows = (await client.query(
+      `SELECT id::text, title, todo_id::text, metadata, updated_at::text
+       FROM memories
+       WHERE updated_at < now() - ($1 || ' days')::interval
+         AND (entity_type = 'log' OR tags @> ARRAY['agent-work']::text[])
+       ORDER BY updated_at ASC
+       LIMIT 15`,
+      [staleDays],
+    )).rows;
+    if (!rows.length) return `не нашёл кандидатов на уборку — нет технических логов старше ${staleDays} дней`;
+    const doneTodoIds = new Set((await client.query("SELECT id::text FROM todos WHERE status IN ('done', 'archived')")).rows.map((r) => r.id));
+    const candidates = rows.filter((m) => {
+      const linkedTodoId = m.todo_id || m.metadata?.todo_id;
+      return !linkedTodoId || doneTodoIds.has(String(linkedTodoId));
+    });
+    if (!candidates.length) return `нашёл ${rows.length} старых технических логов, но все привязаны к ещё открытым задачам — не трогаю`;
+    const lines = candidates.map((m) => `#${m.id} «${m.title}»`).join(", ");
+    return `кандидаты на удаление (${candidates.length} из ${rows.length} проверенных, технические логи старше ${staleDays} дней, без связи с открытыми задачами): ${lines}. Покажи это человеку и жди подтверждения, прежде чем звать delete_memory на конкретные ID.`;
+  }
+
   if (name === "record_memory") {
     const title = String(args.title || "").trim();
     const content = String(args.content || "").trim();
@@ -2567,6 +2616,10 @@ async function replyAsJarvis(item) {
       + "set_todo_priority, delete_todo (необратимо, точный заголовок), merge_todos (объединить несколько задач "
       + "проекта в одну по их числовым ID — исходные не удаляются, уходят в архив с пометкой; сам подбирай "
       + "ID через list_project_todos/search_todos, если просят «прибраться» или «объедини задачи про X»), "
+      + "review_memory_cleanup (найти в памяти устаревшие технические логи по уже закрытым задачам — вся "
+      + "тяжёлая работа на сервере, тебе приходит готовый компактный список ID, не сама память; после вызова "
+      + "покажи список человеку и жди подтверждения, прежде чем звать delete_memory — не удаляй сразу; для "
+      + "глубокого смыслового разбора дублей это не замена, такое — к Claude), "
       + "record_memory (записать долгоживущий "
       + "факт), list_project_todos (заголовки задач проекта), get_project_info (git/стек/деплой/доступ и "
       + "описание проекта из props — если просят РАССКАЗАТЬ/ОПИСАТЬ проект, роль, контекст, что это такое — "
@@ -2637,7 +2690,11 @@ async function replyAsJarvis(item) {
       + `${projectList.map((p) => p.name).join(", ") || "нет проектов"}. Известные компании: `
       + `${companyNames.join(", ") || "нет компаний"}. Сводка по MBOX прямо сейчас: всего задач `
       + `${stats.todos_total}, из них незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total}. `
-      + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь."
+      + "Если спросят общее число задач/проектов — отвечай из этой сводки, не выдумывай и не говори, что не умеешь. "
+      + "Если результат инструмента явно помечен как неполный (например «показаны 20 из 102 — список НЕ "
+      + "полный») — никогда не достраивай остальное своими словами («всё остальное готово/сделано» и т.п.), "
+      + "это додумывание за пределами того, что реально видно; честно скажи, что показана только часть, и "
+      + "предложи уточнить через search_todos или другой конкретный запрос."
       + (item.props?.current_project_name
         ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
         : "");
@@ -2645,10 +2702,17 @@ async function replyAsJarvis(item) {
     // стек или ссылку, а в этом попросил "создай проект", Джарвис не мог их связать. Подтягиваем
     // последние сообщения разговора (включая только что вставленное — оно уже в базе) как реальную
     // историю диалога, а не только последнюю реплику.
+    // KEEP_RAW=50 и OLDER_CAP=60 — по прямому указанию владельца (см. inbox #546, todo #214):
+    // последние 50 сообщений идут дословно, старше — сжимаются младшим/дешёвым провайдером в
+    // ужатый архив (созданные задачи, важные факты и т.п.), не всё подряд. OLDER_CAP ограничивает,
+    // сколько СТАРЫХ сообщений вообще попадает в сводку за один раз — без потолка "старая" часть
+    // росла бы бесконечно с каждым новым сообщением в давно идущем разговоре.
+    const KEEP_RAW = 50;
+    const OLDER_CAP = 60;
     const history = (await client.query(
       `SELECT agent_name, body, title FROM agent_inbox
        WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = $1)
-       ORDER BY created_at DESC LIMIT 8`,
+       ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
       [JARVIS_NAME],
     )).rows.reverse();
     // Однократный запрос с несколькими действиями ("удали Тест и Тест 2") ненадёжен — модель
@@ -2657,30 +2721,36 @@ async function replyAsJarvis(item) {
     // выполняем то, что модель попросила, отдаём результат обратно и спрашиваем снова, пока она
     // не перестанет вызывать функции (или не упрёмся в потолок шагов).
     const toRole = (row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
-    // Сжатие раньше срабатывало почти на каждом ответе (COMPRESS_FROM=4 при живом чате, где
-    // history почти всегда полная) — лишний последовательный HTTP-запрос к Cloudflare ПЕРЕД
-    // каждым обращением к Gemini заметно замедлял простые быстрые ответы ("создай 3 задачи"
-    // не должно ждать сжатие несуществующего избытка). Теперь два условия разом: история
-    // заполнена под потолок (COMPRESS_FROM=8, столько же, сколько LIMIT в запросе истории) И
-    // в "старой" части реально много текста (иначе сжимать нечего — риск того же порядка, что
-    // и экономия). Сводка идёт ВНУТРЬ системного промпта, не отдельным message с role:"system" в
-    // истории — toGeminiContents(messages) явно пропускает (continue) любой message с role:"system",
-    // кроме самого первого, который geminiComplete отдельно вынимает под systemInstruction. Сводка
-    // как message посреди истории молча терялась бы на основном (Gemini) пути.
-    const COMPRESS_FROM = 8;
-    const COMPRESS_MIN_CHARS = 1200;
+    const actionLog = [];
+    const toolsUsed = [];
+    // Полный пошаговый трейс — что вызвано, с чем, что вернулось. В props, не в body: props не
+    // попадают в historyMessages (там читаются только body/title), так что этот подробный вывод
+    // никогда не вернётся Джарвису на следующем шаге — только человеку в консоль. Уведомление о
+    // сжатии истории (если случится) тоже пишется сюда — это и есть "должно в консоль писаться,
+    // что произошло суммирование" из inbox #546.
+    const detailedTrace = [];
+    // Заметные действия (создание/удаление/объединение сущностей) — отдельно от полного трейса,
+    // видны СРАЗУ, без разворачивания подробностей: "Добавлена задача «X»", "Удалена запись
+    // памяти «Y»" и т.п. Полный трейс с аргументами — по умолчанию свёрнут, это уже "для
+    // проверки", не для обычного чтения на каждый ответ.
+    const highlights = [];
+    // Сжатие включается, только когда сообщений реально больше 50 — короткие быстрые обмены
+    // ("создай 3 задачи") не платят цену лишнего запроса к Cloudflare. Сводка идёт ВНУТРЬ
+    // системного промпта, не отдельным message с role:"system" в истории — toGeminiContents
+    // явно пропускает (continue) любой message с role:"system", кроме самого первого, который
+    // geminiComplete отдельно вынимает под systemInstruction; посреди истории сводка молча
+    // терялась бы на основном (Gemini) пути.
     let historyMessages = history.map(toRole);
     let finalSystemPrompt = systemPrompt;
-    const olderForCompression = history.slice(0, -2);
-    const olderCharCount = olderForCompression.reduce((sum, row) => sum + (row.body || row.title || "").length, 0);
-    if (history.length >= COMPRESS_FROM && olderCharCount >= COMPRESS_MIN_CHARS && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
-      const older = olderForCompression;
-      const recent = history.slice(-2);
+    if (history.length > KEEP_RAW && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
+      const older = history.slice(0, history.length - KEEP_RAW);
+      const recent = history.slice(history.length - KEEP_RAW);
       const transcript = older.map((row) => `${row.agent_name === JARVIS_NAME ? JARVIS_NAME : "Человек"}: ${row.body || row.title}`).join("\n");
       setPhase(item.id, "Сжимает историю диалога (Cloudflare)");
       const summary = await cloudflareSummarize(transcript);
       if (summary) {
         jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
+        detailedTrace.push(`Сжатие истории: ${older.length} старых сообщений упакованы в сводку (${summary.length} символов), последние ${recent.length} остались как есть.`);
         finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
         historyMessages = recent.map(toRole);
       }
@@ -2689,12 +2759,6 @@ async function replyAsJarvis(item) {
       { role: "system", content: finalSystemPrompt },
       ...historyMessages,
     ];
-    const actionLog = [];
-    const toolsUsed = [];
-    // Полный пошаговый трейс — что вызвано, с чем, что вернулось. В props, не в body: props не
-    // попадают в historyMessages (там читаются только body/title), так что этот подробный вывод
-    // никогда не вернётся Джарвису на следующем шаге — только человеку в консоль.
-    const detailedTrace = [];
     let reply = "";
     // Прораб — Gemini; при первой же ошибке (429, недоступность, отсутствие ключа) переключаемся
     // на Groq gpt-oss-120b и остаёмся на нём до конца ЭТОГО ответа — не мечемся между провайдерами
@@ -2738,6 +2802,7 @@ async function replyAsJarvis(item) {
         actionLog.push(result);
         if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
         detailedTrace.push(`${detailedTrace.length + 1}. ${call.function?.name || "?"}\n   аргументы: ${call.function?.arguments || "—"}\n   результат: ${result}`);
+        if (HIGHLIGHT_TOOLS.has(call.function?.name)) highlights.push(result);
         messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
       }
     }
@@ -2750,7 +2815,7 @@ async function replyAsJarvis(item) {
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace })],
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights })],
     );
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });

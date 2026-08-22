@@ -267,6 +267,7 @@ type LogLine = {
   pending?: "sending" | "sent" | "failed";
   toolsUsed?: string[];
   trace?: string[];
+  highlights?: string[];
   actions?: MessageAction[];
   postBuilder?: PostPart[];
 };
@@ -736,6 +737,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       trace: Array.isArray(item.props?.trace)
         ? (item.props.trace as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
+      // Заметные действия (создано/удалено/объединено) — видны сразу, в отличие от trace выше.
+      highlights: Array.isArray(item.props?.highlights)
+        ? (item.props.highlights as unknown[]).filter((t): t is string => typeof t === "string")
+        : undefined,
       actions: parseActions(item.props?.actions),
       postBuilder: parsePostBuilder(item.props?.post_builder),
     }));
@@ -961,8 +966,18 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         ))}
                       </span>
                     )}
+                    {!!line.highlights?.length && (
+                      <div className="console-highlights">
+                        {line.highlights.map((text, index) => (
+                          <p className="console-highlight-line" key={index}>{text}</p>
+                        ))}
+                      </div>
+                    )}
                     {!!line.trace?.length && (
-                      <pre className="console-trace">{line.trace.join("\n\n")}</pre>
+                      <details className="console-trace-details">
+                        <summary>Подробности ({line.trace.length})</summary>
+                        <pre className="console-trace">{line.trace.join("\n\n")}</pre>
+                      </details>
                     )}
                     {!!line.actions?.length && (
                       <span className="console-actions">
