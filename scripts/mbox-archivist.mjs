@@ -341,6 +341,28 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "merge_todos",
+      description: "Объединить несколько существующих задач одного проекта в одну новую. Используй, когда в проекте "
+        + "накопилось несколько мелких/дублирующих задач по одной теме и явно лучше вести их одной — например, "
+        + "просят «прибраться в задачах» или «объедини всё про X в одну». Исходные задачи не удаляются "
+        + "необратимо — переводятся в архив с пометкой, во что объединены, их можно найти и восстановить. "
+        + "Для составления заголовка/описания объединённой задачи из текста исходных удобно сперва "
+        + "воспользоваться delegate_to_junior, чтобы не тратить свой контекст на черновик.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живут задачи" },
+          todo_ids: { type: "array", items: { type: "string" }, description: "ID (числа) объединяемых задач, минимум два, все должны принадлежать этому проекту" },
+          merged_title: { type: "string", description: "Заголовок новой объединённой задачи" },
+          merged_note: { type: "string", description: "Описание новой объединённой задачи, необязательно" },
+        },
+        required: ["project_name", "todo_ids", "merged_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "record_memory",
       description: "Записать факт в память MBOX — то, что стоит запомнить надолго (предпочтение пользователя, удачный или неудачный подход, важное решение).",
       parameters: {
@@ -845,6 +867,37 @@ async function runJarvisTool(name, rawArgs, projectList) {
     if (!todo) return `не нашёл задачу с точным заголовком «${args.todo_title}» в проекте «${project.name}»`;
     await mboxFetch(`/api/mbox/todos/${todo.id}`, { method: "DELETE" });
     return `удалена задача «${todo.title}» из проекта «${project.name}»`;
+  }
+
+  if (name === "merge_todos") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const ids = Array.isArray(args.todo_ids) ? [...new Set(args.todo_ids.map((id) => String(id).trim()).filter((id) => /^\d+$/.test(id)))] : [];
+    if (ids.length < 2) return "нужно минимум два числовых ID задачи в todo_ids";
+    const mergedTitle = String(args.merged_title || "").trim();
+    if (!mergedTitle) return "не объединил — нужен заголовок объединённой задачи";
+    const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
+    const projectTodos = context.todos || [];
+    const rows = ids.map((id) => projectTodos.find((t) => String(t.id) === id)).filter(Boolean);
+    if (rows.length !== ids.length) {
+      const found = new Set(rows.map((r) => String(r.id)));
+      const missing = ids.filter((id) => !found.has(id));
+      return `не нашёл в проекте «${project.name}» задачи с ID: ${missing.join(", ")} — объединение отменено, ничего не тронуто`;
+    }
+    const priorityRank = { urgent: 0, high: 1, normal: 2, low: 3 };
+    const mergedPriority = rows.reduce((best, r) => (priorityRank[r.priority] ?? 9) < (priorityRank[best] ?? 9) ? r.priority : best, "low");
+    const created = await mboxFetch("/api/mbox/todos", {
+      method: "POST",
+      body: JSON.stringify({ project_id: project.id, title: mergedTitle, note: String(args.merged_note || ""), status: "open", priority: mergedPriority, access_level: "private" }),
+    });
+    const newId = created.todo?.id;
+    for (const row of rows) {
+      await mboxFetch(`/api/mbox/todos/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "archived", note: `${row.note || ""}\n\n[Объединено в «${mergedTitle}» #${newId}]` }),
+      });
+    }
+    return `объединил ${rows.length} задач (${rows.map((r) => `#${r.id} «${r.title}»`).join(", ")}) в новую «${mergedTitle}» (#${newId}, приоритет ${mergedPriority}); исходные переведены в архив с пометкой`;
   }
 
   if (name === "record_memory") {

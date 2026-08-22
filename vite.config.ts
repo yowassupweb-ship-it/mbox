@@ -642,6 +642,28 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "merge_todos",
+      description: "Объединить несколько существующих задач одного проекта в одну новую. Используй, когда в проекте "
+        + "накопилось несколько мелких/дублирующих задач по одной теме и явно лучше вести их одной — например, "
+        + "просят «прибраться в задачах» или «объедини всё про X в одну». Исходные задачи не удаляются "
+        + "необратимо — переводятся в архив с пометкой, во что объединены, их можно найти и восстановить. "
+        + "Для составления заголовка/описания объединённой задачи из текста исходных удобно сперва "
+        + "воспользоваться delegate_to_junior, чтобы не тратить свой контекст на черновик.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_name: { type: "string", description: "Название проекта, где живут задачи" },
+          todo_ids: { type: "array", items: { type: "string" }, description: "ID (числа) объединяемых задач, минимум два, все должны принадлежать этому проекту" },
+          merged_title: { type: "string", description: "Заголовок новой объединённой задачи" },
+          merged_note: { type: "string", description: "Описание новой объединённой задачи, необязательно" },
+        },
+        required: ["project_name", "todo_ids", "merged_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "record_memory",
       description: "Записать факт в память MBOX — то, что стоит запомнить надолго (предпочтение пользователя, удачный или неудачный подход, важное решение).",
       parameters: {
@@ -1369,6 +1391,34 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     return `удалена задача «${todo.title}» из проекта «${project.name}»`;
   }
 
+  if (name === "merge_todos") {
+    const project = matchProjectFuzzy(args.project_name, projectList);
+    if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    const ids = Array.isArray(args.todo_ids) ? [...new Set((args.todo_ids as unknown[]).map((id) => String(id).trim()).filter((id) => /^\d+$/.test(id)))] : [];
+    if (ids.length < 2) return "нужно минимум два числовых ID задачи в todo_ids";
+    const mergedTitle = String(args.merged_title || "").trim();
+    if (!mergedTitle) return "не объединил — нужен заголовок объединённой задачи";
+    const rows = (await client.query("SELECT id::text, title, priority, note FROM todos WHERE id = ANY($1::bigint[]) AND project_id = $2", [ids, project.id])).rows as { id: string; title: string; priority: string; note: string }[];
+    if (rows.length !== ids.length) {
+      const found = new Set(rows.map((r) => r.id));
+      const missing = ids.filter((id) => !found.has(id));
+      return `не нашёл в проекте «${project.name}» задачи с ID: ${missing.join(", ")} — объединение отменено, ничего не тронуто`;
+    }
+    const priorityRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+    const mergedPriority = rows.reduce((best, r) => (priorityRank[r.priority] ?? 9) < (priorityRank[best] ?? 9) ? r.priority : best, "low");
+    const inserted = await client.query(
+      `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
+       VALUES ($1, $2, $3, 'open', $4, '{}', 'private') RETURNING id::text`,
+      [project.id, mergedTitle, String(args.merged_note || ""), mergedPriority],
+    );
+    const newId = (inserted.rows[0] as { id: string }).id;
+    await client.query(
+      `UPDATE todos SET status = 'archived', note = note || $1, claimed_by = '', claimed_until = NULL, updated_at = now() WHERE id = ANY($2::bigint[])`,
+      [`\n\n[Объединено в «${mergedTitle}» #${newId}]`, ids],
+    );
+    return `объединил ${rows.length} задач (${rows.map((r) => `#${r.id} «${r.title}»`).join(", ")}) в новую «${mergedTitle}» (#${newId}, приоритет ${mergedPriority}); исходные переведены в архив с пометкой`;
+  }
+
   if (name === "record_memory") {
     const title = String(args.title || "").trim();
     const content = String(args.content || "").trim();
@@ -1908,7 +1958,10 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + `${GROQ_MODEL} через Groq API. Если спросят, какая ты модель — называй ту, что реально сейчас `
         + "отвечает (обычно Gemini), не выдумывай третье название. Отвечай коротко и по делу, на русском. У тебя есть НАСТОЯЩИЕ инструменты: "
         + "create_todo, create_project, delete_project (необратимо, точное название), update_todo_status, "
-        + "set_todo_priority, delete_todo (необратимо, точный заголовок), record_memory (записать долгоживущий "
+        + "set_todo_priority, delete_todo (необратимо, точный заголовок), merge_todos (объединить несколько задач "
+        + "проекта в одну по их числовым ID — исходные не удаляются, уходят в архив с пометкой; сам подбирай "
+        + "ID через list_project_todos/search_todos, если просят «прибраться» или «объедини задачи про X»), "
+        + "record_memory (записать долгоживущий "
         + "факт), list_project_todos (заголовки задач проекта), get_project_info (git/стек/деплой/доступ и "
         + "описание проекта из props — если просят РАССКАЗАТЬ/ОПИСАТЬ проект, роль, контекст, что это такое — "
         + "используй именно этот инструмент, не search_memory: там технические итоги прогонов агентов, а не "
