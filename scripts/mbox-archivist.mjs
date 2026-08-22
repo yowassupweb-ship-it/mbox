@@ -137,7 +137,9 @@ async function reviewStaleMemories() {
   const pending = (inboxData.inbox || []).some((item) => item.status !== "done" && String(item.title || "").startsWith(CLEANUP_PROPOSAL_TITLE_PREFIX));
   if (pending) return { skipped: true, reason: "предыдущее предложение ещё без ответа" };
 
-  const memData = await mboxFetch("/api/mbox/memories");
+  // sort=oldest — без него ORDER BY updated_at DESC LIMIT 300 отдал бы только 300 САМЫХ СВЕЖИХ
+  // записей, среди которых кандидатов на уборку почти не бывает по определению.
+  const memData = await mboxFetch("/api/mbox/memories?sort=oldest");
   const allMemories = memData.memories || [];
   const doneTodoIds = new Set();
   for (const project of projectsData.projects || []) {

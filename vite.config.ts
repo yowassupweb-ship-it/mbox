@@ -134,6 +134,7 @@ type MemoryEmbeddingRow = {
   tags: string[];
   metadata: Record<string, unknown>;
   updated_at: string;
+  embedding_updated_at: string | null;
 };
 
 type TfidfVector = {
@@ -2176,13 +2177,20 @@ async function recordMemoryAction({ memoryId, actor = "agent", action, note = ""
 
 async function refreshMemoryEmbeddings() {
   const memories = await queryPostgres<MemoryEmbeddingRow>(
-    `SELECT id::text, title, content, tags, metadata, updated_at::text
-     FROM memories
-     ORDER BY id`,
+    `SELECT m.id::text, m.title, m.content, m.tags, m.metadata, m.updated_at::text,
+            e.updated_at::text AS embedding_updated_at
+     FROM memories m
+     LEFT JOIN memory_embeddings e ON e.memory_id = m.id
+     ORDER BY m.id`,
   );
   const documents = memories.rows.map((memory) => ({ id: memory.id, text: memoryEmbeddingText(memory), updated_at: memory.updated_at }));
   const vectors = buildTfIdfIndex(documents);
+  // См. server/mbox-server.mjs — пишем только записи с отсутствующим/устаревшим эмбеддингом,
+  // не все 1600+ при каждом вызове (эта функция вызывается и на чтение, из каждого поиска).
+  const stale = memories.rows.filter((m) => !m.embedding_updated_at || new Date(m.updated_at) > new Date(m.embedding_updated_at));
+  const staleIds = new Set(stale.map((m) => m.id));
   for (const vector of vectors) {
+    if (!staleIds.has(String(vector.id))) continue;
     await queryPostgres(
       `INSERT INTO memory_embeddings(memory_id, representation, dimension, encoding_source, updated_at)
        VALUES ($1, $2, $3, 'tfidf-local-v1', now())
@@ -2513,6 +2521,7 @@ function suggestMemoryHierarchy(input: Record<string, any>, memories: Array<Memo
     tags: Array.isArray(input.tags) ? input.tags : [],
     metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
     updated_at: "",
+    embedding_updated_at: null,
   });
   const documents = memories.map((memory) => ({ id: memory.id, text: memoryEmbeddingText(memory) }));
   const vectors = buildTfIdfIndex(documents);
@@ -2889,6 +2898,7 @@ function mboxDevApi() {
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
               return sendJson(res, 201, { memory: result.rows[0] });
             }
+            const sortOldest = url.searchParams.get("sort") === "oldest";
             const result = await queryPostgres(
               `SELECT id::text, folder_id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
                       pg_column_size(memories)::int AS memory_bytes,
@@ -2897,7 +2907,7 @@ function mboxDevApi() {
                       sum(pg_column_size(memories)) OVER()::bigint AS total_bytes
                FROM memories
                WHERE $1 = '' OR search_vector @@ plainto_tsquery('simple', $1) OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR tags::text ILIKE '%' || $1 || '%'
-               ORDER BY updated_at DESC
+               ORDER BY updated_at ${sortOldest ? "ASC" : "DESC"}
                LIMIT 300`,
               [q],
             );

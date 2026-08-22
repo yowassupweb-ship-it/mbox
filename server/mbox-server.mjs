@@ -345,13 +345,24 @@ function recallLexicalScore(queryText, memory) {
 
 async function refreshMemoryEmbeddings() {
   const memories = await query(
-    `SELECT id::text, title, content, tags, metadata, updated_at::text
-     FROM memories
-     ORDER BY id`,
+    `SELECT m.id::text, m.title, m.content, m.tags, m.metadata, m.updated_at::text,
+            e.updated_at::text AS embedding_updated_at
+     FROM memories m
+     LEFT JOIN memory_embeddings e ON e.memory_id = m.id
+     ORDER BY m.id`,
   );
   const documents = memories.rows.map((memory) => ({ id: memory.id, text: memoryEmbeddingText(memory), updated_at: memory.updated_at }));
   const vectors = buildTfIdfIndex(documents);
+  // Раньше это был безусловный UPSERT на КАЖДУЮ запись памяти при КАЖДОМ вызове — а вызывается
+  // эта функция и на чтение (relevantMemories для любого непустого поиска, значит из каждого
+  // search_todos/get_next_task через /agent/context). query() открывает новое соединение на
+  // каждый вызов (CLAUDE.md, подводный камень 4) — при 1600+ записях памяти это тысячи
+  // последовательных подключений к БД на один поиск, была основная причина многоминутных
+  // зависаний. Теперь пишем только записи с отсутствующим или устаревшим эмбеддингом.
+  const stale = memories.rows.filter((m) => !m.embedding_updated_at || new Date(m.updated_at) > new Date(m.embedding_updated_at));
+  const staleIds = new Set(stale.map((m) => m.id));
   for (const vector of vectors) {
+    if (!staleIds.has(vector.id)) continue;
     await query(
       `INSERT INTO memory_embeddings(memory_id, representation, dimension, encoding_source, updated_at)
        VALUES ($1, $2, $3, 'tfidf-local-v1', now())
@@ -3072,6 +3083,10 @@ async function handleApiWithContext(req, res, url) {
       broadcastChange(req, "create", "memories", String(body.title || "").trim());
       return sendJson(res, 201, { memory: result.rows[0] });
     }
+    // sort=oldest — для фоновой уборки памяти (архивариус ищет кандидатов на удаление среди
+    // старых записей), без него ORDER BY updated_at DESC LIMIT 300 отдавал бы только САМЫЕ
+    // СВЕЖИЕ записи — ровно противоположность тому, что нужно для поиска устаревшего.
+    const sortOldest = url.searchParams.get("sort") === "oldest";
     const result = await query(
       `SELECT id::text, folder_id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
               pg_column_size(memories)::int AS memory_bytes,
@@ -3080,7 +3095,7 @@ async function handleApiWithContext(req, res, url) {
               sum(pg_column_size(memories)) OVER()::bigint AS total_bytes
        FROM memories
        WHERE $1 = '' OR search_vector @@ plainto_tsquery('simple', $1) OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR tags::text ILIKE '%' || $1 || '%'
-       ORDER BY updated_at DESC
+       ORDER BY updated_at ${sortOldest ? "ASC" : "DESC"}
        LIMIT 300`,
       [q],
     );
