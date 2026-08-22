@@ -1522,8 +1522,11 @@ async function respondToRequests() {
         + "текстовый кусок — черновик, сводку, пересказ, классификацию — внутри цепочки действий, чтобы не "
         + "тратить свой контекст на сам черновик; не годится для того, что само требует вызова инструментов). Если "
         + "просят одно из этого — вызови функцию, не пиши текстом, что сделал это. Если в одном "
-        + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов) — вызывай их одно за "
-        + "другим по очереди, пока не выполнишь все, не только первое; не останавливайся после первого шага и "
+        + "сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, например «создай 3 "
+        + "задачи с названиями A/B/C») — по возможности вызывай ВСЕ нужные функции ОДНИМ ответом (несколько "
+        + "tool_calls разом), а не по одной с отдельным шагом на каждую — так быстрее для человека. Если так "
+        + "не получилось — вызывай их одно за другим по очереди, пока не выполнишь все, не только первое; "
+        + "не останавливайся после первого шага и "
         + "не переспрашивай подтверждение между шагами, если человек уже описал всю последовательность в одном "
         + "сообщении — уверенно доводи комбо из 3-5 инструментов до конца за один ответ, а мелкие текстовые "
         + "подзадачи внутри такой цепочки отдавай delegate_to_junior вместо того, чтобы писать черновик самому. "
@@ -1553,16 +1556,19 @@ async function respondToRequests() {
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .slice(-8);
 
-      // Сжатие истории — см. server/mbox-server.mjs. Сводка идёт ВНУТРЬ системного промпта, не
-      // отдельным message с role:"system" в истории — toGeminiContents пропускает (continue) любой
-      // message с role:"system", кроме самого первого; посреди истории такая сводка молча
-      // терялась бы на основном (Gemini) пути. Без setPhase здесь — этот файл не пишет фазы в UI.
+      // Сжатие — см. server/mbox-server.mjs. Срабатывает только когда история заполнена под
+      // потолок И там реально много текста — иначе лишний последовательный запрос к Cloudflare
+      // перед каждым обращением к Gemini заметно замедлял простые быстрые ответы. Без setPhase
+      // здесь — этот файл не пишет фазы в UI.
       const toRole = (row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title });
-      const COMPRESS_FROM = 4;
+      const COMPRESS_FROM = 8;
+      const COMPRESS_MIN_CHARS = 1200;
       let historyMessages = history.map(toRole);
       let finalSystemPrompt = systemPrompt;
-      if (history.length >= COMPRESS_FROM && cloudflareAccountId && cloudflareApiToken) {
-        const older = history.slice(0, -2);
+      const olderForCompression = history.slice(0, -2);
+      const olderCharCount = olderForCompression.reduce((sum, row) => sum + (row.body || row.title || "").length, 0);
+      if (history.length >= COMPRESS_FROM && olderCharCount >= COMPRESS_MIN_CHARS && cloudflareAccountId && cloudflareApiToken) {
+        const older = olderForCompression;
         const recent = history.slice(-2);
         const transcript = older.map((row) => `${row.agent_name === agentName ? agentName : "Человек"}: ${row.body || row.title}`).join("\n");
         const summary = await cloudflareSummarize(transcript);
@@ -1623,7 +1629,7 @@ async function respondToRequests() {
           }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
-          detailedTrace.push(`${call.function?.name || "?"}(${call.function?.arguments || ""}) -> ${result}`);
+          detailedTrace.push(`${detailedTrace.length + 1}. ${call.function?.name || "?"}\n   аргументы: ${call.function?.arguments || "—"}\n   результат: ${result}`);
           messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }

@@ -2004,7 +2004,10 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         + "Если просят "
         + "одно из этого — вызови функцию, не пиши текстом, что сделал это. "
         + "Если в одном сообщении просят НЕСКОЛЬКО действий (может быть комбо из разных инструментов, не "
-        + "только повтор одного и того же) — вызывай их одно за другим по очереди, пока не выполнишь все, не "
+        + "только повтор одного и того же, например «создай 3 задачи с названиями A/B/C») — по возможности "
+        + "вызывай ВСЕ нужные функции ОДНИМ ответом (несколько tool_calls разом), а не по одной с отдельным "
+        + "шагом на каждую — так быстрее для человека, каждый лишний шаг это отдельный медленный запрос к "
+        + "модели. Если так не получилось — вызывай их одно за другим по очереди, пока не выполнишь все, не "
         + "только первое; не останавливайся после первого шага и не переспрашивай подтверждение между шагами, "
         + "если человек уже описал всю последовательность в одном сообщении — уверенно доводи комбо из 3-5 "
         + "инструментов до конца за один ответ, а мелкие текстовые подзадачи внутри такой цепочки отдавай "
@@ -2041,16 +2044,18 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         [JARVIS_NAME],
       )).rows.reverse() as { agent_name: string; body: string; title: string }[];
 
-      // Сжатие истории — см. комментарий в server/mbox-server.mjs. Сводка идёт ВНУТРЬ системного
-      // промпта, не отдельным message с role:"system" в истории — toGeminiContents пропускает
-      // (continue) любой message с role:"system", кроме самого первого; посреди истории такая
-      // сводка молча терялась бы на основном (Gemini) пути.
+      // Сжатие — см. комментарий в server/mbox-server.mjs. Срабатывает только когда история
+      // заполнена под потолок И там реально много текста — иначе лишний последовательный запрос
+      // к Cloudflare перед каждым обращением к Gemini заметно замедлял простые быстрые ответы.
       const toRole = (row: { agent_name: string; body: string; title: string }) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
-      const COMPRESS_FROM = 4;
+      const COMPRESS_FROM = 8;
+      const COMPRESS_MIN_CHARS = 1200;
       let historyMessages: GroqMessage[] = history.map(toRole);
       let finalSystemPrompt = systemPrompt;
-      if (history.length >= COMPRESS_FROM && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
-        const older = history.slice(0, -2);
+      const olderForCompression = history.slice(0, -2);
+      const olderCharCount = olderForCompression.reduce((sum, row) => sum + (row.body || row.title || "").length, 0);
+      if (history.length >= COMPRESS_FROM && olderCharCount >= COMPRESS_MIN_CHARS && CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
+        const older = olderForCompression;
         const recent = history.slice(-2);
         const transcript = older.map((row) => `${row.agent_name === JARVIS_NAME ? JARVIS_NAME : "Человек"}: ${row.body || row.title}`).join("\n");
         setPhase(item.id, "Сжимает историю диалога (Cloudflare)");
@@ -2115,7 +2120,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
           }
           actionLog.push(result);
           if (call.function?.name && !toolsUsed.includes(call.function.name)) toolsUsed.push(call.function.name);
-          detailedTrace.push(`${call.function?.name || "?"}(${call.function?.arguments || ""}) -> ${result}`);
+          detailedTrace.push(`${detailedTrace.length + 1}. ${call.function?.name || "?"}\n   аргументы: ${call.function?.arguments || "—"}\n   результат: ${result}`);
           messages.push({ role: "tool", tool_call_id: call.id, name: call.function?.name, content: result });
         }
       }
