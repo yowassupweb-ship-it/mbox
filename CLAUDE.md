@@ -54,7 +54,15 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    `/api/mbox/status`, которого нет в проде. **Правя ручку, правь обе или сознательно решай, что нет.**
    Пример сознательного решения: `kind='telegram_channel'` в `refreshDataSourceById` реализован
    только в `server/mbox-server.mjs` (это то, что реально дёргает архивариус в проде) — в
-   `vite.config.ts` его нет.
+   `vite.config.ts` его нет. На самом деле копии три — `scripts/mbox-archivist.mjs` (резервный
+   cron, REST-клиент без доступа к БД) третья. Полный вынос в shared-модуль не сделан осознанно
+   (todo #161): у копий разная механика доступа к данным (прямой `pg.Client` / vite dev middleware
+   / чистый REST), реальный вынос — отдельная архитектурная задача. Вместо этого —
+   `npm run check:mirror` (`scripts/check-triple-mirror.mjs`): сверяет набор инструментов Джарвиса
+   (`JARVIS_TOOLS`) и веток диспетчера между тремя файлами, ловит забытые зеркалирования. На
+   2026-08-23 сознательно не зеркалированы в `mbox-archivist.mjs`: `get_memory_actions`,
+   `list_memory_links` (нужны новые REST GET-ручки, которых сейчас нет вообще), `analyze_posts`
+   (тяжёлый инструмент, вряд ли нужен в резервном cron).
 2. **Прод отдаёт закоммиченный билд.** Изменение в `src/` не попадёт в прод без `npm run build` и
    коммита `public/`. `--emptyOutDir false` не чистит старые хеш-бандлы — мусор в `public/assets`
    накапливается, удалять руками.

@@ -16,7 +16,8 @@
     "mbox:sort": "node scripts/mbox-maintenance.mjs sort",
     "mbox:index": "node scripts/mbox-maintenance.mjs index",
     "mbox:codex-watch": "node scripts/codex-inbox-watcher.mjs",
-    "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export"
+    "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export",
+    "check:mirror": "node scripts/check-triple-mirror.mjs"
   },
   "dependencies": {
     "@chatscope/chat-ui-kit-react": "^2.1.1",

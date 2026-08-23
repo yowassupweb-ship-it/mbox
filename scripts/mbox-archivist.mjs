@@ -644,6 +644,30 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_memory",
+      description: "Вывести ПОЛНЫЙ текст записи памяти по её номеру (ID) — search_memory отдаёт только короткий обрезанный summary, этим инструментом читай запись целиком, когда попросят «выведи полностью», «покажи запись #N» и т.п.",
+      parameters: {
+        type: "object",
+        properties: { memory_id: { type: "string", description: "Номер записи (ID), обычно виден в результатах search_memory" } },
+        required: ["memory_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_task",
+      description: "Вывести ПОЛНУЮ карточку задачи (описание, статус, приоритет, проект) по её номеру (ID) — list_project_todos и search_todos отдают только обрезанные превью, этим инструментом читай задачу целиком по номеру.",
+      parameters: {
+        type: "object",
+        properties: { todo_id: { type: "string", description: "Номер задачи (ID)" } },
+        required: ["todo_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_memory",
       description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
       parameters: {
@@ -1215,6 +1239,36 @@ async function runJarvisTool(name, rawArgs, projectList) {
     if (!keys.length) return `компания «${company.name}»: свойства не заполнены`;
     const propsText = keys.map((key) => `${key}: ${String(props[key]).slice(0, 180)}`).join("; ");
     return `компания «${company.name}» (доступ: ${company.access_level}): ${propsText}`;
+  }
+
+  if (name === "get_memory") {
+    const id = String(args.memory_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID записи — возьми его из результатов search_memory";
+    let data;
+    try {
+      data = await mboxFetch(`/api/mbox/memories/${id}`);
+    } catch {
+      return `запись #${id} не нашлась — возможно, удалена или номер неверный`;
+    }
+    const row = data.memory;
+    if (!row) return `запись #${id} не нашлась — возможно, удалена или номер неверный`;
+    const tags = Array.isArray(row.tags) && row.tags.length ? ` [теги: ${row.tags.join(", ")}]` : "";
+    return `«${row.title}»${row.project_name ? ` (${row.project_name})` : ""}${tags}:\n${row.content}`;
+  }
+
+  if (name === "get_task") {
+    const id = String(args.todo_id || "").trim();
+    if (!id || !/^\d+$/.test(id)) return "нужен числовой ID задачи";
+    let data;
+    try {
+      data = await mboxFetch(`/api/mbox/todos/${id}`);
+    } catch {
+      return `задача #${id} не нашлась — возможно, удалена или номер неверный`;
+    }
+    const row = data.todo;
+    if (!row) return `задача #${id} не нашлась — возможно, удалена или номер неверный`;
+    const project = projectList.find((p) => p.id === row.project_id);
+    return `«${row.title}»${project ? ` (${project.name})` : ""} — статус: ${row.status}, приоритет: ${row.priority}${row.claimed_by ? `, в работе у: ${row.claimed_by}` : ""}. Описание: ${row.note || "пусто"}`;
   }
 
   if (name === "search_memory") {
