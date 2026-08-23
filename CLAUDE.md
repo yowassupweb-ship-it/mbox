@@ -108,10 +108,17 @@ compose — контейнер `mbox-postgres`. `scripts/server_metrics_collecto
 ## Безопасность — известные слабые места
 
 Не «чинить мимоходом», но помнить и предупреждать при работе рядом:
-- в `schema/mbox_postgres.sql:334` сидится `Admin` с паролем `change-me-before-use`;
-- ключ шифрования секретов падает в `MBOX_SECRET_KEY || DATABASE_URL || "mbox-local-key"` — при
-  смене `DATABASE_URL` без явного `MBOX_SECRET_KEY` расшифровка ломается;
-- cookie-аутентификация без CSRF-токена, защита только `SameSite=Lax`;
+- `schema/mbox_postgres.sql:334` сидит `Admin` паролем `change-me-before-use` — это только сид для
+  свежей установки; на проде пароль уже сменён (проверено 2026-08-22: bcrypt-хеш реальный, не
+  дефолтный), но при разворачивании новой копии не забыть сменить сразу;
+- ключ шифрования секретов падает в `MBOX_SECRET_KEY || DATABASE_URL || "mbox-local-key"` — на
+  проде `MBOX_SECRET_KEY` выставлен явно (проверено 2026-08-22), но при смене `DATABASE_URL` без
+  явного `MBOX_SECRET_KEY` на новой копии расшифровка сломается тихо;
+- cookie-аутентификация без CSRF-токена, защита `HttpOnly; Secure; SameSite=Lax`. Проверено
+  2026-08-22: мутирующих GET-ручек в mbox-server.mjs нет (все мутации — POST/PATCH/DELETE), поэтому
+  `SameSite=Lax` перекрывает CSRF для актуальных браузеров без отдельного токена — сознательное
+  решение не добавлять токен, а не недосмотр. Пересмотреть, если появится мутирующий GET или нужна
+  поддержка совсем старых браузеров без SameSite;
 - `scripts/mbox_ssh_tunnel.py` ходит с `AutoAddPolicy()` и паролем из окружения.
 
 ## Стиль

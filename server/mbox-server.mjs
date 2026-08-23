@@ -3007,14 +3007,17 @@ async function handleApiWithContext(req, res, url) {
               ))`,
       [user.rows[0].id],
     );
-    res.setHeader("set-cookie", `mbox_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`);
+    // Secure — этот файл всегда за Caddy на HTTPS (см. docker-compose.production.yml), в отличие
+    // от vite.config.ts (dev, обычный http://localhost) — там Secure сломал бы логин, здесь нет
+    // причин его не ставить. Часть аудита CSRF-риска из CLAUDE.md (todo #164).
+    res.setHeader("set-cookie", `mbox_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`);
     return sendJson(res, 200, { user: user.rows[0] });
   }
 
   if (url.pathname === "/api/mbox/auth/logout" && req.method === "POST") {
     const token = getCookie(req, "mbox_session");
     if (token) await query("DELETE FROM auth_sessions WHERE token_hash = $1", [createHash("sha256").update(token).digest("hex")]);
-    res.setHeader("set-cookie", "mbox_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+    res.setHeader("set-cookie", "mbox_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0");
     return sendJson(res, 200, { ok: true });
   }
 
