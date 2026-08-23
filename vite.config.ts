@@ -1434,7 +1434,7 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     const gitUrl = String(args.git_url || "").trim();
     const inserted = await client.query(
       `INSERT INTO projects(name, status, stack, git_url, access_level, props) VALUES ($1, 'active', $2, $3, 'private', '{}') RETURNING id::text`,
-      [projectName, JSON.stringify(stack), gitUrl || null],
+      [projectName, JSON.stringify(stack), gitUrl],
     );
     projectList.push({ id: inserted.rows[0].id as string, name: projectName });
     const extra = [stack.length ? `стек: ${stack.join(", ")}` : "", gitUrl ? `git: ${gitUrl}` : ""].filter(Boolean).join(", ");
