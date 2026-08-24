@@ -2866,8 +2866,6 @@ function mboxDevApi() {
                ),
                names AS (
                  SELECT name FROM presence
-                 UNION SELECT name FROM audited
-                 UNION SELECT name FROM ran
                )
                SELECT n.name,
                       COALESCE(p.kind, 'ai_agent') AS kind,
