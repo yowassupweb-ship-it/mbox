@@ -27,7 +27,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
 function mountDesktopControlWhenReady() {
   const timer = window.setInterval(() => {
-    if (document.querySelector(".desktop-slot")) {
+    const existingSlot = document.querySelector(".desktop-slot");
+    if (existingSlot && !existingSlot.querySelector(".desktop-pill.download")) {
       window.clearInterval(timer);
       return;
     }
@@ -35,13 +36,13 @@ function mountDesktopControlWhenReady() {
     const search = document.querySelector(".search-shell");
     if (!topbar || !search) return;
     window.clearInterval(timer);
-    mountDesktopControl(topbar, search);
+    mountDesktopControl(topbar, search, existingSlot);
   }, 300);
   window.setTimeout(() => window.clearInterval(timer), 15000);
 }
 
-function mountDesktopControl(topbar, search) {
-  const root = document.createElement("div");
+function mountDesktopControl(topbar, search, existingSlot) {
+  const root = existingSlot || document.createElement("div");
   root.className = "desktop-slot desktop-slot-preload";
   root.innerHTML = `
     <button class="desktop-pill" type="button" aria-expanded="false">
@@ -67,7 +68,7 @@ function mountDesktopControl(topbar, search) {
     </div>
   `;
   injectDesktopControlStyles();
-  topbar.insertBefore(root, search);
+  if (!existingSlot) topbar.insertBefore(root, search);
 
   const pill = root.querySelector(".desktop-pill");
   const popover = root.querySelector(".desktop-popover");

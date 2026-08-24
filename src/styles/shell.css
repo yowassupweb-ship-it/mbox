@@ -492,6 +492,13 @@
   grid-column: 1 / -1;
 }
 
+.desktop-update-state {
+  margin-top: 9px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 @keyframes desktop-pop {
   from { opacity: 0; transform: translateY(-6px) scale(.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }

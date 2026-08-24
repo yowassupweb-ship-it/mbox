@@ -36,25 +36,28 @@ type TopBarProps = {
 };
 
 type DesktopResponder = { pid: number; agent: string; commandLine?: string };
+type DesktopApi = {
+  status: () => Promise<DesktopResponder[]>;
+  start: (name: string) => Promise<DesktopResponder[]>;
+  stop: (name: string) => Promise<DesktopResponder[]>;
+  installAutostart: () => Promise<unknown>;
+  removeAutostart: () => Promise<unknown>;
+  installAppAutostart: () => Promise<unknown>;
+  removeAppAutostart: () => Promise<unknown>;
+  openRepo: () => Promise<unknown>;
+  checkUpdates?: () => Promise<unknown>;
+  installUpdate?: () => Promise<unknown>;
+  onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;
+};
 
 declare global {
   interface Window {
-    mboxDesktop?: {
-      status: () => Promise<DesktopResponder[]>;
-      start: (name: string) => Promise<DesktopResponder[]>;
-      stop: (name: string) => Promise<DesktopResponder[]>;
-      installAutostart: () => Promise<unknown>;
-      removeAutostart: () => Promise<unknown>;
-      installAppAutostart: () => Promise<unknown>;
-      removeAppAutostart: () => Promise<unknown>;
-      openRepo: () => Promise<unknown>;
-      onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;
-    };
+    mboxDesktop?: DesktopApi;
   }
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.1.exe";
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.2.exe";
 
 export function TopBar({
   query,
@@ -75,13 +78,15 @@ export function TopBar({
   const [desktopOpen, setDesktopOpen] = useState(false);
   const [desktopRows, setDesktopRows] = useState<DesktopResponder[]>([]);
   const [desktopBusy, setDesktopBusy] = useState(false);
+  const [desktopApi, setDesktopApi] = useState<DesktopApi | null>(null);
+  const [desktopUpdateStatus, setDesktopUpdateStatus] = useState("Обновления проверяются в установленном приложении");
   const closeTimer = useRef<number | undefined>(undefined);
   const burstTimer = useRef<number | undefined>(undefined);
   const firstRun = useRef(true);
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy || logoBurst);
-  const desktop = typeof window !== "undefined" ? window.mboxDesktop : undefined;
+  const desktop = desktopApi;
   const codexLive = desktopRows.some((row) => row.agent === "Codex");
   const claudeLive = desktopRows.some((row) => row.agent === "Claude");
 
@@ -100,6 +105,25 @@ export function TopBar({
       setDesktopBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    const detect = () => {
+      if (cancelled || !window.mboxDesktop) return false;
+      setDesktopApi(window.mboxDesktop);
+      return true;
+    };
+    if (detect()) return;
+    const timer = window.setInterval(() => {
+      if (detect()) window.clearInterval(timer);
+    }, 150);
+    window.setTimeout(() => window.clearInterval(timer), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   // Попап раньше пропадал мгновенно при закрытии — CSS-анимация играла только на открытии.
   // Держим DOM ещё один тик, проигрываем обратную анимацию, и только потом размонтируем.
@@ -132,7 +156,10 @@ export function TopBar({
     if (!desktop) return;
     void refreshDesktop();
     const timer = window.setInterval(() => { void refreshDesktop(); }, 6000);
-    desktop.onEvent(() => { void refreshDesktop(); });
+    desktop.onEvent((event) => {
+      if (event.type === "update" && event.message) setDesktopUpdateStatus(event.message);
+      void refreshDesktop();
+    });
     return () => window.clearInterval(timer);
   }, [desktop]);
 
@@ -191,10 +218,14 @@ export function TopBar({
               <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAppAutostart())}>
                 Автозапуск приложения
               </button>
+              <button type="button" disabled={desktopBusy || !desktop.checkUpdates} onClick={() => desktopAction(() => desktop.checkUpdates?.() ?? Promise.resolve())}>
+                <RefreshCw size={14} /> Обновить
+              </button>
               <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.openRepo())}>
                 <FolderOpen size={14} /> Репозиторий
               </button>
             </div>
+            <div className="desktop-update-state">{desktopUpdateStatus}</div>
           </div>
         )}
       </div>
