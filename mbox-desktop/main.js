@@ -2,12 +2,14 @@ const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog } = 
 const { autoUpdater } = require("electron-updater");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const isDev = !app.isPackaged;
-const repoRoot = path.resolve(__dirname, "..");
-const appRoot = isDev ? repoRoot : process.resourcesPath;
+const repoRoot = resolveRepoRoot();
+const packagedScriptRoot = path.join(process.resourcesPath || "", "scripts");
 const mboxUrl = (process.env.MBOX_URL || "https://mbox.shar-os.ru").replace(/\/+$/, "");
+const responderEnv = loadResponderEnv();
 const updateFeedUrl = `${mboxUrl}/downloads/`;
 const iconPath = path.join(__dirname, "resources", "mbox.png");
 const processPatterns = {
@@ -43,6 +45,86 @@ app.on("window-all-closed", () => {});
 app.on("before-quit", () => {
   app.isQuitting = true;
 });
+
+function resolveRepoRoot() {
+  const candidates = [
+    process.env.MBOX_REPO_ROOT,
+    isDev ? path.resolve(__dirname, "..") : "",
+    path.join(os.homedir(), "Desktop", "Mbox", "memora", "memora-graph"),
+    path.join(os.homedir(), "Desktop", "MBOX", "memora", "memora-graph"),
+    path.resolve(__dirname, "..")
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "scripts", "start-codex-responder.cmd"))) return candidate;
+  }
+  return isDev ? path.resolve(__dirname, "..") : process.resourcesPath;
+}
+
+function loadResponderEnv() {
+  const env = {
+    MBOX_URL: mboxUrl,
+    MBOX_USERNAME: "Admin",
+    ...readDotEnv(path.join(repoRoot, ".env.local")),
+    ...readCodexMboxEnv(),
+    ...process.env
+  };
+  return env;
+}
+
+function readDotEnv(file) {
+  const result = {};
+  if (!file || !fs.existsSync(file)) return result;
+  const text = fs.readFileSync(file, "utf8");
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match) continue;
+    result[match[1]] = unquoteEnvValue(match[2].trim());
+  }
+  return result;
+}
+
+function readCodexMboxEnv() {
+  const file = path.join(os.homedir(), ".codex", "config.toml");
+  const result = {};
+  if (!fs.existsSync(file)) return result;
+  const text = fs.readFileSync(file, "utf8");
+  const block = text.match(/\[mcp_servers\.mbox-prod\][\s\S]*?(?=\n\[|$)/);
+  if (block) {
+    const envLine = block[0].match(/env\s*=\s*\{([^}]+)\}/);
+    if (envLine) {
+      for (const pair of envLine[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"/g)) {
+        result[pair[1]] = unescapeTomlString(pair[2]);
+      }
+    }
+  }
+  const envBlock = text.match(/\[mcp_servers\.mbox-prod\.env\][\s\S]*?(?=\n\[|$)/);
+  if (envBlock) {
+    for (const pair of envBlock[0].matchAll(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"\s*$/gm)) {
+      result[pair[1]] = unescapeTomlString(pair[2]);
+    }
+  }
+  return result;
+}
+
+function unquoteEnvValue(value) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function unescapeTomlString(value) {
+  return value.replace(/\\(["\\btnfr])/g, (_, char) => {
+    const escapes = { '"': '"', "\\": "\\", b: "\b", t: "\t", n: "\n", f: "\f", r: "\r" };
+    return escapes[char] || char;
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -143,29 +225,44 @@ function setMenu() {
 
 function wrapperPath(name) {
   const file = name === "Codex" ? "start-codex-responder.cmd" : "start-claude-responder.cmd";
-  const devPath = path.join(repoRoot, "scripts", file);
-  const packagedPath = path.join(process.resourcesPath || "", "scripts", file);
-  return fs.existsSync(devPath) ? devPath : packagedPath;
+  const repoPath = path.join(repoRoot, "scripts", file);
+  const packagedPath = path.join(packagedScriptRoot, file);
+  return fs.existsSync(repoPath) ? repoPath : packagedPath;
 }
 
 async function startResponders() {
-  await startResponder("Codex");
-  await startResponder("Claude");
+  const results = [];
+  results.push(await startResponder("Codex"));
+  results.push(await startResponder("Claude"));
+  return results;
 }
 
 async function startResponder(name) {
-  if ((await processStatus()).some((item) => item.agent === name)) return;
+  if ((await processStatus()).some((item) => item.agent === name)) return { agent: name, status: "already-running" };
   const file = wrapperPath(name);
   if (!fs.existsSync(file)) throw new Error(`${name} wrapper not found: ${file}`);
+  const workdir = fs.existsSync(path.join(repoRoot, "package.json")) ? repoRoot : path.dirname(path.dirname(file));
+  const env = {
+    ...process.env,
+    ...responderEnv,
+    MBOX_AGENT_NAME: name,
+    MBOX_PROJECT: responderEnv.MBOX_PROJECT || process.env.MBOX_PROJECT || "MBOX",
+    CODEX_WATCH_WORKDIR: responderEnv.CODEX_WATCH_WORKDIR || repoRoot,
+    CLAUDE_WATCH_WORKDIR: responderEnv.CLAUDE_WATCH_WORKDIR || repoRoot
+  };
   const child = spawn(file, [], {
-    cwd: path.dirname(path.dirname(file)),
+    cwd: workdir,
     shell: true,
     windowsHide: true,
-    env: { ...process.env, MBOX_AGENT_NAME: name, MBOX_PROJECT: process.env.MBOX_PROJECT || "MBOX" }
+    detached: true,
+    stdio: "ignore",
+    env
   });
+  child.unref();
   tracked.set(name, child);
   child.on("exit", (code, signal) => log(`${name} responder exited code=${code ?? ""} signal=${signal ?? ""}`));
-  log(`started ${name} responder`);
+  log(`started ${name} responder from ${file}`);
+  return { agent: name, status: "started", script: file };
 }
 
 async function stopResponders() {
@@ -345,6 +442,7 @@ ipcMain.handle("mbox-desktop:status", async () => processStatus());
 ipcMain.handle("mbox-desktop:start", async (_event, name) => {
   if (name === "All") await startResponders();
   else await startResponder(name);
+  await sleep(1200);
   return processStatus();
 });
 ipcMain.handle("mbox-desktop:stop", async (_event, name) => {

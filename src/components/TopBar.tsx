@@ -50,20 +50,6 @@ type DesktopApi = {
   onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;
 };
 
-const noopDesktopApi: DesktopApi = {
-  status: async () => [],
-  start: async () => [],
-  stop: async () => [],
-  installAutostart: async () => undefined,
-  removeAutostart: async () => undefined,
-  installAppAutostart: async () => undefined,
-  removeAppAutostart: async () => undefined,
-  openRepo: async () => undefined,
-  checkUpdates: async () => undefined,
-  installUpdate: async () => undefined,
-  onEvent: () => undefined,
-};
-
 declare global {
   interface Window {
     mboxDesktop?: DesktopApi;
@@ -71,7 +57,7 @@ declare global {
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.6.exe";
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.7.exe";
 
 function detectDesktopShell() {
   if (typeof window === "undefined") return false;
@@ -100,6 +86,7 @@ export function TopBar({
   const [desktopOpen, setDesktopOpen] = useState(false);
   const [desktopRows, setDesktopRows] = useState<DesktopResponder[]>([]);
   const [desktopBusy, setDesktopBusy] = useState(false);
+  const [desktopError, setDesktopError] = useState("");
   const [desktopApi, setDesktopApi] = useState<DesktopApi | null>(null);
   const [isDesktopShell, setIsDesktopShell] = useState(false);
   const [desktopUpdateStatus, setDesktopUpdateStatus] = useState("Обновления проверяются в установленном приложении");
@@ -109,13 +96,18 @@ export function TopBar({
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy || logoBurst);
-  const desktop = desktopApi || (isDesktopShell ? noopDesktopApi : null);
+  const desktop = desktopApi;
   const codexLive = desktopRows.some((row) => row.agent === "Codex");
   const claudeLive = desktopRows.some((row) => row.agent === "Claude");
 
   async function refreshDesktop() {
     if (!desktop) return;
-    setDesktopRows(await desktop.status());
+    try {
+      setDesktopRows(await desktop.status());
+      setDesktopError("");
+    } catch (error) {
+      setDesktopError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function desktopAction(action: () => Promise<unknown>) {
@@ -124,6 +116,9 @@ export function TopBar({
     try {
       await action();
       await refreshDesktop();
+      setDesktopError("");
+    } catch (error) {
+      setDesktopError(error instanceof Error ? error.message : String(error));
     } finally {
       setDesktopBusy(false);
     }
@@ -203,6 +198,12 @@ export function TopBar({
             <strong>Приложение</strong>
             <span>{codexLive && claudeLive ? "агенты слушают" : desktopRows.length ? "частично" : "тихо"}</span>
           </button>
+        ) : isDesktopShell ? (
+          <button className="desktop-pill bridge-missing" type="button" disabled title="MBOX Desktop IPC не подключился">
+            <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
+            <strong>Приложение</strong>
+            <span>мост не подключен</span>
+          </button>
         ) : (
           <a className="desktop-pill download" href={desktopDownloadUrl} target="_blank" rel="noreferrer">
             <Download size={17} />
@@ -251,7 +252,7 @@ export function TopBar({
                 <FolderOpen size={14} /> Репозиторий
               </button>
             </div>
-            <div className="desktop-update-state">{desktopUpdateStatus}</div>
+            <div className={`desktop-update-state${desktopError ? " is-error" : ""}`}>{desktopError || desktopUpdateStatus}</div>
           </div>
         )}
       </div>

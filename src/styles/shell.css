@@ -392,6 +392,11 @@
   color: color-mix(in srgb, var(--accent-color) 82%, white 10%);
 }
 
+.desktop-pill.bridge-missing {
+  cursor: default;
+  opacity: .78;
+}
+
 .desktop-pill:hover,
 .desktop-pill[aria-expanded="true"] {
   background: rgba(58, 58, 62, .86);
@@ -497,6 +502,10 @@
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.desktop-update-state.is-error {
+  color: #ffb4a8;
 }
 
 @keyframes desktop-pop {
