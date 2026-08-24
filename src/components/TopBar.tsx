@@ -50,6 +50,20 @@ type DesktopApi = {
   onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;
 };
 
+const noopDesktopApi: DesktopApi = {
+  status: async () => [],
+  start: async () => [],
+  stop: async () => [],
+  installAutostart: async () => undefined,
+  removeAutostart: async () => undefined,
+  installAppAutostart: async () => undefined,
+  removeAppAutostart: async () => undefined,
+  openRepo: async () => undefined,
+  checkUpdates: async () => undefined,
+  installUpdate: async () => undefined,
+  onEvent: () => undefined,
+};
+
 declare global {
   interface Window {
     mboxDesktop?: DesktopApi;
@@ -57,7 +71,7 @@ declare global {
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.3.exe";
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.4.exe";
 
 export function TopBar({
   query,
@@ -79,6 +93,7 @@ export function TopBar({
   const [desktopRows, setDesktopRows] = useState<DesktopResponder[]>([]);
   const [desktopBusy, setDesktopBusy] = useState(false);
   const [desktopApi, setDesktopApi] = useState<DesktopApi | null>(null);
+  const [isDesktopShell, setIsDesktopShell] = useState(false);
   const [desktopUpdateStatus, setDesktopUpdateStatus] = useState("Обновления проверяются в установленном приложении");
   const closeTimer = useRef<number | undefined>(undefined);
   const burstTimer = useRef<number | undefined>(undefined);
@@ -86,7 +101,7 @@ export function TopBar({
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy || logoBurst);
-  const desktop = desktopApi;
+  const desktop = desktopApi || (isDesktopShell ? noopDesktopApi : null);
   const codexLive = desktopRows.some((row) => row.agent === "Codex");
   const claudeLive = desktopRows.some((row) => row.agent === "Claude");
 
@@ -110,7 +125,10 @@ export function TopBar({
     if (typeof window === "undefined") return;
     let cancelled = false;
     const detect = () => {
-      if (cancelled || !window.mboxDesktop) return false;
+      if (cancelled) return false;
+      const desktopFlag = document.documentElement.dataset.mboxDesktop === "true";
+      if (desktopFlag) setIsDesktopShell(true);
+      if (!window.mboxDesktop) return false;
       setDesktopApi(window.mboxDesktop);
       return true;
     };
@@ -118,10 +136,11 @@ export function TopBar({
     const timer = window.setInterval(() => {
       if (detect()) window.clearInterval(timer);
     }, 150);
-    window.setTimeout(() => window.clearInterval(timer), 3000);
+    const stopTimer = window.setTimeout(() => window.clearInterval(timer), 15000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.clearTimeout(stopTimer);
     };
   }, []);
 
@@ -165,7 +184,7 @@ export function TopBar({
 
   return (
     <header className="topbar">
-      <div className="desktop-slot">
+      <div className={isDesktopShell || desktopApi ? "desktop-slot is-desktop-shell" : "desktop-slot"}>
         {desktop ? (
           <button
             className={`desktop-pill ${codexLive && claudeLive ? "active" : ""}`}

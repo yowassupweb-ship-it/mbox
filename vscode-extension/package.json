@@ -2,7 +2,7 @@
   "name": "mbox-vscode",
   "displayName": "MBOX",
   "description": "MBOX project context, tasks, memories, and agent workflow inside VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "mbox",
   "private": true,
   "icon": "resources/mbox.png",

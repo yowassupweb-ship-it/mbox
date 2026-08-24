@@ -368,9 +368,9 @@ class MboxTreeProvider {
 
   consoleChildren() {
     const inbox = this.snapshot.inbox || [];
-    const openConsole = new MboxItem("Open shared console", vscode.TreeItemCollapsibleState.None, {
+    const openConsole = new MboxItem("Открыть консоль", vscode.TreeItemCollapsibleState.None, {
       iconPath: this.logoIcon,
-      command: { command: "mbox.openConsole", title: "Open Shared Console" }
+      command: { command: "mbox.openConsole", title: "Открыть консоль" }
     });
     const messages = inbox.slice(0, 20).map((item) => new MboxItem(item.title || item.body || `Message ${item.id}`, vscode.TreeItemCollapsibleState.None, {
       id: item.id,
@@ -443,103 +443,409 @@ function formatConsoleTime(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString();
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function consoleHtml(nonce, logoUri) {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${logoUri.toString()} data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <title>MBOX Console</title>
   <style>
-    body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
-    .shell { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
-    header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
-    header img { width: 24px; height: 24px; }
-    header strong { font-size: 13px; }
-    header span { color: var(--vscode-descriptionForeground); font-size: 12px; }
-    .toolbar { display: flex; gap: 8px; margin-left: auto; }
-    button, select { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 4px; padding: 6px 9px; font: inherit; }
-    select { color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); }
-    button:hover { background: var(--vscode-button-hoverBackground); }
-    #messages { overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-    .message { border: 1px solid var(--vscode-panel-border); border-radius: 6px; padding: 10px; background: var(--vscode-sideBar-background); }
-    .meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--vscode-descriptionForeground); font-size: 11px; margin-bottom: 7px; }
-    .body { white-space: pre-wrap; line-height: 1.45; }
-    .composer { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--vscode-panel-border); }
-    textarea { min-height: 76px; resize: vertical; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 4px; padding: 8px; font: inherit; }
-    .actions { display: flex; flex-direction: column; gap: 8px; min-width: 112px; }
-    .empty, .error { color: var(--vscode-descriptionForeground); padding: 22px; text-align: center; }
-    .error { color: var(--vscode-errorForeground); }
+    :root {
+      --bg-color: #08090a;
+      --container-bg: #08090a;
+      --element-bg: #121316;
+      --text-main: #eef4f1;
+      --text-2: rgba(238, 244, 241, .7);
+      --text-muted: rgba(238, 244, 241, .44);
+      --border-color: rgba(133, 245, 219, .16);
+      --accent-color: #29e0d6;
+      --state-ok: #35c759;
+      --state-warn: #ffb000;
+      --state-danger: #ff4d5e;
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 10px;
+      --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text-main);
+      background: var(--bg-color);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      overflow: hidden;
+    }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .agent-chat-shell.console {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #0c0c0e;
+      overflow: hidden;
+    }
+    .console-bar {
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 42px;
+      padding: 7px 10px;
+      background: #17171a;
+      border-bottom: 1px solid rgba(255, 255, 255, .06);
+      overflow: visible;
+    }
+    .console-bar-roster {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 7px 10px;
+      min-width: 0;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+    .console-bar-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: none;
+      min-height: 26px;
+      padding: 2px 3px;
+      border-radius: 12px;
+      color: var(--text-2);
+    }
+    .agent-avatar {
+      width: 20px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.06);
+      overflow: hidden;
+      flex: none;
+    }
+    .agent-avatar img { width: 18px; height: 18px; object-fit: contain; image-rendering: pixelated; }
+    .console-bar-agent-name { color: var(--text-2); font-weight: 600; }
+    .console-bar-agent.active .console-bar-agent-name,
+    .console-bar-agent.working .console-bar-agent-name { color: var(--text-main); }
+    .console-bar-agent-phase {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-style: italic;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chat-close {
+      margin-left: auto;
+      display: grid;
+      place-items: center;
+      min-width: 38px;
+      min-height: 34px;
+      border: 1px solid rgba(255, 255, 255, .08);
+      border-radius: var(--radius-md);
+      padding: 0;
+      background: rgba(255, 255, 255, .045);
+      color: var(--text-2);
+    }
+    .chat-close:hover {
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, .16);
+      background: rgba(255, 255, 255, .075);
+    }
+    .console-log {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 12px 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      background:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 100% 28px,
+        #0c0c0e;
+    }
+    .console-log-line {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      min-width: 0;
+      color: var(--text-main);
+      line-height: 1.45;
+    }
+    .console-log-head {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .console-log-time {
+      flex: none;
+      min-width: 62px;
+      color: #5b6b66;
+      font-variant-numeric: tabular-nums;
+    }
+    .console-log-actor {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      color: var(--accent-color);
+      font-weight: 700;
+    }
+    .console-log-line.out .console-log-actor { color: var(--state-ok); }
+    .console-log-line.sys .console-log-actor { color: var(--text-muted); }
+    .console-log-line.err .console-log-actor { color: var(--state-danger); }
+    .console-log-text {
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      color: var(--text-main);
+    }
+    .console-log-line.sys .console-log-text { color: var(--text-2); }
+    .console-log-sep {
+      align-self: center;
+      margin: 8px 0 5px;
+      color: var(--text-muted);
+      font-size: 11px;
+      letter-spacing: 0;
+    }
+    .console-tools-used {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .console-tool-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 7px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 10px;
+      background: rgba(255,255,255,.045);
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+    .console-composer {
+      flex: none;
+      position: relative;
+      padding: 10px 14px 12px;
+      border-top: 1px solid rgba(255,255,255,.06);
+      background: #111114;
+    }
+    .console-quick {
+      display: flex;
+      gap: 7px;
+      margin-bottom: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .console-quick::-webkit-scrollbar { display: none; }
+    .console-quick button {
+      flex: none;
+      min-height: 28px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--radius-md);
+      padding: 0 9px;
+      background: rgba(255,255,255,.05);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .console-quick button:hover { color: var(--text-main); border-color: rgba(133,245,219,.28); }
+    .console-input-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 9px;
+      min-height: 40px;
+      border: 1px solid rgba(133,245,219,.16);
+      border-radius: var(--radius-lg);
+      background: #121316;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.55), inset 0 2px 5px rgba(0,0,0,.4);
+      padding: 8px 10px;
+    }
+    .console-prompt {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      color: var(--state-warn);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .console-prompt img { width: 13px; height: 13px; object-fit: contain; image-rendering: pixelated; }
+    textarea {
+      width: 100%;
+      min-height: 24px;
+      max-height: 160px;
+      resize: vertical;
+      border: 0;
+      outline: 0;
+      padding: 2px 0;
+      color: var(--text-main);
+      background: transparent;
+      line-height: 1.45;
+    }
+    textarea::placeholder { color: var(--text-muted); }
+    .send {
+      min-width: 34px;
+      min-height: 30px;
+      border: 1px solid rgba(133,245,219,.24);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+      color: var(--text-main);
+      font-weight: 800;
+    }
+    .send:hover { background: color-mix(in srgb, var(--accent-color) 32%, transparent); }
+    .empty, .error {
+      color: var(--text-muted);
+      padding: 22px 0;
+      text-align: left;
+      white-space: pre-wrap;
+    }
+    .error { color: var(--state-danger); }
+    @media (max-width: 560px) {
+      .console-bar { align-items: flex-start; }
+      .console-input-row { grid-template-columns: minmax(0, 1fr) auto; }
+      .console-prompt { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <header>
-      <img src="${logoUri}" alt="MBOX">
-      <div>
-        <strong>MBOX Shared Console</strong><br>
-        <span>Messages go to the same agent inbox watched by Codex and Claude.</span>
+  <div class="agent-chat-shell console">
+    <div class="console-bar">
+      <div class="console-bar-roster" title="MBOX · Codex · Claude · Джарвис">
+        <span class="console-bar-agent active">
+          <span class="agent-avatar"><img src="${logoUri}" alt=""></span>
+          <span class="console-bar-agent-name">MBOX</span>
+        </span>
+        <span class="console-bar-agent active"><span class="console-bar-agent-name">Codex</span></span>
+        <span class="console-bar-agent active"><span class="console-bar-agent-name">Claude</span></span>
+        <span class="console-bar-agent active"><span class="console-bar-agent-name">Джарвис</span></span>
       </div>
-      <div class="toolbar">
-        <select id="target">
-          <option value="">Auto</option>
-          <option value="Codex">Codex</option>
-          <option value="Claude">Claude</option>
-          <option value="All">All</option>
-          <option value="Джарвис">Jarvis</option>
-        </select>
-        <button id="refresh">Refresh</button>
+      <button class="chat-close" id="refresh" type="button" title="Обновить" aria-label="Обновить">↻</button>
+    </div>
+    <main id="messages" class="console-log">
+      <div class="console-log-line sys">
+        <span class="console-log-head"><span class="console-log-time"></span><span class="console-log-actor">mbox ›</span></span>
+        <span class="console-log-text">mbox консоль готова. /help — список команд.</span>
       </div>
-    </header>
-    <main id="messages"><div class="empty">Loading...</div></main>
-    <section class="composer">
-      <textarea id="text" placeholder="Write @Codex, @Claude, @All, or leave Auto and choose a target..."></textarea>
-      <div class="actions">
-        <button id="send">Send</button>
-        <button id="codex">@Codex</button>
-        <button id="claude">@Claude</button>
+    </main>
+    <section class="console-composer">
+      <div class="console-quick">
+        <button id="codex" type="button">@Codex</button>
+        <button id="claude" type="button">@Claude</button>
+        <button id="all" type="button">@All</button>
+        <button id="jarvis" type="button">@Джарвис</button>
       </div>
+      <form class="console-input-row" id="form">
+        <span class="console-prompt" id="prompt"><img src="${logoUri}" alt=""></span>
+        <textarea id="text" placeholder="/команда, @агент; $проект; #артефакт" rows="1" spellcheck="false"></textarea>
+        <button class="send" id="send" type="submit" aria-label="Отправить">›</button>
+      </form>
     </section>
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const messages = document.getElementById("messages");
     const text = document.getElementById("text");
-    const target = document.getElementById("target");
+    const prompt = document.getElementById("prompt");
+    let selectedTarget = "";
+    let lastDay = "";
 
     document.getElementById("refresh").addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
-    document.getElementById("send").addEventListener("click", send);
-    document.getElementById("codex").addEventListener("click", () => { target.value = "Codex"; if (!text.value.includes("@Codex")) text.value = "@Codex " + text.value; text.focus(); });
-    document.getElementById("claude").addEventListener("click", () => { target.value = "Claude"; if (!text.value.includes("@Claude")) text.value = "@Claude " + text.value; text.focus(); });
+    document.getElementById("form").addEventListener("submit", (event) => { event.preventDefault(); send(); });
+    document.getElementById("codex").addEventListener("click", () => mention("Codex"));
+    document.getElementById("claude").addEventListener("click", () => mention("Claude"));
+    document.getElementById("all").addEventListener("click", () => mention("All"));
+    document.getElementById("jarvis").addEventListener("click", () => mention("Джарвис"));
+    text.addEventListener("input", updatePrompt);
     text.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) send();
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        send();
+      }
     });
+
+    function mention(name) {
+      selectedTarget = name;
+      const marker = "@" + name;
+      if (!text.value.includes(marker)) text.value = marker + (text.value.trim() ? " " + text.value.trim() : " ");
+      updatePrompt();
+      text.focus();
+    }
+
+    function updatePrompt() {
+      const match = text.value.match(/@([A-Za-zА-Яа-яЁё0-9_-]+)/u);
+      prompt.textContent = match ? "@" + match[1] : "";
+      const img = document.createElement("img");
+      img.src = "${logoUri}";
+      img.alt = "";
+      prompt.appendChild(img);
+    }
 
     function send() {
       const body = text.value.trim();
       if (!body) return;
-      vscode.postMessage({ type: "send", body, target: target.value });
+      vscode.postMessage({ type: "send", body, target: selectedTarget });
       text.value = "";
+      selectedTarget = "";
+      updatePrompt();
     }
 
     function escapeHtml(value) {
       return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     }
 
+    function kindOf(item) {
+      if (item.agent_name === "Human" || item.agent_name === "Человек") return "out";
+      if (item.item_type === "agent_error") return "err";
+      if (item.item_type === "notice") return "sys";
+      return "in";
+    }
+
+    function actorOf(item) {
+      if (item.agent_name === "Human" || item.agent_name === "Человек") return "ты";
+      return item.agent_name || "unknown";
+    }
+
     function render(items) {
       if (!items.length) {
-        messages.innerHTML = '<div class="empty">No console messages yet.</div>';
+        messages.innerHTML = '<div class="console-log-line sys"><span class="console-log-head"><span class="console-log-time"></span><span class="console-log-actor">mbox ›</span></span><span class="console-log-text">mbox консоль готова. /help — список команд.</span></div>';
         return;
       }
-      messages.innerHTML = items.map((item) => {
+      lastDay = "";
+      messages.innerHTML = items.reverse().map((item) => {
+        const day = String(item.created_at || "").slice(0, 10);
+        const sep = day && day !== lastDay ? '<div class="console-log-sep">' + escapeHtml(day) + '</div>' : "";
+        if (day) lastDay = day;
         const to = item.props && (item.props.to || item.props.target || item.props.agent);
-        const meta = [item.agent_name || "unknown", item.item_type || "message", item.status || "", to ? "to " + to : "", item.created_at_label || ""].filter(Boolean).map(escapeHtml).join(" / ");
-        return '<article class="message"><div class="meta">' + meta + '</div><div class="body">' + escapeHtml(item.body || item.title || "") + '</div></article>';
+        const actor = actorOf(item);
+        const kind = kindOf(item);
+        const textValue = item.body || item.title || "";
+        const tools = item.props && Array.isArray(item.props.tools_used) ? item.props.tools_used : [];
+        const toolHtml = tools.length ? '<span class="console-tools-used">' + tools.map((tool) => '<span class="console-tool-chip">' + escapeHtml(tool) + '</span>').join("") + '</span>' : "";
+        const targetHint = to ? ' <span class="console-tool-chip">to ' + escapeHtml(to) + '</span>' : "";
+        return sep + '<div class="console-log-line ' + kind + '">' +
+          '<span class="console-log-head"><span class="console-log-time">' + escapeHtml(item.created_at_label || "") + '</span><span class="console-log-actor">' + escapeHtml(actor) + ' ›</span>' + targetHint + '</span>' +
+          '<span class="console-log-text">' + escapeHtml(textValue) + '</span>' + toolHtml +
+          '</div>';
       }).join("");
+      messages.scrollTop = messages.scrollHeight;
     }
 
     window.addEventListener("message", (event) => {
@@ -549,6 +855,7 @@ function consoleHtml(nonce, logoUri) {
     });
 
     vscode.postMessage({ type: "ready" });
+    updatePrompt();
   </script>
 </body>
 </html>`;

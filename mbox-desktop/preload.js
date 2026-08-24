@@ -4,6 +4,8 @@ const path = require("path");
 
 const desktopIconSrc = loadDesktopIconSrc();
 
+document.documentElement.dataset.mboxDesktop = "true";
+
 const desktopApi = {
   status: () => ipcRenderer.invoke("mbox-desktop:status"),
   start: (name) => ipcRenderer.invoke("mbox-desktop:start", name),
