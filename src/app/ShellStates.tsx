@@ -1,10 +1,13 @@
-import { CloudOff, Loader2 } from "lucide-react";
+import { CloudOff } from "lucide-react";
+import { useWorkingFrame } from "../components/AgentAvatar";
 
 export function ShellLoading({ text = "Загрузка" }: { text?: string }) {
+  const frame = useWorkingFrame(true);
+
   return (
     <main className="login-screen">
       <div className="login-panel shell-state">
-        <Loader2 className="shell-spinner" size={22} />
+        <img className="shell-spinner" src={frame} width={54} height={54} alt="" />
         <span>{text}</span>
       </div>
     </main>

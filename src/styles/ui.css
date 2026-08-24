@@ -141,12 +141,10 @@
 }
 
 .shell-spinner {
-  animation: shell-spin 1s linear infinite;
-  color: var(--accent-color);
-}
-
-@keyframes shell-spin {
-  to { transform: rotate(360deg); }
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  image-rendering: pixelated;
 }
 
 .offline-banner {
