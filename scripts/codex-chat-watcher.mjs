@@ -28,18 +28,25 @@ const aliases = (config.CODEX_CHAT_ALIASES || "codex,Codex,кодекс,Коде
   .map((value) => value.trim())
   .filter(Boolean);
 const seenPath = path.join(os.tmpdir(), `codex-chat-watcher-seen-${agentName}-${project}.json`);
+const lockPath = path.join(os.tmpdir(), `codex-chat-watcher-${agentName}-${project}.lock`);
 const logPrefix = `[${agentName} chat]`;
 
 let cookie = "";
 let stopping = false;
 let seen = loadSeen();
+let lockFd = null;
+
+acquireSingleInstanceLock();
 
 process.on("SIGINT", () => {
   stopping = true;
+  releaseSingleInstanceLock();
 });
 process.on("SIGTERM", () => {
   stopping = true;
+  releaseSingleInstanceLock();
 });
+process.on("exit", releaseSingleInstanceLock);
 
 await ping("session_start");
 console.log(`${logPrefix} watching @codex mentions on ${baseUrl} project=${project} every ${pollMs}ms`);
@@ -57,6 +64,56 @@ while (!stopping) {
 }
 
 console.log(`${logPrefix} stopped`);
+releaseSingleInstanceLock();
+
+function acquireSingleInstanceLock() {
+  try {
+    lockFd = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(lockFd, String(process.pid));
+  } catch (error) {
+    const pid = readLockPid();
+    if (pid && isProcessAlive(pid)) {
+      console.error(`${logPrefix} another watcher is already running pid=${pid}; exiting`);
+      process.exit(0);
+    }
+    try {
+      fs.rmSync(lockPath, { force: true });
+      lockFd = fs.openSync(lockPath, "wx");
+      fs.writeFileSync(lockFd, String(process.pid));
+    } catch (retryError) {
+      console.error(`${logPrefix} could not acquire lock ${lockPath}: ${retryError.message}`);
+      process.exit(1);
+    }
+  }
+}
+
+function readLockPid() {
+  try {
+    const pid = Number(fs.readFileSync(lockPath, "utf8").trim());
+    return Number.isFinite(pid) ? pid : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseSingleInstanceLock() {
+  if (lockFd !== null) {
+    try { fs.closeSync(lockFd); } catch {}
+    lockFd = null;
+  }
+  if (readLockPid() === process.pid) {
+    try { fs.rmSync(lockPath, { force: true }); } catch {}
+  }
+}
 
 function loadConfig() {
   const env = { ...process.env };

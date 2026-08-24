@@ -15,7 +15,9 @@ const project = process.env.MBOX_PROJECT || "MBOX";
 const pollMs = Number(process.env.MBOX_WATCH_POLL_MS || 15000);
 const includeUnaddressed = !["0", "false", "no"].includes(String(process.env.MBOX_WATCH_UNADDRESSED || "true").toLowerCase());
 const startGraceMs = Number(process.env.MBOX_WATCH_START_GRACE_MS || 15 * 60 * 1000);
-const cutoffAt = new Date(Date.now() - startGraceMs);
+const includeBacklog = ["1", "true", "yes"].includes(String(process.env.MBOX_WATCH_BACKLOG || "").toLowerCase());
+const startedAt = new Date();
+const cutoffAt = includeBacklog ? new Date(startedAt.getTime() - startGraceMs) : startedAt;
 const agentAliases = [agentName, ...(process.env.MBOX_AGENT_ALIASES || "Клод").split(",")]
   .map((alias) => alias.trim())
   .filter(Boolean);
@@ -25,6 +27,7 @@ const broadcastAliases = (process.env.MBOX_BROADCAST_ALIASES || "Всем,Все
   .filter(Boolean);
 const logPrefix = `[${agentName} inbox]`;
 const seenPath = path.join(os.tmpdir(), `claude-inbox-watcher-seen-${agentName}.json`);
+const lockPath = path.join(os.tmpdir(), `claude-inbox-watcher-${agentName}-${project}.lock`);
 const seen = new Set(loadSeen());
 const claudeCommand = process.env.CLAUDE_COMMAND || "claude";
 const claudeModel = process.env.CLAUDE_WATCH_MODEL || "";
@@ -34,12 +37,17 @@ const contextLimit = Number(process.env.MBOX_WATCH_CONTEXT_LIMIT || 30);
 
 let cookie = "";
 let stopping = false;
+let lockFd = null;
 
-process.on("SIGINT", () => { stopping = true; });
-process.on("SIGTERM", () => { stopping = true; });
+acquireSingleInstanceLock();
+
+process.on("SIGINT", () => { stopping = true; releaseSingleInstanceLock(); });
+process.on("SIGTERM", () => { stopping = true; releaseSingleInstanceLock(); });
+process.on("exit", releaseSingleInstanceLock);
 
 await ping("session_start");
 console.log(`${logPrefix} watching ${baseUrl} project=${project} every ${pollMs}ms`);
+console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring inbox before ${cutoffAt.toISOString()}`}`);
 
 while (!stopping) {
   try {
@@ -58,6 +66,56 @@ while (!stopping) {
 }
 
 console.log(`${logPrefix} stopped`);
+releaseSingleInstanceLock();
+
+function acquireSingleInstanceLock() {
+  try {
+    lockFd = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(lockFd, String(process.pid));
+  } catch (error) {
+    const pid = readLockPid();
+    if (pid && isProcessAlive(pid)) {
+      console.error(`${logPrefix} another watcher is already running pid=${pid}; exiting`);
+      process.exit(0);
+    }
+    try {
+      fs.rmSync(lockPath, { force: true });
+      lockFd = fs.openSync(lockPath, "wx");
+      fs.writeFileSync(lockFd, String(process.pid));
+    } catch (retryError) {
+      console.error(`${logPrefix} could not acquire lock ${lockPath}: ${retryError.message}`);
+      process.exit(1);
+    }
+  }
+}
+
+function readLockPid() {
+  try {
+    const pid = Number(fs.readFileSync(lockPath, "utf8").trim());
+    return Number.isFinite(pid) ? pid : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseSingleInstanceLock() {
+  if (lockFd !== null) {
+    try { fs.closeSync(lockFd); } catch {}
+    lockFd = null;
+  }
+  if (readLockPid() === process.pid) {
+    try { fs.rmSync(lockPath, { force: true }); } catch {}
+  }
+}
 
 function loadSeen() {
   try {

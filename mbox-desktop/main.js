@@ -18,6 +18,7 @@ const processPatterns = {
 let mainWindow = null;
 let tray = null;
 let tracked = new Map();
+let updatePromptOpen = false;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
@@ -269,12 +270,37 @@ function setupAutoUpdates() {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.setFeedURL({ provider: "generic", url: updateFeedUrl });
   autoUpdater.on("checking-for-update", () => updateStatus("checking", "Проверяю обновления"));
-  autoUpdater.on("update-available", (info) => updateStatus("available", `Доступна версия ${info.version || ""}`.trim()));
+  autoUpdater.on("update-available", (info) => {
+    const message = `Доступна версия ${info.version || ""}`.trim();
+    updateStatus("available", message);
+    showUpdateNotice("info", "MBOX Desktop: найдено обновление", `${message}. Скачиваю в фоне.`);
+  });
   autoUpdater.on("update-not-available", () => updateStatus("current", "Установлена свежая версия"));
   autoUpdater.on("download-progress", (progress) => updateStatus("downloading", `Скачиваю обновление ${Math.round(progress.percent || 0)}%`));
   autoUpdater.on("update-downloaded", (info) => {
     updateStatus("ready", `Обновление ${info.version || ""} готово к установке`.trim());
-    dialog.showMessageBox(mainWindow, {
+    showUpdateInstallPrompt(info);
+  });
+  autoUpdater.on("error", (error) => {
+    updateStatus("error", `Обновление: ${error.message}`);
+    showUpdateNotice("error", "MBOX Desktop: обновление не проверилось", error.message);
+  });
+  if (app.isPackaged) {
+    setTimeout(() => checkForUpdates(false), 5000);
+  }
+}
+
+function showUpdateNotice(type, message, detail) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  dialog.showMessageBox(mainWindow, { type, message, detail }).catch(() => {});
+}
+
+function showUpdateInstallPrompt(info) {
+  if (!mainWindow || mainWindow.isDestroyed() || updatePromptOpen) return;
+  updatePromptOpen = true;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  dialog.showMessageBox(mainWindow, {
       type: "info",
       buttons: ["Установить сейчас", "Позже"],
       defaultId: 0,
@@ -283,12 +309,7 @@ function setupAutoUpdates() {
       detail: "Приложение перезапустится и установит новую версию.",
     }).then((result) => {
       if (result.response === 0) autoUpdater.quitAndInstall(false, true);
-    }).catch(() => {});
-  });
-  autoUpdater.on("error", (error) => updateStatus("error", `Обновление: ${error.message}`));
-  if (app.isPackaged) {
-    setTimeout(() => checkForUpdates(false), 5000);
-  }
+    }).catch(() => {}).finally(() => { updatePromptOpen = false; });
 }
 
 function updateStatus(status, message) {

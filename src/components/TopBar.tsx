@@ -71,7 +71,7 @@ declare global {
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.4.exe";
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.5.exe";
 
 export function TopBar({
   query,
