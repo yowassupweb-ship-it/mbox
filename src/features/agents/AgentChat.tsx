@@ -927,7 +927,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 </span>
               )) : <span className="console-bar-agent muted">агентов нет на связи</span>}
             </div>
-            <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={15} /></button>
+            <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={21} strokeWidth={3} /></button>
           </div>
 
           {/* Действия, требующие решения человека (requires_human) — раньше жили только на

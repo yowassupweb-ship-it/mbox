@@ -244,7 +244,7 @@ async function recentConversationContext(item) {
   const currentCreatedAt = new Date(item.created_at || Date.now()).getTime();
   const rows = (data.inbox || [])
     .filter((entry) => ["question", "chat", "answer", "agent_response"].includes(entry.item_type))
-    .filter((entry) => String(entry.project_id || "") === targetProjectId)
+    .filter((entry) => !targetProjectId || !entry.project_id || String(entry.project_id) === targetProjectId)
     .filter((entry) => new Date(entry.created_at || 0).getTime() <= currentCreatedAt)
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
     .slice(-contextLimit);
@@ -259,9 +259,10 @@ async function recentConversationContext(item) {
 function formatContextLine(entry) {
   const at = entry.created_at ? new Date(entry.created_at).toISOString().slice(11, 19) : "--:--:--";
   const actor = entry.agent_name || "unknown";
-  const text = String(entry.body || entry.title || "").replace(/\s+/g, " ").trim();
+  const to = entry.props?.to ? ` -> ${entry.props.to}` : "";
+  const text = String([entry.title, entry.body].filter(Boolean).join(" — ")).replace(/\s+/g, " ").trim();
   const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
-  return `[${at}] ${actor} (${entry.item_type} #${entry.id}): ${clipped}`;
+  return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}): ${clipped}`;
 }
 
 async function runClaude(item) {
@@ -282,18 +283,20 @@ async function runClaude(item) {
     `Body:\n${item.body || ""}`,
   ].join("\n");
 
-  const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "text"];
+  const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "text", "--input-format", "text"];
   if (claudeModel) args.push("--model", claudeModel);
-  args.push(prompt);
 
-  return await spawnCaptured(claudeCommand, args, { cwd: workdir, env: process.env });
+  return await spawnCaptured(claudeCommand, args, { cwd: workdir, env: process.env }, prompt);
 }
 
-function spawnCaptured(command, args, options) {
+function spawnCaptured(command, args, options, input = "") {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
+    const child = spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32" });
     let stdout = "";
     let stderr = "";
+    if (input) {
+      child.stdin?.end(input);
+    }
     child.stdout.on("data", (chunk) => { stdout += chunk; process.stdout.write(chunk); });
     child.stderr.on("data", (chunk) => { stderr += chunk; process.stderr.write(chunk); });
     child.on("error", reject);

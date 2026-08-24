@@ -489,6 +489,14 @@
    регулируется перетаскиванием (см. startResize в AgentChat.tsx), треть экрана по умолчанию.
    На более узких экранах — прежнее плавающее/полноэкранное поведение, не трогаем. */
 @media (min-width: 1201px) {
+  :root { --chat-slot: 104px; }
+
+  .agent-chat {
+    right: calc(18px + env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    z-index: 55;
+  }
+
   .agent-chat-shell.console {
     position: fixed;
     top: 0;
@@ -626,13 +634,21 @@
 
 .agent-chat-shell .console-bar .chat-close {
   margin-left: auto;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 4px 6px;
-  background: transparent;
-  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: var(--radius-md);
+  padding: 0;
+  background: rgba(255, 255, 255, .045);
+  color: var(--text-2);
 }
-.agent-chat-shell .console-bar .chat-close:hover { color: var(--text-main); }
+.agent-chat-shell .console-bar .chat-close:hover {
+  color: var(--text-main);
+  border-color: rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .075);
+}
 
 /* Не растягивается (flex: none) — лог занимает всё оставшееся место. Если запросов накопилось
    много, сама секция скроллится, не толкая шапку/поле ввода за пределы экрана. */
