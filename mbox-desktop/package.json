@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
@@ -11,7 +11,9 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
-  "dependencies": {},
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
   "devDependencies": {
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
@@ -42,6 +44,12 @@
       "target": "nsis",
       "icon": "resources/mbox.png"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://mbox.shar-os.ru/downloads/"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

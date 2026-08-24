@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -7,6 +8,7 @@ const isDev = !app.isPackaged;
 const repoRoot = path.resolve(__dirname, "..");
 const appRoot = isDev ? repoRoot : process.resourcesPath;
 const mboxUrl = (process.env.MBOX_URL || "https://mbox.shar-os.ru").replace(/\/+$/, "");
+const updateFeedUrl = `${mboxUrl}/downloads/`;
 const iconPath = path.join(__dirname, "resources", "mbox.png");
 const processPatterns = {
   Codex: "codex-chat-watcher.mjs",
@@ -31,6 +33,7 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   setMenu();
+  setupAutoUpdates();
   await startResponders().catch((error) => log(`autostart responders failed: ${error.message}`));
 });
 
@@ -97,6 +100,7 @@ function setMenu() {
       submenu: [
         { label: "Обновить вебку", accelerator: "CmdOrCtrl+R", click: () => mainWindow?.reload() },
         { label: "Открыть в браузере", click: () => shell.openExternal(mboxUrl) },
+        { label: "Проверить обновления", click: () => checkForUpdates(true) },
         { type: "separator" },
         { label: "Открыть репозиторий", click: () => shell.openPath(repoRoot) },
         { type: "separator" },
@@ -260,6 +264,55 @@ function log(message) {
   mainWindow?.webContents.send("mbox-desktop:event", { type: "log", message, at: new Date().toISOString() });
 }
 
+function setupAutoUpdates() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.setFeedURL({ provider: "generic", url: updateFeedUrl });
+  autoUpdater.on("checking-for-update", () => updateStatus("checking", "Проверяю обновления"));
+  autoUpdater.on("update-available", (info) => updateStatus("available", `Доступна версия ${info.version || ""}`.trim()));
+  autoUpdater.on("update-not-available", () => updateStatus("current", "Установлена свежая версия"));
+  autoUpdater.on("download-progress", (progress) => updateStatus("downloading", `Скачиваю обновление ${Math.round(progress.percent || 0)}%`));
+  autoUpdater.on("update-downloaded", (info) => {
+    updateStatus("ready", `Обновление ${info.version || ""} готово к установке`.trim());
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      buttons: ["Установить сейчас", "Позже"],
+      defaultId: 0,
+      cancelId: 1,
+      message: "Обновление MBOX Desktop скачано.",
+      detail: "Приложение перезапустится и установит новую версию.",
+    }).then((result) => {
+      if (result.response === 0) autoUpdater.quitAndInstall(false, true);
+    }).catch(() => {});
+  });
+  autoUpdater.on("error", (error) => updateStatus("error", `Обновление: ${error.message}`));
+  if (app.isPackaged) {
+    setTimeout(() => checkForUpdates(false), 5000);
+  }
+}
+
+function updateStatus(status, message) {
+  log(message);
+  mainWindow?.webContents.send("mbox-desktop:event", { type: "update", status, message, at: new Date().toISOString() });
+}
+
+async function checkForUpdates(manual) {
+  if (!app.isPackaged) {
+    const message = "Обновления доступны в установленном MBOX Desktop";
+    updateStatus("dev", message);
+    if (manual) dialog.showMessageBox(mainWindow, { type: "info", message });
+    return { ok: false, reason: "dev" };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { ok: true, updateInfo: result?.updateInfo || null };
+  } catch (error) {
+    updateStatus("error", `Не удалось проверить обновления: ${error.message}`);
+    if (manual) dialog.showMessageBox(mainWindow, { type: "error", message: "Не удалось проверить обновления", detail: error.message });
+    return { ok: false, error: error.message };
+  }
+}
+
 ipcMain.handle("mbox-desktop:status", async () => processStatus());
 ipcMain.handle("mbox-desktop:start", async (_event, name) => {
   if (name === "All") await startResponders();
@@ -276,3 +329,8 @@ ipcMain.handle("mbox-desktop:remove-autostart", async () => removeResponderAutos
 ipcMain.handle("mbox-desktop:install-app-autostart", async () => installAppAutostart());
 ipcMain.handle("mbox-desktop:remove-app-autostart", async () => removeAppAutostart());
 ipcMain.handle("mbox-desktop:open-repo", async () => shell.openPath(repoRoot));
+ipcMain.handle("mbox-desktop:check-updates", async () => checkForUpdates(true));
+ipcMain.handle("mbox-desktop:install-update", async () => {
+  autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
+});

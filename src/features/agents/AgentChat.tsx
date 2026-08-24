@@ -174,7 +174,7 @@ function agentState(agent: AgentActivity, runs: AgentRun[]) {
   // phase — живой сигнал, который агент сам присылает через POST /agent/ping (не выдумываем
   // "думает" статично: если фазы нет, значит агент сейчас реально ничего не делает).
   if (status === "active" && agent.phase) return { key: "working", label: agent.phase, detail: "" };
-  if (status === "active") return { key: "thinking", label: "на связи", detail: "ждёт задачу" };
+  if (status === "active") return { key: "active", label: "на связи", detail: "ждёт задачу" };
   if (status === "idle") return { key: "idle", label: "ожидает", detail: formatSince(agent.last_seen) };
   return { key: "offline", label: "отключён", detail: formatSince(agent.last_seen) };
 }
@@ -658,7 +658,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const working = states.filter((entry) => entry.state.key === "working");
   // "N агентов на связи: имена" — раньше жило в шапке страницы и дублировало этот же ростер под
   // другим текстом. Состав разговора — дело консоли, не глобальной шапки.
-  const online = states.filter((entry) => entry.state.key === "working" || entry.state.key === "thinking");
+  const online = states.filter((entry) => entry.state.key !== "offline");
   const rosterSummary = online.length
     ? `${online.length} ${plural(online.length, "агент", "агента", "агентов")} на связи: ${online.map((entry) => entry.agent.name).join(", ")}`
     : "агентов нет на связи";
@@ -919,8 +919,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           <div className="console-resize-handle" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Изменить ширину консоли" />
           <div className="console-bar">
             <div className="console-bar-roster" title={rosterSummary}>
-              {online.length ? online.map(({ agent, state }) => (
-                <span className="console-bar-agent" key={agent.id} title={`${agent.name} · ${state.label}${state.detail ? " — " + state.detail : ""}`}>
+              {states.length ? states.map(({ agent, state }) => (
+                <span className={`console-bar-agent ${state.key}`} key={agent.id} title={`${agent.name} · ${state.label}${state.detail ? " — " + state.detail : ""}`}>
                   <AgentAvatar name={agent.name} status={state.key} live={state.key === "working"} size={20} />
                   <span className="console-bar-agent-name">{agent.name}</span>
                   {state.key === "working" && <span className="console-bar-agent-phase">{state.label}</span>}

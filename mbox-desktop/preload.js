@@ -13,6 +13,8 @@ const desktopApi = {
   installAppAutostart: () => ipcRenderer.invoke("mbox-desktop:install-app-autostart"),
   removeAppAutostart: () => ipcRenderer.invoke("mbox-desktop:remove-app-autostart"),
   openRepo: () => ipcRenderer.invoke("mbox-desktop:open-repo"),
+  checkUpdates: () => ipcRenderer.invoke("mbox-desktop:check-updates"),
+  installUpdate: () => ipcRenderer.invoke("mbox-desktop:install-update"),
   onEvent: (handler) => ipcRenderer.on("mbox-desktop:event", (_event, payload) => handler(payload))
 };
 
@@ -58,8 +60,10 @@ function mountDesktopControl(topbar, search) {
         <button type="button" data-action="stop">■ Остановить</button>
         <button type="button" data-action="autostart">Автозапуск агентов</button>
         <button type="button" data-action="app-autostart">Автозапуск приложения</button>
+        <button type="button" data-action="update">Обновить</button>
         <button type="button" data-action="repo">Репозиторий</button>
       </div>
+      <div class="desktop-update-state" data-role="update-status">Обновления проверяются в установленном приложении</div>
     </div>
   `;
   injectDesktopControlStyles();
@@ -69,6 +73,7 @@ function mountDesktopControl(topbar, search) {
   const popover = root.querySelector(".desktop-popover");
   const summary = root.querySelector("[data-role='summary']");
   const list = root.querySelector(".desktop-agent-list");
+  const updateStatus = root.querySelector("[data-role='update-status']");
 
   async function refresh() {
     const rows = await desktopApi.status();
@@ -95,9 +100,16 @@ function mountDesktopControl(topbar, search) {
     if (action === "stop") { await desktopApi.stop("All"); await refresh(); }
     if (action === "autostart") await desktopApi.installAutostart();
     if (action === "app-autostart") await desktopApi.installAppAutostart();
+    if (action === "update") {
+      updateStatus.textContent = "Проверяю обновления";
+      await desktopApi.checkUpdates();
+    }
     if (action === "repo") await desktopApi.openRepo();
   });
-  desktopApi.onEvent(() => { if (!popover.hidden) refresh(); });
+  desktopApi.onEvent((event) => {
+    if (event?.type === "update" && event.message) updateStatus.textContent = event.message;
+    if (!popover.hidden) refresh();
+  });
   refresh();
 }
 
@@ -132,6 +144,7 @@ function injectDesktopControlStyles() {
     .desktop-slot-preload .desktop-dot { width: 9px; height: 9px; border-radius: 50%; background: #6b7280; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
     .desktop-slot-preload .desktop-dot.live { background: #65d68b; box-shadow: 0 0 0 3px rgba(101,214,139,.16); }
     .desktop-slot-preload .desktop-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .desktop-slot-preload .desktop-update-state { margin-top: 9px; color: var(--text-muted, #aeb8c8); font-size: 11px; line-height: 1.35; }
   `;
   document.documentElement.appendChild(style);
 }

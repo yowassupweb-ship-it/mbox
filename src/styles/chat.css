@@ -573,18 +573,20 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: 6px 10px;
+  min-height: 42px;
+  padding: 7px 10px;
   background: #17171a;
   border-bottom: 1px solid rgba(255, 255, 255, .06);
+  overflow: visible;
 }
 
 .agent-chat-shell .console-bar-roster {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 7px 10px;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   white-space: nowrap;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -593,8 +595,11 @@
 .console-bar-agent {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: none;
+  min-height: 26px;
+  padding: 2px 3px;
+  border-radius: var(--radius-pill);
 }
 
 .console-bar-agent-name {
@@ -603,6 +608,11 @@
 }
 
 .console-bar-agent.muted { color: var(--text-muted); }
+
+.console-bar-agent.active .console-bar-agent-name,
+.console-bar-agent.working .console-bar-agent-name {
+  color: var(--text-main);
+}
 
 .console-bar-agent-phase {
   color: var(--text-muted);

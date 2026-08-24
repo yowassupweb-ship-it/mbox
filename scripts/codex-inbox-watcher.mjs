@@ -31,6 +31,7 @@ const broadcastAliases = (config.MBOX_BROADCAST_ALIASES || "Всем,Все,All,
 const codexCommand = config.CODEX_COMMAND || "codex";
 const codexModel = config.CODEX_WATCH_MODEL || "";
 const workdir = config.CODEX_WATCH_WORKDIR || root;
+const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 30);
 const logPrefix = `[${agentName} inbox]`;
 
 let cookie = "";
@@ -289,14 +290,45 @@ async function finishRun(id, status, result, elapsedMs) {
   });
 }
 
+async function recentConversationContext(item) {
+  if (!contextLimit) return "";
+  const data = await mboxFetch("/api/mbox/agent/inbox");
+  const targetProjectId = String(item.project_id || "");
+  const currentCreatedAt = new Date(item.created_at || Date.now()).getTime();
+  const rows = (data.inbox || [])
+    .filter((entry) => ["question", "chat", "answer", "agent_response"].includes(entry.item_type))
+    .filter((entry) => String(entry.project_id || "") === targetProjectId)
+    .filter((entry) => new Date(entry.created_at || 0).getTime() <= currentCreatedAt)
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
+    .slice(-contextLimit);
+
+  if (!rows.length) return "";
+  return [
+    "Recent MBOX console context, oldest to newest:",
+    ...rows.map(formatContextLine),
+  ].join("\n");
+}
+
+function formatContextLine(entry) {
+  const at = entry.created_at ? new Date(entry.created_at).toISOString().slice(11, 19) : "--:--:--";
+  const actor = entry.agent_name || "unknown";
+  const text = String(entry.body || entry.title || "").replace(/\s+/g, " ").trim();
+  const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  return `[${at}] ${actor} (${entry.item_type} #${entry.id}): ${clipped}`;
+}
+
 async function runCodex(item) {
   const outputFile = path.join(os.tmpdir(), `codex-mbox-${item.id}-${Date.now()}.txt`);
+  const conversationContext = await recentConversationContext(item);
   const prompt = [
     "You were woken by MBOX agent_inbox.",
     `Your canonical agent name is ${agentName}.`,
     "Answer the inbox item below. If the user asks you to do code work, do it in the repo and summarize the result.",
     "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
     "Keep the final answer concise and directly useful.",
+    "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
+    "",
+    conversationContext,
     "",
     `Inbox id: ${item.id}`,
     `From: ${item.agent_name || "unknown"}`,
