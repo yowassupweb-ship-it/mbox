@@ -62,7 +62,8 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL(mboxUrl);
+  mainWindow.webContents.setUserAgent(`${mainWindow.webContents.getUserAgent()} MBOXDesktop/${app.getVersion()}`);
+  mainWindow.loadURL(withDesktopFlag(mboxUrl));
   mainWindow.on("close", (event) => {
     if (app.isQuitting) return;
     event.preventDefault();
@@ -263,6 +264,12 @@ async function showStatusDialog() {
 function log(message) {
   console.log(`[MBOX Desktop] ${message}`);
   mainWindow?.webContents.send("mbox-desktop:event", { type: "log", message, at: new Date().toISOString() });
+}
+
+function withDesktopFlag(rawUrl) {
+  const url = new URL(rawUrl);
+  url.searchParams.set("mboxDesktop", "1");
+  return url.toString();
 }
 
 function setupAutoUpdates() {

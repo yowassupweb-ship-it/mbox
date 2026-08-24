@@ -71,7 +71,15 @@ declare global {
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.5.exe";
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.6.exe";
+
+function detectDesktopShell() {
+  if (typeof window === "undefined") return false;
+  const flag = document.documentElement.dataset.mboxDesktop === "true";
+  const query = new URLSearchParams(window.location.search).get("mboxDesktop") === "1";
+  const userAgent = window.navigator.userAgent.includes("MBOXDesktop/");
+  return flag || query || userAgent;
+}
 
 export function TopBar({
   query,
@@ -126,8 +134,7 @@ export function TopBar({
     let cancelled = false;
     const detect = () => {
       if (cancelled) return false;
-      const desktopFlag = document.documentElement.dataset.mboxDesktop === "true";
-      if (desktopFlag) setIsDesktopShell(true);
+      if (detectDesktopShell()) setIsDesktopShell(true);
       if (!window.mboxDesktop) return false;
       setDesktopApi(window.mboxDesktop);
       return true;

@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld("mboxDesktop", desktopApi);
 
 window.addEventListener("DOMContentLoaded", () => {
   document.documentElement.dataset.mboxDesktop = "true";
-  mountDesktopControlWhenReady();
+  window.dispatchEvent(new Event("mbox-desktop-ready"));
 });
 
 function mountDesktopControlWhenReady() {

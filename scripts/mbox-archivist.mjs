@@ -1782,7 +1782,7 @@ async function respondToRequests() {
         const summary = await cloudflareSummarize(transcript);
         if (summary) {
           jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
-          phase("Сжимает историю диалога (Cloudflare)");
+          phase("Сжимает историю диалога");
           detailedTrace.push(`Сжатие истории: ${older.length} старых сообщений упакованы в сводку (${summary.length} символов), последние ${recent.length} остались как есть.`);
           finalSystemPrompt = `${systemPrompt} Сводка более раннего разговора: ${summary}`;
           historyMessages = recent.map(toRole);

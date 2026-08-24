@@ -2213,7 +2213,7 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
         const older = history.slice(0, history.length - KEEP_RAW);
         const recent = history.slice(history.length - KEEP_RAW);
         const transcript = older.map((row) => `${row.agent_name === JARVIS_NAME ? JARVIS_NAME : "Человек"}: ${row.body || row.title}`).join("\n");
-        setPhase(item.id, "Сжимает историю диалога (Cloudflare)");
+        setPhase(item.id, "Сжимает историю диалога");
         const summary = await cloudflareSummarize(transcript);
         if (summary) {
           jlog(item.id, `история сжата Cloudflare: ${older.length} сообщений -> сводка ${summary.length} символов`);
