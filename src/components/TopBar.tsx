@@ -1,4 +1,4 @@
-import { AlertTriangle, Search } from "lucide-react";
+import { AlertTriangle, Download, FolderOpen, Play, RefreshCw, Search, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
 
@@ -35,7 +35,26 @@ type TopBarProps = {
   busy?: boolean;
 };
 
+type DesktopResponder = { pid: number; agent: string; commandLine?: string };
+
+declare global {
+  interface Window {
+    mboxDesktop?: {
+      status: () => Promise<DesktopResponder[]>;
+      start: (name: string) => Promise<DesktopResponder[]>;
+      stop: (name: string) => Promise<DesktopResponder[]>;
+      installAutostart: () => Promise<unknown>;
+      removeAutostart: () => Promise<unknown>;
+      installAppAutostart: () => Promise<unknown>;
+      removeAppAutostart: () => Promise<unknown>;
+      openRepo: () => Promise<unknown>;
+      onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;
+    };
+  }
+}
+
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.0.exe";
 
 export function TopBar({
   query,
@@ -53,12 +72,34 @@ export function TopBar({
   const [popoverMounted, setPopoverMounted] = useState(false);
   const [popoverClosing, setPopoverClosing] = useState(false);
   const [logoBurst, setLogoBurst] = useState(false);
+  const [desktopOpen, setDesktopOpen] = useState(false);
+  const [desktopRows, setDesktopRows] = useState<DesktopResponder[]>([]);
+  const [desktopBusy, setDesktopBusy] = useState(false);
   const closeTimer = useRef<number | undefined>(undefined);
   const burstTimer = useRef<number | undefined>(undefined);
   const firstRun = useRef(true);
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy || logoBurst);
+  const desktop = typeof window !== "undefined" ? window.mboxDesktop : undefined;
+  const codexLive = desktopRows.some((row) => row.agent === "Codex");
+  const claudeLive = desktopRows.some((row) => row.agent === "Claude");
+
+  async function refreshDesktop() {
+    if (!desktop) return;
+    setDesktopRows(await desktop.status());
+  }
+
+  async function desktopAction(action: () => Promise<unknown>) {
+    if (!desktop) return;
+    setDesktopBusy(true);
+    try {
+      await action();
+      await refreshDesktop();
+    } finally {
+      setDesktopBusy(false);
+    }
+  }
 
   // Попап раньше пропадал мгновенно при закрытии — CSS-анимация играла только на открытии.
   // Держим DOM ещё один тик, проигрываем обратную анимацию, и только потом размонтируем.
@@ -87,8 +128,76 @@ export function TopBar({
     return () => window.clearTimeout(burstTimer.current);
   }, [open]);
 
+  useEffect(() => {
+    if (!desktop) return;
+    void refreshDesktop();
+    const timer = window.setInterval(() => { void refreshDesktop(); }, 6000);
+    desktop.onEvent(() => { void refreshDesktop(); });
+    return () => window.clearInterval(timer);
+  }, [desktop]);
+
   return (
     <header className="topbar">
+      <div className="desktop-slot">
+        {desktop ? (
+          <button
+            className={`desktop-pill ${codexLive && claudeLive ? "active" : ""}`}
+            type="button"
+            onClick={() => { setDesktopOpen((value) => !value); void refreshDesktop(); }}
+            aria-expanded={desktopOpen}
+          >
+            <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
+            <strong>Приложение</strong>
+            <span>{codexLive && claudeLive ? "агенты слушают" : desktopRows.length ? "частично" : "тихо"}</span>
+          </button>
+        ) : (
+          <a className="desktop-pill download" href={desktopDownloadUrl} target="_blank" rel="noreferrer">
+            <Download size={17} />
+            <strong>Скачать приложение</strong>
+          </a>
+        )}
+        {desktop && desktopOpen && (
+          <div className="desktop-popover" role="dialog" aria-label="MBOX Desktop">
+            <div className="desktop-popover-head">
+              <strong>Локальные агенты</strong>
+              <button type="button" onClick={refreshDesktop} disabled={desktopBusy} aria-label="Обновить">
+                <RefreshCw size={14} />
+              </button>
+            </div>
+            <div className="desktop-agent-list">
+              {["Codex", "Claude"].map((name) => {
+                const row = desktopRows.find((item) => item.agent === name);
+                return (
+                  <div className="desktop-agent-row" key={name}>
+                    <span className={row ? "desktop-dot live" : "desktop-dot"} />
+                    <div>
+                      <strong>{name}</strong>
+                      <span>{row ? `pid ${row.pid}` : "не запущен"}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="desktop-actions">
+              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.start("All"))}>
+                <Play size={14} /> Запустить
+              </button>
+              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.stop("All"))}>
+                <Square size={14} /> Остановить
+              </button>
+              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAutostart())}>
+                Автозапуск агентов
+              </button>
+              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAppAutostart())}>
+                Автозапуск приложения
+              </button>
+              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.openRepo())}>
+                <FolderOpen size={14} /> Репозиторий
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       <div className="search-shell">
         <Search size={18} />
         <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Поиск" />

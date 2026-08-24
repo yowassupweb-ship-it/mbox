@@ -1,0 +1,51 @@
+{
+  "name": "mbox-desktop",
+  "displayName": "MBOX Desktop",
+  "version": "0.1.0",
+  "description": "MBOX web mirror with local desktop responder controls.",
+  "private": true,
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "node launch.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ru.sharos.mbox.desktop",
+    "productName": "MBOX Desktop",
+    "files": [
+      "launch.js",
+      "main.js",
+      "preload.js",
+      "resources/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../scripts",
+        "to": "scripts",
+        "filter": [
+          "start-codex-responder.cmd",
+          "start-claude-responder.cmd",
+          "codex-chat-watcher.mjs",
+          "claude-inbox-watcher.mjs"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "resources/mbox.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

@@ -16,6 +16,8 @@
     "mbox:sort": "node scripts/mbox-maintenance.mjs sort",
     "mbox:index": "node scripts/mbox-maintenance.mjs index",
     "mbox:codex-watch": "node scripts/codex-inbox-watcher.mjs",
+    "mbox:codex-chat-watch": "node scripts/codex-chat-watcher.mjs",
+    "mbox:claude-watch": "node scripts/claude-inbox-watcher.mjs",
     "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export",
     "check:mirror": "node scripts/check-triple-mirror.mjs",
     "smoke-test": "node scripts/smoke-test.mjs"

@@ -57,13 +57,31 @@
     pointer-events: none;
   }
 
+  .desktop-slot,
   .search-shell,
   .realtime-pill {
     pointer-events: auto;
   }
 
+  .desktop-pill {
+    min-height: 42px;
+    max-width: 124px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .desktop-pill span {
+    display: none;
+  }
+
+  .desktop-popover {
+    top: 52px;
+    left: 10px;
+    width: min(286px, calc(100vw - 20px));
+  }
+
   .search-shell {
-    width: min(58vw, 220px);
+    width: min(44vw, 220px);
     max-width: 220px;
     min-height: 42px;
   }

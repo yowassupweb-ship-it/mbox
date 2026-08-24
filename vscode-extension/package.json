@@ -1,0 +1,253 @@
+{
+  "name": "mbox-vscode",
+  "displayName": "MBOX",
+  "description": "MBOX project context, tasks, memories, and agent workflow inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "mbox",
+  "private": true,
+  "icon": "resources/mbox.png",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onView:mbox.projects",
+    "onView:mbox.todos",
+    "onView:mbox.memories",
+    "onView:mbox.console",
+    "onCommand:mbox.configure",
+    "onCommand:mbox.refresh",
+    "onCommand:mbox.nextTask",
+    "onCommand:mbox.claimTask",
+    "onCommand:mbox.openItem",
+    "onCommand:mbox.createTask",
+    "onCommand:mbox.recordMemory",
+    "onCommand:mbox.openConsole",
+    "onCommand:mbox.startResponders",
+    "onCommand:mbox.stopResponders",
+    "onCommand:mbox.showResponderStatus",
+    "onCommand:mbox.installStartupResponders",
+    "onCommand:mbox.uninstallStartupResponders",
+    "onCommand:mbox.openWeb"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "MBOX",
+      "properties": {
+        "mbox.url": {
+          "type": "string",
+          "default": "https://mbox.shar-os.ru",
+          "description": "Base URL of the MBOX instance."
+        },
+        "mbox.username": {
+          "type": "string",
+          "default": "Admin",
+          "description": "MBOX username used for API login."
+        },
+        "mbox.agentName": {
+          "type": "string",
+          "default": "VS Code",
+          "description": "Agent name sent in the x-mbox-agent header."
+        },
+        "mbox.project": {
+          "type": "string",
+          "default": "MBOX",
+          "description": "Default MBOX project shown in the extension."
+        },
+        "mbox.repoPath": {
+          "type": "string",
+          "default": "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
+          "description": "Local MBOX repository path containing scripts/codex-chat-watcher.mjs and scripts/claude-inbox-watcher.mjs."
+        },
+        "mbox.autoStartResponders": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start Codex and Claude MBOX inbox responders automatically while VS Code is open."
+        },
+        "mbox.codexCommand": {
+          "type": "string",
+          "default": "codex",
+          "description": "Command used by the Codex responder watcher."
+        },
+        "mbox.claudeCommand": {
+          "type": "string",
+          "default": "claude",
+          "description": "Command used by the Claude responder watcher."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mbox",
+          "title": "MBOX",
+          "icon": "resources/mbox.png"
+        }
+      ]
+    },
+    "views": {
+      "mbox": [
+        {
+          "id": "mbox.projects",
+          "name": "Context",
+          "icon": "resources/mbox.png"
+        },
+        {
+          "id": "mbox.todos",
+          "name": "Todos",
+          "icon": "resources/mbox.png"
+        },
+        {
+          "id": "mbox.memories",
+          "name": "Memories",
+          "icon": "resources/mbox.png"
+        },
+        {
+          "id": "mbox.console",
+          "name": "Console",
+          "icon": "resources/mbox.png"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "mbox.configure",
+        "title": "MBOX: Configure Connection"
+      },
+      {
+        "command": "mbox.refresh",
+        "title": "MBOX: Refresh"
+      },
+      {
+        "command": "mbox.nextTask",
+        "title": "MBOX: Get Next Task"
+      },
+      {
+        "command": "mbox.claimTask",
+        "title": "MBOX: Claim Task"
+      },
+      {
+        "command": "mbox.openItem",
+        "title": "MBOX: Open Item"
+      },
+      {
+        "command": "mbox.createTask",
+        "title": "MBOX: Create Task"
+      },
+      {
+        "command": "mbox.recordMemory",
+        "title": "MBOX: Record Memory"
+      },
+      {
+        "command": "mbox.openConsole",
+        "title": "MBOX: Open Shared Console"
+      },
+      {
+        "command": "mbox.startResponders",
+        "title": "MBOX: Start Codex/Claude Responders"
+      },
+      {
+        "command": "mbox.stopResponders",
+        "title": "MBOX: Stop Codex/Claude Responders"
+      },
+      {
+        "command": "mbox.showResponderStatus",
+        "title": "MBOX: Show Responder Status"
+      },
+      {
+        "command": "mbox.installStartupResponders",
+        "title": "MBOX: Install Always-On Responders"
+      },
+      {
+        "command": "mbox.uninstallStartupResponders",
+        "title": "MBOX: Uninstall Always-On Responders"
+      },
+      {
+        "command": "mbox.openWeb",
+        "title": "MBOX: Open Web App"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "mbox.refresh",
+          "when": "view =~ /^mbox\\./",
+          "group": "navigation"
+        },
+        {
+          "command": "mbox.createTask",
+          "when": "view == mbox.todos",
+          "group": "navigation"
+        },
+        {
+          "command": "mbox.recordMemory",
+          "when": "view == mbox.memories",
+          "group": "navigation"
+        },
+        {
+          "command": "mbox.openConsole",
+          "when": "view == mbox.console",
+          "group": "navigation"
+        },
+        {
+          "command": "mbox.showResponderStatus",
+          "when": "view == mbox.console",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "mbox.claimTask",
+          "when": "view == mbox.todos && viewItem == todo",
+          "group": "inline"
+        },
+        {
+          "command": "mbox.openItem",
+          "when": "view =~ /^mbox\\./",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mbox.configure"
+        },
+        {
+          "command": "mbox.refresh"
+        },
+        {
+          "command": "mbox.nextTask"
+        },
+        {
+          "command": "mbox.createTask"
+        },
+        {
+          "command": "mbox.recordMemory"
+        },
+        {
+          "command": "mbox.openConsole"
+        },
+        {
+          "command": "mbox.startResponders"
+        },
+        {
+          "command": "mbox.stopResponders"
+        },
+        {
+          "command": "mbox.showResponderStatus"
+        },
+        {
+          "command": "mbox.installStartupResponders"
+        },
+        {
+          "command": "mbox.uninstallStartupResponders"
+        },
+        {
+          "command": "mbox.openWeb"
+        }
+      ]
+    }
+  }
+}
