@@ -4,8 +4,6 @@ const path = require("path");
 
 const desktopIconSrc = loadDesktopIconSrc();
 
-document.documentElement.dataset.mboxDesktop = "true";
-
 const desktopApi = {
   status: () => ipcRenderer.invoke("mbox-desktop:status"),
   start: (name) => ipcRenderer.invoke("mbox-desktop:start", name),
@@ -22,10 +20,18 @@ const desktopApi = {
 
 contextBridge.exposeInMainWorld("mboxDesktop", desktopApi);
 
+markDesktopShell();
+
 window.addEventListener("DOMContentLoaded", () => {
-  document.documentElement.dataset.mboxDesktop = "true";
+  markDesktopShell();
   window.dispatchEvent(new Event("mbox-desktop-ready"));
 });
+
+function markDesktopShell() {
+  if (document.documentElement) {
+    document.documentElement.dataset.mboxDesktop = "true";
+  }
+}
 
 function mountDesktopControlWhenReady() {
   const timer = window.setInterval(() => {

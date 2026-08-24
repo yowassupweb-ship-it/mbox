@@ -250,7 +250,7 @@ async function startResponder(name) {
     CODEX_WATCH_WORKDIR: responderEnv.CODEX_WATCH_WORKDIR || repoRoot,
     CLAUDE_WATCH_WORKDIR: responderEnv.CLAUDE_WATCH_WORKDIR || repoRoot
   };
-  const child = spawn(file, [], {
+  const child = spawn("cmd.exe", ["/d", "/c", file], {
     cwd: workdir,
     shell: true,
     windowsHide: true,
