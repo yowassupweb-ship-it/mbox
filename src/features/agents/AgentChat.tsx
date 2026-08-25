@@ -1006,8 +1006,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             {working.length > 0 && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
-                <span className="console-log-actor">·</span>
-                <span className="console-log-text">{working[0].agent.name} печатает: {working[0].state.detail || "работает"}</span>
+                <span className="console-thinking-row">
+                  <ThinkingSpinner />
+                  <span className="console-log-text">{working[0].agent.name}: {working[0].state.label}{working[0].state.detail ? ` — ${working[0].state.detail}` : ""}</span>
+                </span>
               </div>
             )}
             {awaitingJarvisId && (

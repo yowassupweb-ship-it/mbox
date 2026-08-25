@@ -63,8 +63,10 @@ export function AgentAvatar({ name, status = "idle", live = false, size = 34 }: 
   const identity = agentIdentity(name);
   const stateClass = live ? "working" : status;
   const glyphScale = identity.key === "generic" ? 0.62 : 0.56;
-  const workingFrame = useWorkingFrame(live);
-  const imageSrc = live ? workingFrame : identity.image;
+  // Раньше "live" подменял картинку на кадры осьминога-логотипа MBOX у ЛЮБОГО агента, включая
+  // Claude/Codex — не разобрать, кто именно сейчас работает. Своя аватарка всегда своя; "работает"
+  // теперь только классом (пульсирующая рамка через CSS), без подмены изображения.
+  const imageSrc = identity.image;
   return (
     <span
       className={`agent-avatar ${identity.key} ${stateClass}${imageSrc ? " has-image" : ""}`}
