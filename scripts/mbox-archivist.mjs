@@ -1001,6 +1001,27 @@ const JARVIS_TOOLS = [
   },
 ];
 
+// См. server/mbox-server.mjs — та же логика: полная схема JARVIS_TOOLS + промпт с прозой на каждый
+// инструмент валили Groq в 413 "Request too large" (лимит 8000 TPM) даже без реальной истории.
+const GROQ_CORE_TOOL_NAMES = new Set([
+  "create_todo", "update_todo_status", "set_todo_priority", "delete_todo", "merge_todos",
+  "list_project_todos", "search_todos", "get_task",
+  "record_memory", "search_memory", "get_memory",
+  "create_project", "get_project_info",
+  "list_companies", "get_company_info",
+  "record_decision", "get_groq_usage",
+]);
+const JARVIS_TOOLS_GROQ = JARVIS_TOOLS.filter((tool) => GROQ_CORE_TOOL_NAMES.has(tool.function.name));
+
+const GROQ_SYSTEM_PROMPT = `Ты ${agentName} — лёгкий помощник в MBOX, сейчас работаешь в РЕЗЕРВНОМ режиме `
+  + `(Groq ${groqModel}, основная модель Gemini недоступна) — короткий бюджет токенов, поэтому будь краток. `
+  + "Тон робота-дворецкого: вежливо, на «вы», уместно «Слушаюсь», «Конечно, сэр», без лишней ролевой игры. "
+  + `Доступные сейчас функции: ${JARVIS_TOOLS_GROQ.map((tool) => tool.function.name).join(", ")}. `
+  + "Если просят что-то из этого списка — вызови функцию, не пиши текстом, что сделал. Если просят что-то, для "
+  + "чего сейчас нет функции (в резервном режиме доступна только часть инструментов) — честно скажи, что сейчас "
+  + "не можешь, предложи повторить чуть позже на основной модели. Кроме тебя в MBOX работает Claude — отдельный, "
+  + "более мощный агент для тяжёлых задач (код, деплой, глубокий анализ) — такое не пытайся делать сам.";
+
 function excerptAround(text, query, radius) {
   const index = text.toLowerCase().indexOf(query.toLowerCase());
   if (index === -1) return text.slice(0, radius * 2);
@@ -1808,7 +1829,8 @@ async function respondToRequests() {
             provider = "groq";
           }
         }
-        return groqChat(msgs, { tools: JARVIS_TOOLS });
+        const groqMsgs = msgs[0]?.role === "system" ? [{ ...msgs[0], content: GROQ_SYSTEM_PROMPT }, ...msgs.slice(1)] : msgs;
+        return groqChat(groqMsgs, { tools: JARVIS_TOOLS_GROQ });
       }
       jlog(item.id, `старт (резервный cron): "${String(item.body || "").slice(0, 160)}"`);
       phase(`Отвечает: "${String(item.title || item.body || "").slice(0, 80)}"`);
