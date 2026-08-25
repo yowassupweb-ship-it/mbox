@@ -250,12 +250,19 @@ async function startResponder(name) {
     CODEX_WATCH_WORKDIR: responderEnv.CODEX_WATCH_WORKDIR || repoRoot,
     CLAUDE_WATCH_WORKDIR: responderEnv.CLAUDE_WATCH_WORKDIR || repoRoot
   };
-  const child = spawn("cmd.exe", ["/d", "/c", file], {
+  // Дефолтный путь установки — "...\Local\Programs\MBOX Desktop\..." — содержит пробел. shell:true
+  // конкатенирует argv в одну строку БЕЗ экранирования (см. предупреждение Node про DEP0190), так что
+  // невзятый в кавычки путь резался по пробелу в "MBOX Desktop" и cmd.exe получал "MBOX" как команду —
+  // responder падал мгновенно с "не является внутренней командой", молча (stdio: "ignore" глушил и это).
+  const logFile = path.join(app.getPath("userData"), "responder-logs", `${name}.log`);
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const logFd = fs.openSync(logFile, "a");
+  const child = spawn("cmd.exe", ["/d", "/c", `"${file}"`], {
     cwd: workdir,
     shell: true,
     windowsHide: true,
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", logFd, logFd],
     env
   });
   child.unref();

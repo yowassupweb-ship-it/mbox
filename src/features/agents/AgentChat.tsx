@@ -886,7 +886,11 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     if (suggestions.length) {
       if (event.key === "ArrowDown") { event.preventDefault(); setHighlight((h) => (h + 1) % suggestions.length); return; }
       if (event.key === "ArrowUp") { event.preventDefault(); setHighlight((h) => (h - 1 + suggestions.length) % suggestions.length); return; }
-      if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); acceptSuggestion(suggestions[highlight].value); return; }
+      // Раньше Enter тоже довершал подсказку — при "@Имя" первый Enter только доставлял
+      // упоминание (курсор оставался в открытом токене), а реальная отправка требовала
+      // второго Enter. Ощущалось как "сообщения с @ уходят не мгновенно". Tab — подсказка,
+      // Enter — всегда отправка, без исключений.
+      if (event.key === "Tab") { event.preventDefault(); acceptSuggestion(suggestions[highlight].value); return; }
       if (event.key === "Escape") { event.preventDefault(); setDismissedKey(tokenKey); return; }
     }
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); return; }
