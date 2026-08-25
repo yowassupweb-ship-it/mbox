@@ -197,7 +197,11 @@ function isAddressedToMe(item) {
   if (broadcastAliases.some((alias) => String(to || "").toLowerCase() === alias.toLowerCase())) return true;
   if (agentAliases.some((alias) => new RegExp(`@${escapeRegExp(alias)}\\b`, "iu").test(text))) return true;
   if (broadcastAliases.some((alias) => new RegExp(`@${escapeRegExp(alias)}\\b`, "iu").test(text))) return true;
-  if (agentAliases.some((alias) => text.toLowerCase().includes(alias.toLowerCase()))) return true;
+  // Раньше здесь была голая substring-проверка "Claude" где угодно в тексте (без @) — Джарвис
+  // постоянно упоминает "Claude" в прозе ("Claude не смог ответить", "коллега Claude"), каждое
+  // такое упоминание ловилось как новая задача мне -> ответ тоже упоминал "Claude" -> самовос-
+  // производящаяся цепочка ("Ответ: Claude ответил на #788: Ответ: Claude не смог ответить на
+  // #783..."). Только явное @-упоминание или прямой адресат (to/target/agent) считается вызовом.
   if (!includeUnaddressed) return false;
   return ["Человек", "Human", "User"].includes(item.agent_name) || item.item_type === "question";
 }
@@ -332,6 +336,9 @@ async function runClaude(item) {
     "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
     "Keep the final answer concise and directly useful.",
     "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
+    // MBOX — русскоязычный проект: владелец, Джарвис и вся консоль общаются по-русски. Без этой
+    // строки ответ уходил на английском (нет другого языкового сигнала во всём промпте).
+    "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
     "",
     conversationContext,
     "",
