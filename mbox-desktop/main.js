@@ -496,6 +496,60 @@ async function openAllowedPath(targetPath) {
 
 const runningTools = new Map();
 const TOOL_OUTPUT_LIMIT = 400;
+const LOCAL_TOOL_CATALOG = [
+  {
+    id: "obscura",
+    name: "Obscura",
+    path: path.join(os.homedir(), "Desktop", "Mbox", "obscura"),
+    commands: [
+      { label: "Сборка с render", command: "cargo build --release -p obscura-cli --bins --features render", env: { CARGO_INCREMENTAL: "0", CARGO_BUILD_JOBS: "2" }, runnable: true },
+      { label: "Сервер CDP", command: "target\\release\\obscura.exe serve --port 9222", runnable: true, long_running: true },
+      { label: "MCP stdio", command: "target\\release\\obscura.exe mcp", runnable: false },
+      { label: "MCP HTTP", command: "target\\release\\obscura.exe mcp --http --port 3000", runnable: true, long_running: true }
+    ]
+  },
+  {
+    id: "figma",
+    name: "Figma MCP",
+    path: path.join(os.homedir(), "Desktop", "Mbox"),
+    commands: [
+      { label: "Открыть Figma", command: "start \"\" \"figma://\"", runnable: true },
+      { label: "Проверить desktop MCP", command: "powershell -NoProfile -Command \"try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3845/mcp -TimeoutSec 3).StatusCode } catch { $_.Exception.Message }\"", runnable: true },
+      { label: "Codex remote MCP", command: "codex mcp add figma --url https://mcp.figma.com/mcp", runnable: true },
+      { label: "Claude desktop MCP", command: "claude mcp add --transport http figma-desktop http://127.0.0.1:3845/mcp", runnable: true }
+    ]
+  },
+  {
+    id: "playwright-mcp",
+    name: "Playwright MCP",
+    path: repoRoot,
+    commands: [
+      { label: "MCP HTTP", command: "npx @playwright/mcp --browser chrome --host 127.0.0.1 --port 9310 --caps vision,pdf", runnable: true, long_running: true },
+      { label: "MCP stdio", command: "npx @playwright/mcp --browser chrome --caps vision,pdf", runnable: false },
+      { label: "Установить Chromium", command: "npx playwright install chromium", env: { PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000" }, runnable: true }
+    ]
+  },
+  {
+    id: "chrome-devtools-mcp",
+    name: "Chrome DevTools MCP",
+    path: repoRoot,
+    commands: [
+      { label: "MCP stable Chrome", command: "npx chrome-devtools-mcp --channel stable --viewport 1440x900", runnable: true, long_running: true },
+      { label: "MCP slim", command: "npx chrome-devtools-mcp --channel stable --slim --viewport 1440x900", runnable: true, long_running: true },
+      { label: "Chrome debug 9222", command: "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --remote-debugging-port=9222 --user-data-dir=\"%TEMP%\\mbox-chrome-debug\"", runnable: true, long_running: true },
+      { label: "Подключиться к 9222", command: "npx chrome-devtools-mcp --browserUrl http://127.0.0.1:9222", runnable: true, long_running: true }
+    ]
+  },
+  {
+    id: "browserbase-stagehand",
+    name: "Browserbase + Stagehand",
+    path: repoRoot,
+    commands: [
+      { label: "MCP HTTP", command: "npx @browserbasehq/mcp --browserbaseApiKey %BROWSERBASE_API_KEY% --browserbaseProjectId %BROWSERBASE_PROJECT_ID% --host 127.0.0.1 --port 9320 --browserWidth 1440 --browserHeight 900", runnable: true, long_running: true },
+      { label: "Stagehand check", command: "node -e \"import('@browserbasehq/stagehand').then(() => console.log('Stagehand OK'))\"", runnable: true }
+    ]
+  }
+];
 
 function toolWorkdirAllowed(dir) {
   const allowedRoots = [
@@ -523,10 +577,15 @@ function decodeConsole(buffer) {
 }
 
 async function fetchToolCatalog() {
-  const response = await fetch(`${mboxUrl}/api/mbox/tools`);
+  try {
+    const response = await fetch(`${mboxUrl}/api/mbox/tools`);
   if (!response.ok) throw new Error(`Каталог инструментов недоступен: ${response.status}`);
-  const data = await response.json();
-  return Array.isArray(data.tools) ? data.tools : [];
+    const data = await response.json();
+    if (Array.isArray(data.tools) && data.tools.length) return data.tools;
+  } catch (error) {
+    log(`tool catalog API unavailable, using desktop catalog: ${error.message}`);
+  }
+  return LOCAL_TOOL_CATALOG;
 }
 
 function emitTool(payload) {
