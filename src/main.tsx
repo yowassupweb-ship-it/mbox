@@ -34,6 +34,7 @@ import { LoginScreen } from "./pages/LoginScreen";
 import { Overview } from "./pages/Overview";
 import { MemoryBoard } from "./pages/Memories";
 import { ArtifactsBoard } from "./pages/Artifacts";
+import { AbilitiesBoard } from "./pages/Abilities";
 import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
 import { ProjectsBoard } from "./pages/Projects";
 import { AgentChat } from "./features/agents/AgentChat";
@@ -209,6 +210,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
         {section === "memories" && <MemoryBoard memories={data.memories} projects={data.projects} decisions={data.decisions} onSaved={data.reload} />}
         {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} projects={data.projects} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
         {section === "projects" && <ProjectsBoard projects={data.projects} companies={data.companies} folders={data.folders} memories={data.memories} decisions={data.decisions} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} memories={data.memories} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
+        {section === "abilities" && <AbilitiesBoard />}
         {section === "history" && <HistoryBoard events={data.auditEvents} />}
         {section === "settings" && (
           <SettingsBoard

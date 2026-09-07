@@ -13,6 +13,7 @@ const desktopApi = {
   installAppAutostart: () => ipcRenderer.invoke("mbox-desktop:install-app-autostart"),
   removeAppAutostart: () => ipcRenderer.invoke("mbox-desktop:remove-app-autostart"),
   openRepo: () => ipcRenderer.invoke("mbox-desktop:open-repo"),
+  openPath: (targetPath) => ipcRenderer.invoke("mbox-desktop:open-path", targetPath),
   checkUpdates: () => ipcRenderer.invoke("mbox-desktop:check-updates"),
   installUpdate: () => ipcRenderer.invoke("mbox-desktop:install-update"),
   onEvent: (handler) => ipcRenderer.on("mbox-desktop:event", (_event, payload) => handler(payload))

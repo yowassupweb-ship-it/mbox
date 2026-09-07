@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { Client } from "pg";
+import { Client, Pool } from "pg";
 import { WebSocketServer } from "ws";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -719,22 +719,55 @@ async function readBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+function isSecureRequest(req) {
+  const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  if (proto) return proto === "https";
+  return Boolean(req.socket?.encrypted);
+}
+
+function sessionCookie(req, value, maxAge) {
+  // Secure ставим только на HTTPS: в проде этот файл стоит за Caddy (см. docker-compose.production.yml),
+  // а локально тот же сервер поднимается на http://localhost:3000 — там Secure-cookie браузер просто
+  // не сохраняет, и после login все запросы уходят без сессии (пустой UI).
+  // Часть аудита CSRF-риска из CLAUDE.md (todo #164).
+  const secure = isSecureRequest(req) ? " Secure;" : "";
+  return `mbox_session=${value}; HttpOnly;${secure} SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+}
+
 function getCookie(req, name) {
   const cookie = req.headers.cookie || "";
   const part = cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`));
   return part ? decodeURIComponent(part.slice(name.length + 1)) : "";
 }
 
+let pgPool = null;
+
+// Пул вместо соединения на каждый вызов — то же, что давно сделано в vite.config.ts (dev-API).
+// На проде база локальная и разница почти незаметна, но при локальном запуске через ssh-туннель
+// каждое новое подключение стоило ~2 секунды: экран грузился больше десяти секунд и выглядел
+// как пустой, из-за чего 5173 "работал с базой", а 3000 нет.
+function getPool() {
+  if (!pgPool) {
+    if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not configured");
+    pgPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 8, idleTimeoutMillis: 30_000, keepAlive: true });
+    pgPool.on("error", () => { /* соединение умерло в простое — пул заменит его сам */ });
+  }
+  return pgPool;
+}
+
 async function query(sql, values = []) {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not configured");
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
-  await client.connect();
+  const actor = requestContext.getStore()?.actor;
+  if (!actor) return getPool().query(sql, values);
+  // Актор ставится сессионно и переживает возврат соединения в пул, но каждый запрос с актором
+  // выставляет свой перед обращением, а аудит пишется только на мутациях — чужой актор протечь
+  // в audit_events не может.
+  const client = await getPool().connect();
   try {
-    const actor = requestContext.getStore()?.actor;
-    if (actor) await client.query("SELECT set_config('mbox.actor', $1, false)", [actor]);
+    await client.query("SELECT set_config('mbox.actor', $1, false)", [actor]);
     return await client.query(sql, values);
   } finally {
-    await client.end();
+    client.release();
   }
 }
 
@@ -742,7 +775,11 @@ async function query(sql, values = []) {
 // для чата это ощущалось как "не отвечает". Здесь та же логика ответа на прямое сообщение, но
 // вызывается синхронно из POST /agent/inbox сразу после вставки, без ожидания следующего тика.
 // Разбор памяти (fact/log) по-прежнему остаётся за таймером — там мгновенность не нужна.
-const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
+// MBOX_AGENT_NAME — имя КЛИЕНТА, который ходит в MBOX (респондер Codex, респондер Claude,
+// MCP-сервер), и её нередко ставят глобально на всю машину. Джарвис живёт внутри сервера и
+// клиентом не является: подхватывая чужую переменную, он переименовывался в "Codex" и сливался
+// с респондером в одну строку agent_presence, а его ответы и ошибки подписывались чужим именем.
+const JARVIS_NAME = process.env.MBOX_JARVIS_NAME || "Джарвис";
 
 /** См. vite.config.ts — подробный трейс шагов агентного цикла в stdout. */
 function jlog(inboxId, message) {
@@ -902,6 +939,20 @@ function toGeminiContents(messages) {
 
 /** Gemini как "прораб" вместо gpt-oss-120b — см. GEMINI_API_KEY выше. Бросает на 429/ошибке, чтобы
  * вызывающий код (complete() в replyAsJarvis) мог переключиться на Groq для остатка того же ответа. */
+// Навыки — одноразовые вызовы без инструментов. Основной Gemini, при любой его ошибке (нет ключа,
+// 429, недоступность) откатываемся на младшую модель Groq: у неё щедрая квота, но она заметно
+// слабее, поэтому она именно резерв, а не основной путь.
+async function skillComplete(messages, purpose, signal) {
+  if (GEMINI_API_KEY) {
+    try {
+      return await geminiComplete(messages, null, purpose, signal);
+    } catch (error) {
+      console.error(`${purpose}: Gemini недоступен (${error.message}) — резервная модель Groq`);
+    }
+  }
+  return groqComplete(messages, null, purpose, signal, 0, GROQ_MODEL_JUNIOR);
+}
+
 async function geminiComplete(messages, tools, purpose = "reply", signal) {
   const systemText = messages.find((m) => m.role === "system")?.content || "";
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
@@ -1668,6 +1719,28 @@ const JARVIS_TOOLS_GROQ = JARVIS_TOOLS.filter((tool) => GROQ_CORE_TOOL_NAMES.has
 // Короткая версия — полная (с построчной прозой на каждый из 41 инструмента) сама по себе
 // перебирает половину лимита Groq. Здесь только персона и список НАЗВАНИЙ доступных сейчас
 // инструментов, без описаний (модель и так видит их JSON-схемы в самом tools).
+// TPM 8000 у Groq — это бюджет на ВСЁ сразу: промпт, схему инструментов, историю и сам ответ.
+// Урезание промпта и набора инструментов (коммит a165abf) дыру не закрыло: KEEP_RAW=50, и полсотни
+// сообщений истории не помещаются ни при каких условиях — отсюда 413 при каждом откате на резерв.
+// Режем историю с головы, свежие сообщения важнее старых.
+const GROQ_HISTORY_BUDGET_CHARS = Number(process.env.GROQ_HISTORY_BUDGET_CHARS || 4000);
+
+function trimHistoryForGroq(msgs, budget = GROQ_HISTORY_BUDGET_CHARS) {
+  if (msgs.length <= 2) return msgs;
+  const [system, ...rest] = msgs;
+  const kept = [];
+  let used = 0;
+  for (let i = rest.length - 1; i >= 0; i -= 1) {
+    const size = JSON.stringify(rest[i]).length;
+    if (kept.length && used + size > budget) break;
+    kept.unshift(rest[i]);
+    used += size;
+  }
+  // Ответ инструмента без предшествующего вызова Groq отвергает — срезаем осиротевшие.
+  while (kept.length && kept[0].role === "tool") kept.shift();
+  return [system, ...kept];
+}
+
 const GROQ_SYSTEM_PROMPT = `Ты ${JARVIS_NAME} — лёгкий помощник в MBOX, сейчас работаешь в РЕЗЕРВНОМ режиме `
   + `(Groq ${GROQ_MODEL}, основная модель Gemini недоступна) — короткий бюджет токенов, поэтому будь краток. `
   + "Тон робота-дворецкого: вежливо, на «вы», уместно «Слушаюсь», «Конечно, сэр», без лишней ролевой игры. "
@@ -1997,16 +2070,12 @@ async function refreshDataSourceById(id, { inboxId } = {}) {
     // Пересказ страницы в 5-10 пунктов — не оркестрация инструментами, а одноразовый "скилл".
     // Отдаём младшей модели: своя, куда более щедрая квота, не трогает тесный бюджет "Прораба".
     setPhase(inboxId, "Делегирует младшему агенту");
-    const digestMessage = await groqComplete(
+    const digestMessage = await skillComplete(
       [
         { role: "system", content: "Сделай короткую сводку веб-страницы для системы памяти: 5-10 пунктов, факты и цифры, без воды, на русском." },
         { role: "user", content: text || "(пустая страница)" },
       ],
-      null,
       "skill-webpage-summary",
-      undefined,
-      0,
-      GROQ_MODEL_JUNIOR,
     );
     const digest = String(digestMessage.content || "").trim().slice(0, 3000);
     let memoryId = row.last_memory_id;
@@ -2671,16 +2740,12 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     const task = String(args.task || "").trim();
     if (!task) return "не делегировал — нет описания задачи";
     setPhase(inboxId, "Делегирует младшему агенту");
-    const delegateMessage = await groqComplete(
+    const delegateMessage = await skillComplete(
       [
         { role: "system", content: `Выполни задачу коротко и по делу, на русском: ${task}` },
         { role: "user", content: String(args.input || "") || "(нет входных данных)" },
       ],
-      null,
       "skill-delegate-junior",
-      undefined,
-      0,
-      GROQ_MODEL_JUNIOR,
     );
     return String(delegateMessage.content || "").trim().slice(0, 3000) || "младший агент не вернул ответ";
   }
@@ -2901,7 +2966,9 @@ async function replyAsJarvis(item) {
       // Урезанные промпт+инструменты — см. GROQ_SYSTEM_PROMPT/JARVIS_TOOLS_GROQ выше: полная схема
       // валила Groq в 413 (TPM 8000) даже без реальной истории.
       const groqMsgs = msgs[0]?.role === "system" ? [{ role: "system", content: GROQ_SYSTEM_PROMPT }, ...msgs.slice(1)] : msgs;
-      return groqComplete(groqMsgs, JARVIS_TOOLS_GROQ, "reply", controller.signal);
+      const trimmed = trimHistoryForGroq(groqMsgs);
+      if (trimmed.length < groqMsgs.length) jlog(item.id, `история урезана для Groq: ${groqMsgs.length} -> ${trimmed.length} сообщений (лимит TPM 8000)`);
+      return groqComplete(trimmed, JARVIS_TOOLS_GROQ, "reply", controller.signal);
     }
     jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
     for (let step = 0; step < 8; step += 1) {
@@ -3010,6 +3077,39 @@ async function requireUser(req, res) {
   return user;
 }
 
+// Каталог навыков — одноразовые вызовы модели без оркестрации инструментами (см. /jarvis в
+// AgentChat.tsx). Он объявлен здесь, а не в базе, потому что навык существует ровно постольку,
+// поскольку в этом файле есть вызывающий его код: purpose ниже — тот же литерал, что уходит в
+// groqComplete, и по нему же считается живой расход из groq_usage.
+const SKILL_CATALOG = [
+  {
+    id: "skill-webpage-summary",
+    name: "Пересказ веб-страницы",
+    owner: "Gemini · резерв oss",
+    trigger: "refresh_data_source",
+    summary: "Источник данных обновился — страница чистится от разметки и сжимается в 5-10 пунктов фактами и цифрами, результат ложится в память как запись «Источник: …».",
+    input: "HTML страницы источника (до 6000 символов текста)",
+    output: "Сводка до 3000 символов, записывается/обновляется в memories",
+  },
+  {
+    id: "skill-delegate-junior",
+    name: "Делегирование Младшему",
+    owner: "Gemini · резерв oss",
+    trigger: "delegate_to_junior",
+    summary: "Джарвис скидывает мелкую текстовую подзадачу — черновик, сводку, пересказ, классификацию — отдельному вызову модели, не тратя на неё свой тесный контекст и квоту.",
+    input: "Формулировка задачи + исходный текст",
+    output: "Готовый текст до 3000 символов обратно в цепочку действий Джарвиса",
+  },
+];
+
+// Служебные режимы — не навыки, но тот же счётчик токенов; показываем рядом, чтобы расход
+// младшей модели было с чем сравнивать.
+const SERVICE_MODES = {
+  reply: "Ответ в чате",
+  cron: "Фоновый разбор по расписанию",
+  "history-compression": "Сжатие истории диалога",
+};
+
 async function handleApi(req, res, url) {
   const actor = await resolveRequestActor(req);
   return requestContext.run({ actor }, () => handleApiWithContext(req, res, url));
@@ -3039,17 +3139,14 @@ async function handleApiWithContext(req, res, url) {
               ))`,
       [user.rows[0].id],
     );
-    // Secure — этот файл всегда за Caddy на HTTPS (см. docker-compose.production.yml), в отличие
-    // от vite.config.ts (dev, обычный http://localhost) — там Secure сломал бы логин, здесь нет
-    // причин его не ставить. Часть аудита CSRF-риска из CLAUDE.md (todo #164).
-    res.setHeader("set-cookie", `mbox_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`);
+    res.setHeader("set-cookie", sessionCookie(req, encodeURIComponent(token), 2592000));
     return sendJson(res, 200, { user: user.rows[0] });
   }
 
   if (url.pathname === "/api/mbox/auth/logout" && req.method === "POST") {
     const token = getCookie(req, "mbox_session");
     if (token) await query("DELETE FROM auth_sessions WHERE token_hash = $1", [createHash("sha256").update(token).digest("hex")]);
-    res.setHeader("set-cookie", "mbox_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0");
+    res.setHeader("set-cookie", sessionCookie(req, "", 0));
     return sendJson(res, 200, { ok: true });
   }
 
@@ -3085,6 +3182,36 @@ async function handleApiWithContext(req, res, url) {
       broadcastRealtime("agent_presence", { agent: name, event: "phase" });
     }
     return sendJson(res, 200, { presence: result.rows[0] });
+  }
+
+  if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {
+    const usage = await query(
+      `SELECT purpose,
+              count(*)::int AS calls,
+              COALESCE(sum(total_tokens), 0)::bigint AS tokens,
+              COALESCE(count(*) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::int AS calls_24h,
+              max(created_at)::text AS last_used_at,
+              (array_agg(model ORDER BY created_at DESC))[1] AS last_model
+       FROM groq_usage GROUP BY purpose`,
+    );
+    const byPurpose = new Map(usage.rows.map((row) => [row.purpose, row]));
+    const withUsage = (id) => {
+      const row = byPurpose.get(id);
+      return {
+        calls: row?.calls || 0,
+        calls_24h: row?.calls_24h || 0,
+        tokens: Number(row?.tokens || 0),
+        last_used_at: row?.last_used_at || null,
+        last_model: row?.last_model || null,
+      };
+    };
+    const skills = SKILL_CATALOG.map((skill) => ({ ...skill, ...withUsage(skill.id) }));
+    const modes = Object.entries(SERVICE_MODES).map(([id, name]) => ({ id, name, ...withUsage(id) }));
+    // Навык, который кто-то залогировал, но забыл описать в каталоге — иначе он молча пропал бы из UI.
+    const unknown = usage.rows
+      .filter((row) => row.purpose.startsWith("skill-") && !SKILL_CATALOG.some((skill) => skill.id === row.purpose))
+      .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
+    return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
   }
 
   if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {
@@ -4646,8 +4773,22 @@ function serveStatic(req, res, url) {
   fs.createReadStream(file).pipe(res);
 }
 
+// MBOX_LOG_REQUESTS=1 — построчный журнал обращений: метод, путь, код, время, была ли cookie.
+// Нужен, когда UI выглядит пустым и надо понять, доходит ли до сервера то, что шлёт браузер.
+const logRequests = process.env.MBOX_LOG_REQUESTS === "1";
+
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  if (logRequests) {
+    const startedAt = Date.now();
+    const hasSession = Boolean(getCookie(req, "mbox_session"));
+    res.on("finish", () => {
+      console.log(`${req.method} ${url.pathname}${url.search} -> ${res.statusCode} ${Date.now() - startedAt}ms cookie=${hasSession ? "да" : "НЕТ"} origin=${req.headers.origin || "-"}`);
+    });
+    res.on("close", () => {
+      if (!res.writableEnded) console.log(`${req.method} ${url.pathname}${url.search} -> ОБОРВАН клиентом ${Date.now() - startedAt}ms`);
+    });
+  }
   try {
     if (url.pathname.startsWith("/api/mbox/")) return await handleApi(req, res, url);
     return serveStatic(req, res, url);

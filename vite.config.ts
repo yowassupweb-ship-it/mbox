@@ -352,7 +352,11 @@ async function queryPostgres<T extends QueryResultRow>(sql: string, values: unkn
 
 // Зеркало server/mbox-server.mjs — прямой ответ Джарвиса из POST /agent/inbox, без ожидания
 // минутного тика systemd-таймера (scripts/mbox-archivist.mjs), который разбирает только память.
-const JARVIS_NAME = process.env.MBOX_AGENT_NAME || "Джарвис";
+// MBOX_AGENT_NAME — имя КЛИЕНТА, который ходит в MBOX (респондер Codex, респондер Claude,
+// MCP-сервер), и её нередко ставят глобально на всю машину. Джарвис живёт внутри сервера и
+// клиентом не является: подхватывая чужую переменную, он переименовывался в "Codex" и сливался
+// с респондером в одну строку agent_presence, а его ответы и ошибки подписывались чужим именем.
+const JARVIS_NAME = process.env.MBOX_JARVIS_NAME || "Джарвис";
 
 /** Подробный трейс поведения Джарвиса — шаг цикла, какой инструмент с какими аргументами,
  * что вернул. Раньше в логах было видно только финальный успех/провал, а не то, ПОЧЕМУ модель
@@ -568,6 +572,18 @@ function toGeminiContents(messages: GroqMessage[]) {
     }
   }
   return contents;
+}
+
+// Зеркало server/mbox-server.mjs: навыки идут на Gemini, младшая модель Groq — только резерв.
+async function skillComplete(messages: GroqMessage[], purpose: string, signal?: AbortSignal): Promise<GroqMessage> {
+  if (GEMINI_API_KEY) {
+    try {
+      return await geminiComplete(messages, undefined, purpose, signal);
+    } catch (error) {
+      console.error(`${purpose}: Gemini недоступен (${(error as Error).message}) — резервная модель Groq`);
+    }
+  }
+  return groqComplete(messages, undefined, purpose, signal, 0, GROQ_MODEL_JUNIOR);
 }
 
 async function geminiComplete(messages: GroqMessage[], tools: unknown[] | undefined, purpose = "reply", signal?: AbortSignal): Promise<GroqMessage> {
@@ -1236,6 +1252,26 @@ const GROQ_CORE_TOOL_NAMES = new Set([
 ]);
 const JARVIS_TOOLS_GROQ = JARVIS_TOOLS.filter((tool) => GROQ_CORE_TOOL_NAMES.has(tool.function.name));
 
+// Зеркало server/mbox-server.mjs: TPM 8000 у Groq — бюджет на промпт, инструменты, историю и
+// ответ сразу, а KEEP_RAW=50 в него не влезает. Режем историю с головы, свежее важнее старого.
+const GROQ_HISTORY_BUDGET_CHARS = Number(process.env.GROQ_HISTORY_BUDGET_CHARS || 4000);
+
+function trimHistoryForGroq(msgs: GroqMessage[], budget = GROQ_HISTORY_BUDGET_CHARS): GroqMessage[] {
+  if (msgs.length <= 2) return msgs;
+  const [system, ...rest] = msgs;
+  const kept: GroqMessage[] = [];
+  let used = 0;
+  for (let i = rest.length - 1; i >= 0; i -= 1) {
+    const size = JSON.stringify(rest[i]).length;
+    if (kept.length && used + size > budget) break;
+    kept.unshift(rest[i]);
+    used += size;
+  }
+  // Ответ инструмента без предшествующего вызова Groq отвергает — срезаем осиротевшие.
+  while (kept.length && kept[0].role === "tool") kept.shift();
+  return [system, ...kept];
+}
+
 const GROQ_SYSTEM_PROMPT = `Ты ${JARVIS_NAME} — лёгкий помощник в MBOX, сейчас работаешь в РЕЗЕРВНОМ режиме `
   + `(Groq ${GROQ_MODEL}, основная модель Gemini недоступна) — короткий бюджет токенов, поэтому будь краток. `
   + "Тон робота-дворецкого: вежливо, на «вы», уместно «Слушаюсь», «Конечно, сэр», без лишней ролевой игры. "
@@ -1411,16 +1447,12 @@ async function refreshDataSourceById(id: string, opts: { inboxId?: unknown } = {
     const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000);
     // Одноразовый пересказ, не оркестрация — отдаём младшей модели, см. server/mbox-server.mjs.
     setPhase(inboxId, "Делегирует младшему агенту");
-    const digestMessage = await groqComplete(
+    const digestMessage = await skillComplete(
       [
         { role: "system", content: "Сделай короткую сводку веб-страницы для системы памяти: 5-10 пунктов, факты и цифры, без воды, на русском." },
         { role: "user", content: text || "(пустая страница)" },
       ],
-      undefined,
       "skill-webpage-summary",
-      undefined,
-      0,
-      GROQ_MODEL_JUNIOR,
     );
     const digest = String(digestMessage.content || "").trim().slice(0, 3000);
     let memoryId = row.last_memory_id;
@@ -2065,16 +2097,12 @@ async function runJarvisTool(client: PoolClient, name: string | undefined, rawAr
     const task = String(args.task || "").trim();
     if (!task) return "не делегировал — нет описания задачи";
     setPhase(inboxId, "Делегирует младшему агенту");
-    const delegateMessage = await groqComplete(
+    const delegateMessage = await skillComplete(
       [
         { role: "system", content: `Выполни задачу коротко и по делу, на русском: ${task}` },
         { role: "user", content: String(args.input || "") || "(нет входных данных)" },
       ],
-      undefined,
       "skill-delegate-junior",
-      undefined,
-      0,
-      GROQ_MODEL_JUNIOR,
     );
     return String(delegateMessage.content || "").trim().slice(0, 3000) || "младший агент не вернул ответ";
   }
@@ -2266,7 +2294,9 @@ async function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: 
           }
         }
         const groqMsgs = msgs[0]?.role === "system" ? [{ ...msgs[0], content: GROQ_SYSTEM_PROMPT }, ...msgs.slice(1)] : msgs;
-        return groqComplete(groqMsgs, JARVIS_TOOLS_GROQ, "reply", controller.signal);
+        const trimmed = trimHistoryForGroq(groqMsgs);
+        if (trimmed.length < groqMsgs.length) jlog(item.id, `история урезана для Groq: ${groqMsgs.length} -> ${trimmed.length} сообщений (лимит TPM 8000)`);
+        return groqComplete(trimmed, JARVIS_TOOLS_GROQ, "reply", controller.signal);
       }
       jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
       for (let step = 0; step < 8; step += 1) {
@@ -2955,6 +2985,62 @@ function mboxDevApi() {
               broadcastRealtime(realtimeClients, "agent_presence", { agent: name, event: "phase" });
             }
             return sendJson(res, 200, { presence: result.rows[0] });
+          }
+
+          // Каталог навыков продублирован из server/mbox-server.mjs — этот dev-сервер повторяет
+          // весь API целиком (см. соседние ручки), отдельного источника правды для него нет.
+          if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {
+            const skillCatalog = [
+              {
+                id: "skill-webpage-summary",
+                name: "Пересказ веб-страницы",
+                owner: "Gemini · резерв oss",
+                trigger: "refresh_data_source",
+                summary: "Источник данных обновился — страница чистится от разметки и сжимается в 5-10 пунктов фактами и цифрами, результат ложится в память как запись «Источник: …».",
+                input: "HTML страницы источника (до 6000 символов текста)",
+                output: "Сводка до 3000 символов, записывается/обновляется в memories",
+              },
+              {
+                id: "skill-delegate-junior",
+                name: "Делегирование Младшему",
+                owner: "Gemini · резерв oss",
+                trigger: "delegate_to_junior",
+                summary: "Джарвис скидывает мелкую текстовую подзадачу — черновик, сводку, пересказ, классификацию — отдельному вызову модели, не тратя на неё свой тесный контекст и квоту.",
+                input: "Формулировка задачи + исходный текст",
+                output: "Готовый текст до 3000 символов обратно в цепочку действий Джарвиса",
+              },
+            ];
+            const serviceModes: Record<string, string> = {
+              reply: "Ответ в чате",
+              cron: "Фоновый разбор по расписанию",
+              "history-compression": "Сжатие истории диалога",
+            };
+            const usage = await queryPostgres<{ purpose: string; calls: number; tokens: string; calls_24h: number; last_used_at: string | null; last_model: string | null }>(
+              `SELECT purpose,
+                      count(*)::int AS calls,
+                      COALESCE(sum(total_tokens), 0)::bigint AS tokens,
+                      COALESCE(count(*) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::int AS calls_24h,
+                      max(created_at)::text AS last_used_at,
+                      (array_agg(model ORDER BY created_at DESC))[1] AS last_model
+               FROM groq_usage GROUP BY purpose`,
+            );
+            const byPurpose = new Map(usage.rows.map((row) => [row.purpose, row]));
+            const withUsage = (id: string) => {
+              const row = byPurpose.get(id);
+              return {
+                calls: row?.calls || 0,
+                calls_24h: row?.calls_24h || 0,
+                tokens: Number(row?.tokens || 0),
+                last_used_at: row?.last_used_at || null,
+                last_model: row?.last_model || null,
+              };
+            };
+            const skills = skillCatalog.map((skill) => ({ ...skill, ...withUsage(skill.id) }));
+            const modes = Object.entries(serviceModes).map(([id, name]) => ({ id, name, ...withUsage(id) }));
+            const unknown = usage.rows
+              .filter((row) => row.purpose.startsWith("skill-") && !skillCatalog.some((skill) => skill.id === row.purpose))
+              .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
+            return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
           }
 
           if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {

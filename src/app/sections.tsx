@@ -9,6 +9,7 @@ export const sections: Array<{ key: SectionKey; label: string; image: string }> 
   { key: "memories", label: "Память", image: `${ICONS}/память.png` },
   { key: "artifacts", label: "Артефакты", image: `${ICONS}/артефакты.png` },
   { key: "projects", label: "Проекты", image: `${ICONS}/проекты.png` },
+  { key: "abilities", label: "Умения", image: `${ICONS}/навыки.png` },
   { key: "history", label: "История", image: `${ICONS}/история.png` },
   { key: "settings", label: "Настройки", image: `${ICONS}/настройки.png` },
 ];

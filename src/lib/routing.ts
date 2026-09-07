@@ -1,12 +1,17 @@
 import type { FolderTreeNode } from "../components/FolderTree";
 import type { SectionKey } from "../types";
 
-export const sectionKeys: SectionKey[] = ["overview", "memories", "artifacts", "projects", "graph", "history", "server", "settings"];
+export const sectionKeys: SectionKey[] = ["overview", "memories", "artifacts", "projects", "abilities", "graph", "history", "server", "settings"];
 
 const knownSections = new Set<SectionKey>(sectionKeys);
 
+// Навыки и Инструменты стали вкладками внутри «Умений» — старые ссылки не должны выкидывать
+// на «Обзор». Какая из двух вкладок откроется, решает сам AbilitiesBoard по этому же пути.
+const renamedSections: Record<string, SectionKey> = { tools: "abilities", skills: "abilities" };
+
 export function sectionFromLocation(): SectionKey {
   const raw = window.location.pathname.split("/").filter(Boolean)[0] as SectionKey | undefined;
+  if (raw && renamedSections[raw]) return renamedSections[raw];
   return raw && knownSections.has(raw) ? raw : "overview";
 }
 

@@ -45,6 +45,7 @@ type DesktopApi = {
   installAppAutostart: () => Promise<unknown>;
   removeAppAutostart: () => Promise<unknown>;
   openRepo: () => Promise<unknown>;
+  openPath?: (targetPath: string) => Promise<unknown>;
   checkUpdates?: () => Promise<unknown>;
   installUpdate?: () => Promise<unknown>;
   onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;

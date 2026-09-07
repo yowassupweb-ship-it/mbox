@@ -491,3 +491,47 @@
   .bottom-nav { padding-block: 6px; }
   .bottom-nav .nav-item { min-height: 38px; }
 }
+
+@media (max-width: 720px) {
+  .tools-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tool-card-head {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .tool-logo {
+    width: 44px;
+    height: 44px;
+  }
+
+  .tool-status {
+    grid-column: 1 / -1;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .tool-command-list button {
+    display: grid;
+    grid-template-columns: 16px minmax(88px, auto) minmax(0, 1fr);
+  }
+
+  .tool-command-list button span {
+    min-width: 0;
+  }
+
+  .skills-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skill-card-head {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .skill-calls {
+    grid-column: 1 / -1;
+    justify-self: start;
+    justify-items: start;
+  }
+}

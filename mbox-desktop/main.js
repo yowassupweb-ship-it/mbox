@@ -462,8 +462,25 @@ ipcMain.handle("mbox-desktop:remove-autostart", async () => removeResponderAutos
 ipcMain.handle("mbox-desktop:install-app-autostart", async () => installAppAutostart());
 ipcMain.handle("mbox-desktop:remove-app-autostart", async () => removeAppAutostart());
 ipcMain.handle("mbox-desktop:open-repo", async () => shell.openPath(repoRoot));
+ipcMain.handle("mbox-desktop:open-path", async (_event, targetPath) => openAllowedPath(targetPath));
 ipcMain.handle("mbox-desktop:check-updates", async () => checkForUpdates(true));
 ipcMain.handle("mbox-desktop:install-update", async () => {
   autoUpdater.quitAndInstall(false, true);
   return { ok: true };
 });
+
+async function openAllowedPath(targetPath) {
+  const requested = path.resolve(String(targetPath || ""));
+  const allowedRoots = [
+    repoRoot,
+    path.join(os.homedir(), "Desktop", "Mbox"),
+    path.join(os.homedir(), "Desktop", "MBOX")
+  ].map((item) => path.resolve(item).toLowerCase());
+  const normalized = requested.toLowerCase();
+  const allowed = allowedRoots.some((root) => normalized === root || normalized.startsWith(`${root}${path.sep}`));
+  if (!allowed) throw new Error("Path is outside the MBOX workspace");
+  if (!fs.existsSync(requested)) throw new Error(`Path not found: ${requested}`);
+  const error = await shell.openPath(requested);
+  if (error) throw new Error(error);
+  return { ok: true, path: requested };
+}

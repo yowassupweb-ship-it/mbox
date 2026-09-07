@@ -127,6 +127,10 @@ class MboxClient {
     return this.request("/api/mbox/agent/inbox");
   }
 
+  agents() {
+    return this.request("/api/mbox/agents");
+  }
+
   async createInboxMessage(body, target = "") {
     const projectId = await this.ensureProjectId();
     const cleanBody = String(body || "").trim();
@@ -446,13 +450,14 @@ function formatConsoleTime(value) {
   return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function consoleHtml(nonce, logoUri) {
+function consoleHtml(nonce, logoUri, avatars) {
+  const imgSrc = [logoUri, ...Object.values(avatars)].map((u) => u.toString()).join(" ");
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${logoUri.toString()} data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${imgSrc} data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <title>MBOX Console</title>
   <style>
     :root {
@@ -537,6 +542,8 @@ function consoleHtml(nonce, logoUri) {
     .console-bar-agent-name { color: var(--text-2); font-weight: 600; }
     .console-bar-agent.active .console-bar-agent-name,
     .console-bar-agent.working .console-bar-agent-name { color: var(--text-main); }
+    .console-bar-agent.idle { opacity: .6; }
+    .console-bar-agent.offline { opacity: .35; }
     .console-bar-agent-phase {
       color: var(--text-muted);
       font-size: 11px;
@@ -611,10 +618,23 @@ function consoleHtml(nonce, logoUri) {
       min-width: 0;
       max-width: 100%;
       overflow-wrap: anywhere;
-      white-space: pre-wrap;
       color: var(--text-main);
     }
-    .console-log-line.sys .console-log-text { color: var(--text-2); }
+    .console-log-line.sys .console-log-text { white-space: pre-wrap; color: var(--text-2); }
+    .console-log-line.cmd .console-log-actor { color: var(--state-warn); }
+    .console-log-line.cmd .console-log-text { color: var(--text-2); }
+    .console-log-text code {
+      padding: 1px 5px;
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,.08);
+      font-family: var(--font-mono);
+      font-size: .95em;
+    }
+    .console-log-text em { font-style: italic; color: var(--text-2); }
+    .console-log-table { display: block; overflow-x: auto; margin: 6px 0; border-collapse: collapse; font-size: .92em; max-width: 100%; }
+    .console-log-table th, .console-log-table td { padding: 4px 10px; border: 1px solid var(--border-color); text-align: left; white-space: nowrap; }
+    .console-log-table th { color: var(--text-2); font-weight: 600; background: rgba(255,255,255,.04); }
+    .console-log-line.typing { opacity: .7; }
     .console-log-sep {
       align-self: center;
       margin: 8px 0 5px;
@@ -645,6 +665,58 @@ function consoleHtml(nonce, logoUri) {
       padding: 10px 14px 12px;
       border-top: 1px solid rgba(255,255,255,.06);
       background: #111114;
+    }
+    .console-suggest {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 100%;
+      margin-bottom: 8px;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius-lg);
+      background: #17171a;
+      box-shadow: 0 12px 30px rgba(0,0,0,.5);
+      padding: 5px;
+      display: grid;
+      gap: 2px;
+    }
+    .console-suggest button {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 7px 9px;
+      border: 0;
+      border-left: 2px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-2);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      text-align: left;
+    }
+    .console-suggest-icon {
+      flex: none;
+      display: inline-grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--accent-color) 16%, transparent);
+      color: var(--accent-color);
+      font-size: 11px;
+    }
+    .console-suggest button b { flex: none; color: var(--text-main); font-weight: 720; }
+    .console-suggest button em {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      text-align: right; font-style: normal; color: var(--text-muted); font-size: 11px;
+    }
+    .console-suggest button.is-active {
+      background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+      border-left-color: var(--accent-color);
+      color: var(--text-main);
     }
     .console-quick {
       display: flex;
@@ -728,33 +800,15 @@ function consoleHtml(nonce, logoUri) {
 <body>
   <div class="agent-chat-shell console">
     <div class="console-bar">
-      <div class="console-bar-roster" title="MBOX · Codex · Claude · Джарвис">
-        <span class="console-bar-agent active">
-          <span class="agent-avatar"><img src="${logoUri}" alt=""></span>
-          <span class="console-bar-agent-name">MBOX</span>
-        </span>
-        <span class="console-bar-agent active"><span class="console-bar-agent-name">Codex</span></span>
-        <span class="console-bar-agent active"><span class="console-bar-agent-name">Claude</span></span>
-        <span class="console-bar-agent active"><span class="console-bar-agent-name">Джарвис</span></span>
-      </div>
+      <div class="console-bar-roster" id="roster" title="агентов пока нет данных"></div>
       <button class="chat-close" id="refresh" type="button" title="Обновить" aria-label="Обновить">↻</button>
     </div>
-    <main id="messages" class="console-log">
-      <div class="console-log-line sys">
-        <span class="console-log-head"><span class="console-log-time"></span><span class="console-log-actor">mbox ›</span></span>
-        <span class="console-log-text">mbox консоль готова. /help — список команд.</span>
-      </div>
-    </main>
+    <main id="messages" class="console-log"></main>
     <section class="console-composer">
-      <div class="console-quick">
-        <button id="codex" type="button">@Codex</button>
-        <button id="claude" type="button">@Claude</button>
-        <button id="all" type="button">@All</button>
-        <button id="jarvis" type="button">@Джарвис</button>
-      </div>
+      <div id="suggest" class="console-suggest" hidden></div>
       <form class="console-input-row" id="form">
         <span class="console-prompt" id="prompt"><img src="${logoUri}" alt=""></span>
-        <textarea id="text" placeholder="/команда, @агент; $проект; #артефакт" rows="1" spellcheck="false"></textarea>
+        <textarea id="text" placeholder="/команда, @агент" rows="1" spellcheck="false"></textarea>
         <button class="send" id="send" type="submit" aria-label="Отправить">›</button>
       </form>
     </section>
@@ -764,85 +818,250 @@ function consoleHtml(nonce, logoUri) {
     const messages = document.getElementById("messages");
     const text = document.getElementById("text");
     const prompt = document.getElementById("prompt");
-    let selectedTarget = "";
-    let lastDay = "";
+    const roster = document.getElementById("roster");
+    const suggestBox = document.getElementById("suggest");
+    const AVATARS = ${JSON.stringify(avatars)};
+    let agentsCache = [];
+    let localLines = [];
+    let lastItems = [];
+    let highlight = 0;
+    let suggestions = [];
+    let dismissedKey = null;
+
+    const SLASH_COMMANDS = [
+      { value: "help", hint: "эта справка" },
+      { value: "status", hint: "кто сейчас на связи" },
+      { value: "agents", hint: "кто сейчас на связи" },
+      { value: "who", hint: "что известно про агента" },
+      { value: "clear", hint: "очистить окно" },
+    ];
 
     document.getElementById("refresh").addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
     document.getElementById("form").addEventListener("submit", (event) => { event.preventDefault(); send(); });
-    document.getElementById("codex").addEventListener("click", () => mention("Codex"));
-    document.getElementById("claude").addEventListener("click", () => mention("Claude"));
-    document.getElementById("all").addEventListener("click", () => mention("All"));
-    document.getElementById("jarvis").addEventListener("click", () => mention("Джарвис"));
-    text.addEventListener("input", updatePrompt);
-    text.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        send();
-      }
-    });
+    text.addEventListener("input", () => { text.style.height = "auto"; text.style.height = Math.min(text.scrollHeight, 220) + "px"; updateSuggestions(); updatePrompt(); });
+    text.addEventListener("click", updateSuggestions);
+    text.addEventListener("keyup", (event) => { if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(event.key)) updateSuggestions(); });
+    text.addEventListener("keydown", onKeyDown);
 
-    function mention(name) {
-      selectedTarget = name;
-      const marker = "@" + name;
-      if (!text.value.includes(marker)) text.value = marker + (text.value.trim() ? " " + text.value.trim() : " ");
-      updatePrompt();
+    function activeToken() {
+      const cursor = text.selectionStart;
+      const before = text.value.slice(0, cursor);
+      const match = before.match(/(?:^|\\s)([@/])(\\S*)$/);
+      if (!match) return null;
+      const trigger = match[1];
+      const query = match[2];
+      const start = cursor - query.length - 1;
+      if (trigger === "/" && start !== 0) return null;
+      return { trigger, query, start, cursor };
+    }
+
+    function updateSuggestions() {
+      const token = activeToken();
+      const tokenKey = token ? token.trigger + ":" + token.start : null;
+      if (!token || tokenKey === dismissedKey) { suggestions = []; renderSuggestions(); return; }
+      const q = token.query.toLowerCase();
+      if (token.trigger === "@") {
+        suggestions = agentsCache.map((a) => ({ value: a.name, hint: a.status || "" })).filter((s) => s.value.toLowerCase().includes(q));
+      } else if (token.trigger === "/") {
+        suggestions = SLASH_COMMANDS.filter((c) => c.value.startsWith(q));
+      } else {
+        suggestions = [];
+      }
+      highlight = 0;
+      renderSuggestions();
+    }
+
+    function renderSuggestions() {
+      if (!suggestions.length) { suggestBox.hidden = true; suggestBox.innerHTML = ""; return; }
+      suggestBox.hidden = false;
+      suggestBox.innerHTML = suggestions.map((s, i) =>
+        '<button type="button" data-index="' + i + '" class="' + (i === highlight ? "is-active" : "") + '">' +
+          '<span class="console-suggest-icon">' + (activeToken().trigger === "@" ? "@" : "/") + '</span>' +
+          '<b>' + escapeHtml(s.value) + '</b>' +
+          (s.hint ? '<em>' + escapeHtml(s.hint) + '</em>' : "") +
+        '</button>'
+      ).join("");
+      suggestBox.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("mousedown", (event) => { event.preventDefault(); acceptSuggestion(suggestions[Number(btn.dataset.index)].value); });
+      });
+    }
+
+    function acceptSuggestion(value) {
+      const token = activeToken();
+      if (!token) return;
+      const before = text.value.slice(0, token.start);
+      const after = text.value.slice(token.cursor);
+      const insert = token.trigger + value + " ";
+      text.value = before + insert + after;
+      const nextCursor = before.length + insert.length;
+      text.setSelectionRange(nextCursor, nextCursor);
+      dismissedKey = null;
+      suggestions = [];
+      renderSuggestions();
       text.focus();
+      updatePrompt();
+    }
+
+    function onKeyDown(event) {
+      if (suggestions.length) {
+        if (event.key === "ArrowDown") { event.preventDefault(); highlight = (highlight + 1) % suggestions.length; renderSuggestions(); return; }
+        if (event.key === "ArrowUp") { event.preventDefault(); highlight = (highlight - 1 + suggestions.length) % suggestions.length; renderSuggestions(); return; }
+        if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); acceptSuggestion(suggestions[highlight].value); return; }
+        if (event.key === "Escape") { event.preventDefault(); const t = activeToken(); dismissedKey = t ? t.trigger + ":" + t.start : null; suggestions = []; renderSuggestions(); return; }
+      }
+      if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); }
+    }
+
+    function parseMention(raw) {
+      const match = raw.trim().match(/^@(\\S+)/);
+      return match ? match[1] : "";
     }
 
     function updatePrompt() {
-      const match = text.value.match(/@([A-Za-zА-Яа-яЁё0-9_-]+)/u);
-      prompt.textContent = match ? "@" + match[1] : "";
-      const img = document.createElement("img");
-      img.src = "${logoUri}";
-      img.alt = "";
-      prompt.appendChild(img);
+      const mention = parseMention(text.value);
+      prompt.innerHTML = (mention ? "@" + escapeHtml(mention) : "") + '<img src="${logoUri}" alt="">';
+    }
+
+    function pushLocal(kind, body) {
+      localLines.push({ id: "local-" + Date.now() + "-" + Math.random(), kind, actor: kind === "cmd" ? "Ты" : "mbox", body, created_at: new Date().toISOString() });
+      renderAll();
+    }
+
+    function runCommand(raw) {
+      const parts = raw.trim().slice(1).split(/\\s+/);
+      const cmd = parts[0];
+      const arg = parts.slice(1).join(" ");
+      pushLocal("cmd", raw);
+      if (cmd === "help") {
+        pushLocal("sys", [
+          "команды:",
+          "  /status, /agents  — кто сейчас на связи",
+          "  /who <имя>        — что известно про агента",
+          "  /clear            — очистить окно (переписка не удаляется)",
+          "  /help             — эта справка",
+          "что угодно без / — уходит агентам в общую или адресную (@агент) переписку",
+        ].join("\\n"));
+      } else if (cmd === "status" || cmd === "agents") {
+        if (!agentsCache.length) { pushLocal("sys", "агентов пока не подключено"); return; }
+        pushLocal("sys", agentsCache.map((a) => (a.name + "          ").slice(0, 12) + (a.status || "") + (a.phase ? " · " + a.phase : "")).join("\\n"));
+      } else if (cmd === "who") {
+        const found = agentsCache.find((a) => a.name.toLowerCase() === arg.toLowerCase());
+        pushLocal("sys", found ? found.name + ": " + found.status + (found.phase ? " — " + found.phase : "") + " · " + (found.kind || "") : (arg ? "агент «" + arg + "» не найден" : "укажи имя: /who Codex"));
+      } else if (cmd === "clear") {
+        localLines = [];
+        renderAll();
+      } else {
+        pushLocal("sys", "неизвестная команда: /" + cmd + " — попробуй /help");
+      }
     }
 
     function send() {
       const body = text.value.trim();
       if (!body) return;
-      vscode.postMessage({ type: "send", body, target: selectedTarget });
       text.value = "";
-      selectedTarget = "";
+      text.style.height = "auto";
+      suggestions = [];
+      renderSuggestions();
       updatePrompt();
+      if (body.startsWith("/")) { runCommand(body); return; }
+      vscode.postMessage({ type: "send", body, target: parseMention(body) });
     }
 
     function escapeHtml(value) {
       return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     }
 
+    const MARKDOWN_TOKEN = /(\\*\\*[^*\\n]+\\*\\*|\`[^\`\\n]+\`|(?<![\\w*])\\*[^*\\n]+\\*(?![\\w*])|(?<!\\w)_[^_\\n]+_(?!\\w))/g;
+    function renderInlineMarkdown(content) {
+      return content.split(MARKDOWN_TOKEN).filter((p) => p !== "").map((part) => {
+        if (part.startsWith("**") && part.endsWith("**")) return "<b>" + escapeHtml(part.slice(2, -2)) + "</b>";
+        if (part.startsWith("\`") && part.endsWith("\`")) return "<code>" + escapeHtml(part.slice(1, -1)) + "</code>";
+        if (part.startsWith("*") && part.endsWith("*")) return "<em>" + escapeHtml(part.slice(1, -1)) + "</em>";
+        if (part.startsWith("_") && part.endsWith("_")) return "<em>" + escapeHtml(part.slice(1, -1)) + "</em>";
+        return escapeHtml(part);
+      }).join("");
+    }
+    const TABLE_SEP = /^\\s*\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)+\\|?\\s*$/;
+    function splitRow(line) { return line.trim().replace(/^\\|/, "").replace(/\\|$/, "").split("|").map((c) => c.trim()); }
+    function renderMarkdownLite(text) {
+      const lines = String(text || "").split("\\n");
+      const blocks = [];
+      let i = 0;
+      while (i < lines.length) {
+        if (lines[i].includes("|") && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
+          const header = splitRow(lines[i]);
+          i += 2;
+          const rows = [];
+          while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") { rows.push(splitRow(lines[i])); i += 1; }
+          blocks.push('<table class="console-log-table"><thead><tr>' + header.map((c) => "<th>" + renderInlineMarkdown(c) + "</th>").join("") + "</tr></thead><tbody>" +
+            rows.map((r) => "<tr>" + r.map((c) => "<td>" + renderInlineMarkdown(c) + "</td>").join("") + "</tr>").join("") + "</tbody></table>");
+          continue;
+        }
+        const line = lines[i];
+        const isListItem = /^\\s*[-*]\\s/.test(line);
+        const content = isListItem ? line.replace(/^\\s*[-*]\\s/, "") : line;
+        blocks.push((isListItem ? "• " : "") + renderInlineMarkdown(content) + (i < lines.length - 1 ? "<br>" : ""));
+        i += 1;
+      }
+      return blocks.join("");
+    }
+
+    function avatarFor(name) {
+      const key = String(name || "").toLowerCase();
+      if (key.includes("claude") || key.includes("anthropic")) return AVATARS.claude;
+      if (key.includes("codex") || key.includes("gpt") || key.includes("openai") || key.includes("chatgpt")) return AVATARS.gpt;
+      if (key.includes("gemini") || key.includes("bard") || key.includes("google")) return AVATARS.gemini;
+      if (key.includes("джарвис") || key.includes("jarvis")) return AVATARS.jarvis;
+      if (key.includes("человек") || key.includes("human") || key === "admin") return AVATARS.user;
+      return "";
+    }
+
+    function renderRoster(agents) {
+      agentsCache = agents;
+      if (!agents.length) { roster.innerHTML = '<span class="console-bar-agent muted">агентов нет на связи</span>'; roster.title = "агентов нет на связи"; return; }
+      roster.title = agents.length + " на связи: " + agents.map((a) => a.name).join(", ");
+      roster.innerHTML = agents.map((a) => {
+        const src = avatarFor(a.name);
+        const av = src ? '<span class="agent-avatar"><img src="' + src + '" alt=""></span>' : "";
+        const phase = a.status === "active" && a.phase ? '<span class="console-bar-agent-phase">' + escapeHtml(a.phase) + '</span>' : "";
+        return '<span class="console-bar-agent ' + escapeHtml(a.status || "offline") + '" title="' + escapeHtml(a.name + " · " + (a.status || "")) + '">' + av +
+          '<span class="console-bar-agent-name">' + escapeHtml(a.name) + '</span>' + phase + '</span>';
+      }).join("");
+    }
+
     function kindOf(item) {
       if (item.agent_name === "Human" || item.agent_name === "Человек") return "out";
       if (item.item_type === "agent_error") return "err";
-      if (item.item_type === "notice") return "sys";
       return "in";
     }
-
     function actorOf(item) {
       if (item.agent_name === "Human" || item.agent_name === "Человек") return "ты";
       return item.agent_name || "unknown";
     }
 
-    function render(items) {
-      if (!items.length) {
-        messages.innerHTML = '<div class="console-log-line sys"><span class="console-log-head"><span class="console-log-time"></span><span class="console-log-actor">mbox ›</span></span><span class="console-log-text">mbox консоль готова. /help — список команд.</span></div>';
+    function renderAll() {
+      const combined = [...lastItems, ...localLines].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+      if (!combined.length) {
+        messages.innerHTML = '<div class="console-log-line sys"><span class="console-log-text">mbox консоль готова. /help — список команд.</span></div>';
         return;
       }
-      lastDay = "";
-      messages.innerHTML = items.reverse().map((item) => {
+      let lastDay = "";
+      messages.innerHTML = combined.map((item) => {
         const day = String(item.created_at || "").slice(0, 10);
         const sep = day && day !== lastDay ? '<div class="console-log-sep">' + escapeHtml(day) + '</div>' : "";
         if (day) lastDay = day;
-        const to = item.props && (item.props.to || item.props.target || item.props.agent);
-        const actor = actorOf(item);
-        const kind = kindOf(item);
-        const textValue = item.body || item.title || "";
+        const kind = item.kind || kindOf(item);
+        const actor = item.actor || actorOf(item);
+        const time = item.created_at_label || "";
+        const body = item.body ?? item.title ?? "";
         const tools = item.props && Array.isArray(item.props.tools_used) ? item.props.tools_used : [];
-        const toolHtml = tools.length ? '<span class="console-tools-used">' + tools.map((tool) => '<span class="console-tool-chip">' + escapeHtml(tool) + '</span>').join("") + '</span>' : "";
-        const targetHint = to ? ' <span class="console-tool-chip">to ' + escapeHtml(to) + '</span>' : "";
+        const toolHtml = tools.length ? '<span class="console-tools-used">' + tools.map((t) => '<span class="console-tool-chip">' + escapeHtml(t) + '</span>').join("") + '</span>' : "";
+        const av = kind === "in" ? avatarFor(item.agent_name) : "";
+        const avHtml = av ? '<span class="agent-avatar" style="width:16px;height:16px"><img src="' + av + '" alt="" style="width:14px;height:14px"></span>' : "";
         return sep + '<div class="console-log-line ' + kind + '">' +
-          '<span class="console-log-head"><span class="console-log-time">' + escapeHtml(item.created_at_label || "") + '</span><span class="console-log-actor">' + escapeHtml(actor) + ' ›</span>' + targetHint + '</span>' +
-          '<span class="console-log-text">' + escapeHtml(textValue) + '</span>' + toolHtml +
+          '<span class="console-log-head"><span class="console-log-time">' + escapeHtml(time) + '</span>' + avHtml +
+          '<span class="console-log-actor">' + (kind === "cmd" ? "$" : escapeHtml(actor)) + '<span aria-hidden="true"> ›</span></span></span>' +
+          '<span class="console-log-text">' + renderMarkdownLite(body) + '</span>' + toolHtml +
           '</div>';
       }).join("");
       messages.scrollTop = messages.scrollHeight;
@@ -850,11 +1069,13 @@ function consoleHtml(nonce, logoUri) {
 
     window.addEventListener("message", (event) => {
       const message = event.data;
-      if (message.type === "items") render(message.items || []);
+      if (message.type === "items") { lastItems = message.items || []; renderAll(); }
+      if (message.type === "roster") renderRoster(message.agents || []);
       if (message.type === "error") messages.innerHTML = '<div class="error">' + escapeHtml(message.message) + '</div>';
     });
 
     vscode.postMessage({ type: "ready" });
+    renderAll();
     updatePrompt();
   </script>
 </body>
@@ -911,6 +1132,12 @@ async function activate(context) {
         .slice(0, 80)
         .map((item) => ({ ...item, created_at_label: formatConsoleTime(item.created_at) }));
       consolePanel.webview.postMessage({ type: "items", items });
+      try {
+        const agentData = await client.agents();
+        consolePanel.webview.postMessage({ type: "roster", agents: agentData.agents || [] });
+      } catch {
+        // roster is a nice-to-have; keep the console usable if /agents fails
+      }
     } catch (error) {
       consolePanel.webview.postMessage({ type: "error", message: error.message });
     }
@@ -929,7 +1156,8 @@ async function activate(context) {
     });
     consolePanel.iconPath = logoUri;
     consolePanel.webview.html = consoleHtml(nonce(), consolePanel.webview.asWebviewUri(logoUri));
-    consolePanel.onDidDispose(() => { consolePanel = null; });
+    const pollTimer = setInterval(() => { refreshConsolePanel(); }, 5000);
+    consolePanel.onDidDispose(() => { clearInterval(pollTimer); consolePanel = null; });
     consolePanel.webview.onDidReceiveMessage(async (message) => {
       if (message.type === "ready" || message.type === "refresh") {
         await refreshConsolePanel();

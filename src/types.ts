@@ -1,4 +1,24 @@
-export type SectionKey = "overview" | "memories" | "artifacts" | "projects" | "graph" | "history" | "server" | "settings";
+export type SectionKey = "overview" | "memories" | "artifacts" | "projects" | "abilities" | "graph" | "history" | "server" | "settings";
+
+export type SkillUsage = {
+  calls: number;
+  calls_24h: number;
+  tokens: number;
+  last_used_at: string | null;
+  last_model: string | null;
+};
+
+export type AgentSkill = SkillUsage & {
+  id: string;
+  name: string;
+  owner: string;
+  trigger: string;
+  summary: string;
+  input: string;
+  output: string;
+};
+
+export type SkillServiceMode = SkillUsage & { id: string; name: string };
 
 export type Memory = {
   id: string;

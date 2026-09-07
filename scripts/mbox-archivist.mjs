@@ -17,7 +17,11 @@
 const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "Admin";
 const password = process.env.MBOX_PASSWORD;
-const agentName = process.env.MBOX_AGENT_NAME || "Джарвис";
+// MBOX_AGENT_NAME — имя КЛИЕНТА, который ходит в MBOX (респондер Codex, респондер Claude,
+// MCP-сервер), и её нередко ставят глобально на всю машину. Джарвис живёт внутри сервера и
+// клиентом не является: подхватывая чужую переменную, он переименовывался в "Codex" и сливался
+// с респондером в одну строку agent_presence, а его ответы и ошибки подписывались чужим именем.
+const agentName = process.env.MBOX_JARVIS_NAME || "Джарвис";
 
 /** См. server/mbox-server.mjs — подробный трейс шагов агентного цикла в stdout контейнера. */
 function jlog(inboxId, message) {
