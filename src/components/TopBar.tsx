@@ -1,6 +1,7 @@
 import { AlertTriangle, Download, FolderOpen, Play, RefreshCw, Search, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
+import type { ToolOutputLine, ToolRunEvent } from "../types";
 
 // Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
 // полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
@@ -49,6 +50,11 @@ type DesktopApi = {
   checkUpdates?: () => Promise<unknown>;
   installUpdate?: () => Promise<unknown>;
   onEvent: (handler: (event: { type: string; message?: string; at?: string }) => void) => void;
+  // Запуск инструментов из MBOX — есть только в свежей оболочке, поэтому всё необязательное.
+  runTool?: (toolId: string, commandLabel: string) => Promise<{ pid?: number }>;
+  stopTool?: (toolId: string) => Promise<unknown>;
+  toolStatus?: () => Promise<Array<{ tool: string; label: string; lines: ToolOutputLine[] }>>;
+  onToolEvent?: (handler: (payload: ToolRunEvent) => void) => () => void;
 };
 
 declare global {

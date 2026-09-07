@@ -16,7 +16,17 @@ const desktopApi = {
   openPath: (targetPath) => ipcRenderer.invoke("mbox-desktop:open-path", targetPath),
   checkUpdates: () => ipcRenderer.invoke("mbox-desktop:check-updates"),
   installUpdate: () => ipcRenderer.invoke("mbox-desktop:install-update"),
-  onEvent: (handler) => ipcRenderer.on("mbox-desktop:event", (_event, payload) => handler(payload))
+  onEvent: (handler) => ipcRenderer.on("mbox-desktop:event", (_event, payload) => handler(payload)),
+  // Инструменты: из страницы уходят только идентификаторы, команду главный процесс берёт из
+  // каталога MBOX сам — см. пояснение в main.js.
+  runTool: (toolId, commandLabel) => ipcRenderer.invoke("mbox-desktop:run-tool", toolId, commandLabel),
+  stopTool: (toolId) => ipcRenderer.invoke("mbox-desktop:stop-tool", toolId),
+  toolStatus: () => ipcRenderer.invoke("mbox-desktop:tool-status"),
+  onToolEvent: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("mbox-desktop:tool", listener);
+    return () => ipcRenderer.removeListener("mbox-desktop:tool", listener);
+  }
 };
 
 contextBridge.exposeInMainWorld("mboxDesktop", desktopApi);

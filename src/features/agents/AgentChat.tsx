@@ -169,7 +169,7 @@ const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_resp
  */
 function agentState(agent: AgentActivity, runs: AgentRun[]) {
   const live = liveRunOf(runs, agent.name);
-  if (live) return { key: "working", label: "работает", detail: live.goal };
+  if (live) return { key: "working", label: "отвечает", detail: live.goal };
   const status = effectiveStatus(agent);
   // phase — живой сигнал, который агент сам присылает через POST /agent/ping (не выдумываем
   // "думает" статично: если фазы нет, значит агент сейчас реально ничего не делает).

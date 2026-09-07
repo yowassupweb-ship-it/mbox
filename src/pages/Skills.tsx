@@ -1,7 +1,10 @@
-import { Activity, ArrowRight, Cpu, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fetchOr } from "../lib/api";
 import type { AgentSkill, SkillServiceMode } from "../types";
+
+/** Навык — одноразовый вызов модели без оркестрации инструментами: Джарвис отдаёт его отдельным
+ * вызовом, чтобы не тратить свой тесный контекст и квоту. Идут на Gemini, младшая oss-модель —
+ * только резерв, если Gemini недоступен. На экране это не пишем: список говорит сам за себя. */
 
 function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -23,6 +26,7 @@ export function SkillsBoard() {
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [modes, setModes] = useState<SkillServiceMode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -38,77 +42,59 @@ export function SkillsBoard() {
   }, []);
 
   return (
-    <div className="skills-board">
-      <section className="skills-head">
-        <div>
-          <span className="eyebrow">что агент умеет сам</span>
-          <h1>Навыки</h1>
-          <p>Одноразовые вызовы модели без оркестрации инструментами: Джарвис отдаёт их отдельным вызовом, чтобы не тратить свой тесный контекст и квоту. Идут на Gemini, младшая модель oss — только резерв, если Gemini недоступен.</p>
-        </div>
-        <div className="skills-summary" aria-label="Сводка навыков">
-          <strong>{skills.length}</strong>
-          <span>{skills.reduce((sum, skill) => sum + skill.calls, 0)} вызовов всего</span>
-        </div>
-      </section>
+    <div className="rows-board">
+      <header className="rows-head">
+        <h1>Навыки</h1>
+        <span>{skills.length} · {skills.reduce((sum, skill) => sum + skill.calls, 0)} вызовов</span>
+      </header>
 
-      {loading && <p className="muted empty-state">Загрузка навыков</p>}
+      {loading && <p className="muted empty-state">Загрузка</p>}
       {!loading && skills.length === 0 && <p className="muted empty-state">Навыков пока нет</p>}
 
-      <div className="skills-grid">
-        {skills.map((skill) => (
-          <article className="skill-card" key={skill.id}>
-            <div className="skill-card-head">
-              <span className="skill-mark" aria-hidden="true"><Zap size={18} /></span>
-              <div>
-                <span className="skill-owner">{skill.owner}</span>
-                <h2>{skill.name}</h2>
-              </div>
-              <span className="skill-calls" title="Вызовов за всё время / за сутки">
-                {skill.calls}<i>{skill.calls_24h} за сутки</i>
-              </span>
+      <div className="rows">
+        {skills.map((skill) => {
+          const open = openId === skill.id;
+          return (
+            <div className="row-group" key={skill.id}>
+              <button type="button" className={open ? "row is-open" : "row"} onClick={() => setOpenId(open ? "" : skill.id)}>
+                <span className="row-name">{skill.name}</span>
+                <span className="row-dim">{skill.owner}</span>
+                <span className="row-num">{skill.calls}</span>
+                <span className="row-dim row-num">{formatTokens(skill.tokens)}</span>
+                <span className="row-dim">{formatLastUsed(skill.last_used_at)}</span>
+              </button>
+              {open && (
+                <dl className="row-detail">
+                  <div><dt>Что делает</dt><dd>{skill.summary}</dd></div>
+                  {skill.trigger && <div><dt>Вызов</dt><dd><code>{skill.trigger}</code> → <code>{skill.id}</code></dd></div>}
+                  <div><dt>Вход</dt><dd>{skill.input || "—"}</dd></div>
+                  <div><dt>Выход</dt><dd>{skill.output || "—"}</dd></div>
+                  <div><dt>Модель</dt><dd>{skill.last_model || "—"}</dd></div>
+                </dl>
+              )}
             </div>
-            <p>{skill.summary}</p>
-            {skill.trigger && (
-              <div className="skill-trigger">
-                <code>{skill.trigger}</code>
-                <ArrowRight size={14} />
-                <code>{skill.id}</code>
-              </div>
-            )}
-            <dl className="skill-io">
-              <div><dt>Вход</dt><dd>{skill.input || "—"}</dd></div>
-              <div><dt>Выход</dt><dd>{skill.output || "—"}</dd></div>
-            </dl>
-            <div className="skill-stats">
-              <span><Activity size={14} />{formatTokens(skill.tokens)} токенов</span>
-              <span><Cpu size={14} />{skill.last_model || "—"}</span>
-              <span>{formatLastUsed(skill.last_used_at)}</span>
-            </div>
-          </article>
-        ))}
+          );
+        })}
       </div>
 
       {modes.length > 0 && (
-        <section className="skills-modes">
-          <h2>Служебные режимы</h2>
-          <p className="muted">Не навыки, но тот же счётчик токенов — с ними видно, сколько на самом деле экономят навыки.</p>
-          <table>
-            <thead>
-              <tr><th>Режим</th><th>Вызовов</th><th>За сутки</th><th>Токенов</th><th>Последний раз</th></tr>
-            </thead>
-            <tbody>
-              {modes.map((mode) => (
-                <tr key={mode.id}>
-                  <td>{mode.name}</td>
-                  <td>{mode.calls}</td>
-                  <td>{mode.calls_24h}</td>
-                  <td>{formatTokens(mode.tokens)}</td>
-                  <td>{formatLastUsed(mode.last_used_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+        <>
+          <header className="rows-head sub">
+            <h2>Служебные режимы</h2>
+            <span>тот же счётчик токенов</span>
+          </header>
+          <div className="rows">
+            {modes.map((mode) => (
+              <div className="row is-static" key={mode.id}>
+                <span className="row-name">{mode.name}</span>
+                <span className="row-dim" />
+                <span className="row-num">{mode.calls}</span>
+                <span className="row-dim row-num">{formatTokens(mode.tokens)}</span>
+                <span className="row-dim">{formatLastUsed(mode.last_used_at)}</span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

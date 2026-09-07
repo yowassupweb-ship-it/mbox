@@ -484,3 +484,128 @@ async function openAllowedPath(targetPath) {
   if (error) throw new Error(error);
   return { ok: true, path: requested };
 }
+
+// --- Запуск инструментов из MBOX -------------------------------------------------------------
+//
+// Окно грузит УДАЛЁННУЮ страницу (mbox.shar-os.ru), и preload-мост доступен ей напрямую. Поэтому
+// из интерфейса приходит только пара идентификаторов: какой инструмент и какая его команда.
+// Саму команду главный процесс берёт из каталога, который сам же и запрашивает у MBOX по HTTPS,
+// и сверяет побайтово. Каталог из renderer'а не принимается ни при каких условиях.
+
+const runningTools = new Map();
+const TOOL_OUTPUT_LIMIT = 400;
+
+function toolWorkdirAllowed(dir) {
+  const allowedRoots = [
+    repoRoot,
+    path.join(os.homedir(), "Desktop", "Mbox"),
+    path.join(os.homedir(), "Desktop", "MBOX")
+  ].map((item) => path.resolve(item).toLowerCase());
+  const normalized = path.resolve(dir).toLowerCase();
+  return allowedRoots.some((root) => normalized === root || normalized.startsWith(`${root}${path.sep}`));
+}
+
+// Свои сообщения («Системе не удается найти указанный путь.») cmd.exe пишет в OEM-кодировке
+// даже когда вывод идёт в канал, и chcp на это не влияет — проверено. Сами инструменты
+// (cargo и прочие) пишут UTF-8. Поэтому сначала строгий UTF-8, а на непрошедших байтах cp866.
+function decodeConsole(buffer) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    try {
+      return new TextDecoder("cp866").decode(buffer);
+    } catch {
+      return buffer.toString("latin1");
+    }
+  }
+}
+
+async function fetchToolCatalog() {
+  const response = await fetch(`${mboxUrl}/api/mbox/tools`);
+  if (!response.ok) throw new Error(`Каталог инструментов недоступен: ${response.status}`);
+  const data = await response.json();
+  return Array.isArray(data.tools) ? data.tools : [];
+}
+
+function emitTool(payload) {
+  mainWindow?.webContents.send("mbox-desktop:tool", { at: new Date().toISOString(), ...payload });
+}
+
+async function runTool(toolId, commandLabel) {
+  const key = String(toolId || "");
+  if (runningTools.has(key)) throw new Error("Этот инструмент уже запущен — сначала остановите его");
+
+  const tools = await fetchToolCatalog();
+  const tool = tools.find((item) => item.id === key);
+  if (!tool) throw new Error(`Инструмент «${key}» не найден в каталоге MBOX`);
+  const entry = (tool.commands || []).find((item) => item.label === commandLabel);
+  if (!entry) throw new Error(`Команда «${commandLabel}» не описана у инструмента «${tool.name}»`);
+  if (entry.runnable === false) throw new Error(`Команда «${commandLabel}» помечена как незапускаемая (нужен stdio-режим)`);
+
+  const workdir = path.resolve(String(tool.path || ""));
+  if (!toolWorkdirAllowed(workdir)) throw new Error("Каталог инструмента вне рабочей папки MBOX");
+  if (!fs.existsSync(workdir)) throw new Error(`Каталог инструмента не найден: ${workdir}`);
+
+  // shell:true склеивает argv без экранирования (DEP0190), поэтому команду отдаём cmd.exe целиком
+  // одной строкой — она пришла из доверенного каталога, а не из интерфейса.
+  const child = spawn("cmd.exe", ["/d", "/s", "/c", entry.command], {
+    cwd: workdir,
+    windowsHide: true,
+    env: { ...process.env, ...(entry.env || {}) }
+  });
+
+  const state = { child, lines: [], label: commandLabel, toolId: key, startedAt: Date.now() };
+  runningTools.set(key, state);
+  emitTool({ tool: key, event: "started", label: commandLabel, command: entry.command, cwd: workdir, pid: child.pid });
+
+  function push(stream, chunk) {
+    for (const line of decodeConsole(chunk).split(/\r?\n/)) {
+      if (!line) continue;
+      state.lines.push({ stream, line });
+      if (state.lines.length > TOOL_OUTPUT_LIMIT) state.lines.shift();
+      emitTool({ tool: key, event: "output", stream, line });
+    }
+  }
+  child.stdout.on("data", (chunk) => push("out", chunk));
+  child.stderr.on("data", (chunk) => push("err", chunk));
+  child.on("error", (error) => {
+    runningTools.delete(key);
+    emitTool({ tool: key, event: "failed", message: error.message });
+  });
+  child.on("exit", (code, signal) => {
+    runningTools.delete(key);
+    emitTool({ tool: key, event: "exited", code, signal, ms: Date.now() - state.startedAt });
+  });
+
+  return { ok: true, pid: child.pid, command: entry.command, cwd: workdir };
+}
+
+function stopTool(toolId) {
+  const state = runningTools.get(String(toolId || ""));
+  if (!state) return { ok: false, reason: "не запущен" };
+  // Дерево процессов: cargo/obscura порождают детей, один kill по pid оставил бы их висеть.
+  try {
+    execFile("taskkill", ["/pid", String(state.child.pid), "/t", "/f"], () => {});
+  } catch {
+    state.child.kill();
+  }
+  return { ok: true };
+}
+
+function toolStatus() {
+  return [...runningTools.entries()].map(([toolId, state]) => ({
+    tool: toolId,
+    label: state.label,
+    pid: state.child.pid,
+    ms: Date.now() - state.startedAt,
+    lines: state.lines.slice(-80)
+  }));
+}
+
+ipcMain.handle("mbox-desktop:run-tool", async (_event, toolId, commandLabel) => runTool(toolId, commandLabel));
+ipcMain.handle("mbox-desktop:stop-tool", async (_event, toolId) => stopTool(toolId));
+ipcMain.handle("mbox-desktop:tool-status", async () => toolStatus());
+
+app.on("before-quit", () => {
+  for (const toolId of [...runningTools.keys()]) stopTool(toolId);
+});

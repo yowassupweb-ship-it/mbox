@@ -20,6 +20,47 @@ export type AgentSkill = SkillUsage & {
 
 export type SkillServiceMode = SkillUsage & { id: string; name: string };
 
+export type ToolCommand = {
+  label: string;
+  command: string;
+  env?: Record<string, string>;
+  /** false — команду нельзя запустить из MBOX (например, MCP через stdio: ей нужен живой канал). */
+  runnable?: boolean;
+  long_running?: boolean;
+};
+
+export type LocalTool = {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+  path: string;
+  repo: string;
+  docs: string;
+  icon: string;
+  summary: string;
+  capabilities: string[];
+  commands: ToolCommand[];
+};
+
+export type ToolOutputLine = { stream: "out" | "err"; line: string };
+
+export type ToolRunEvent = {
+  tool: string;
+  event: "started" | "output" | "exited" | "failed";
+  at?: string;
+  label?: string;
+  command?: string;
+  cwd?: string;
+  pid?: number;
+  stream?: "out" | "err";
+  line?: string;
+  code?: number | null;
+  signal?: string | null;
+  ms?: number;
+  message?: string;
+};
+
 export type Memory = {
   id: string;
   folder_id: string | null;

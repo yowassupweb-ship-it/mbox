@@ -1,7 +1,7 @@
 {
   "name": "mbox-vscode",
   "displayName": "MBOX",
-  "description": "MBOX project context, tasks, memories, and agent workflow inside VS Code.",
+  "description": "Проекты, задачи, память и работа агентов MBOX прямо в VS Code.",
   "version": "0.1.1",
   "publisher": "mbox",
   "private": true,
@@ -40,42 +40,42 @@
         "mbox.url": {
           "type": "string",
           "default": "https://mbox.shar-os.ru",
-          "description": "Base URL of the MBOX instance."
+          "description": "Адрес MBOX."
         },
         "mbox.username": {
           "type": "string",
           "default": "Admin",
-          "description": "MBOX username used for API login."
+          "description": "Имя пользователя для входа в MBOX."
         },
         "mbox.agentName": {
           "type": "string",
           "default": "VS Code",
-          "description": "Agent name sent in the x-mbox-agent header."
+          "description": "Имя агента, которое уходит в заголовке x-mbox-agent и в ростер MBOX."
         },
         "mbox.project": {
           "type": "string",
           "default": "MBOX",
-          "description": "Default MBOX project shown in the extension."
+          "description": "Проект MBOX, который показывает расширение."
         },
         "mbox.repoPath": {
           "type": "string",
           "default": "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
-          "description": "Local MBOX repository path containing scripts/codex-chat-watcher.mjs and scripts/claude-inbox-watcher.mjs."
+          "description": "Путь к локальному репозиторию MBOX со скриптами респондеров."
         },
         "mbox.autoStartResponders": {
           "type": "boolean",
           "default": true,
-          "description": "Start Codex and Claude MBOX inbox responders automatically while VS Code is open."
+          "description": "Запускать респондеров Codex и Claude, пока открыт VS Code."
         },
         "mbox.codexCommand": {
           "type": "string",
           "default": "codex",
-          "description": "Command used by the Codex responder watcher."
+          "description": "Команда, которой запускается Codex."
         },
         "mbox.claudeCommand": {
           "type": "string",
           "default": "claude",
-          "description": "Command used by the Claude responder watcher."
+          "description": "Команда, которой запускается Claude."
         }
       }
     },
@@ -92,22 +92,22 @@
       "mbox": [
         {
           "id": "mbox.projects",
-          "name": "Context",
+          "name": "Проект",
           "icon": "resources/mbox.png"
         },
         {
           "id": "mbox.todos",
-          "name": "Todos",
+          "name": "Задачи",
           "icon": "resources/mbox.png"
         },
         {
           "id": "mbox.memories",
-          "name": "Memories",
+          "name": "Память",
           "icon": "resources/mbox.png"
         },
         {
           "id": "mbox.console",
-          "name": "Console",
+          "name": "Консоль",
           "icon": "resources/mbox.png"
         }
       ]
@@ -115,59 +115,59 @@
     "commands": [
       {
         "command": "mbox.configure",
-        "title": "MBOX: Configure Connection"
+        "title": "MBOX: Настроить подключение"
       },
       {
         "command": "mbox.refresh",
-        "title": "MBOX: Refresh"
+        "title": "MBOX: Обновить"
       },
       {
         "command": "mbox.nextTask",
-        "title": "MBOX: Get Next Task"
+        "title": "MBOX: Взять следующую задачу"
       },
       {
         "command": "mbox.claimTask",
-        "title": "MBOX: Claim Task"
+        "title": "MBOX: Взять задачу в работу"
       },
       {
         "command": "mbox.openItem",
-        "title": "MBOX: Open Item"
+        "title": "MBOX: Открыть"
       },
       {
         "command": "mbox.createTask",
-        "title": "MBOX: Create Task"
+        "title": "MBOX: Создать задачу"
       },
       {
         "command": "mbox.recordMemory",
-        "title": "MBOX: Record Memory"
+        "title": "MBOX: Записать в память"
       },
       {
         "command": "mbox.openConsole",
-        "title": "MBOX: Open Shared Console"
+        "title": "MBOX: Открыть консоль"
       },
       {
         "command": "mbox.startResponders",
-        "title": "MBOX: Start Codex/Claude Responders"
+        "title": "MBOX: Запустить респондеров Codex и Claude"
       },
       {
         "command": "mbox.stopResponders",
-        "title": "MBOX: Stop Codex/Claude Responders"
+        "title": "MBOX: Остановить респондеров"
       },
       {
         "command": "mbox.showResponderStatus",
-        "title": "MBOX: Show Responder Status"
+        "title": "MBOX: Состояние респондеров"
       },
       {
         "command": "mbox.installStartupResponders",
-        "title": "MBOX: Install Always-On Responders"
+        "title": "MBOX: Включить автозапуск респондеров"
       },
       {
         "command": "mbox.uninstallStartupResponders",
-        "title": "MBOX: Uninstall Always-On Responders"
+        "title": "MBOX: Отключить автозапуск респондеров"
       },
       {
         "command": "mbox.openWeb",
-        "title": "MBOX: Open Web App"
+        "title": "MBOX: Открыть веб-приложение"
       }
     ],
     "menus": {

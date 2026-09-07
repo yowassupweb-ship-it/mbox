@@ -7,395 +7,187 @@
   align-items: start;
 }
 
-.tools-board {
+/* Построчный список — общий для «Навыков» и «Инструментов». Никаких карточек и плиток:
+   строка = сущность, клик раскрывает подробности. Колонки одинаковой ширины у обоих экранов,
+   поэтому взгляд не перестраивается при переключении вкладок. */
+.rows-board {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   padding-bottom: 18px;
 }
 
-.tools-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(164px, 220px);
-  gap: 14px;
-  align-items: stretch;
+.rows-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 6px;
 }
 
-.tools-head > div:first-child,
-.tools-summary,
-.tool-card {
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-xl);
-  background: var(--element-bg);
-  box-shadow: var(--chin-shadow);
-}
-
-.tools-head > div:first-child {
-  min-width: 0;
-  padding: 20px;
-}
-
-.tools-head h1 {
-  margin: 4px 0 8px;
+.rows-head h1,
+.rows-head h2 {
+  margin: 0;
   font-family: var(--font-pixel);
-  font-size: 18px;
-  line-height: 1.55;
+  font-size: 16px;
+  line-height: 1.4;
   letter-spacing: 0;
 }
 
-.tools-head p,
-.tool-card p {
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
+.rows-head h2 { font-size: 14px; }
+.rows-head.sub { padding-top: 10px; }
 
-.tools-summary {
-  display: grid;
-  align-content: center;
-  gap: 6px;
-  padding: 18px;
-}
-
-.tools-summary strong {
-  font-family: var(--font-pixel);
-  font-size: 34px;
-  line-height: 1.2;
-}
-
-.tools-summary span,
-.tool-kind {
+.rows-head span {
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
 
-.tools-grid {
+.rows {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  gap: 14px;
-}
-
-.tool-card {
-  min-width: 0;
-  display: grid;
-  gap: 14px;
-  padding: 18px;
-}
-
-.tool-card-head {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-}
-
-.tool-logo {
-  width: 52px;
-  height: 52px;
-  border-radius: var(--radius-md);
-  object-fit: contain;
-  background: rgba(255, 255, 255, .06);
-}
-
-.tool-card h2 {
-  margin: 2px 0 0;
-  font-size: 23px;
-  line-height: 1.2;
-}
-
-.tool-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  justify-self: end;
-  border-radius: var(--radius-pill);
-  padding: 7px 10px;
-  background: color-mix(in srgb, var(--accent-color) 14%, transparent);
-  color: var(--text-main);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  white-space: nowrap;
-}
-
-.tool-tags,
-.tool-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tool-tags span {
-  border-radius: var(--radius-pill);
-  padding: 6px 9px;
-  background: rgba(255, 255, 255, .06);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
-.tool-actions button,
-.tool-actions a,
-.tool-command-list button {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  gap: 1px;
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--container-bg) 84%, transparent);
+  background: var(--border-color);
+  overflow: hidden;
+}
+
+.row-group { display: grid; background: var(--element-bg); }
+
+.row {
+  width: 100%;
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 128px) 64px 64px minmax(0, 108px);
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 0;
+  background: var(--element-bg);
   color: var(--text-main);
-  box-shadow: var(--chin-shadow);
   font: inherit;
-  font-weight: var(--weight-medium);
-  text-decoration: none;
+  text-align: left;
   cursor: pointer;
 }
 
-.tool-actions button,
-.tool-actions a {
-  min-height: 38px;
-  padding: 0 12px;
-}
+.row.is-static { cursor: default; }
+.row:hover:not(.is-static) { background: color-mix(in srgb, var(--accent-color) 7%, var(--element-bg)); }
+.row.is-open { background: color-mix(in srgb, var(--accent-color) 10%, var(--element-bg)); }
 
-.tool-command-list {
-  display: grid;
-  gap: 8px;
-}
-
-.tool-command-list button {
-  width: 100%;
-  min-height: 44px;
-  padding: 9px 11px;
-  justify-content: start;
-  text-align: left;
-}
-
-.tool-command-list button span {
-  flex: none;
-  min-width: 108px;
-}
-
-.tool-command-list code {
+.row-name,
+.row-dim,
+.row-cmd,
+.row-cmd-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
 }
 
-.skills-board {
+.row-name { font-weight: var(--weight-medium); }
+.row-dim { color: var(--text-muted); font-size: var(--text-sm); }
+.row-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.row-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  justify-self: end;
+}
+
+.row-dot.live {
+  background: var(--state-ok, #65d68b);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-ok, #65d68b) 18%, transparent);
+}
+
+/* Подробности — тоже строками, а не сеткой карточек. */
+.row-detail {
   display: grid;
-  gap: 14px;
-  padding-bottom: 18px;
-}
-
-.skills-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(164px, 220px);
-  gap: 14px;
-  align-items: stretch;
-}
-
-.skills-head > div:first-child,
-.skills-summary,
-.skill-card,
-.skills-modes {
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-xl);
-  background: var(--element-bg);
-  box-shadow: var(--chin-shadow);
-}
-
-.skills-head > div:first-child {
-  min-width: 0;
-  padding: 20px;
-}
-
-.skills-head h1 {
-  margin: 4px 0 8px;
-  font-family: var(--font-pixel);
-  font-size: 18px;
-  line-height: 1.55;
-  letter-spacing: 0;
-}
-
-.skills-head p,
-.skill-card p {
+  gap: 1px;
   margin: 0;
-  color: var(--text-muted);
-  line-height: 1.55;
-  overflow-wrap: anywhere;
+  background: var(--border-color);
+  border-top: var(--border-width) solid var(--border-color);
 }
 
-.skills-summary {
+.row-detail > div {
   display: grid;
-  align-content: center;
-  gap: 6px;
-  padding: 18px;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 12px;
+  background: var(--container-bg);
 }
 
-.skills-summary strong {
-  font-family: var(--font-pixel);
-  font-size: 34px;
-  line-height: 1.2;
-}
+.row-detail dt { color: var(--text-muted); font-size: var(--text-sm); }
+.row-detail dd { margin: 0; min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
 
-.skills-summary span,
-.skill-owner {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-
-.skills-grid {
+.row-line {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  gap: 14px;
-}
-
-.skill-card {
-  min-width: 0;
-  display: grid;
-  gap: 14px;
-  padding: 18px;
-  align-content: start;
-}
-
-.skill-card-head {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 108px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+  padding: 7px 12px;
+  background: var(--container-bg);
 }
 
-.skill-mark {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
-  color: var(--accent-color);
-}
+.row-line .row-path { grid-column: 1 / 3; }
 
-.skill-card h2 {
-  margin: 2px 0 0;
-  font-size: 23px;
-  line-height: 1.2;
-}
-
-.skill-calls {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
-  justify-self: end;
-  font-family: var(--font-pixel);
-  font-size: 22px;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-
-.skill-calls i {
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-style: normal;
-}
-
-.skill-trigger {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-}
-
-.skill-trigger code {
-  border-radius: var(--radius-pill);
-  padding: 6px 9px;
-  background: rgba(255, 255, 255, .06);
-  font-size: var(--text-sm);
-}
-
-.skill-io {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-}
-
-.skill-io > div {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.skill-io dt {
+.row-cmd,
+.row-path {
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
 
-.skill-io dd {
-  margin: 0;
-  min-width: 0;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.skill-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.skill-stats span {
+.row-line-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  justify-self: end;
+}
+
+.row-line-actions button,
+.row-line-actions a {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-pill);
-  padding: 6px 9px;
-  background: rgba(255, 255, 255, .06);
+  padding: 0 9px;
+  background: transparent;
   color: var(--text-muted);
+  font: inherit;
   font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  text-decoration: none;
+  cursor: pointer;
 }
 
-.skills-modes {
-  padding: 18px;
-  display: grid;
-  gap: 10px;
-}
+.row-line-actions button:hover,
+.row-line-actions a:hover { color: var(--text-main); border-color: var(--accent-color); }
+.row-line-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.row-line-actions .is-stop { color: #ffb3b3; border-color: color-mix(in srgb, #ff6b6b 40%, var(--border-color)); }
 
-.skills-modes h2 {
-  margin: 0;
-  font-size: 19px;
-  line-height: 1.3;
-}
+.row-console { background: var(--container-bg); }
 
-.skills-modes p { margin: 0; }
-
-/* Таблица шире карточки на узком экране — скроллим её саму, а не всю страницу. */
-.skills-modes table {
-  display: block;
-  overflow-x: auto;
-  width: 100%;
-  border-collapse: collapse;
-  white-space: nowrap;
-}
-
-.skills-modes th,
-.skills-modes td {
-  padding: 9px 12px 9px 0;
-  text-align: left;
-  border-bottom: var(--border-width) solid var(--border-color);
-}
-
-.skills-modes th {
-  color: var(--text-muted);
+.row-console-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: var(--border-width) solid var(--border-color);
   font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
 }
 
-.skills-modes tr:last-child td { border-bottom: 0; }
+.row-console-body {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 12px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.row-out { white-space: pre-wrap; overflow-wrap: anywhere; }
+.row-out.err { color: #ffb3b3; }
 
 /* Название — вход в полноэкранную запись (MemoryModal), не просто текст ячейки. */
 .memory-title-open {

@@ -3081,6 +3081,31 @@ async function requireUser(req, res) {
 // AgentChat.tsx). Он объявлен здесь, а не в базе, потому что навык существует ровно постольку,
 // поскольку в этом файле есть вызывающий его код: purpose ниже — тот же литерал, что уходит в
 // groqComplete, и по нему же считается живой расход из groq_usage.
+// Каталог инструментов — внешние проекты, дающие агентам новые действия. Живёт на сервере, а не
+// во фронтенде, по двум причинам: страницу «Инструменты» видно из любого клиента одинаково, и
+// desktop-оболочка берёт команды ИМЕННО отсюда, а не из того, что прислал интерфейс. Второе
+// важно: Electron открывает удалённую страницу, и запускать произвольную строку из неё нельзя.
+const TOOL_CATALOG = [
+  {
+    id: "obscura",
+    name: "Obscura",
+    kind: "headless browser",
+    status: "локально подключается",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\obscura",
+    repo: "https://github.com/h4ckf0r0day/obscura",
+    docs: "https://docs.obscura.sh",
+    icon: "/assets/icons/tools/obscura.png",
+    summary: "Лёгкий браузерный движок для агентной автоматизации: загрузка страниц, stealth, CDP, скриншоты, PDF и MCP без запуска Chromium.",
+    capabilities: ["web extraction", "screenshots", "PDF export", "CDP", "Playwright/Puppeteer", "MCP browser"],
+    commands: [
+      { label: "Сборка с render", command: "cargo build --release -p obscura-cli --bins --features render", env: { CARGO_INCREMENTAL: "0", CARGO_BUILD_JOBS: "2" }, runnable: true },
+      { label: "Сервер CDP", command: "target\\release\\obscura.exe serve --port 9222", runnable: true, long_running: true },
+      { label: "MCP stdio", command: "target\\release\\obscura.exe mcp", runnable: false },
+      { label: "MCP HTTP", command: "target\\release\\obscura.exe mcp --http --port 3000", runnable: true, long_running: true },
+    ],
+  },
+];
+
 const SKILL_CATALOG = [
   {
     id: "skill-webpage-summary",
@@ -3182,6 +3207,10 @@ async function handleApiWithContext(req, res, url) {
       broadcastRealtime("agent_presence", { agent: name, event: "phase" });
     }
     return sendJson(res, 200, { presence: result.rows[0] });
+  }
+
+  if (url.pathname === "/api/mbox/tools" && req.method === "GET") {
+    return sendJson(res, 200, { tools: TOOL_CATALOG });
   }
 
   if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {

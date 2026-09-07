@@ -4,6 +4,25 @@ const fs = require("fs");
 const path = require("path");
 
 const SECRET_PASSWORD = "mbox.password";
+
+// Раньше у каждого элемента всех деревьев стояла одна и та же mbox.png — статус проекта, задача,
+// запись памяти и сообщение выглядели одинаково, взгляд не за что зацепить. ThemeIcon рисуется
+// в цвет темы и различает сущности, ThemeColor подсвечивает статус задачи.
+const TODO_STATUS = {
+  open: { label: "Новая", icon: "circle-outline", color: "" },
+  next: { label: "Следующая", icon: "chevron-right", color: "charts.blue" },
+  doing: { label: "В работе", icon: "debug-start", color: "charts.yellow" },
+  blocked: { label: "Заблокирована", icon: "error", color: "charts.red" },
+  review: { label: "На проверке", icon: "eye", color: "charts.purple" },
+  done: { label: "Готово", icon: "pass-filled", color: "charts.green" },
+  archived: { label: "Архив", icon: "archive", color: "" },
+};
+
+const PRIORITY_LABEL = { low: "низкий", normal: "обычный", high: "высокий", urgent: "срочный" };
+
+function themeIcon(name, color) {
+  return color ? new vscode.ThemeIcon(name, new vscode.ThemeColor(color)) : new vscode.ThemeIcon(name);
+}
 let activeResponders = null;
 
 class MboxClient {
@@ -54,7 +73,7 @@ class MboxClient {
     this.cookie = cookie.split(";")[0];
   }
 
-  async request(path, init = {}) {
+  async request(path, init = {}, retried = false) {
     await this.ensureLogin();
     const { url, agentName } = this.config;
     const headers = {
@@ -64,13 +83,37 @@ class MboxClient {
       ...(init.headers || {})
     };
     const response = await fetch(`${url}${path}`, { ...init, headers });
-    if (response.status === 401 || response.status === 403) {
+    if ((response.status === 401 || response.status === 403) && !retried) {
+      // Ровно одна повторная попытка. Раньше рекурсия шла без счётчика: если логин проходил,
+      // а запрос всё равно отдавал 401, расширение зацикливалось намертво.
       this.cookie = "";
       await this.ensureLogin();
-      return this.request(path, init);
+      return this.request(path, init, true);
     }
     if (!response.ok) throw new Error(`MBOX ${response.status}: ${await response.text()}`);
     return response.status === 204 ? null : response.json();
+  }
+
+  /** Без этого расширения нет в agent_presence: по контракту MBOX ростер наполняется
+   * ТОЛЬКО через /agent/ping, и в интерфейсе VS Code просто не было видно. */
+  async ping(event) {
+    return this.request("/api/mbox/agent/ping", {
+      method: "POST",
+      body: JSON.stringify({
+        agent: this.config.agentName,
+        event,
+        kind: "editor",
+        client: "VS Code",
+        scope: "projects,todos,memories,inbox",
+      }),
+    });
+  }
+
+  /** Адрес вебсокета MBOX, выведенный из базового URL. */
+  realtimeUrl() {
+    const base = this.config.url;
+    if (!base) return "";
+    return `${base.replace(/^http/, "ws")}/api/mbox/realtime`;
   }
 
   async contextSnapshot() {
@@ -306,10 +349,13 @@ class MboxTreeProvider {
 
   async getChildren(item) {
     if (this.error) {
-      return [new MboxItem(this.error.message, vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon })];
+      return [new MboxItem(this.error.message, vscode.TreeItemCollapsibleState.None, {
+        iconPath: themeIcon("warning", "charts.red"),
+        tooltip: "Не удалось получить данные из MBOX. Проверьте подключение: «MBOX: Настроить подключение».",
+      })];
     }
     if (!this.snapshot) {
-      return [new MboxItem("Not loaded", vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon })];
+      return [new MboxItem("Загружаю…", vscode.TreeItemCollapsibleState.None, { iconPath: themeIcon("loading~spin") })];
     }
     if (this.kind === "context") return this.contextChildren(item);
     if (this.kind === "todos") return this.todoChildren();
@@ -323,67 +369,91 @@ class MboxTreeProvider {
       return [
         new MboxItem(project.name || this.client.config.project, vscode.TreeItemCollapsibleState.Expanded, {
           description: project.status || "",
-          iconPath: this.logoIcon,
+          iconPath: themeIcon("repo"),
           item: project,
           contextValue: "project"
         }),
-        new MboxItem("Open Web App", vscode.TreeItemCollapsibleState.None, {
-          iconPath: this.logoIcon,
-          command: { command: "mbox.openWeb", title: "Open Web App" }
+        new MboxItem("Открыть MBOX в браузере", vscode.TreeItemCollapsibleState.None, {
+          iconPath: themeIcon("link-external"),
+          command: { command: "mbox.openWeb", title: "Открыть MBOX в браузере" }
         })
       ];
     }
     const stack = Array.isArray(project.stack) ? project.stack.join(", ") : "";
+    const nothing = "не задано";
     return [
-      new MboxItem(`Status: ${project.status || "unknown"}`, vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon }),
-      new MboxItem(`Stack: ${stack || "not set"}`, vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon }),
-      new MboxItem(`Deploy: ${project.deploy_target || "not set"}`, vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon }),
-      new MboxItem(`Git: ${project.git_url || "not set"}`, vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon })
+      new MboxItem("Статус", vscode.TreeItemCollapsibleState.None, { description: project.status || "неизвестен", iconPath: themeIcon("pulse") }),
+      new MboxItem("Стек", vscode.TreeItemCollapsibleState.None, { description: stack || nothing, iconPath: themeIcon("layers") }),
+      new MboxItem("Деплой", vscode.TreeItemCollapsibleState.None, { description: project.deploy_target || nothing, iconPath: themeIcon("rocket") }),
+      new MboxItem("Git", vscode.TreeItemCollapsibleState.None, { description: project.git_url || nothing, iconPath: themeIcon("source-control"), tooltip: project.git_url || "" })
     ];
   }
 
   todoChildren() {
     const todos = this.snapshot.todos || this.snapshot.project?.todos || [];
-    if (!todos.length) return [new MboxItem("No todos", vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon })];
-    return todos.map((todo) => new MboxItem(todo.title || `Todo ${todo.id}`, vscode.TreeItemCollapsibleState.None, {
-      id: todo.id,
-      item: todo,
-      contextValue: "todo",
-      description: [todo.status, todo.priority].filter(Boolean).join(" · "),
-      tooltip: [todo.note, todo.claimed_by ? `Claimed by ${todo.claimed_by}` : ""].filter(Boolean).join("\n\n"),
-      iconPath: this.logoIcon,
-      command: { command: "mbox.openItem", title: "Open Todo", arguments: [{ item: todo, kind: "todo" }] }
-    }));
+    if (!todos.length) return [new MboxItem("Задач нет", vscode.TreeItemCollapsibleState.None, { iconPath: themeIcon("check-all") })];
+    // Порядок статусов — рабочий, а не алфавитный: сначала то, что горит.
+    const order = ["doing", "blocked", "review", "next", "open", "done", "archived"];
+    const sorted = [...todos].sort((a, b) => {
+      const byStatus = order.indexOf(a.status || "open") - order.indexOf(b.status || "open");
+      if (byStatus !== 0) return byStatus;
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
+    return sorted.map((todo) => {
+      const meta = TODO_STATUS[todo.status] || TODO_STATUS.open;
+      const priority = PRIORITY_LABEL[todo.priority] || todo.priority || "";
+      const claimed = todo.claimed_by ? `в работе у ${todo.claimed_by}` : "";
+      return new MboxItem(todo.title || `Задача ${todo.id}`, vscode.TreeItemCollapsibleState.None, {
+        id: todo.id,
+        item: todo,
+        contextValue: "todo",
+        description: [meta.label, priority && priority !== "обычный" ? priority : "", claimed].filter(Boolean).join(" · "),
+        tooltip: [todo.note, claimed, `#${todo.id}`].filter(Boolean).join("\n\n"),
+        iconPath: themeIcon(meta.icon, meta.color),
+        command: { command: "mbox.openItem", title: "Открыть задачу", arguments: [{ item: todo, kind: "todo" }] }
+      });
+    });
   }
 
   memoryChildren() {
     const memories = this.snapshot.memories || [];
-    if (!memories.length) return [new MboxItem("No memories", vscode.TreeItemCollapsibleState.None, { iconPath: this.logoIcon })];
-    return memories.slice(0, 30).map((memory) => new MboxItem(memory.title || `Memory ${memory.id}`, vscode.TreeItemCollapsibleState.None, {
+    if (!memories.length) return [new MboxItem("Записей нет", vscode.TreeItemCollapsibleState.None, { iconPath: themeIcon("book") })];
+    const kindIcon = { fact: "note", log: "history", post: "comment", project: "repo", todos: "checklist" };
+    const shown = memories.slice(0, 30);
+    const items = shown.map((memory) => new MboxItem(memory.title || `Запись ${memory.id}`, vscode.TreeItemCollapsibleState.None, {
       id: memory.id,
       item: memory,
       contextValue: "memory",
       description: memory.entity_type || "",
       tooltip: memory.content_preview || memory.content || "",
-      iconPath: this.logoIcon,
-      command: { command: "mbox.openItem", title: "Open Memory", arguments: [{ item: memory, kind: "memory" }] }
+      iconPath: themeIcon(kindIcon[memory.entity_type] || "note"),
+      command: { command: "mbox.openItem", title: "Открыть запись", arguments: [{ item: memory, kind: "memory" }] }
     }));
+    // Раньше список молча обрезался на 30 и было неясно, всё это или нет.
+    if (memories.length > shown.length) {
+      items.push(new MboxItem(`…ещё ${memories.length - shown.length} — смотреть в MBOX`, vscode.TreeItemCollapsibleState.None, {
+        iconPath: themeIcon("ellipsis"),
+        command: { command: "mbox.openWeb", title: "Открыть MBOX" }
+      }));
+    }
+    return items;
   }
 
   consoleChildren() {
     const inbox = this.snapshot.inbox || [];
     const openConsole = new MboxItem("Открыть консоль", vscode.TreeItemCollapsibleState.None, {
-      iconPath: this.logoIcon,
+      iconPath: themeIcon("comment-discussion"),
       command: { command: "mbox.openConsole", title: "Открыть консоль" }
     });
-    const messages = inbox.slice(0, 20).map((item) => new MboxItem(item.title || item.body || `Message ${item.id}`, vscode.TreeItemCollapsibleState.None, {
+    const typeIcon = { question: "question", chat: "comment", agent_response: "reply", agent_error: "warning", notice: "info" };
+    const messages = inbox.slice(0, 20).map((item) => new MboxItem(item.title || item.body || `Сообщение ${item.id}`, vscode.TreeItemCollapsibleState.None, {
       id: item.id,
       item,
       contextValue: "inbox",
-      description: [item.agent_name, item.status, item.props?.to ? `to ${item.props.to}` : ""].filter(Boolean).join(" - "),
+      description: [item.agent_name, item.props?.to ? `→ ${item.props.to}` : ""].filter(Boolean).join(" "),
       tooltip: item.body || "",
-      iconPath: this.logoIcon,
-      command: { command: "mbox.openItem", title: "Open Inbox Message", arguments: [{ item, kind: "inbox" }] }
+      iconPath: themeIcon(typeIcon[item.item_type] || "comment", item.item_type === "agent_error" ? "charts.red" : ""),
+      command: { command: "mbox.openItem", title: "Открыть сообщение", arguments: [{ item, kind: "inbox" }] }
     }));
     return [openConsole, ...messages];
   }
@@ -460,22 +530,25 @@ function consoleHtml(nonce, logoUri, avatars) {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${imgSrc} data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <title>MBOX Console</title>
   <style>
+    /* Палитра берётся из активной темы VS Code. Раньше здесь стояли фиксированные тёмные цвета,
+       и на светлой теме панель превращалась в чёрный прямоугольник посреди редактора.
+       Второе значение в var() — запасное, на случай темы без такой переменной. */
     :root {
-      --bg-color: #08090a;
-      --container-bg: #08090a;
-      --element-bg: #121316;
-      --text-main: #eef4f1;
-      --text-2: rgba(238, 244, 241, .7);
-      --text-muted: rgba(238, 244, 241, .44);
-      --border-color: rgba(133, 245, 219, .16);
-      --accent-color: #29e0d6;
-      --state-ok: #35c759;
-      --state-warn: #ffb000;
-      --state-danger: #ff4d5e;
+      --bg-color: var(--vscode-sideBar-background, var(--vscode-editor-background, #08090a));
+      --container-bg: var(--vscode-editor-background, #08090a);
+      --element-bg: var(--vscode-editorWidget-background, var(--vscode-input-background, #121316));
+      --text-main: var(--vscode-foreground, #eef4f1);
+      --text-2: var(--vscode-descriptionForeground, rgba(238, 244, 241, .7));
+      --text-muted: var(--vscode-disabledForeground, rgba(238, 244, 241, .44));
+      --border-color: var(--vscode-widget-border, var(--vscode-panel-border, rgba(133, 245, 219, .16)));
+      --accent-color: var(--vscode-textLink-foreground, #29e0d6);
+      --state-ok: var(--vscode-charts-green, #35c759);
+      --state-warn: var(--vscode-charts-yellow, #ffb000);
+      --state-danger: var(--vscode-charts-red, #ff4d5e);
       --radius-sm: 4px;
       --radius-md: 8px;
       --radius-lg: 10px;
-      --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, monospace;
+      --font-mono: var(--vscode-editor-font-family, ui-monospace, "Cascadia Code", Consolas, monospace);
     }
     * { box-sizing: border-box; }
     body {
@@ -493,7 +566,7 @@ function consoleHtml(nonce, logoUri, avatars) {
       height: 100vh;
       display: flex;
       flex-direction: column;
-      background: #0c0c0e;
+      background: var(--container-bg);
       overflow: hidden;
     }
     .console-bar {
@@ -504,7 +577,7 @@ function consoleHtml(nonce, logoUri, avatars) {
       gap: 8px;
       min-height: 42px;
       padding: 7px 10px;
-      background: #17171a;
+      background: var(--element-bg);
       border-bottom: 1px solid rgba(255, 255, 255, .06);
       overflow: visible;
     }
@@ -579,8 +652,8 @@ function consoleHtml(nonce, logoUri, avatars) {
       flex-direction: column;
       gap: 7px;
       background:
-        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 100% 28px,
-        #0c0c0e;
+        linear-gradient(var(--vscode-editorIndentGuide-background1, rgba(255,255,255,.018)) 1px, transparent 1px) 0 0 / 100% 28px,
+        var(--container-bg);
     }
     .console-log-line {
       display: flex;
@@ -600,7 +673,7 @@ function consoleHtml(nonce, logoUri, avatars) {
     .console-log-time {
       flex: none;
       min-width: 62px;
-      color: #5b6b66;
+      color: var(--text-muted);
       font-variant-numeric: tabular-nums;
     }
     .console-log-actor {
@@ -664,7 +737,7 @@ function consoleHtml(nonce, logoUri, avatars) {
       position: relative;
       padding: 10px 14px 12px;
       border-top: 1px solid rgba(255,255,255,.06);
-      background: #111114;
+      background: var(--element-bg);
     }
     .console-suggest {
       position: absolute;
@@ -676,7 +749,7 @@ function consoleHtml(nonce, logoUri, avatars) {
       overflow-y: auto;
       border: 1px solid rgba(255,255,255,.1);
       border-radius: var(--radius-lg);
-      background: #17171a;
+      background: var(--element-bg);
       box-shadow: 0 12px 30px rgba(0,0,0,.5);
       padding: 5px;
       display: grid;
@@ -744,10 +817,9 @@ function consoleHtml(nonce, logoUri, avatars) {
       align-items: end;
       gap: 9px;
       min-height: 40px;
-      border: 1px solid rgba(133,245,219,.16);
+      border: 1px solid var(--vscode-input-border, var(--border-color));
       border-radius: var(--radius-lg);
-      background: #121316;
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,.55), inset 0 2px 5px rgba(0,0,0,.4);
+      background: var(--vscode-input-background, var(--element-bg));
       padding: 8px 10px;
     }
     .console-prompt {
@@ -1091,7 +1163,7 @@ function nonce() {
 
 async function activate(context) {
   const client = new MboxClient(context);
-  const output = vscode.window.createOutputChannel("MBOX Responders");
+  const output = vscode.window.createOutputChannel("MBOX: респондеры");
   const responders = new ResponderManager(client, output);
   activeResponders = responders;
   const providers = [
@@ -1100,13 +1172,29 @@ async function activate(context) {
     new MboxTreeProvider(client, "memories", context.extensionUri),
     new MboxTreeProvider(client, "console", context.extensionUri)
   ];
-  context.subscriptions.push(
-    output,
-    vscode.window.registerTreeDataProvider("mbox.projects", providers[0]),
-    vscode.window.registerTreeDataProvider("mbox.todos", providers[1]),
-    vscode.window.registerTreeDataProvider("mbox.memories", providers[2]),
-    vscode.window.registerTreeDataProvider("mbox.console", providers[3])
-  );
+  // createTreeView вместо registerTreeDataProvider: только он даёт badge и description в
+  // заголовке вьюхи. Без счётчиков не видно, сколько всего задач и сообщений, пока не раскроешь.
+  const views = {
+    context: vscode.window.createTreeView("mbox.projects", { treeDataProvider: providers[0] }),
+    todos: vscode.window.createTreeView("mbox.todos", { treeDataProvider: providers[1] }),
+    memories: vscode.window.createTreeView("mbox.memories", { treeDataProvider: providers[2] }),
+    console: vscode.window.createTreeView("mbox.console", { treeDataProvider: providers[3] }),
+  };
+  context.subscriptions.push(output, views.context, views.todos, views.memories, views.console);
+
+  function updateBadges(snapshot) {
+    const todos = snapshot?.todos || snapshot?.project?.todos || [];
+    const openTodos = todos.filter((todo) => !["done", "archived"].includes(todo.status));
+    const memories = snapshot?.memories || [];
+    const inbox = snapshot?.inbox || [];
+    const unanswered = inbox.filter((item) => item.status !== "done" && item.item_type === "question");
+
+    views.context.description = snapshot?.project?.name || "";
+    views.todos.description = todos.length ? `${openTodos.length} из ${todos.length}` : "";
+    views.todos.badge = openTodos.length ? { value: openTodos.length, tooltip: `Незакрытых задач: ${openTodos.length}` } : undefined;
+    views.memories.description = memories.length ? String(memories.length) : "";
+    views.console.badge = unanswered.length ? { value: unanswered.length, tooltip: `Без ответа: ${unanswered.length}` } : undefined;
+  }
 
   let consolePanel = null;
 
@@ -1114,10 +1202,12 @@ async function activate(context) {
     try {
       const snapshot = await client.contextSnapshot();
       providers.forEach((provider) => provider.refresh(snapshot));
-      if (!silent) vscode.window.showInformationMessage(`MBOX refreshed: ${client.config.project}`);
+      updateBadges(snapshot);
+      if (!silent) vscode.window.setStatusBarMessage(`MBOX обновлён: ${client.config.project}`, 2000);
     } catch (error) {
       providers.forEach((provider) => provider.refresh(null, error));
-      if (!silent) vscode.window.showErrorMessage(`MBOX refresh failed: ${error.message}`);
+      updateBadges(null);
+      if (!silent) vscode.window.showErrorMessage(`MBOX: не удалось обновить — ${error.message}`);
     }
   }
 
@@ -1150,12 +1240,19 @@ async function activate(context) {
       return;
     }
     const logoUri = vscode.Uri.joinPath(context.extensionUri, "resources", "mbox.png");
-    consolePanel = vscode.window.createWebviewPanel("mbox.consolePanel", "MBOX Console", vscode.ViewColumn.Beside, {
+    consolePanel = vscode.window.createWebviewPanel("mbox.consolePanel", "Консоль MBOX", vscode.ViewColumn.Beside, {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "resources")]
     });
     consolePanel.iconPath = logoUri;
-    consolePanel.webview.html = consoleHtml(nonce(), consolePanel.webview.asWebviewUri(logoUri));
+    // Без этого consoleHtml получала avatars === undefined и падала на Object.values(undefined):
+    // панель не открывалась вообще. Берём только реально лежащие в resources/avatars файлы.
+    const avatars = {};
+    for (const name of ["claude", "codex", "gemini", "gpt", "jarvis", "user"]) {
+      const file = vscode.Uri.joinPath(context.extensionUri, "resources", "avatars", `${name}.png`);
+      if (fs.existsSync(file.fsPath)) avatars[name] = consolePanel.webview.asWebviewUri(file).toString();
+    }
+    consolePanel.webview.html = consoleHtml(nonce(), consolePanel.webview.asWebviewUri(logoUri), avatars);
     const pollTimer = setInterval(() => { refreshConsolePanel(); }, 5000);
     consolePanel.onDidDispose(() => { clearInterval(pollTimer); consolePanel = null; });
     consolePanel.webview.onDidReceiveMessage(async (message) => {
@@ -1290,6 +1387,92 @@ async function activate(context) {
   );
 
   refresh(true);
+
+  // Присутствие: отмечаемся при старте и раз в минуту, иначе ростер считает нас отключёнными.
+  client.ping("session_start").catch((error) => output.appendLine(`[MBOX] ping не прошёл: ${error.message}`));
+  const heartbeat = setInterval(() => {
+    client.ping("heartbeat").catch(() => { /* сеть моргнула — следующий тик наверстает */ });
+  }, 60_000);
+  context.subscriptions.push({ dispose: () => clearInterval(heartbeat) });
+
+  // Живое обновление. Раньше деревья обновлялись только по команде «Обновить» и молча старели.
+  // WebSocket есть не в каждой версии среды расширений (глобальный WebSocket появился поздно),
+  // поэтому при его отсутствии откатываемся на редкий опрос — деревья свежие в обоих случаях.
+  let realtimeSocket = null;
+  let realtimeRetry = null;
+  let pendingRefresh = null;
+  let realtimeFailures = 0;
+  let fallbackPoll = null;
+
+  function startFallbackPoll(reason) {
+    if (fallbackPoll) return;
+    output.appendLine(`[MBOX] обновляю опросом раз в 20 с — ${reason}`);
+    fallbackPoll = setInterval(() => refresh(true), 20_000);
+  }
+
+  function scheduleRefresh() {
+    // Событий может прилететь пачка (агент пишет ответ и меняет задачу) — сглаживаем.
+    if (pendingRefresh) return;
+    pendingRefresh = setTimeout(() => {
+      pendingRefresh = null;
+      refresh(true);
+      refreshConsolePanel();
+    }, 400);
+  }
+
+  function connectRealtime() {
+    const url = client.realtimeUrl();
+    const Impl = globalThis.WebSocket;
+    if (!url || typeof Impl !== "function") return false;
+    try {
+      realtimeSocket = new Impl(url);
+    } catch (error) {
+      output.appendLine(`[MBOX] realtime недоступен: ${error.message}`);
+      return false;
+    }
+    let opened = false;
+    // Молчаливый отказ: MBOX рвёт апгрейд через socket.destroy(), и события close не приходит.
+    // Без этого таймера расширение осталось бы и без realtime, и без опроса.
+    const openTimeout = setTimeout(() => {
+      if (opened) return;
+      try { realtimeSocket?.close(); } catch { /* уже мёртв */ }
+      realtimeSocket = null;
+      startFallbackPoll("realtime не ответил на подключение");
+    }, 8000);
+    realtimeSocket.addEventListener("open", () => {
+      opened = true;
+      realtimeFailures = 0;
+      clearTimeout(openTimeout);
+      output.appendLine("[MBOX] realtime подключён");
+      if (fallbackPoll) { clearInterval(fallbackPoll); fallbackPoll = null; }
+    });
+    realtimeSocket.addEventListener("message", () => scheduleRefresh());
+    realtimeSocket.addEventListener("close", () => {
+      realtimeSocket = null;
+      clearTimeout(openTimeout);
+      // MBOX рвёт апгрейд, если в запросе нет сессионной cookie, а стандартный WebSocket
+      // заголовки передавать не умеет. Такой отказ виден как close без предшествующего open —
+      // тогда переподключаться бессмысленно, уходим на опрос и говорим об этом в журнал.
+      if (!opened && ++realtimeFailures >= 2) {
+        startFallbackPoll("realtime отклоняет подключение (нет сессионной cookie в апгрейде)");
+        return;
+      }
+      if (!realtimeRetry) realtimeRetry = setTimeout(() => { realtimeRetry = null; connectRealtime(); }, 15_000);
+    });
+    realtimeSocket.addEventListener("error", () => { /* close придёт следом, решение примем там */ });
+    return true;
+  }
+
+  if (!connectRealtime()) startFallbackPoll("в этой версии среды нет WebSocket");
+  context.subscriptions.push({
+    dispose: () => {
+      if (fallbackPoll) clearInterval(fallbackPoll);
+      if (realtimeRetry) clearTimeout(realtimeRetry);
+      if (pendingRefresh) clearTimeout(pendingRefresh);
+      try { realtimeSocket?.close(); } catch { /* уже закрыт */ }
+    },
+  });
+
   if (client.config.autoStartResponders) {
     responders.startAll().catch((error) => {
       output.appendLine(`[MBOX] responder autostart failed: ${error.stack || error.message}`);
