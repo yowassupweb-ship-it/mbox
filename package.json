@@ -36,10 +36,15 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@browserbasehq/mcp": "^3.0.0",
+    "@browserbasehq/stagehand": "^4.0.2",
+    "@playwright/mcp": "^0.0.80",
     "@types/pg": "^8.21.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@types/ws": "^8.18.1",
+    "chrome-devtools-mcp": "^1.8.0",
+    "playwright": "^1.63.0",
     "typescript": "^5.4.5"
   }
 }

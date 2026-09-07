@@ -501,12 +501,21 @@
   .row-dim:not(.row-num) { display: none; }
   .row .row-num { display: none; }
 
-  .row-detail > div,
+  .row-detail > div:not(.row-line):not(.row-console),
   .row-line {
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
   }
 
   .row-line .row-path { grid-column: auto; }
-  .row-line-actions { justify-self: start; flex-wrap: wrap; }
+  .row-line-actions,
+  .row-line-actions.path-actions {
+    justify-self: start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .row-line-actions.command-actions {
+    display: inline-flex;
+  }
 }

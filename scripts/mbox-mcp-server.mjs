@@ -8,6 +8,9 @@ const password = process.env.MBOX_PASSWORD;
 // Имя агента обязательно. Молчаливый дефолт «MBOX Agent» плодил призраков: сессия без переменной
 // окружения заводила отдельного агента, и в ростере появлялись лишние имена рядом с настоящими.
 const agentName = process.env.MBOX_AGENT_NAME;
+const agentAliases = [agentName, ...(process.env.MBOX_AGENT_ALIASES || "").split(",")]
+  .map((alias) => String(alias || "").trim())
+  .filter(Boolean);
 
 if (!baseUrl || !password) {
   console.error("MBOX_URL and MBOX_PASSWORD are required");
@@ -20,6 +23,11 @@ if (!agentName) {
 }
 
 let cookie = "";
+
+function isAgentAlias(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Boolean(normalized) && agentAliases.some((alias) => alias.toLowerCase() === normalized);
+}
 
 async function mboxFetch(path, init = {}) {
   if (!cookie) await login();
@@ -72,9 +80,11 @@ async function pendingMessages() {
     const inbox = data.inbox || [];
     const mine = inbox.filter((item) => {
       if (item.status === "done") return false;
-      if (item.agent_name !== "Человек") return false;
-      const to = item.props?.to;
-      return !to || to === agentName;
+      if (item.agent_name === agentName) return false;
+      if (["agent_response", "agent_error"].includes(item.item_type)) return false;
+      const to = item.props?.to || item.props?.target || item.props?.agent;
+      if (isAgentAlias(to)) return true;
+      return item.agent_name === "Человек" && !to;
     });
     if (!mine.length) return "";
 
@@ -95,14 +105,14 @@ async function pendingMessages() {
     const stillOpen = mine.filter((item) => !responded(item));
     if (!stillOpen.length) return "";
 
-    const lines = stillOpen.map((item) => "- " + (item.body || item.title)).join("\n");
+    const lines = stillOpen.map((item) => `- #${item.id} from ${item.agent_name || "unknown"}: ${item.body || item.title}`).join("\n");
     return [
       "", "",
-      "🔴 СООБЩЕНИЕ ОТ ЧЕЛОВЕКА, ТРЕБУЕТ ОТВЕТА (" + stillOpen.length + ") 🔴",
+      "🔴 MBOX SYNAPSE: ADDRESSED MESSAGE REQUIRES ATTENTION (" + stillOpen.length + ") 🔴",
       lines,
-      "Ответь через create_inbox_item ПРЯМО СЕЙЧАС, прежде чем продолжать текущую задачу.",
-      "Это напоминание будет повторяться на каждом вызове инструмента, пока ты не ответишь.",
-      "=== конец сообщения от человека ===",
+      "Respond or intervene before continuing the current task. Use create_inbox_item with props.in_reply_to set to the source id and to set to the sender when a reply is needed.",
+      "This reminder repeats on every MBOX tool call until you create a later inbox item.",
+      "=== end MBOX synapse ===",
     ].join("\n");
   } catch {
     return "";
@@ -270,7 +280,7 @@ server.registerTool(
   "create_inbox_item",
   {
     title: "Create MBOX agent inbox item",
-    description: "Write a notice, proposal or human decision request into the agent inbox.",
+    description: "Write a notice, proposal, human decision request, or agent handoff into the agent inbox. For synapse handoffs, set to='Codex' or to='Claude' so the addressed agent can be woken.",
     inputSchema: {
       project: z.string().default("MBOX"),
       title: z.string(),
@@ -278,14 +288,20 @@ server.registerTool(
       item_type: z.string().default("notice"),
       priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
       requires_human: z.boolean().default(false),
+      to: z.string().default(""),
+      props: z.record(z.any()).default({}),
     },
   },
-  async ({ project, title, body, item_type, priority, requires_human }) => {
+  async ({ project, title, body, item_type, priority, requires_human, to, props }) => {
     const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
     const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    const itemProps = {
+      ...(props && typeof props === "object" ? props : {}),
+      ...(to ? { to } : {}),
+    };
     const data = await mboxFetch("/api/mbox/agent/inbox", {
       method: "POST",
-      body: JSON.stringify({ project_id: target?.id || null, agent_name: agentName, title, body, item_type, priority, requires_human }),
+      body: JSON.stringify({ project_id: target?.id || null, agent_name: agentName, title, body, item_type, priority, requires_human, props: itemProps }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.inbox_item, null, 2) }] });
   },

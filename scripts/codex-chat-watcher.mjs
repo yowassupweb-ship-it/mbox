@@ -225,7 +225,8 @@ async function nextMention() {
   return inbox
     .filter((item) => item.status === "open")
     .filter((item) => !seen.has(String(item.id)))
-    .filter((item) => ["question", "chat"].includes(item.item_type))
+    .filter((item) => item.agent_name !== agentName)
+    .filter((item) => !["agent_response", "agent_error"].includes(item.item_type))
     .filter((item) => includeBacklog || new Date(item.created_at) >= cutoffAt)
     .filter((item) => !target || String(item.project_id || "") === String(target.id || ""))
     .filter((item) => isMentionForCodex(item))

@@ -3104,6 +3104,75 @@ const TOOL_CATALOG = [
       { label: "MCP HTTP", command: "target\\release\\obscura.exe mcp --http --port 3000", runnable: true, long_running: true },
     ],
   },
+  {
+    id: "figma",
+    name: "Figma MCP",
+    kind: "design context",
+    status: "нужна авторизация Figma",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox",
+    repo: "https://www.figma.com/mcp-catalog/",
+    docs: "https://developers.figma.com/docs/figma-mcp-server/",
+    icon: "/assets/icons/tools/figma.png",
+    summary: "Официальный MCP Figma: читает дизайн-контекст, компоненты, переменные и Dev Mode данные; remote MCP требует авторизации, desktop MCP включается в Figma Desktop.",
+    capabilities: ["design context", "components", "variables", "Dev Mode", "write to canvas"],
+    commands: [
+      { label: "Открыть Figma", command: "start \"\" \"figma://\"", runnable: true },
+      { label: "Проверить desktop MCP", command: "powershell -NoProfile -Command \"try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3845/mcp -TimeoutSec 3).StatusCode } catch { $_.Exception.Message }\"", runnable: true },
+      { label: "Codex remote MCP", command: "codex mcp add figma --url https://mcp.figma.com/mcp", runnable: true },
+      { label: "Claude desktop MCP", command: "claude mcp add --transport http figma-desktop http://127.0.0.1:3845/mcp", runnable: true },
+    ],
+  },
+  {
+    id: "playwright-mcp",
+    name: "Playwright MCP",
+    kind: "browser automation",
+    status: "установлен npm",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
+    repo: "https://github.com/microsoft/playwright-mcp",
+    docs: "https://playwright.dev/docs/getting-started-mcp",
+    icon: "/assets/icons/tools/playwright.png",
+    summary: "Официальный Playwright MCP для кликов, форм, снимков accessibility tree, скриншотов и browser QA. Настроен на системный Chrome, чтобы не ждать отдельный Chromium.",
+    capabilities: ["clicks", "forms", "accessibility snapshots", "screenshots", "PDF", "local QA"],
+    commands: [
+      { label: "MCP HTTP", command: "npx @playwright/mcp --browser chrome --host 127.0.0.1 --port 9310 --caps vision,pdf", runnable: true, long_running: true },
+      { label: "MCP stdio", command: "npx @playwright/mcp --browser chrome --caps vision,pdf", runnable: false },
+      { label: "Установить Chromium", command: "npx playwright install chromium", env: { PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000" }, runnable: true },
+    ],
+  },
+  {
+    id: "chrome-devtools-mcp",
+    name: "Chrome DevTools MCP",
+    kind: "browser debugger",
+    status: "установлен npm",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
+    repo: "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+    docs: "https://developer.chrome.com/docs/devtools/agents/get-started",
+    icon: "/assets/icons/tools/chrome-devtools.png",
+    summary: "Официальный Chrome DevTools MCP для console/network/performance/DOM аудита и проверки живого Chrome из агента.",
+    capabilities: ["console", "network", "performance", "DOM", "screenshots", "debugging"],
+    commands: [
+      { label: "MCP stable Chrome", command: "npx chrome-devtools-mcp --channel stable --viewport 1440x900", runnable: true, long_running: true },
+      { label: "MCP slim", command: "npx chrome-devtools-mcp --channel stable --slim --viewport 1440x900", runnable: true, long_running: true },
+      { label: "Chrome debug 9222", command: "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --remote-debugging-port=9222 --user-data-dir=\"%TEMP%\\mbox-chrome-debug\"", runnable: true, long_running: true },
+      { label: "Подключиться к 9222", command: "npx chrome-devtools-mcp --browserUrl http://127.0.0.1:9222", runnable: true, long_running: true },
+    ],
+  },
+  {
+    id: "browserbase-stagehand",
+    name: "Browserbase + Stagehand",
+    kind: "cloud browser",
+    status: "пакеты установлены, нужны ключи",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
+    repo: "https://github.com/browserbase/mcp-server-browserbase",
+    docs: "https://docs.browserbase.com/",
+    icon: "/assets/icons/tools/browserbase.png",
+    summary: "Облачный браузерный MCP на Browserbase со Stagehand для долгих web-сценариев, извлечения данных и сессий с прокси. Требует BROWSERBASE_API_KEY и BROWSERBASE_PROJECT_ID.",
+    capabilities: ["cloud sessions", "Stagehand act/extract/observe", "proxies", "stealth", "long-running browsing"],
+    commands: [
+      { label: "MCP HTTP", command: "npx @browserbasehq/mcp --browserbaseApiKey %BROWSERBASE_API_KEY% --browserbaseProjectId %BROWSERBASE_PROJECT_ID% --host 127.0.0.1 --port 9320 --browserWidth 1440 --browserHeight 900", runnable: true, long_running: true },
+      { label: "Stagehand check", command: "node -e \"import('@browserbasehq/stagehand').then(() => console.log('Stagehand OK'))\"", runnable: true },
+    ],
+  },
 ];
 
 const SKILL_CATALOG = [
@@ -4507,6 +4576,9 @@ async function handleApiWithContext(req, res, url) {
       // Ловит и человека, и Джарвиса (если тот сам адресует ответ Claude через props.to).
       if (addressedTo === "Claude" && result.rows[0]) {
         console.log(`[claude-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
+      }
+      if (addressedTo === "Codex" && result.rows[0]) {
+        console.log(`[codex-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
       }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
     }

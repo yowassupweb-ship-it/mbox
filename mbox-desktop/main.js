@@ -37,7 +37,9 @@ app.whenReady().then(async () => {
   createTray();
   setMenu();
   setupAutoUpdates();
-  await startResponders().catch((error) => log(`autostart responders failed: ${error.message}`));
+  if (process.env.MBOX_DESKTOP_SKIP_AGENT_AUTOSTART !== "1") {
+    await startResponders().catch((error) => log(`autostart responders failed: ${error.message}`));
+  }
 });
 
 app.on("window-all-closed", () => {});
@@ -546,17 +548,21 @@ async function runTool(toolId, commandLabel) {
   if (!toolWorkdirAllowed(workdir)) throw new Error("Каталог инструмента вне рабочей папки MBOX");
   if (!fs.existsSync(workdir)) throw new Error(`Каталог инструмента не найден: ${workdir}`);
 
-  // shell:true склеивает argv без экранирования (DEP0190), поэтому команду отдаём cmd.exe целиком
-  // одной строкой — она пришла из доверенного каталога, а не из интерфейса.
-  const child = spawn("cmd.exe", ["/d", "/s", "/c", entry.command], {
+  // Команду отдаём видимому cmd.exe: на вкладке "Инструменты" это именно ручной запуск
+  // локального проекта из Electron, а не тихий фоновой процесс без окна и контекста.
+  const child = spawn("cmd.exe", ["/d", "/s", "/k", entry.command], {
     cwd: workdir,
-    windowsHide: true,
+    windowsHide: false,
+    detached: true,
+    stdio: "ignore",
     env: { ...process.env, ...(entry.env || {}) }
   });
 
   const state = { child, lines: [], label: commandLabel, toolId: key, startedAt: Date.now() };
   runningTools.set(key, state);
   emitTool({ tool: key, event: "started", label: commandLabel, command: entry.command, cwd: workdir, pid: child.pid });
+  state.lines.push({ stream: "out", line: `Открыта консоль: ${entry.command}` });
+  emitTool({ tool: key, event: "output", stream: "out", line: `Открыта консоль: ${entry.command}` });
 
   function push(stream, chunk) {
     for (const line of decodeConsole(chunk).split(/\r?\n/)) {
@@ -566,8 +572,8 @@ async function runTool(toolId, commandLabel) {
       emitTool({ tool: key, event: "output", stream, line });
     }
   }
-  child.stdout.on("data", (chunk) => push("out", chunk));
-  child.stderr.on("data", (chunk) => push("err", chunk));
+  child.stdout?.on("data", (chunk) => push("out", chunk));
+  child.stderr?.on("data", (chunk) => push("err", chunk));
   child.on("error", (error) => {
     runningTools.delete(key);
     emitTool({ tool: key, event: "failed", message: error.message });

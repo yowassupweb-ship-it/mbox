@@ -1,0 +1,45 @@
+{
+  "servers": {
+    "figma-desktop": {
+      "type": "http",
+      "url": "http://127.0.0.1:3845/mcp"
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp",
+        "--browser",
+        "chrome",
+        "--caps",
+        "vision,pdf"
+      ]
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp",
+        "--channel",
+        "stable",
+        "--viewport",
+        "1440x900"
+      ]
+    },
+    "browserbase": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@browserbasehq/mcp",
+        "--browserbaseApiKey",
+        "${env:BROWSERBASE_API_KEY}",
+        "--browserbaseProjectId",
+        "${env:BROWSERBASE_PROJECT_ID}",
+        "--browserWidth",
+        "1440",
+        "--browserHeight",
+        "900"
+      ]
+    }
+  }
+}

@@ -30,9 +30,10 @@ export function ToolsBoard() {
   const [copied, setCopied] = useState("");
   const [openId, setOpenId] = useState("");
   const [runs, setRuns] = useState<Record<string, RunState>>({});
+  const [hasDesktopBridge, setHasDesktopBridge] = useState(() => Boolean(desktop()?.runTool));
   const logRef = useRef<HTMLDivElement | null>(null);
 
-  const inDesktop = Boolean(desktop()?.runTool);
+  const inDesktop = hasDesktopBridge;
 
   useEffect(() => {
     let alive = true;
@@ -44,6 +45,13 @@ export function ToolsBoard() {
       })
       .catch(() => alive && setLoading(false));
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    const refreshDesktopBridge = () => setHasDesktopBridge(Boolean(desktop()?.runTool));
+    refreshDesktopBridge();
+    window.addEventListener("mbox-desktop-ready", refreshDesktopBridge);
+    return () => window.removeEventListener("mbox-desktop-ready", refreshDesktopBridge);
   }, []);
 
   // Страницу могли перезагрузить посреди сборки — подхватываем уже запущенное.
@@ -136,7 +144,7 @@ export function ToolsBoard() {
                 <div className="row-detail">
                   <div className="row-line">
                     <code className="row-path">{tool.path}</code>
-                    <span className="row-line-actions">
+                    <span className="row-line-actions path-actions">
                       <button type="button" onClick={() => desktop()?.openPath?.(tool.path) ?? copy(tool.path, `${tool.id}:path`)} title="Открыть папку">
                         <FolderOpen size={14} />
                       </button>
@@ -155,7 +163,7 @@ export function ToolsBoard() {
                       <div className="row-line" key={action.label}>
                         <span className="row-cmd-label">{action.label}</span>
                         <code className="row-cmd">{action.command}</code>
-                        <span className="row-line-actions">
+                        <span className="row-line-actions command-actions">
                           <button type="button" onClick={() => copy(action.command, `${tool.id}:${action.label}`)} title="Скопировать команду">
                             <Copy size={14} />{copied === `${tool.id}:${action.label}` ? "скопировано" : ""}
                           </button>
