@@ -30,6 +30,8 @@ services:
     image: caddy:2-alpine
     container_name: mbox-caddy
     restart: unless-stopped
+    environment:
+      MBOX_DOMAIN: ${MBOX_DOMAIN:-mbox.shar-os.ru}
     ports:
       - "80:80"
       - "443:443"
