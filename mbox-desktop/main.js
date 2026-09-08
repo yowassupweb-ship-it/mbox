@@ -592,6 +592,11 @@ function emitTool(payload) {
   mainWindow?.webContents.send("mbox-desktop:tool", { at: new Date().toISOString(), ...payload });
 }
 
+function externalUrlFromStartCommand(command) {
+  const match = String(command || "").trim().match(/^start\s+""\s+"([a-z][a-z0-9+.-]*:\/\/[^"]*)"$/i);
+  return match ? match[1] : "";
+}
+
 async function runTool(toolId, commandLabel) {
   const key = String(toolId || "");
   if (runningTools.has(key)) throw new Error("Этот инструмент уже запущен — сначала остановите его");
@@ -609,7 +614,15 @@ async function runTool(toolId, commandLabel) {
 
   // Команду отдаём видимому cmd.exe: на вкладке "Инструменты" это именно ручной запуск
   // локального проекта из Electron, а не тихий фоновой процесс без окна и контекста.
-  const child = spawn("cmd.exe", ["/d", "/s", "/k", entry.command], {
+  const externalUrl = externalUrlFromStartCommand(entry.command);
+  if (externalUrl) {
+    emitTool({ tool: key, event: "started", label: commandLabel, command: entry.command, cwd: workdir });
+    await shell.openExternal(externalUrl);
+    emitTool({ tool: key, event: "exited", code: 0, signal: null, ms: 0 });
+    return { ok: true, command: entry.command, cwd: workdir };
+  }
+
+  const child = spawn("cmd.exe", ["/d", "/k", entry.command], {
     cwd: workdir,
     windowsHide: false,
     detached: true,
