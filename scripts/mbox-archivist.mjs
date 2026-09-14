@@ -441,7 +441,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 // Инструменты, чей результат стоит показать сразу, не разворачивая весь трейс — см.
 // server/mbox-server.mjs.
 const HIGHLIGHT_TOOLS = new Set([
-  "create_todo", "delete_todo", "merge_todos",
+  "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -527,14 +527,14 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "delete_todo",
-      description: "Удалить задачу насовсем. Необратимо — заголовок задачи должен совпадать ТОЧНО.",
+      description: "Удалить задачу насовсем. Необратимо. Лучше по todo_id (номер из list_project_todos/search_todos); по заголовку — только при ТОЧНОМ совпадении.",
       parameters: {
         type: "object",
         properties: {
-          project_name: { type: "string", description: "Название проекта, где живёт задача" },
-          todo_title: { type: "string", description: "Точный заголовок задачи для удаления" },
+          todo_id: { type: "string", description: "Номер задачи (ID) — предпочтительный способ" },
+          project_name: { type: "string", description: "Название проекта, если удаляешь по заголовку" },
+          todo_title: { type: "string", description: "Точный заголовок задачи, если номера нет" },
         },
-        required: ["project_name", "todo_title"],
       },
     },
   },
@@ -605,10 +605,13 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "list_project_todos",
-      description: "Посмотреть список задач конкретного проекта с их статусом и приоритетом.",
+      description: "Задачи проекта с номерами (#ID), статусом и приоритетом. По умолчанию только АКТИВНЫЕ (всё, кроме done/archived) — это и есть ответ на «какие задачи», «что актуально», «что в работе». status=all — все задачи, либо конкретный статус.",
       parameters: {
         type: "object",
-        properties: { project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" } },
+        properties: {
+          project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+          status: { type: "string", enum: ["active", "all", ...TODO_STATUSES], description: "Фильтр: active (по умолчанию), all или конкретный статус" },
+        },
         required: ["project_name"],
       },
     },
@@ -673,10 +676,14 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "search_memory",
-      description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
+      description: "Искать в памяти MBOX (факты, инструкции, решения, итоги работы агентов). Ранжированный поиск по смыслу и по словам, отдаёт номера записей (#ID) с отрывком вокруг совпадения. Полный текст — get_memory по номеру. Если подходящего нет — переформулируй (другие слова, английский термин, одно редкое слово) и ищи снова.",
       parameters: {
         type: "object",
-        properties: { query: { type: "string", description: "Ключевые слова для поиска" } },
+        properties: {
+          query: { type: "string", description: "Существенные ключевые слова, без служебных слов" },
+          project_name: { type: "string", description: "Проект, к которому относится вопрос: его записи поднимаются выше, но ищется вся память. Необязательно" },
+          limit: { type: "number", description: "Сколько записей вернуть, по умолчанию 8, максимум 20" },
+        },
         required: ["query"],
       },
     },
@@ -685,7 +692,7 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "search_todos",
-      description: "Найти задачи по тексту в заголовке ИЛИ в описании (note) — list_project_todos видит только заголовки, этот инструмент ищет по содержимому задачи.",
+      description: "Найти задачи по словам в заголовке ИЛИ в описании (note), во всех статусах, с номерами (#ID). Каждое слово ищется отдельно, падеж и порядок не важны; активные задачи идут первыми.",
       parameters: {
         type: "object",
         properties: {
@@ -901,7 +908,7 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "update_project_info",
-      description: "Изменить карточку проекта — стек, ссылку на git, деплой или статус. Указывай только то, что нужно поменять.",
+      description: "Изменить карточку проекта — стек, ссылку на git, деплой, статус или произвольные свойства (props: ссылки, описание, «ссылка на скачивание» и т.п.). Указывай только то, что нужно поменять.",
       parameters: {
         type: "object",
         properties: {
@@ -911,6 +918,7 @@ const JARVIS_TOOLS = [
           deploy_provider: { type: "string", description: "Новый провайдер деплоя, необязательно" },
           deploy_target: { type: "string", description: "Новая цель деплоя, необязательно" },
           status: { type: "string", description: "Новый статус проекта, необязательно" },
+          props: { type: "object", description: "Свойства карточки ключ-значение — дописываются поверх существующих, остальные не стираются. Необязательно" },
         },
         required: ["project_name"],
       },
@@ -991,6 +999,40 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "update_todo",
+      description: "Изменить существующую задачу по номеру (todo_id): заголовок, описание, статус, приоритет — любое сочетание одним вызовом. Когда номер известен, это надёжнее update_todo_status/set_todo_priority/update_todo_note: не промахнётся мимо похожей задачи.",
+      parameters: {
+        type: "object",
+        properties: {
+          todo_id: { type: "string", description: "Номер задачи (ID)" },
+          title: { type: "string", description: "Новый заголовок, необязательно" },
+          note: { type: "string", description: "Текст описания, необязательно" },
+          note_mode: { type: "string", enum: ["append", "replace"], description: "append (по умолчанию) — дописать к описанию, replace — заменить" },
+          status: { type: "string", enum: TODO_STATUSES, description: "Новый статус, необязательно" },
+          priority: { type: "string", enum: TODO_PRIORITIES, description: "Новый приоритет, необязательно" },
+        },
+        required: ["todo_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_webpage",
+      description: "Открыть веб-страницу по адресу и прочитать её текст прямо сейчас, без записи в память. На «что на странице X», «посмотри сайт», «прочитай ссылку». Для регулярного слежения за сайтом — create_data_source.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "Адрес страницы, можно без https://" },
+          max_chars: { type: "number", description: "Сколько символов текста вернуть, по умолчанию 8000, максимум 20000" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delegate_to_junior",
       description: "Делегировать младшей модели небольшую самостоятельную текстовую подзадачу (черновик, сводка, пересказ, классификация) внутри цепочки действий — экономит твой контекст: результат приходит готовым, ты не тратишь токены на сам черновик. НЕ для задач, которые сами требуют вызова инструментов — младшая модель не имеет доступа к инструментам, только текст на входе и текст на выходе.",
       parameters: {
@@ -1009,7 +1051,7 @@ const JARVIS_TOOLS = [
 // инструмент валили Groq в 413 "Request too large" (лимит 8000 TPM) даже без реальной истории.
 const GROQ_CORE_TOOL_NAMES = new Set([
   "create_todo", "update_todo_status", "set_todo_priority", "delete_todo", "merge_todos",
-  "list_project_todos", "search_todos", "get_task",
+  "list_project_todos", "search_todos", "get_task", "update_todo",
   "record_memory", "search_memory", "get_memory",
   "create_project", "get_project_info",
   "list_companies", "get_company_info",
@@ -1034,17 +1076,145 @@ function excerptAround(text, query, radius) {
   return text.slice(start, end);
 }
 
+// См. server/mbox-server.mjs — «шар» против shar-messenger: транслитерация с отрезанным падежным
+// окончанием вторым проходом; пустое имя больше не совпадает с первым проектом по алфавиту.
+const CYRILLIC_TO_LATIN = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "ts", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
+
+function normalizeEntityName(value) {
+  return String(value || "").toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((word) => (/[а-яё]/.test(word) && word.length > 3 ? word.replace(/(ами|ями|ов|ев|ах|ях|ом|ем|ой|ей|а|у|е|ы|и|ю|я|о)$/, "") : word))
+    .join("")
+    .replace(/[а-яё]/g, (ch) => CYRILLIC_TO_LATIN[ch] ?? ch);
+}
+
+function matchByName(name, list) {
+  const q = String(name || "").trim().toLowerCase();
+  if (!q) return undefined;
+  const direct = list.find((item) => item.name.toLowerCase() === q)
+    || list.find((item) => item.name.toLowerCase().includes(q) || q.includes(item.name.toLowerCase()));
+  if (direct) return direct;
+  const normalized = normalizeEntityName(q);
+  if (normalized.length < 3) return undefined;
+  return list.find((item) => normalizeEntityName(item.name) === normalized)
+    || list.find((item) => normalizeEntityName(item.name).startsWith(normalized))
+    || list.find((item) => { const own = normalizeEntityName(item.name); return own.length >= 3 && normalized.startsWith(own); });
+}
+
 function matchProjectFuzzy(projectName, projectList) {
-  const q = String(projectName || "").trim().toLowerCase();
-  return projectList.find((p) => p.name.toLowerCase() === q)
-    || projectList.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
+  return matchByName(projectName, projectList);
 }
 
 function matchCompanyFuzzy(companyName, companyList) {
-  const q = String(companyName || "").trim().toLowerCase();
-  return companyList.find((c) => c.name.toLowerCase() === q)
-    || companyList.find((c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
+  return matchByName(companyName, companyList);
 }
+
+// См. server/mbox-server.mjs — запрос режется на значимые слова с грубо отрезанными окончаниями.
+const SEARCH_STOPWORDS = new Set(["как", "что", "где", "это", "там", "или", "для", "про", "при", "над", "под", "без", "все", "всё", "его", "она", "они", "мне", "мой", "моя", "мои", "есть", "был", "была", "было", "типа", "какой", "какая", "какие", "какую", "the", "and", "for"]);
+
+function searchTerms(query) {
+  const words = String(query || "").toLowerCase().normalize("NFKC").match(/[\p{L}\p{N}_]+/gu) || [];
+  const terms = words
+    .filter((word) => (word.length >= 3 || /\d/.test(word)) && !SEARCH_STOPWORDS.has(word))
+    .map((word) => {
+      if (!/[а-яё]/.test(word)) return word;
+      if (word.length >= 7) return word.slice(0, -2);
+      if (word.length >= 5) return word.slice(0, -1);
+      return word;
+    });
+  return [...new Set(terms)].slice(0, 8);
+}
+
+/** См. server/mbox-server.mjs — сжатый след инструментов возвращается в историю к последним ответам. */
+function formatToolTraceForHistory(trace, budget = 2500) {
+  const parts = [];
+  let used = 0;
+  for (const entry of Array.isArray(trace) ? trace : []) {
+    const text = String(entry || "").replace(/\s+/g, " ").trim();
+    if (!text || text.startsWith("Сжатие истории")) continue;
+    const piece = text.slice(0, 900);
+    if (used + piece.length > budget) break;
+    parts.push(piece);
+    used += piece.length;
+  }
+  return parts.length ? `⟦данные инструментов⟧ ${parts.join(" | ")}` : "";
+}
+
+/** См. server/mbox-server.mjs — адрес из чата: внутренние хосты закрыты, каждый редирект проверяется. */
+function isPublicHostname(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (host.includes(":")) return !(host === "::1" || /^(fc|fd|fe80)/.test(host) || host.startsWith("::ffff:"));
+  if (!host.includes(".")) return false;
+  if (/(^|\.)(localhost|local|internal)$/.test(host)) return false;
+  if (/^(0|10|127)\./.test(host) || /^169\.254\./.test(host) || /^192\.168\./.test(host)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return false;
+  return true;
+}
+
+const HTML_ENTITIES = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", laquo: "«", raquo: "»", mdash: "—", ndash: "–", hellip: "…", copy: "©" };
+
+function htmlToPlainText(html) {
+  return String(html || "")
+    .replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<\s*(br|\/p|\/div|\/li|\/tr|\/h[1-6]|\/section|\/article|\/header|\/footer)\b[^>]*>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n• ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, code) => {
+      if (code[0] !== "#") return HTML_ENTITIES[code.toLowerCase()] ?? match;
+      const point = code[1] === "x" || code[1] === "X" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
+    })
+    .replace(/[ \t\f\v\r]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function fetchPublicPage(rawUrl, signal) {
+  let target;
+  try {
+    target = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+  } catch {
+    throw new Error(`некорректный адрес «${rawUrl}»`);
+  }
+  for (let hop = 0; hop < 5; hop += 1) {
+    if (!/^https?:$/.test(target.protocol) || !isPublicHostname(target.hostname)) {
+      throw new Error(`адрес ${target.hostname} закрыт — читаю только публичные http(s)-сайты`);
+    }
+    const response = await fetch(target, {
+      redirect: "manual",
+      signal,
+      headers: { "user-agent": "Mozilla/5.0 (compatible; MBOX-Jarvis/1.0)", accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5" },
+    });
+    const location = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && location) {
+      target = new URL(location, target);
+      continue;
+    }
+    return { response, url: target.toString() };
+  }
+  throw new Error("слишком много перенаправлений");
+}
+
+// См. server/mbox-server.mjs — правила по провалам живого чата 7–14 сентября.
+const JARVIS_DATA_RULES = "ПРАВИЛА РАБОТЫ С ДАННЫМИ. 1) Номера: говоря о задачах и записях памяти, всегда "
+  + "называй их #ID — человек продолжает «удали #251», «выведи #1977». 2) Поиск не сдаётся с первой попытки: "
+  + "если search_memory/search_todos не нашли нужное или нашли не то — переформулируй сам (другие ключевые "
+  + "слова, синоним, английский термин вроде имени переменной, одно самое редкое слово, без project_name) и "
+  + "повтори, до трёх попыток за ответ; «не нашёл» — только после этого, и перечисли, что пробовал. "
+  + "3) Нашёл подходящую запись, а просят подробности, инструкцию, «вытащи», «полностью» — сразу вызови "
+  + "get_memory и выведи текст целиком, дословно, без пересказа и сокращений; не заставляй просить дважды. "
+  + "4) Существующую задачу меняй и удаляй по #ID (update_todo, delete_todo с todo_id), если номер известен "
+  + "или его можно узнать через list_project_todos/search_todos. 5) «Какие задачи», «что актуально», «что в "
+  + "работе» — list_project_todos без status: он и так отдаёт только активные. 6) Названия проектов человек "
+  + "пишет по-русски и сокращённо («шар», «по шару» — это shar-messenger из списка известных проектов): "
+  + "сопоставляй сам, не переспрашивай. 7) Ссылка или «что на сайте X» — read_webpage. 8) «Добавь в свойства/"
+  + "карточку проекта» — update_project_info с props. 9) После действия отчитайся одной-двумя строками: что "
+  + "именно изменено, с #ID. 10) В конце твоих прошлых реплик может стоять блок «⟦данные инструментов⟧» — это "
+  + "то, что тогда вернули инструменты (номера, тексты); опирайся на него в уточняющих вопросах, но сам такой "
+  + "блок не пиши и дословно не цитируй.";
 
 async function matchTodoFuzzy(projectName, todoTitle, exact = false) {
   const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(projectName)}`);
@@ -1131,6 +1301,16 @@ async function runJarvisTool(name, rawArgs, projectList) {
   }
 
   if (name === "delete_todo") {
+    const todoId = String(args.todo_id || "").trim();
+    if (todoId) {
+      if (!/^\d+$/.test(todoId)) return "todo_id должен быть числом";
+      let todo;
+      try { todo = (await mboxFetch(`/api/mbox/todos/${todoId}`)).todo; } catch { todo = null; }
+      if (!todo) return `задача #${todoId} не нашлась — возможно, уже удалена`;
+      await mboxFetch(`/api/mbox/todos/${todoId}`, { method: "DELETE" });
+      const owner = projectList.find((p) => String(p.id) === String(todo.project_id));
+      return `удалена задача #${todoId} «${todo.title}»${owner ? ` из проекта «${owner.name}»` : ""}`;
+    }
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
     const todo = await matchTodoFuzzy(project.name, args.todo_title, true);
@@ -1211,16 +1391,20 @@ async function runJarvisTool(name, rawArgs, projectList) {
   if (name === "list_project_todos") {
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    // См. server/mbox-server.mjs — по умолчанию только активные, с номерами.
+    const filter = ["all", ...TODO_STATUSES].includes(args.status) ? args.status : "active";
     const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
-    const allTodos = context.todos || [];
-    const todos = allTodos.slice(0, 20);
-    if (!todos.length) return `у проекта «${project.name}» пока нет задач`;
-    const lines = todos.map((t) => `[${t.status}/${t.priority}] ${t.title}`);
-    // Раньше здесь молча резалось до 20 без единого намёка на усечение — модель уверенно
-    // заявляла "это все задачи", хотя реальных было больше. context.todos.length — точное
-    // число ДО среза, это не как в SQL LIMIT, где точный total не бесплатен.
-    const truncated = allTodos.length > todos.length;
-    return `задачи проекта «${project.name}» (показаны ${todos.length}${truncated ? ` из ${allTodos.length} — список НЕ полный, для остальных используй search_todos` : ""}): ${lines.join("; ")}`;
+    const statusRank = { doing: 1, next: 2, review: 3, blocked: 4, open: 5 };
+    const priorityRank = { urgent: 1, high: 2, normal: 3, low: 4 };
+    const matching = (context.todos || [])
+      .filter((t) => filter === "all" || (filter === "active" ? !["done", "archived"].includes(t.status) : t.status === filter))
+      .sort((a, b) => (statusRank[a.status] ?? 6) - (statusRank[b.status] ?? 6) || (priorityRank[a.priority] ?? 5) - (priorityRank[b.priority] ?? 5));
+    const todos = matching.slice(0, 40);
+    const filterLabel = filter === "active" ? "активные (без done/archived)" : filter === "all" ? "все" : `в статусе ${filter}`;
+    if (!todos.length) return `у проекта «${project.name}» нет задач — фильтр: ${filterLabel}`;
+    const truncated = matching.length > todos.length;
+    const lines = todos.map((t) => `#${t.id} [${t.status}/${t.priority}] ${t.title}`);
+    return `задачи проекта «${project.name}», ${filterLabel} (показаны ${todos.length}${truncated ? ` из ${matching.length} — список НЕ полный, для остальных используй search_todos` : " — это все"}):\n${lines.join("\n")}`;
   }
 
   if (name === "get_project_info") {
@@ -1299,35 +1483,60 @@ async function runJarvisTool(name, rawArgs, projectList) {
   if (name === "search_memory") {
     const q = String(args.query || "").trim();
     if (!q) return "не искал — пустой запрос";
-    const data = await mboxFetch(`/api/mbox/memories?q=${encodeURIComponent(q)}`);
-    const rows = (data.memories || []).slice(0, 5);
-    if (!rows.length) return `по запросу «${q}» в памяти ничего не нашлось`;
-    return rows.map((m) => {
-      const project = projectList.find((p) => p.id === m.project_id);
-      return `«${m.title}»${project ? ` (${project.name})` : ""}: ${String(m.content || "").slice(0, 160)}`;
-    }).join(" | ");
+    const limit = Math.min(Math.max(Number(args.limit) || 8, 1), 20);
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const terms = searchTerms(q);
+    const ranked = await mboxFetch(`/api/mbox/memories/search?q=${encodeURIComponent(q)}&limit=${limit * 3}&min_score=0.04&detail=full`);
+    let rows = ranked.memories || [];
+    if (!rows.length && terms.length) {
+      const longest = [...terms].sort((a, b) => b.length - a.length)[0];
+      const fallback = await mboxFetch(`/api/mbox/memories?q=${encodeURIComponent(longest)}`);
+      rows = fallback.memories || [];
+    }
+    if (project) {
+      const projectKey = normalizeEntityName(project.name);
+      const related = (m) => String(m.project_id || m.metadata?.project_id || "") === String(project.id)
+        || (Array.isArray(m.tags) && m.tags.some((tag) => normalizeEntityName(tag) === projectKey))
+        || normalizeEntityName(m.metadata?.project || "") === projectKey;
+      rows = [...rows.filter(related), ...rows.filter((m) => !related(m))];
+    }
+    rows = rows.slice(0, limit);
+    if (!rows.length) return `по запросу «${q}» в памяти ничего не нашлось — переформулируй (другие ключевые слова, английский термин, одно слово) и попробуй ещё раз`;
+    const lines = rows.map((m) => {
+      const content = String(m.content || "");
+      const term = terms.find((word) => content.toLowerCase().includes(word));
+      const excerpt = (term ? excerptAround(content, term, 150) : content.slice(0, 300)).replace(/\s+/g, " ").trim();
+      const projectName = m.project_name || projectList.find((p) => String(p.id) === String(m.project_id))?.name || m.metadata?.project || "";
+      const where = [projectName, Array.isArray(m.tags) && m.tags.length ? `теги: ${m.tags.slice(0, 6).join(", ")}` : ""].filter(Boolean).join("; ");
+      return `#${m.id} «${m.title}»${where ? ` (${where})` : ""}, ${String(m.updated_at || "").slice(0, 10)}: …${excerpt}… [${content.length} симв.]`;
+    });
+    return `найдено в памяти ${rows.length}, самые подходящие сверху. Полный текст — get_memory с номером:\n${lines.join("\n")}`;
   }
 
   if (name === "search_todos") {
-    const q = String(args.query || "").trim().toLowerCase();
-    if (!q) return "не искал — пустой запрос";
+    const q = String(args.query || "").trim();
+    const terms = searchTerms(q);
+    if (!terms.length) return "не искал — пустой запрос";
     const targets = args.project_name ? [matchProjectFuzzy(args.project_name, projectList)].filter(Boolean) : projectList;
-    const matches = [];
+    const all = [];
     for (const project of targets) {
       const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
-      for (const t of context.todos || []) {
-        const note = String(t.note || "");
-        const noteMatch = note.toLowerCase().includes(q);
-        if (t.title.toLowerCase().includes(q) || noteMatch) {
-          // Заголовок без query сбивал модель с толку, если совпадение было только в note.
-          const snippet = noteMatch ? `, в описании: "...${excerptAround(note, q, 60)}..."` : "";
-          matches.push(`[${project.name}] «${t.title}» (${t.status}/${t.priority})${snippet}`);
-        }
-      }
-      if (matches.length >= 10) break;
+      for (const t of context.todos || []) all.push({ ...t, project_name: project.name });
     }
-    if (!matches.length) return `по запросу «${args.query}» задач не нашлось`;
-    return matches.slice(0, 10).join("; ");
+    const haystack = (t) => `${t.title} ${t.note || ""}`.toLowerCase();
+    let found = all.filter((t) => terms.every((word) => haystack(t).includes(word)));
+    const partial = !found.length && terms.length > 1;
+    if (partial) found = all.filter((t) => terms.some((word) => haystack(t).includes(word)));
+    const closed = (t) => Number(["done", "archived"].includes(t.status));
+    found = found.sort((a, b) => closed(a) - closed(b)).slice(0, 15);
+    if (!found.length) return `по запросу «${q}» задач не нашлось — попробуй другие слова${args.project_name ? " или поиск без проекта" : ""}`;
+    const lines = found.map((t) => {
+      const note = String(t.note || "");
+      const term = terms.find((word) => note.toLowerCase().includes(word) && !t.title.toLowerCase().includes(word));
+      const snippet = term ? ` — в описании: «…${excerptAround(note, term, 60).replace(/\s+/g, " ")}…»` : "";
+      return `#${t.id} [${t.project_name}] «${t.title}» (${t.status}/${t.priority})${snippet}`;
+    });
+    return `${partial ? "совпадений сразу по всем словам нет, вот задачи хотя бы с частью слов" : `найдено задач — ${found.length}`}:\n${lines.join("\n")}`;
   }
 
   if (name === "update_todo_note") {
@@ -1533,6 +1742,12 @@ async function runJarvisTool(name, rawArgs, projectList) {
     if (args.deploy_provider !== undefined) { patch.deploy_provider = String(args.deploy_provider).trim(); changed.push("deploy_provider"); }
     if (args.deploy_target !== undefined) { patch.deploy_target = String(args.deploy_target).trim(); changed.push("deploy_target"); }
     if (args.status !== undefined) { patch.status = String(args.status).trim(); changed.push("status"); }
+    // PATCH /projects/:id заменяет props целиком — поэтому сначала читаем текущие и сливаем.
+    if (args.props && typeof args.props === "object" && !Array.isArray(args.props) && Object.keys(args.props).length) {
+      const context = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project.name)}`);
+      patch.props = { ...(context.project?.props || {}), ...args.props };
+      changed.push(`props (${Object.keys(args.props).join(", ")})`);
+    }
     if (!changed.length) return "нечего обновлять — не переданы новые значения";
     await mboxFetch(`/api/mbox/projects/${project.id}`, { method: "PATCH", body: JSON.stringify(patch) });
     return `у проекта «${project.name}» обновлено: ${changed.join(", ")}`;
@@ -1613,6 +1828,55 @@ async function runJarvisTool(name, rawArgs, projectList) {
     return `создан артефакт «${artifactName}» (${category})${project ? ` в проекте «${project.name}»` : ""} (#${created.artifact?.id ?? "?"})`;
   }
 
+  if (name === "update_todo") {
+    const id = String(args.todo_id || "").trim();
+    if (!/^\d+$/.test(id)) return "нужен числовой todo_id — возьми номер из list_project_todos/search_todos";
+    let todo;
+    try { todo = (await mboxFetch(`/api/mbox/todos/${id}`)).todo; } catch { todo = null; }
+    if (!todo) return `задача #${id} не нашлась`;
+    const patch = {};
+    const changes = [];
+    const newTitle = String(args.title ?? "").trim();
+    if (newTitle && newTitle !== todo.title) { patch.title = newTitle; changes.push(`заголовок: «${todo.title}» → «${newTitle}»`); }
+    const newNote = String(args.note ?? "").trim();
+    if (newNote) {
+      patch.note = args.note_mode === "replace" || !todo.note ? newNote : `${todo.note}\n${newNote}`;
+      changes.push(args.note_mode === "replace" ? "описание заменено" : "описание дополнено");
+    }
+    if (args.status !== undefined && args.status !== todo.status) {
+      if (!TODO_STATUSES.includes(args.status)) return `неизвестный статус «${args.status}» — доступны: ${TODO_STATUSES.join(", ")}`;
+      patch.status = args.status;
+      changes.push(`статус: ${todo.status} → ${args.status}`);
+    }
+    if (args.priority !== undefined && args.priority !== todo.priority) {
+      if (!TODO_PRIORITIES.includes(args.priority)) return `неизвестный приоритет «${args.priority}» — доступны: ${TODO_PRIORITIES.join(", ")}`;
+      patch.priority = args.priority;
+      changes.push(`приоритет: ${todo.priority} → ${args.priority}`);
+    }
+    if (!changes.length) return `у задачи #${id} «${todo.title}» ничего не поменялось — значения не переданы или совпадают с текущими`;
+    await mboxFetch(`/api/mbox/todos/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    const owner = projectList.find((p) => String(p.id) === String(todo.project_id));
+    return `задача #${id} (${owner?.name || "без проекта"}) обновлена — ${changes.join("; ")}`;
+  }
+
+  if (name === "read_webpage") {
+    const rawUrl = String(args.url || "").trim();
+    if (!rawUrl) return "не прочитал — нет адреса";
+    const maxChars = Math.min(Math.max(Number(args.max_chars) || 8000, 500), 20000);
+    const { response, url: finalUrl } = await fetchPublicPage(rawUrl, AbortSignal.timeout(20000));
+    if (!response.ok) return `страница ${finalUrl} ответила HTTP ${response.status}`;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType && !/text|html|xml|json/i.test(contentType)) return `по адресу ${finalUrl} не текст, а ${contentType}`;
+    const body = (await response.text()).slice(0, 3_000_000);
+    const isHtml = /html|xml/i.test(contentType) || /<html|<body/i.test(body.slice(0, 2000));
+    const pageTitle = isHtml ? htmlToPlainText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "") : "";
+    const description = isHtml ? htmlToPlainText(body.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i)?.[1] || "") : "";
+    const text = isHtml ? htmlToPlainText(body) : body.trim();
+    if (!text) return `страница ${finalUrl} загрузилась, но текста в HTML нет — скорее всего, содержимое рисует JavaScript, без браузера его не прочитать`;
+    const cut = text.length > maxChars;
+    return `страница ${finalUrl}${pageTitle ? ` — «${pageTitle}»` : ""}${description ? `\nописание: ${description}` : ""}\nтекст (${text.length} симв.${cut ? `, показаны первые ${maxChars}` : ""}):\n${text.slice(0, maxChars)}`;
+  }
+
   if (name === "delegate_to_junior") {
     const task = String(args.task || "").trim();
     const input = String(args.input || "").trim();
@@ -1655,7 +1919,12 @@ async function respondToRequests() {
   // Без явного @Джарвис пользователь адресует сообщение "в пустоту" — реальные агенты (Claude, Codex)
   // сидят в сессиях и не всегда онлайн. Джарвис — единственный постоянный, поэтому берёт себе всё,
   // что не тегнуто явно на кого-то другого, а не только прямые обращения.
-  const mine = inbox.filter((item) => item.status !== "done" && item.agent_name === "Человек" && (!item.props?.to || item.props.to === agentName));
+  // open — вопрос ещё никем не взят. doing — на него уже отвечает основной путь (replyAsJarvis в
+  // server/mbox-server.mjs); раньше фильтр был «не done», и cron отвечал на тот же вопрос второй раз.
+  // Зависший doing (сервер перезапустился посреди ответа) подбираем через 10 минут.
+  const updatedMs = (item) => Date.parse(String(item.updated_at || "").replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00"));
+  const staleDoing = (item) => item.status === "doing" && Date.now() - updatedMs(item) > 10 * 60 * 1000;
+  const mine = inbox.filter((item) => (item.status === "open" || staleDoing(item)) && item.item_type === "question" && item.agent_name === "Человек" && (!item.props?.to || item.props.to === agentName));
   if (!mine.length) return { answered: 0 };
 
   const projectsData = await mboxFetch("/api/mbox/projects");
@@ -1713,13 +1982,14 @@ async function respondToRequests() {
         + "компактный список ID; после вызова покажи список человеку и жди подтверждения, прежде чем звать "
         + "delete_memory — не удаляй сразу; для глубокого смыслового разбора дублей это не замена, такое — "
         + "к Claude), "
-        + "record_memory (записать долгоживущий факт), list_project_todos (заголовки задач проекта), "
+        + "record_memory (записать долгоживущий факт), list_project_todos (задачи проекта с #ID; по умолчанию только активные, status=all — все), "
         + "get_project_info (git/стек/деплой/доступ и описание проекта из props — если просят РАССКАЗАТЬ/"
         + "ОПИСАТЬ проект, роль, контекст — используй именно этот инструмент, не search_memory: там технические "
         + "итоги прогонов агентов, а не описание проекта), search_todos (искать по тексту задачи, включая "
         + "описание — если list_project_todos не нашёл нужное, попробуй search_todos), search_memory (искать "
         + "конкретные факты по ключевым словам, НЕ для общего описания проекта), update_todo_note (дописать или "
-        + "заменить описание задачи), link_projects (связать два проекта отношением), record_decision (записать "
+        + "заменить описание задачи), update_todo (изменить задачу по #ID: заголовок, описание, статус, приоритет "
+        + "разом), read_webpage (прочитать веб-страницу по ссылке прямо сейчас), link_projects (связать два проекта отношением), record_decision (записать "
         + "ВЫБОР между вариантами и почему — не факт, для фактов record_memory), get_groq_usage (расход токенов "
         + "по ВСЕМ моделям, которыми ты говоришь — и Groq, и Gemini, с разбивкой по модели, не только Groq "
         + "несмотря на название), list_recent_activity (последние события в проекте или во всём MBOX), "
@@ -1737,7 +2007,7 @@ async function respondToRequests() {
         + "create_company (завести новую компанию, необязательно сразу со свойствами), update_company_info "
         + "(дописать/обновить свойства существующей компании поверх текущих, не стирая остальные), "
         + "update_project_info (изменить стек/git/деплой/статус проекта — указывай только то, что реально "
-        + "меняешь), create_folder и list_folders (папки для организации памяти/артефактов/проектов/задач/"
+        + "меняешь; произвольные свойства вроде ссылок и описаний — через props, они дописываются поверх), create_folder и list_folders (папки для организации памяти/артефактов/проектов/задач/"
         + "скриптов/агентских областей), link_memories (связать две записи памяти отношением — «связано», "
         + "«противоречит», «уточняет» и т.п., по ID), list_artifacts и create_artifact (артефакт — осознанная "
         + "находка/материал вроде компонента, конфига или зафиксированного решения, в отличие от сырой записи "
@@ -1759,7 +2029,7 @@ async function respondToRequests() {
         + "деплоем на прод, глубоким анализом больших массивов данных. Если просят что-то из этого — скажи "
         + "прямо, что это к Claude, не к тебе, не делай вид, что справишься сам. Модели, которые говорят твоим "
         + "голосом: сам ты обычно на Gemini, в резерве — Groq (\"Прораб\" openai/gpt-oss-120b, \"Младший\" "
-        + "openai/gpt-oss-20b). Claude — отдельный агент на своей модели (Claude Sonnet), не твоя резервная "
+        + "openai/gpt-oss-20b). Claude — отдельный агент на своей модели, не твоя резервная "
         + "модель. Тебе видна история разговора (не только последнее сообщение), "
         + "но действие вызывай ТОЛЬКО когда об этом явно просят прямо сейчас — фразы вроде «буду делать проект "
         + "на стеке X» или «планирую X» это описание планов, а не команда, не создавай ничего в ответ на них. "
@@ -1771,7 +2041,7 @@ async function respondToRequests() {
         + "Если результат инструмента явно помечен как неполный (например «показаны 20 из 102 — список НЕ "
         + "полный») — никогда не достраивай остальное своими словами («всё остальное готово/сделано» и т.п.), "
         + "это додумывание за пределами того, что реально видно; честно скажи, что показана только часть, и "
-        + "предложи уточнить через search_todos."
+        + "предложи уточнить через search_todos. " + JARVIS_DATA_RULES
         + (item.props?.current_project_name
           ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
           : "");
@@ -1787,7 +2057,12 @@ async function respondToRequests() {
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .slice(-(KEEP_RAW + OLDER_CAP));
 
-      const toRole = (row) => ({ role: row.agent_name === agentName ? "assistant" : "user", content: row.body || row.title });
+      const rowsWithToolTrace = new Set(history.filter((row) => row.agent_name === agentName && Array.isArray(row.props?.trace) && row.props.trace.length).slice(-6));
+      const toRole = (row) => {
+        const toolBlock = rowsWithToolTrace.has(row) ? formatToolTraceForHistory(row.props.trace) : "";
+        const text = row.body || row.title;
+        return { role: row.agent_name === agentName ? "assistant" : "user", content: toolBlock ? `${text}\n\n${toolBlock}` : text };
+      };
       const actionLog = [];
       const toolsUsed = [];
       // Полный пошаговый трейс — см. server/mbox-server.mjs. В props, не в body: props не
@@ -1838,7 +2113,7 @@ async function respondToRequests() {
       }
       jlog(item.id, `старт (резервный cron): "${String(item.body || "").slice(0, 160)}"`);
       phase(`Отвечает: "${String(item.title || item.body || "").slice(0, 80)}"`);
-      for (let step = 0; step < 8; step += 1) {
+      for (let step = 0; step < 12; step += 1) {
         jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
         phase("Подбирает инструмент/навык");
         const message = await complete(messages);

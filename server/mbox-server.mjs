@@ -343,6 +343,45 @@ function recallLexicalScore(queryText, memory) {
   };
 }
 
+/** Ранжированный поиск по памяти: TF-IDF-вектор плюс лексика. Общий для /memories/search (им пользуются
+ * внешние агенты через MCP) и инструмента search_memory Джарвиса — у того раньше был свой ILIKE по
+ * всей фразе целиком и без номеров записей. */
+async function rankMemories(search, { projectId = "", project = "", tags = [], recencyDays = 0, minScore = 0.05, limit = 20 } = {}) {
+  const { documents } = await refreshMemoryEmbeddings();
+  const documentFrequency = new Map();
+  for (const doc of documents) {
+    for (const token of new Set(tokenizeEmbeddingText(doc.text))) {
+      documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+    }
+  }
+  const queryVector = vectorFromText(search, documentFrequency, documents.length);
+  const result = await query(
+    `SELECT m.id::text, m.project_id::text, p.name AS project_name, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
+            pg_column_size(m)::int AS memory_bytes,
+            m.created_at::text, m.updated_at::text,
+            e.representation, e.dimension, e.encoding_source, e.updated_at::text AS embedding_updated_at
+     FROM memories m
+     JOIN memory_embeddings e ON e.memory_id = m.id
+     LEFT JOIN projects p ON p.id = m.project_id
+     WHERE ($1 = '' OR m.project_id::text = $1 OR m.metadata->>'project_id' = $1)
+       AND ($2 = '' OR p.name = $2 OR m.metadata->>'project' = $2)
+       AND ($3::text[] = '{}'::text[] OR m.tags && $3::text[])
+       AND ($4::int <= 0 OR m.updated_at >= now() - ($4::int * interval '1 day'))`,
+    [projectId, project, tags, recencyDays],
+  );
+  return result.rows
+    .map((memory) => {
+      const lexical = recallLexicalScore(search, memory);
+      const vectorScore = cosineSimilarity(queryVector, memory.representation || {});
+      const score = (vectorScore * 0.65) + (lexical.lexical * 0.25) + (lexical.title * 0.25) + (lexical.tags * 0.15) + (lexical.exact * 0.2);
+      return { ...memory, score };
+    })
+    .filter((memory) => memory.score >= minScore)
+    .sort((a, b) => b.score - a.score || new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .slice(0, limit)
+    .map(({ representation, ...memory }) => ({ ...memory, score: Number(memory.score.toFixed(6)) }));
+}
+
 async function refreshMemoryEmbeddings() {
   const memories = await query(
     `SELECT m.id::text, m.title, m.content, m.tags, m.metadata, m.updated_at::text,
@@ -1092,7 +1131,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 // Инструменты, чей результат стоит показать сразу, не разворачивая весь трейс — создание/
 // удаление/объединение сущностей, то, что человек реально хочет видеть с первого взгляда.
 const HIGHLIGHT_TOOLS = new Set([
-  "create_todo", "delete_todo", "merge_todos",
+  "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1178,14 +1217,14 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "delete_todo",
-      description: "Удалить задачу насовсем. Необратимо — заголовок задачи должен совпадать ТОЧНО.",
+      description: "Удалить задачу насовсем. Необратимо. Лучше по todo_id (номер из list_project_todos/search_todos); по заголовку — только при ТОЧНОМ совпадении.",
       parameters: {
         type: "object",
         properties: {
-          project_name: { type: "string", description: "Название проекта, где живёт задача" },
-          todo_title: { type: "string", description: "Точный заголовок задачи для удаления" },
+          todo_id: { type: "string", description: "Номер задачи (ID) — предпочтительный способ" },
+          project_name: { type: "string", description: "Название проекта, если удаляешь по заголовку" },
+          todo_title: { type: "string", description: "Точный заголовок задачи, если номера нет" },
         },
-        required: ["project_name", "todo_title"],
       },
     },
   },
@@ -1256,10 +1295,13 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "list_project_todos",
-      description: "Посмотреть список задач конкретного проекта с их статусом и приоритетом.",
+      description: "Задачи проекта с номерами (#ID), статусом и приоритетом. По умолчанию только АКТИВНЫЕ (всё, кроме done/archived) — это и есть ответ на «какие задачи», «что актуально», «что в работе». status=all — все задачи, либо конкретный статус.",
       parameters: {
         type: "object",
-        properties: { project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" } },
+        properties: {
+          project_name: { type: "string", description: "Название проекта, максимально похожее на одно из существующих" },
+          status: { type: "string", enum: ["active", "all", ...TODO_STATUSES], description: "Фильтр: active (по умолчанию), all или конкретный статус" },
+        },
         required: ["project_name"],
       },
     },
@@ -1300,10 +1342,14 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "search_memory",
-      description: "Поискать в записанной памяти MBOX по ключевым словам (факты, предпочтения, решения).",
+      description: "Искать в памяти MBOX (факты, инструкции, решения, итоги работы агентов). Ранжированный поиск по смыслу и по словам (падеж и порядок слов не важны), отдаёт номера записей (#ID) с отрывком вокруг совпадения. Полный текст — get_memory по номеру. Если подходящего нет — переформулируй (другие слова, английский термин, одно редкое слово) и ищи снова.",
       parameters: {
         type: "object",
-        properties: { query: { type: "string", description: "Ключевые слова для поиска" } },
+        properties: {
+          query: { type: "string", description: "Существенные ключевые слова, без служебных слов" },
+          project_name: { type: "string", description: "Проект, к которому относится вопрос: его записи поднимаются выше, но ищется вся память. Необязательно" },
+          limit: { type: "number", description: "Сколько записей вернуть, по умолчанию 8, максимум 20" },
+        },
         required: ["query"],
       },
     },
@@ -1360,7 +1406,7 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "search_todos",
-      description: "Найти задачи по тексту в заголовке ИЛИ в описании (note) — list_project_todos видит только заголовки, этот инструмент ищет по содержимому задачи.",
+      description: "Найти задачи по словам в заголовке ИЛИ в описании (note), во всех статусах, с номерами (#ID). Каждое слово ищется отдельно, падеж и порядок не важны; активные задачи идут первыми.",
       parameters: {
         type: "object",
         properties: {
@@ -1595,7 +1641,7 @@ const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "update_project_info",
-      description: "Изменить карточку проекта — стек, ссылку на git, деплой или статус. Указывай только то, что нужно поменять.",
+      description: "Изменить карточку проекта — стек, ссылку на git, деплой, статус или произвольные свойства (props: ссылки, описание, «ссылка на скачивание» и т.п.). Указывай только то, что нужно поменять.",
       parameters: {
         type: "object",
         properties: {
@@ -1605,6 +1651,7 @@ const JARVIS_TOOLS = [
           deploy_provider: { type: "string", description: "Новый провайдер деплоя, необязательно" },
           deploy_target: { type: "string", description: "Новая цель деплоя, необязательно" },
           status: { type: "string", description: "Новый статус проекта, необязательно" },
+          props: { type: "object", description: "Свойства карточки ключ-значение — дописываются поверх существующих, остальные не стираются. Необязательно" },
         },
         required: ["project_name"],
       },
@@ -1685,6 +1732,40 @@ const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "update_todo",
+      description: "Изменить существующую задачу по номеру (todo_id): заголовок, описание, статус, приоритет — любое сочетание одним вызовом. Когда номер известен, это надёжнее update_todo_status/set_todo_priority/update_todo_note: не промахнётся мимо похожей задачи.",
+      parameters: {
+        type: "object",
+        properties: {
+          todo_id: { type: "string", description: "Номер задачи (ID)" },
+          title: { type: "string", description: "Новый заголовок, необязательно" },
+          note: { type: "string", description: "Текст описания, необязательно" },
+          note_mode: { type: "string", enum: ["append", "replace"], description: "append (по умолчанию) — дописать к описанию, replace — заменить" },
+          status: { type: "string", enum: TODO_STATUSES, description: "Новый статус, необязательно" },
+          priority: { type: "string", enum: TODO_PRIORITIES, description: "Новый приоритет, необязательно" },
+        },
+        required: ["todo_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_webpage",
+      description: "Открыть веб-страницу по адресу и прочитать её текст прямо сейчас, без записи в память. На «что на странице X», «посмотри сайт», «прочитай ссылку». Для регулярного слежения за сайтом — create_data_source.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "Адрес страницы, можно без https://" },
+          max_chars: { type: "number", description: "Сколько символов текста вернуть, по умолчанию 8000, максимум 20000" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delegate_to_junior",
       description: "Делегировать младшей модели небольшую самостоятельную текстовую подзадачу (черновик, сводка, пересказ, классификация) внутри цепочки действий — экономит твой контекст: результат приходит готовым, ты не тратишь токены на сам черновик. НЕ для задач, которые сами требуют вызова инструментов — младшая модель не имеет доступа к инструментам, только текст на входе и текст на выходе.",
       parameters: {
@@ -1708,7 +1789,7 @@ const JARVIS_TOOLS = [
 // компромисс ради того, чтобы Groq вообще отвечал, а не падал каждый раз.
 const GROQ_CORE_TOOL_NAMES = new Set([
   "create_todo", "update_todo_status", "set_todo_priority", "delete_todo", "merge_todos",
-  "list_project_todos", "search_todos", "get_task",
+  "list_project_todos", "search_todos", "get_task", "update_todo",
   "record_memory", "search_memory", "get_memory",
   "create_project", "get_project_info",
   "list_companies", "get_company_info",
@@ -1789,18 +1870,155 @@ function excerptAround(text, query, radius) {
   return text.slice(start, end);
 }
 
-function matchProjectFuzzy(projectName, projectList) {
-  const q = String(projectName || "").trim().toLowerCase();
-  return projectList.find((p) => p.name.toLowerCase() === q)
-    || projectList.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
+// «шар» против shar-messenger: человек пишет названия по-русски, сокращённо и в падеже («по шару»,
+// «в шаре»), а проекты заведены латиницей — прямое includes такого не видит. Второй проход —
+// транслитерация с отрезанным падежным окончанием. Пустое имя больше не совпадает с первым проектом
+// по алфавиту: раньше "".includes давал true, и задача без проекта молча уезжала не туда.
+const CYRILLIC_TO_LATIN = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "ts", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
+
+function normalizeEntityName(value) {
+  return String(value || "").toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((word) => (/[а-яё]/.test(word) && word.length > 3 ? word.replace(/(ами|ями|ов|ев|ах|ях|ом|ем|ой|ей|а|у|е|ы|и|ю|я|о)$/, "") : word))
+    .join("")
+    .replace(/[а-яё]/g, (ch) => CYRILLIC_TO_LATIN[ch] ?? ch);
 }
 
-/** Компании — отдельная сущность верхнего уровня, не строка в projectList; свой fuzzy-match. */
-function matchCompanyFuzzy(companyName, companyList) {
-  const q = String(companyName || "").trim().toLowerCase();
-  return companyList.find((c) => c.name.toLowerCase() === q)
-    || companyList.find((c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()));
+function matchByName(name, list) {
+  const q = String(name || "").trim().toLowerCase();
+  if (!q) return undefined;
+  const direct = list.find((item) => item.name.toLowerCase() === q)
+    || list.find((item) => item.name.toLowerCase().includes(q) || q.includes(item.name.toLowerCase()));
+  if (direct) return direct;
+  const normalized = normalizeEntityName(q);
+  if (normalized.length < 3) return undefined;
+  return list.find((item) => normalizeEntityName(item.name) === normalized)
+    || list.find((item) => normalizeEntityName(item.name).startsWith(normalized))
+    || list.find((item) => { const own = normalizeEntityName(item.name); return own.length >= 3 && normalized.startsWith(own); });
 }
+
+function matchProjectFuzzy(projectName, projectList) {
+  return matchByName(projectName, projectList);
+}
+
+/** Компании — отдельная сущность верхнего уровня, не строка в projectList; тот же поиск по имени. */
+function matchCompanyFuzzy(companyName, companyList) {
+  return matchByName(companyName, companyList);
+}
+
+// 11 сентября «найди в памяти шара заметку про пересборку фронта» не нашлось, хотя запись #1977
+// так и называется: поиск брал ВСЮ фразу одной подстрокой. Режем запрос на значимые слова и грубо
+// отрезаем русские окончания, чтобы падеж («пересборке» / «пересборка») не мешал совпадению.
+const SEARCH_STOPWORDS = new Set(["как", "что", "где", "это", "там", "или", "для", "про", "при", "над", "под", "без", "все", "всё", "его", "она", "они", "мне", "мой", "моя", "мои", "есть", "был", "была", "было", "типа", "какой", "какая", "какие", "какую", "the", "and", "for"]);
+
+function searchTerms(query) {
+  const words = String(query || "").toLowerCase().normalize("NFKC").match(/[\p{L}\p{N}_]+/gu) || [];
+  const terms = words
+    .filter((word) => (word.length >= 3 || /\d/.test(word)) && !SEARCH_STOPWORDS.has(word))
+    .map((word) => {
+      if (!/[а-яё]/.test(word)) return word;
+      if (word.length >= 7) return word.slice(0, -2);
+      if (word.length >= 5) return word.slice(0, -1);
+      return word;
+    });
+  return [...new Set(terms)].slice(0, 8);
+}
+
+// Раньше в историю диалога шёл только текст ответа, а номера и тексты, которые вернули инструменты,
+// терялись между ходами: на «полностью вытащи» и «скажи номер записи» Джарвис уже не знал, что нашёл
+// минутой раньше. Сжатый след инструментов возвращается в историю к последним ответам.
+function formatToolTraceForHistory(trace, budget = 2500) {
+  const parts = [];
+  let used = 0;
+  for (const entry of Array.isArray(trace) ? trace : []) {
+    const text = String(entry || "").replace(/\s+/g, " ").trim();
+    if (!text || text.startsWith("Сжатие истории")) continue;
+    const piece = text.slice(0, 900);
+    if (used + piece.length > budget) break;
+    parts.push(piece);
+    used += piece.length;
+  }
+  return parts.length ? `⟦данные инструментов⟧ ${parts.join(" | ")}` : "";
+}
+
+// Адрес для read_webpage приходит из чата, поэтому внутренние хосты (localhost, docker-сеть без точки
+// в имени, приватные диапазоны) закрыты, а каждый редирект проверяется заново — иначе внешний сайт
+// мог бы перенаправить запрос внутрь сервера.
+function isPublicHostname(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (host.includes(":")) return !(host === "::1" || /^(fc|fd|fe80)/.test(host) || host.startsWith("::ffff:"));
+  if (!host.includes(".")) return false;
+  if (/(^|\.)(localhost|local|internal)$/.test(host)) return false;
+  if (/^(0|10|127)\./.test(host) || /^169\.254\./.test(host) || /^192\.168\./.test(host)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return false;
+  return true;
+}
+
+const HTML_ENTITIES = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", laquo: "«", raquo: "»", mdash: "—", ndash: "–", hellip: "…", copy: "©" };
+
+function htmlToPlainText(html) {
+  return String(html || "")
+    .replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<\s*(br|\/p|\/div|\/li|\/tr|\/h[1-6]|\/section|\/article|\/header|\/footer)\b[^>]*>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n• ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, code) => {
+      if (code[0] !== "#") return HTML_ENTITIES[code.toLowerCase()] ?? match;
+      const point = code[1] === "x" || code[1] === "X" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
+    })
+    .replace(/[ \t\f\v\r]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function fetchPublicPage(rawUrl, signal) {
+  let target;
+  try {
+    target = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+  } catch {
+    throw new Error(`некорректный адрес «${rawUrl}»`);
+  }
+  for (let hop = 0; hop < 5; hop += 1) {
+    if (!/^https?:$/.test(target.protocol) || !isPublicHostname(target.hostname)) {
+      throw new Error(`адрес ${target.hostname} закрыт — читаю только публичные http(s)-сайты`);
+    }
+    const response = await fetch(target, {
+      redirect: "manual",
+      signal,
+      headers: { "user-agent": "Mozilla/5.0 (compatible; MBOX-Jarvis/1.0)", accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5" },
+    });
+    const location = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && location) {
+      target = new URL(location, target);
+      continue;
+    }
+    return { response, url: target.toString() };
+  }
+  throw new Error("слишком много перенаправлений");
+}
+
+// Правила, на которых Джарвис спотыкался в живом чате 7–14 сентября: сдавался после одного поиска,
+// пересказывал вместо того, чтобы вывести запись целиком, не называл номеров.
+const JARVIS_DATA_RULES = "ПРАВИЛА РАБОТЫ С ДАННЫМИ. 1) Номера: говоря о задачах и записях памяти, всегда "
+  + "называй их #ID — человек продолжает «удали #251», «выведи #1977». 2) Поиск не сдаётся с первой попытки: "
+  + "если search_memory/search_todos не нашли нужное или нашли не то — переформулируй сам (другие ключевые "
+  + "слова, синоним, английский термин вроде имени переменной, одно самое редкое слово, без project_name) и "
+  + "повтори, до трёх попыток за ответ; «не нашёл» — только после этого, и перечисли, что пробовал. "
+  + "3) Нашёл подходящую запись, а просят подробности, инструкцию, «вытащи», «полностью» — сразу вызови "
+  + "get_memory и выведи текст целиком, дословно, без пересказа и сокращений; не заставляй просить дважды. "
+  + "4) Существующую задачу меняй и удаляй по #ID (update_todo, delete_todo с todo_id), если номер известен "
+  + "или его можно узнать через list_project_todos/search_todos. 5) «Какие задачи», «что актуально», «что в "
+  + "работе» — list_project_todos без status: он и так отдаёт только активные. 6) Названия проектов человек "
+  + "пишет по-русски и сокращённо («шар», «по шару» — это shar-messenger из списка известных проектов): "
+  + "сопоставляй сам, не переспрашивай. 7) Ссылка или «что на сайте X» — read_webpage. 8) «Добавь в свойства/"
+  + "карточку проекта» — update_project_info с props. 9) После действия отчитайся одной-двумя строками: что "
+  + "именно изменено, с #ID. 10) В конце твоих прошлых реплик может стоять блок «⟦данные инструментов⟧» — это "
+  + "то, что тогда вернули инструменты (номера, тексты); опирайся на него в уточняющих вопросах, но сам такой "
+  + "блок не пиши и дословно не цитируй.";
 
 async function matchTodoFuzzy(client, projectId, todoTitle, { exact = false } = {}) {
   const rows = (await client.query("SELECT id::text, title, status, priority, note FROM todos WHERE project_id = $1", [projectId])).rows;
@@ -2161,6 +2379,15 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
   }
 
   if (name === "delete_todo") {
+    const todoId = String(args.todo_id || "").trim();
+    if (todoId) {
+      if (!/^\d+$/.test(todoId)) return "todo_id должен быть числом";
+      const deleted = (await client.query(
+        "DELETE FROM todos t USING projects p WHERE t.id = $1 AND p.id = t.project_id RETURNING t.title, p.name AS project_name",
+        [todoId],
+      )).rows[0];
+      return deleted ? `удалена задача #${todoId} «${deleted.title}» из проекта «${deleted.project_name}»` : `задача #${todoId} не нашлась — возможно, уже удалена`;
+    }
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
     const todo = await matchTodoFuzzy(client, project.id, args.todo_title, { exact: true });
@@ -2235,22 +2462,27 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
   if (name === "list_project_todos") {
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
+    // 1 сентября «какие актуальные задачи по шару» получало вперемешку done и archived: фильтра по
+    // статусу не было, сортировка шла только по приоритету. И без номеров — дальше ни get_task, ни
+    // merge_todos, ни удаление по ID были недостижимы.
+    const filter = ["all", ...TODO_STATUSES].includes(args.status) ? args.status : "active";
     const rows = (await client.query(
-      `SELECT title, status, priority, count(*) OVER()::int AS total_count
-       FROM todos WHERE project_id = $1
-       ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC
-       LIMIT 20`,
-      [project.id],
+      `SELECT id::text, title, status, priority, count(*) OVER()::int AS total_count
+       FROM todos
+       WHERE project_id = $1
+         AND ($2 = 'all' OR ($2 = 'active' AND status NOT IN ('done', 'archived')) OR status = $2)
+       ORDER BY CASE status WHEN 'doing' THEN 1 WHEN 'next' THEN 2 WHEN 'review' THEN 3 WHEN 'blocked' THEN 4 WHEN 'open' THEN 5 ELSE 6 END,
+                CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
+                updated_at DESC
+       LIMIT 40`,
+      [project.id, filter],
     )).rows;
-    if (!rows.length) return `у проекта «${project.name}» пока нет задач`;
-    // Точное total_count вместо эвристики "ровно 20 -> наверное есть ещё" — та не отличала
-    // "правда 20 всего" от "20+, обрезано", и молчала про усечение, если total оказывался < 20
-    // (не могло случиться при limit 20, но принцип тот же риск, что был в list_project_todos
-    // резервного cron-пути — модель уверенно заявляла "это все задачи").
+    const filterLabel = filter === "active" ? "активные (без done/archived)" : filter === "all" ? "все" : `в статусе ${filter}`;
+    if (!rows.length) return `у проекта «${project.name}» нет задач — фильтр: ${filterLabel}`;
     const total = rows[0].total_count;
     const truncated = total > rows.length;
-    const lines = rows.map((t) => `[${t.status}/${t.priority}] ${t.title}`);
-    return `задачи проекта «${project.name}» (показаны ${rows.length}${truncated ? ` из ${total} — список НЕ полный, для остальных используй search_todos` : ""}): ${lines.join("; ")}`;
+    const lines = rows.map((t) => `#${t.id} [${t.status}/${t.priority}] ${t.title}`);
+    return `задачи проекта «${project.name}», ${filterLabel} (показаны ${rows.length}${truncated ? ` из ${total} — список НЕ полный, для остальных используй search_todos` : " — это все"}):\n${lines.join("\n")}`;
   }
 
   if (name === "get_project_info") {
@@ -2312,15 +2544,47 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
   if (name === "search_memory") {
     const q = String(args.query || "").trim();
     if (!q) return "не искал — пустой запрос";
-    const rows = (await client.query(
-      `SELECT m.title, m.content, p.name AS project_name
+    const limit = Math.min(Math.max(Number(args.limit) || 8, 1), 20);
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    const terms = searchTerms(q);
+    const byId = new Map((await rankMemories(q, { minScore: 0.04, limit: limit * 3 })).map((m) => [m.id, m]));
+    // Векторный поиск не знает падежей: «пересборке» не совпадёт с «пересборка». Записи, где есть
+    // ВСЕ основы слов запроса, получают прибавку; если таких нет и ничего не нашлось — хотя бы часть слов.
+    const lexicalSearch = async (mode) => (await client.query(
+      `SELECT m.id::text, m.project_id::text, p.name AS project_name, m.title, m.content, m.tags, m.metadata, m.updated_at::text
        FROM memories m LEFT JOIN projects p ON p.id = m.project_id
-       WHERE m.title ILIKE '%' || $1 || '%' OR m.content ILIKE '%' || $1 || '%'
-       ORDER BY m.updated_at DESC LIMIT 5`,
-      [q],
+       WHERE (SELECT ${mode}((m.title || ' ' || coalesce(m.content, '') || ' ' || array_to_string(m.tags, ' ')) ILIKE '%' || term || '%') FROM unnest($1::text[]) AS term)
+       ORDER BY m.updated_at DESC LIMIT 30`,
+      [terms],
     )).rows;
-    if (!rows.length) return `по запросу «${q}» в памяти ничего не нашлось`;
-    return rows.map((m) => `«${m.title}»${m.project_name ? ` (${m.project_name})` : ""}: ${m.content.slice(0, 160)}`).join(" | ");
+    if (terms.length) {
+      for (const m of await lexicalSearch("bool_and")) {
+        const hit = byId.get(m.id);
+        if (hit) hit.score += 0.3;
+        else byId.set(m.id, { ...m, score: 0.3 });
+      }
+      if (!byId.size && terms.length > 1) {
+        for (const m of await lexicalSearch("bool_or")) byId.set(m.id, { ...m, score: 0.1 });
+      }
+    }
+    let rows = [...byId.values()].sort((a, b) => b.score - a.score);
+    if (project) {
+      const projectKey = normalizeEntityName(project.name);
+      const related = (m) => String(m.project_id || m.metadata?.project_id || "") === project.id
+        || (Array.isArray(m.tags) && m.tags.some((tag) => normalizeEntityName(tag) === projectKey))
+        || normalizeEntityName(m.metadata?.project || "") === projectKey;
+      rows = [...rows.filter(related), ...rows.filter((m) => !related(m))];
+    }
+    rows = rows.slice(0, limit);
+    if (!rows.length) return `по запросу «${q}» в памяти ничего не нашлось — переформулируй (другие ключевые слова, английский термин, одно слово) и попробуй ещё раз`;
+    const lines = rows.map((m) => {
+      const content = String(m.content || "");
+      const term = terms.find((word) => content.toLowerCase().includes(word));
+      const excerpt = (term ? excerptAround(content, term, 150) : content.slice(0, 300)).replace(/\s+/g, " ").trim();
+      const where = [m.project_name || m.metadata?.project || "", Array.isArray(m.tags) && m.tags.length ? `теги: ${m.tags.slice(0, 6).join(", ")}` : ""].filter(Boolean).join("; ");
+      return `#${m.id} «${m.title}»${where ? ` (${where})` : ""}, ${String(m.updated_at || "").slice(0, 10)}: …${excerpt}… [${content.length} симв.]`;
+    });
+    return `найдено в памяти ${rows.length}, самые подходящие сверху. Полный текст — get_memory с номером:\n${lines.join("\n")}`;
   }
 
   if (name === "get_memory") {
@@ -2380,25 +2644,29 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
 
   if (name === "search_todos") {
     const q = String(args.query || "").trim();
-    if (!q) return "не искал — пустой запрос";
+    const terms = searchTerms(q);
+    if (!terms.length) return "не искал — пустой запрос";
     const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
-    const rows = (await client.query(
-      `SELECT t.title, t.note, t.status, t.priority, p.name AS project_name
+    const run = async (mode) => (await client.query(
+      `SELECT t.id::text, t.title, t.note, t.status, t.priority, p.name AS project_name
        FROM todos t JOIN projects p ON p.id = t.project_id
-       WHERE (t.title ILIKE '%' || $1 || '%' OR t.note ILIKE '%' || $1 || '%')
-         AND ($2::bigint IS NULL OR t.project_id = $2::bigint)
-       ORDER BY t.updated_at DESC LIMIT 10`,
-      [q, project?.id || null],
+       WHERE ($2::bigint IS NULL OR t.project_id = $2::bigint)
+         AND (SELECT ${mode}((t.title || ' ' || coalesce(t.note, '')) ILIKE '%' || term || '%') FROM unnest($1::text[]) AS term)
+       ORDER BY (t.status IN ('done', 'archived')), t.updated_at DESC LIMIT 15`,
+      [terms, project?.id || null],
     )).rows;
-    if (!rows.length) return `по запросу «${q}» задач не нашлось`;
-    // Раньше возвращали только заголовок — если совпадение было в note, а не в title, модель
-    // видела заголовок без "1440" и решала, что задача не подходит, хотя SQL нашёл её верно.
-    // Сниппет вокруг совпадения делает видимым, ГДЕ именно нашлось совпадение.
-    return rows.map((t) => {
-      const noteMatch = t.note && t.note.toLowerCase().includes(q.toLowerCase());
-      const snippet = noteMatch ? `, в описании: "...${excerptAround(t.note, q, 60)}..."` : "";
-      return `[${t.project_name}] «${t.title}» (${t.status}/${t.priority})${snippet}`;
-    }).join("; ");
+    let rows = await run("bool_and");
+    const partial = !rows.length && terms.length > 1;
+    if (partial) rows = await run("bool_or");
+    if (!rows.length) return `по запросу «${q}» задач не нашлось${project ? ` в проекте «${project.name}»` : ""} — попробуй другие слова${project ? " или поиск без проекта" : ""}`;
+    // Сниппет из описания — иначе модель видит заголовок без искомого слова и решает, что задача не та.
+    const lines = rows.map((t) => {
+      const note = String(t.note || "");
+      const term = terms.find((word) => note.toLowerCase().includes(word) && !t.title.toLowerCase().includes(word));
+      const snippet = term ? ` — в описании: «…${excerptAround(note, term, 60).replace(/\s+/g, " ")}…»` : "";
+      return `#${t.id} [${t.project_name}] «${t.title}» (${t.status}/${t.priority})${snippet}`;
+    });
+    return `${partial ? "совпадений сразу по всем словам нет, вот задачи хотя бы с частью слов" : `найдено задач — ${rows.length}`}:\n${lines.join("\n")}`;
   }
 
   if (name === "update_todo_note") {
@@ -2644,6 +2912,12 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     if (args.deploy_provider !== undefined) { params.push(String(args.deploy_provider).trim()); sets.push(`deploy_provider = $${params.length}`); }
     if (args.deploy_target !== undefined) { params.push(String(args.deploy_target).trim()); sets.push(`deploy_target = $${params.length}`); }
     if (args.status !== undefined) { params.push(String(args.status).trim()); sets.push(`status = $${params.length}`); }
+    // 9 сентября «добавь в свойства шара ссылку на скачивание» было некуда записать: инструмент знал
+    // только пять фиксированных полей. props дописываются поверх, чужие ключи не стираются.
+    if (args.props && typeof args.props === "object" && !Array.isArray(args.props) && Object.keys(args.props).length) {
+      params.push(JSON.stringify(args.props));
+      sets.push(`props = props || $${params.length}::jsonb`);
+    }
     if (!sets.length) return "нечего обновлять — не переданы новые значения";
     params.push(project.id);
     await client.query(`UPDATE projects SET ${sets.join(", ")}, updated_at = now() WHERE id = $${params.length}`, params);
@@ -2736,6 +3010,64 @@ async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
     return `создан артефакт «${artifactName}» (${category})${project ? ` в проекте «${project.name}»` : ""} (#${inserted.rows[0].id})`;
   }
 
+  if (name === "update_todo") {
+    const id = String(args.todo_id || "").trim();
+    if (!/^\d+$/.test(id)) return "нужен числовой todo_id — возьми номер из list_project_todos/search_todos";
+    const todo = (await client.query(
+      "SELECT t.id::text, t.title, t.note, t.status, t.priority, p.name AS project_name FROM todos t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = $1",
+      [id],
+    )).rows[0];
+    if (!todo) return `задача #${id} не нашлась`;
+    const next = { title: todo.title, note: todo.note || "", status: todo.status, priority: todo.priority };
+    const changes = [];
+    const newTitle = String(args.title ?? "").trim();
+    if (newTitle && newTitle !== todo.title) { next.title = newTitle; changes.push(`заголовок: «${todo.title}» → «${newTitle}»`); }
+    const newNote = String(args.note ?? "").trim();
+    if (newNote) {
+      next.note = args.note_mode === "replace" || !next.note ? newNote : `${next.note}\n${newNote}`;
+      changes.push(args.note_mode === "replace" ? "описание заменено" : "описание дополнено");
+    }
+    if (args.status !== undefined && args.status !== todo.status) {
+      if (!TODO_STATUSES.includes(args.status)) return `неизвестный статус «${args.status}» — доступны: ${TODO_STATUSES.join(", ")}`;
+      next.status = args.status;
+      changes.push(`статус: ${todo.status} → ${args.status}`);
+    }
+    if (args.priority !== undefined && args.priority !== todo.priority) {
+      if (!TODO_PRIORITIES.includes(args.priority)) return `неизвестный приоритет «${args.priority}» — доступны: ${TODO_PRIORITIES.join(", ")}`;
+      next.priority = args.priority;
+      changes.push(`приоритет: ${todo.priority} → ${args.priority}`);
+    }
+    if (!changes.length) return `у задачи #${id} «${todo.title}» ничего не поменялось — значения не переданы или совпадают с текущими`;
+    await client.query(
+      `UPDATE todos SET title = $1, note = $2, status = $3, priority = $4,
+         claimed_by = CASE WHEN $3 IN ('done', 'archived') THEN '' ELSE claimed_by END,
+         claimed_until = CASE WHEN $3 IN ('done', 'archived') THEN NULL ELSE claimed_until END,
+         updated_at = now()
+       WHERE id = $5`,
+      [next.title, next.note, next.status, next.priority, id],
+    );
+    return `задача #${id} (${todo.project_name || "без проекта"}) обновлена — ${changes.join("; ")}`;
+  }
+
+  if (name === "read_webpage") {
+    const rawUrl = String(args.url || "").trim();
+    if (!rawUrl) return "не прочитал — нет адреса";
+    const maxChars = Math.min(Math.max(Number(args.max_chars) || 8000, 500), 20000);
+    setPhase(inboxId, "Читает веб-страницу");
+    const { response, url: finalUrl } = await fetchPublicPage(rawUrl, AbortSignal.timeout(20000));
+    if (!response.ok) return `страница ${finalUrl} ответила HTTP ${response.status}`;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType && !/text|html|xml|json/i.test(contentType)) return `по адресу ${finalUrl} не текст, а ${contentType}`;
+    const body = (await response.text()).slice(0, 3_000_000);
+    const isHtml = /html|xml/i.test(contentType) || /<html|<body/i.test(body.slice(0, 2000));
+    const pageTitle = isHtml ? htmlToPlainText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "") : "";
+    const description = isHtml ? htmlToPlainText(body.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i)?.[1] || "") : "";
+    const text = isHtml ? htmlToPlainText(body) : body.trim();
+    if (!text) return `страница ${finalUrl} загрузилась, но текста в HTML нет — скорее всего, содержимое рисует JavaScript, без браузера его не прочитать`;
+    const cut = text.length > maxChars;
+    return `страница ${finalUrl}${pageTitle ? ` — «${pageTitle}»` : ""}${description ? `\nописание: ${description}` : ""}\nтекст (${text.length} симв.${cut ? `, показаны первые ${maxChars}` : ""}):\n${text.slice(0, maxChars)}`;
+  }
+
   if (name === "delegate_to_junior") {
     const task = String(args.task || "").trim();
     if (!task) return "не делегировал — нет описания задачи";
@@ -2767,6 +3099,10 @@ async function replyAsJarvis(item) {
   try {
     await client.connect();
     await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
+    // Пока идёт цикл (до минуты с лишним), резервный cron в scripts/mbox-archivist.mjs видел вопрос «не
+    // done» и отвечал на него второй раз — отсюда пары одинаковых ответов 1, 9 и 11 сентября. doing —
+    // «уже взят»: архивариус берёт только open и зависшие doing старше 10 минут.
+    await client.query("UPDATE agent_inbox SET status = 'doing', updated_at = now() WHERE id = $1 AND status = 'open'", [item.id]);
 
     const fastPathReply = await tryFastPath(client, item.body || item.title);
     if (fastPathReply) {
@@ -2810,7 +3146,7 @@ async function replyAsJarvis(item) {
       + "покажи список человеку и жди подтверждения, прежде чем звать delete_memory — не удаляй сразу; для "
       + "глубокого смыслового разбора дублей это не замена, такое — к Claude), "
       + "record_memory (записать долгоживущий "
-      + "факт), list_project_todos (заголовки задач проекта), get_project_info (git/стек/деплой/доступ и "
+      + "факт), list_project_todos (задачи проекта с #ID; по умолчанию только активные, status=all — все), get_project_info (git/стек/деплой/доступ и "
       + "описание проекта из props — если просят РАССКАЗАТЬ/ОПИСАТЬ проект, роль, контекст, что это такое — "
       + "используй именно этот инструмент, не search_memory: там технические итоги прогонов агентов, а не "
       + "описание проекта), search_todos (искать по тексту задачи, включая описание — если list_project_todos "
@@ -2820,7 +3156,9 @@ async function replyAsJarvis(item) {
       + "get_memory (полный текст записи памяти по ID), get_memory_actions (кто и когда правил запись по её ID), "
       + "list_memory_links (что связано с записью по её ID), get_task (полная карточка задачи по её ID — в "
       + "отличие от list_project_todos/search_todos, которые отдают только обрезанные превью), update_todo_note "
-      + "(дописать или заменить описание задачи), link_projects (связать два проекта отношением — «использует», "
+      + "(дописать или заменить описание задачи), update_todo (изменить задачу по #ID: заголовок, описание, статус, приоритет "
+      + "разом; когда номер известен, надёжнее инструментов по заголовку), read_webpage (прочитать веб-страницу по "
+      + "ссылке прямо сейчас, без записи в память), link_projects (связать два проекта отношением — «использует», "
       + "«зависит от» и т.п.), record_decision (записать ВЫБОР между вариантами и почему — не факт, для фактов "
       + "record_memory), get_groq_usage (расход токенов по моделям, которыми ты говоришь — и Groq, и Gemini, "
       + "сегодня/за сутки/всего; у Gemini нет известного жёсткого лимита, это просто счётчик расхода), "
@@ -2842,7 +3180,7 @@ async function replyAsJarvis(item) {
       + "create_company (завести новую компанию, необязательно сразу со свойствами), update_company_info "
       + "(дописать/обновить свойства существующей компании поверх текущих, не стирая остальные), "
       + "update_project_info (изменить стек/git/деплой/статус проекта — указывай только то, что реально "
-      + "меняешь), create_folder и list_folders (папки для организации памяти/артефактов/проектов/задач/"
+      + "меняешь; произвольные свойства вроде ссылок и описаний — через props, они дописываются поверх), create_folder и list_folders (папки для организации памяти/артефактов/проектов/задач/"
       + "скриптов/агентских областей), link_memories (связать две записи памяти отношением — «связано», "
       + "«противоречит», «уточняет» и т.п., по ID), list_artifacts и create_artifact (артефакт — осознанная "
       + "находка/материал вроде компонента, конфига или зафиксированного решения, в отличие от сырой записи "
@@ -2868,7 +3206,7 @@ async function replyAsJarvis(item) {
       + "справишься сам, скажи прямо, что это к Claude, не к тебе. Модели, которые говорят твоим голосом: сам "
       + "ты обычно на Gemini, в резерве — Groq (\"Прораб\", openai/gpt-oss-120b — ведёт диалог и решает, какой "
       + "инструмент вызвать; \"Младший\", openai/gpt-oss-20b — разовые задачи без диалога вроде пересказа "
-      + "страницы или классификации памяти). Claude — это отдельный агент на своей модели (Claude Sonnet), не "
+      + "страницы или классификации памяти). Claude — это отдельный агент на своей модели, не "
       + "ещё одна твоя резервная модель, не путай. Тебе видна история разговора "
       + "(не только последнее сообщение), но действие вызывай ТОЛЬКО когда об этом явно просят прямо сейчас — "
       + "фразы вроде «буду делать проект на стеке X» или «планирую X» это описание планов, а не команда, не "
@@ -2883,7 +3221,7 @@ async function replyAsJarvis(item) {
       + "Если результат инструмента явно помечен как неполный (например «показаны 20 из 102 — список НЕ "
       + "полный») — никогда не достраивай остальное своими словами («всё остальное готово/сделано» и т.п.), "
       + "это додумывание за пределами того, что реально видно; честно скажи, что показана только часть, и "
-      + "предложи уточнить через search_todos или другой конкретный запрос."
+      + "предложи уточнить через search_todos или другой конкретный запрос. " + JARVIS_DATA_RULES
       + (item.props?.current_project_name
         ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
         : "");
@@ -2899,7 +3237,7 @@ async function replyAsJarvis(item) {
     const KEEP_RAW = 50;
     const OLDER_CAP = 60;
     const history = (await client.query(
-      `SELECT agent_name, body, title FROM agent_inbox
+      `SELECT agent_name, body, title, props FROM agent_inbox
        WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = 'Claude' OR agent_name = $1)
        ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
       [JARVIS_NAME],
@@ -2909,7 +3247,12 @@ async function replyAsJarvis(item) {
     // каждое действие. Вместо надежды на параллельные tool_calls гоняем обычный agentic-цикл:
     // выполняем то, что модель попросила, отдаём результат обратно и спрашиваем снова, пока она
     // не перестанет вызывать функции (или не упрёмся в потолок шагов).
-    const toRole = (row) => ({ role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: row.body || row.title });
+    const rowsWithToolTrace = new Set(history.filter((row) => row.agent_name === JARVIS_NAME && Array.isArray(row.props?.trace) && row.props.trace.length).slice(-6));
+    const toRole = (row) => {
+      const toolBlock = rowsWithToolTrace.has(row) ? formatToolTraceForHistory(row.props.trace) : "";
+      const text = row.body || row.title;
+      return { role: row.agent_name === JARVIS_NAME ? "assistant" : "user", content: toolBlock ? `${text}\n\n${toolBlock}` : text };
+    };
     const actionLog = [];
     const toolsUsed = [];
     // Полный пошаговый трейс — что вызвано, с чем, что вернулось. В props, не в body: props не
@@ -2971,7 +3314,7 @@ async function replyAsJarvis(item) {
       return groqComplete(trimmed, JARVIS_TOOLS_GROQ, "reply", controller.signal);
     }
     jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
-    for (let step = 0; step < 8; step += 1) {
+    for (let step = 0; step < 12; step += 1) {
       jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
       setPhase(item.id, "Подбирает инструмент/навык");
       const message = await complete(messages);
@@ -3570,39 +3913,7 @@ async function handleApiWithContext(req, res, url) {
       return sendJson(res, 200, { query: search, detail, memories: detail === "full" ? memories : memories.map((memory) => compactRecallMemoryRow(memory)) });
     }
 
-    const { documents } = await refreshMemoryEmbeddings();
-    const documentFrequency = new Map();
-    for (const doc of documents) {
-      for (const token of new Set(tokenizeEmbeddingText(doc.text))) {
-        documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
-      }
-    }
-    const queryVector = vectorFromText(search, documentFrequency, documents.length);
-    const result = await query(
-      `SELECT m.id::text, m.project_id::text, p.name AS project_name, m.todo_id::text, m.agent_run_id::text, m.title, m.content, m.entity_type, m.access_level, m.tags, m.metadata,
-              pg_column_size(m)::int AS memory_bytes,
-              m.created_at::text, m.updated_at::text,
-              e.representation, e.dimension, e.encoding_source, e.updated_at::text AS embedding_updated_at
-       FROM memories m
-       JOIN memory_embeddings e ON e.memory_id = m.id
-       LEFT JOIN projects p ON p.id = m.project_id
-       WHERE ($1 = '' OR m.project_id::text = $1 OR m.metadata->>'project_id' = $1)
-         AND ($2 = '' OR p.name = $2 OR m.metadata->>'project' = $2)
-         AND ($3::text[] = '{}'::text[] OR m.tags && $3::text[])
-         AND ($4::int <= 0 OR m.updated_at >= now() - ($4::int * interval '1 day'))`,
-      [projectId, project, tags, recencyDays],
-    );
-    const memories = result.rows
-      .map((memory) => {
-        const lexical = recallLexicalScore(search, memory);
-        const vectorScore = cosineSimilarity(queryVector, memory.representation || {});
-        const score = (vectorScore * 0.65) + (lexical.lexical * 0.25) + (lexical.title * 0.25) + (lexical.tags * 0.15) + (lexical.exact * 0.2);
-        return { ...memory, score };
-      })
-      .filter((memory) => memory.score >= minScore)
-      .sort((a, b) => b.score - a.score || new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-      .slice(0, limit)
-      .map(({ representation, ...memory }) => ({ ...memory, score: Number(memory.score.toFixed(6)) }));
+    const memories = await rankMemories(search, { projectId, project, tags, recencyDays, minScore, limit });
     return sendJson(res, 200, {
       query: search,
       detail,
@@ -4548,7 +4859,11 @@ async function handleApiWithContext(req, res, url) {
       broadcastChange(req, "create", "agent_inbox", String(body.title || "").trim());
       const senderName = String(body.agent_name || actorFromReq(req));
       const addressedTo = body.props && typeof body.props === "object" ? String(body.props.to || "") : "";
-      if ((senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
+      // Только вопросы. Служебные записи с agent_name "Claude" (agent_error/agent_response от
+      // scripts/claude-inbox-watcher.mjs, без props.to) тоже проходили — и Джарвис 14 сентября отвечал на
+      // «Claude не смог ответить на #928» так, будто это вопрос человека.
+      const isQuestion = String(body.item_type || "") === "question";
+      if (isQuestion && (senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME) && result.rows[0]) {
         // Claude тоже может триггерить живой ответ Джарвиса (по просьбе человека — "агенты
         // общаются, но с ограничениями") — но без верхнего предела это открытая дверь для
         // зацикливания ботов друг на друге. Ограничение: если среди последних 6 сообщений треда

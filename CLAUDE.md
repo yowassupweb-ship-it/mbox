@@ -91,6 +91,13 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    `POST /api/mbox/agent/ping`; MCP-сервер шлёт `session_start` при старте и `heartbeat` раз в 60 с.
    `/api/mbox/agents` собирает список из `agent_presence` + `audit_events.actor` + `agent_runs`.
    Ничего не хардкодить: агент появляется в UI, как только сходил в API.
+10. **Автоответ Джарвиса.** `POST /agent/inbox` будит Джарвиса только на `item_type: "question"` от
+   `Человек`/`Claude` без чужого `props.to` — служебные `agent_error`/`agent_response` его больше не
+   будят (раньше он отвечал на «Claude не смог ответить на #N»). Пока он думает, вопрос в статусе
+   `doing`; резервный cron `scripts/mbox-archivist.mjs` берёт только `open` и зависшие `doing` старше
+   10 минут — иначе на один вопрос приходило два ответа. Инструменты Джарвиса отдают `#ID`, его
+   `search_memory` на сервере — общий `rankMemories()` с `/memories/search`, правила поведения —
+   `JARVIS_DATA_RULES` (во всех трёх копиях).
 
 ## Работа агента с MBOX
 
