@@ -13,6 +13,8 @@ UI на русском, код и API на английском.
 | `src/styles.css` | 2400 строк, единственный стиль-файл |
 | `src/components/` | только TopBar, BottomNav, FolderTree |
 | `server/mbox-server.mjs` | **прод**-API + статика + WebSocket |
+| `server/jarvis.mjs` | **весь Джарвис**: инструменты, маршрутизация по группам, агентный цикл, модели, источники данных; импортируется и прод-сервером, и `vite.config.ts` |
+| `server/env.mjs` | загрузка `.env`/`.env.local` — импортируется первым, до `jarvis.mjs` |
 | `vite.config.ts` | **dev**-API как vite-middleware — вторая, отдельная реализация тех же ручек |
 | `schema/mbox_postgres.sql` | схема + сиды; одновременно init-скрипт и «миграции» |
 | `scripts/mbox-mcp-server.mjs` | MCP-сервер `mbox-prod` — то, через что агенты ходят в MBOX |
@@ -54,17 +56,13 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    Они уже разошлись: в dev-версии нет `agent_runs`, `agent_inbox`, `decision_log`, `/todos/:id/claim`,
    `/agent/next-task`, `/agent/context`, секретов и установки `mbox.actor` для аудита; зато есть
    `/api/mbox/status`, которого нет в проде. **Правя ручку, правь обе или сознательно решай, что нет.**
-   Пример сознательного решения: `kind='telegram_channel'` в `refreshDataSourceById` реализован
-   только в `server/mbox-server.mjs` (это то, что реально дёргает архивариус в проде) — в
-   `vite.config.ts` его нет. На самом деле копии три — `scripts/mbox-archivist.mjs` (резервный
-   cron, REST-клиент без доступа к БД) третья. Полный вынос в shared-модуль не сделан осознанно
-   (todo #161): у копий разная механика доступа к данным (прямой `pg.Client` / vite dev middleware
-   / чистый REST), реальный вынос — отдельная архитектурная задача. Вместо этого —
-   `npm run check:mirror` (`scripts/check-triple-mirror.mjs`): сверяет набор инструментов Джарвиса
-   (`JARVIS_TOOLS`) и веток диспетчера между тремя файлами, ловит забытые зеркалирования. На
-   2026-08-23 сознательно не зеркалированы в `mbox-archivist.mjs`: `get_memory_actions`,
-   `list_memory_links` (нужны новые REST GET-ручки, которых сейчас нет вообще), `analyze_posts`
-   (тяжёлый инструмент, вряд ли нужен в резервном cron).
+   Исключение — Джарвис: с 2026-09-15 он живёт в одном `server/jarvis.mjs` (todo #258). Прод-сервер и
+   `vite.config.ts` импортируют модуль и передают ему доступ к данным через `configureJarvis({ query,
+   broadcastRealtime, rankMemories, recordMemoryAction })`; типы для TS — `server/jarvis.d.mts`.
+   `scripts/mbox-archivist.mjs` своего агентного цикла больше не имеет: пропущенный вопрос он отдаёт
+   серверу через `POST /api/mbox/agent/inbox/:id/answer`. `check:mirror` удалён — сверять нечего.
+   Модуль читает ключи моделей из `process.env` при загрузке, поэтому `server/env.mjs` обязан
+   импортироваться раньше него.
 2. **Прод отдаёт закоммиченный билд.** Изменение в `src/` не попадёт в прод без `npm run build` и
    коммита `public/`. `--emptyOutDir false` не чистит старые хеш-бандлы — мусор в `public/assets`
    накапливается, удалять руками.
@@ -91,13 +89,19 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    `POST /api/mbox/agent/ping`; MCP-сервер шлёт `session_start` при старте и `heartbeat` раз в 60 с.
    `/api/mbox/agents` собирает список из `agent_presence` + `audit_events.actor` + `agent_runs`.
    Ничего не хардкодить: агент появляется в UI, как только сходил в API.
-10. **Автоответ Джарвиса.** `POST /agent/inbox` будит Джарвиса только на `item_type: "question"` от
-   `Человек`/`Claude` без чужого `props.to` — служебные `agent_error`/`agent_response` его больше не
-   будят (раньше он отвечал на «Claude не смог ответить на #N»). Пока он думает, вопрос в статусе
-   `doing`; резервный cron `scripts/mbox-archivist.mjs` берёт только `open` и зависшие `doing` старше
-   10 минут — иначе на один вопрос приходило два ответа. Инструменты Джарвиса отдают `#ID`, его
-   `search_memory` на сервере — общий `rankMemories()` с `/memories/search`, правила поведения —
-   `JARVIS_DATA_RULES` (во всех трёх копиях).
+10. **Автоответ Джарвиса.** `POST /agent/inbox` будит Джарвиса на `item_type: "question"` от
+   `Человек`/`Claude` без чужого `props.to` и на `item_type: "answer"` от `Человек` с
+   `props.to = Джарвис` (кнопки «Требуют ответа»). Служебные `agent_error`/`agent_response` его не
+   будят. Пока он думает, вопрос в статусе `doing`; архивариус отдаёт серверу только `open` старше
+   минуты и `doing` старше 10 минут, не старше суток. Инструменты отдают `#ID`; в запрос модели идут
+   только нужные группы инструментов (`TOOL_GROUPS`, догрузка — мета-инструмент `request_tools`).
+11. **Поиск по памяти.** `GET /api/mbox/memories?q=` (строка поиска в UI) и `search_memory`
+   Джарвиса ищут слова по отдельности с отрезанными окончаниями (`searchTerms` из `server/jarvis.mjs`),
+   а не всю строку одной подстрокой. Остальные UI-ручки (`projects`, `artifacts`, `decisions`, …) пока
+   ищут целой подстрокой.
+12. **Отладка Джарвиса через MCP.** `list_inbox` (тексты и трейс инструментов), `get_inbox_item`
+   (сообщение + ответы + ошибки), `get_jarvis_errors`. На сервере — фильтры `GET /agent/inbox`
+   (`agent`, `item_type`, `q`, `before_id`, `limit`) и `GET /agent/inbox/:id`.
 
 ## Работа агента с MBOX
 

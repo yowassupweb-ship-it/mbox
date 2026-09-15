@@ -547,6 +547,114 @@ server.registerTool(
   },
 );
 
+// Переписка инбокса целиком (todo #259): раньше агенты через MCP видели только заголовки из
+// get_agent_context — ни текстов ответов Джарвиса, ни следа его инструментов, ни его ошибок.
+function inboxView(item, detail = "short") {
+  const props = item?.props && typeof item.props === "object" ? item.props : {};
+  const view = {
+    id: item.id,
+    created_at: item.created_at,
+    agent: item.agent_name,
+    type: item.item_type,
+    status: item.status,
+    to: props.to || "",
+    re: props.re || props.in_reply_to || "",
+    title: item.title,
+    body: detail === "full" ? item.body : String(item.body || "").slice(0, 400),
+  };
+  if (Array.isArray(props.tools_used) && props.tools_used.length) view.tools_used = props.tools_used;
+  if (detail === "full") {
+    if (Array.isArray(props.trace) && props.trace.length) view.trace = props.trace;
+    if (Array.isArray(props.highlights) && props.highlights.length) view.highlights = props.highlights;
+    if (props.failed) view.failed = true;
+    view.project_id = item.project_id;
+  }
+  return view;
+}
+
+function matchesInboxFilter(item, { agent, item_type, query, before_id }) {
+  if (agent && item.agent_name !== agent) return false;
+  if (item_type && item.item_type !== item_type) return false;
+  if (before_id && !(Number(item.id) < Number(before_id))) return false;
+  if (query && !`${item.title || ""}\n${item.body || ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+  return true;
+}
+
+server.registerTool(
+  "list_inbox",
+  {
+    title: "List MBOX inbox and chat",
+    description: "Read the MBOX agent inbox / chat newest first WITH message bodies: human questions, Jarvis answers, handoffs, agent errors. Filter by agent ('Джарвис', 'Человек', 'Claude', 'Codex'), item_type (question, answer, notice, agent_error, agent_response), text query, before_id for paging. detail=full adds Jarvis tool traces. For one message with its replies and errors use get_inbox_item.",
+    inputSchema: {
+      limit: z.number().default(30),
+      agent: z.string().default(""),
+      item_type: z.string().default(""),
+      query: z.string().default(""),
+      before_id: z.string().default(""),
+      detail: z.enum(["short", "full"]).default("short"),
+    },
+  },
+  async ({ limit, agent, item_type, query, before_id, detail }) => {
+    const size = Math.min(Math.max(Number(limit) || 30, 1), 200);
+    const params = new URLSearchParams({ limit: String(size) });
+    if (agent) params.set("agent", agent);
+    if (item_type) params.set("item_type", item_type);
+    if (query) params.set("q", query);
+    if (before_id) params.set("before_id", before_id);
+    const data = await mboxFetch(`/api/mbox/agent/inbox?${params.toString()}`);
+    // Сервер без todo #259 фильтры игнорирует и отдаёт 200 последних — поэтому дофильтровываем здесь же.
+    const rows = (data.inbox || [])
+      .filter((item) => matchesInboxFilter(item, { agent, item_type, query, before_id }))
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .slice(0, size)
+      .map((item) => inboxView(item, detail));
+    return withPush({ content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "get_inbox_item",
+  {
+    title: "Get one MBOX inbox message",
+    description: "One inbox/chat message by id with full body and props (Jarvis tool trace), all replies to it (items with props.re = id) and Jarvis errors logged for it. Use to debug what Jarvis actually did.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    let data;
+    try {
+      data = await mboxFetch(`/api/mbox/agent/inbox/${encodeURIComponent(id)}`);
+    } catch (error) {
+      if (!/^MBOX 40[45]/.test(String(error.message))) throw error;
+      // Без todo #259 ручки нет — собираем то же из последних 200 записей и журнала ошибок.
+      const inbox = (await mboxFetch("/api/mbox/agent/inbox")).inbox || [];
+      const item = inbox.find((row) => String(row.id) === String(id));
+      const errors = ((await mboxFetch("/api/mbox/agent/jarvis-errors")).errors || []).filter((row) => String(row.inbox_id) === String(id));
+      data = item ? { inbox_item: item, replies: inbox.filter((row) => String(row.props?.re || row.props?.in_reply_to || "") === String(id)), errors } : null;
+    }
+    const text = data
+      ? JSON.stringify({ item: inboxView(data.inbox_item, "full"), replies: (data.replies || []).map((row) => inboxView(row, "full")), errors: data.errors || [] }, null, 2)
+      : `inbox item #${id} not found`;
+    return withPush({ content: [{ type: "text", text }] });
+  },
+);
+
+server.registerTool(
+  "get_jarvis_errors",
+  {
+    title: "Get Jarvis error log",
+    description: "Recent Jarvis failures (tool errors, model/provider errors, cron hand-off errors) newest first, optionally for one inbox message.",
+    inputSchema: { limit: z.number().default(20), inbox_id: z.string().default("") },
+  },
+  async ({ limit, inbox_id }) => {
+    const size = Math.min(Math.max(Number(limit) || 20, 1), 200);
+    const params = new URLSearchParams({ limit: String(size) });
+    if (inbox_id) params.set("inbox_id", inbox_id);
+    const data = await mboxFetch(`/api/mbox/agent/jarvis-errors?${params.toString()}`);
+    const rows = (data.errors || []).filter((row) => !inbox_id || String(row.inbox_id) === String(inbox_id)).slice(0, size);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] });
+  },
+);
+
 server.registerTool(
   "get_memory",
   {
