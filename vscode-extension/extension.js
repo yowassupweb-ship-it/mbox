@@ -123,6 +123,27 @@ class MboxClient {
     return snapshot;
   }
 
+  projects() { return this.request("/api/mbox/projects?detail=short"); }
+  artifacts() { return this.request("/api/mbox/artifacts"); }
+  skills() { return this.request("/api/mbox/agent/skills"); }
+
+  async workspaceSnapshot() {
+    const [context, projects, artifacts, skills] = await Promise.all([
+      this.contextSnapshot(), this.projects(), this.artifacts(), this.skills()
+    ]);
+    return {
+      ...context,
+      projects: projects.projects || [],
+      artifacts: artifacts.artifacts || [],
+      skills: skills.skills || []
+    };
+  }
+
+  async selectProject(name) {
+    await vscode.workspace.getConfiguration("mbox").update("project", name, vscode.ConfigurationTarget.Global);
+    this.projectId = "";
+  }
+
   nextTask() {
     const { project, agentName } = this.config;
     return this.request(`/api/mbox/agent/next-task?project=${encodeURIComponent(project)}&agent=${encodeURIComponent(agentName)}`);
@@ -360,6 +381,8 @@ class MboxTreeProvider {
     if (this.kind === "context") return this.contextChildren(item);
     if (this.kind === "todos") return this.todoChildren();
     if (this.kind === "console") return this.consoleChildren();
+    if (this.kind === "artifacts") return this.artifactChildren();
+    if (this.kind === "skills") return this.skillChildren();
     return this.memoryChildren();
   }
 
@@ -367,6 +390,13 @@ class MboxTreeProvider {
     const project = this.snapshot.project || {};
     if (!item) {
       return [
+        ...(this.snapshot.projects || []).map((entry) => new MboxItem(entry.name, vscode.TreeItemCollapsibleState.None, {
+          description: entry.name === project.name ? "выбран" : entry.status || "",
+          iconPath: themeIcon(entry.name === project.name ? "check" : "repo"),
+          item: entry,
+          contextValue: "project",
+          command: { command: "mbox.switchProject", title: "Переключить проект", arguments: [entry] }
+        })),
         new MboxItem(project.name || this.client.config.project, vscode.TreeItemCollapsibleState.Expanded, {
           description: project.status || "",
           iconPath: themeIcon("repo"),
@@ -456,6 +486,30 @@ class MboxTreeProvider {
       command: { command: "mbox.openItem", title: "Открыть сообщение", arguments: [{ item, kind: "inbox" }] }
     }));
     return [openConsole, ...messages];
+  }
+
+  artifactChildren() {
+    const artifacts = this.snapshot.artifacts || [];
+    if (!artifacts.length) return [new MboxItem("Артефактов нет", vscode.TreeItemCollapsibleState.None, { iconPath: themeIcon("archive") })];
+    return artifacts.map((artifact) => new MboxItem(artifact.name || `Артефакт ${artifact.id}`, vscode.TreeItemCollapsibleState.None, {
+      id: artifact.id, item: artifact, contextValue: "artifact",
+      description: [artifact.category, artifact.version, artifact.status].filter(Boolean).join(" · "),
+      tooltip: artifact.content || "",
+      iconPath: themeIcon("archive"),
+      command: { command: "mbox.openItem", title: "Открыть артефакт", arguments: [{ item: artifact, kind: "artifact" }] }
+    }));
+  }
+
+  skillChildren() {
+    const skills = this.snapshot.skills || [];
+    if (!skills.length) return [new MboxItem("Навыков нет", vscode.TreeItemCollapsibleState.None, { iconPath: themeIcon("tools") })];
+    return skills.map((skill) => new MboxItem(skill.name || skill.id, vscode.TreeItemCollapsibleState.None, {
+      id: skill.id, item: skill, contextValue: "skill",
+      description: skill.description || "",
+      tooltip: skill.description || skill.instructions || "",
+      iconPath: themeIcon("tools"),
+      command: { command: "mbox.useSkill", title: "Использовать навык", arguments: [skill] }
+    }));
   }
 }
 
@@ -1170,6 +1224,8 @@ async function activate(context) {
     new MboxTreeProvider(client, "context", context.extensionUri),
     new MboxTreeProvider(client, "todos", context.extensionUri),
     new MboxTreeProvider(client, "memories", context.extensionUri),
+    new MboxTreeProvider(client, "artifacts", context.extensionUri),
+    new MboxTreeProvider(client, "skills", context.extensionUri),
     new MboxTreeProvider(client, "console", context.extensionUri)
   ];
   // createTreeView вместо registerTreeDataProvider: только он даёт badge и description в
@@ -1178,9 +1234,11 @@ async function activate(context) {
     context: vscode.window.createTreeView("mbox.projects", { treeDataProvider: providers[0] }),
     todos: vscode.window.createTreeView("mbox.todos", { treeDataProvider: providers[1] }),
     memories: vscode.window.createTreeView("mbox.memories", { treeDataProvider: providers[2] }),
-    console: vscode.window.createTreeView("mbox.console", { treeDataProvider: providers[3] }),
+    artifacts: vscode.window.createTreeView("mbox.artifacts", { treeDataProvider: providers[3] }),
+    skills: vscode.window.createTreeView("mbox.skills", { treeDataProvider: providers[4] }),
+    console: vscode.window.createTreeView("mbox.console", { treeDataProvider: providers[5] }),
   };
-  context.subscriptions.push(output, views.context, views.todos, views.memories, views.console);
+  context.subscriptions.push(output, views.context, views.todos, views.memories, views.artifacts, views.skills, views.console);
 
   function updateBadges(snapshot) {
     const todos = snapshot?.todos || snapshot?.project?.todos || [];
@@ -1193,6 +1251,8 @@ async function activate(context) {
     views.todos.description = todos.length ? `${openTodos.length} из ${todos.length}` : "";
     views.todos.badge = openTodos.length ? { value: openTodos.length, tooltip: `Незакрытых задач: ${openTodos.length}` } : undefined;
     views.memories.description = memories.length ? String(memories.length) : "";
+    views.artifacts.description = snapshot?.artifacts?.length ? String(snapshot.artifacts.length) : "";
+    views.skills.description = snapshot?.skills?.length ? String(snapshot.skills.length) : "";
     views.console.badge = unanswered.length ? { value: unanswered.length, tooltip: `Без ответа: ${unanswered.length}` } : undefined;
   }
 
@@ -1200,7 +1260,7 @@ async function activate(context) {
 
   async function refresh(silent = false) {
     try {
-      const snapshot = await client.contextSnapshot();
+      const snapshot = await client.workspaceSnapshot();
       providers.forEach((provider) => provider.refresh(snapshot));
       updateBadges(snapshot);
       if (!silent) vscode.window.setStatusBarMessage(`MBOX обновлён: ${client.config.project}`, 2000);
@@ -1278,6 +1338,20 @@ async function activate(context) {
       if (await promptConnection(client)) await refresh();
     }),
     vscode.commands.registerCommand("mbox.refresh", () => refresh()),
+    vscode.commands.registerCommand("mbox.switchProject", async (project) => {
+      const chosen = project?.name || await vscode.window.showQuickPick((providers[0].snapshot?.projects || []).map((entry) => ({ label: entry.name, description: entry.status || "" })), { title: "Выберите проект MBOX" }).then((entry) => entry?.label);
+      if (!chosen) return;
+      await client.selectProject(chosen);
+      await refresh();
+    }),
+    vscode.commands.registerCommand("mbox.useSkill", async (skill) => {
+      if (!skill?.id) return;
+      const brief = await vscode.window.showInputBox({ title: `Навык: ${skill.name || skill.id}`, prompt: "Опишите задачу обычным текстом", ignoreFocusOut: true });
+      if (!brief) return;
+      await client.createInboxMessage(`Используй навык ${skill.id}. ${brief}`, "Джарвис");
+      vscode.window.showInformationMessage(`Задача передана навыку «${skill.name || skill.id}»`);
+      await refresh(true);
+    }),
     vscode.commands.registerCommand("mbox.nextTask", async () => {
       try {
         const result = await client.nextTask();

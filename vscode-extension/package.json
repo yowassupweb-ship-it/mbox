@@ -2,7 +2,7 @@
   "name": "mbox-vscode",
   "displayName": "MBOX",
   "description": "Проекты, задачи, память и работа агентов MBOX прямо в VS Code.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "mbox",
   "private": true,
   "icon": "resources/mbox.png",
@@ -17,9 +17,13 @@
     "onView:mbox.projects",
     "onView:mbox.todos",
     "onView:mbox.memories",
+    "onView:mbox.artifacts",
+    "onView:mbox.skills",
     "onView:mbox.console",
     "onCommand:mbox.configure",
     "onCommand:mbox.refresh",
+    "onCommand:mbox.switchProject",
+    "onCommand:mbox.useSkill",
     "onCommand:mbox.nextTask",
     "onCommand:mbox.claimTask",
     "onCommand:mbox.openItem",
@@ -106,6 +110,16 @@
           "icon": "resources/mbox.png"
         },
         {
+          "id": "mbox.artifacts",
+          "name": "Артефакты",
+          "icon": "resources/mbox.png"
+        },
+        {
+          "id": "mbox.skills",
+          "name": "Навыки",
+          "icon": "resources/mbox.png"
+        },
+        {
           "id": "mbox.console",
           "name": "Консоль",
           "icon": "resources/mbox.png"
@@ -120,6 +134,14 @@
       {
         "command": "mbox.refresh",
         "title": "MBOX: Обновить"
+      },
+      {
+        "command": "mbox.switchProject",
+        "title": "MBOX: Сменить проект"
+      },
+      {
+        "command": "mbox.useSkill",
+        "title": "MBOX: Использовать навык"
       },
       {
         "command": "mbox.nextTask",
