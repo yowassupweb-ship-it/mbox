@@ -871,8 +871,15 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/projects"
     || pathname === "/api/mbox/memories"
     || pathname === "/api/mbox/memories/search"
+    || pathname === "/api/mbox/folders"
+    || pathname === "/api/mbox/artifacts"
+    || pathname === "/api/mbox/history"
+    || pathname === "/api/mbox/graph/edges"
+    || pathname === "/api/mbox/agent/runs"
+    || pathname === "/api/mbox/decisions"
+    || pathname === "/api/mbox/todos"
     || pathname === "/api/mbox/agent/inbox"
-    || /^\/api\/mbox\/(projects|memories|agent\/inbox)\/\d+$/.test(pathname);
+    || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
 
 // Каталог навыков — одноразовые вызовы модели без оркестрации инструментами (см. /jarvis в
@@ -1608,6 +1615,7 @@ async function handleApiWithContext(req, res, url) {
   if (url.pathname === "/api/mbox/folders") {
     if (req.method === "POST") {
       const body = await readBody(req);
+      if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
       const result = await query(
         `INSERT INTO folders(parent_id, name, entity_type, access_level, color, project_id)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -1652,9 +1660,10 @@ async function handleApiWithContext(req, res, url) {
               COALESCE((SELECT content_bytes FROM rollup WHERE rollup.id = folders.id), 0) AS content_bytes,
               COALESCE((SELECT content_items FROM rollup WHERE rollup.id = folders.id), 0) AS content_items
        FROM folders
-       WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR entity_type ILIKE '%' || $1 || '%'
+       WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+         AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR entity_type ILIKE '%' || $1 || '%')
        ORDER BY COALESCE(parent_id, 0), name`,
-      [q],
+      [q, scope.all, scope.projectIds],
     );
     return sendJson(res, 200, { folders: result.rows });
   }
@@ -1662,6 +1671,10 @@ async function handleApiWithContext(req, res, url) {
   const folderMatch = url.pathname.match(/^\/api\/mbox\/folders\/(\d+)$/);
   if (folderMatch && req.method === "PATCH") {
     const body = await readBody(req);
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM folders WHERE id = $1", [folderMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    }
     const result = await query(
       `UPDATE folders SET
          parent_id = $1,
@@ -1678,6 +1691,10 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (folderMatch && req.method === "DELETE") {
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM folders WHERE id = $1", [folderMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    }
     await query("DELETE FROM folders WHERE id = $1", [folderMatch[1]]);
     broadcastChange(req, "delete", "folders", `#${folderMatch[1]}`);
     return sendJson(res, 200, { ok: true });
@@ -1686,6 +1703,7 @@ async function handleApiWithContext(req, res, url) {
   if (url.pathname === "/api/mbox/artifacts") {
     if (req.method === "POST") {
       const body = await readBody(req);
+      if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
       const result = await query(
         `INSERT INTO artifacts(folder_id, project_id, name, category, version, status, content, access_level)
          VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(NULLIF($8, ''), 'agents'))
@@ -1698,10 +1716,11 @@ async function handleApiWithContext(req, res, url) {
     const result = await query(
       `SELECT id::text, folder_id::text, project_id::text, name, category, version, status, content, access_level, pg_column_size(artifacts)::int AS memory_bytes
        FROM artifacts
-       WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%'
+       WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+         AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%')
        ORDER BY category, name
        LIMIT 300`,
-      [q],
+      [q, scope.all, scope.projectIds],
     );
     return sendJson(res, 200, { artifacts: result.rows });
   }
@@ -1709,6 +1728,10 @@ async function handleApiWithContext(req, res, url) {
   const artifactMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)$/);
   if (artifactMatch && req.method === "PATCH") {
     const body = await readBody(req);
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id) || (body.project_id && !hasProjectAccess(scope, body.project_id))) return sendForbidden(res);
+    }
     const result = await query(
       `UPDATE artifacts SET
          folder_id = $1,
@@ -1728,6 +1751,10 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (artifactMatch && req.method === "DELETE") {
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    }
     await query("DELETE FROM artifacts WHERE id = $1", [artifactMatch[1]]);
     broadcastChange(req, "delete", "artifacts", `#${artifactMatch[1]}`);
     return sendJson(res, 200, { ok: true });
@@ -2124,6 +2151,7 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/todos" && req.method === "POST") {
     const body = await readBody(req);
+    if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
     const result = await query(
       `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
        VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'open'), COALESCE(NULLIF($5, ''), 'normal'), $6, COALESCE(NULLIF($7, ''), 'private'))
@@ -2140,14 +2168,18 @@ async function handleApiWithContext(req, res, url) {
       `SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text,
               access_level, pg_column_size(todos)::int AS memory_bytes, created_at::text, updated_at::text
        FROM todos
-       WHERE id = $1`,
-      [todoMatch[1]],
+       WHERE id = $1 AND ($2::boolean OR project_id = ANY($3::bigint[]))`,
+      [todoMatch[1], scope.all, scope.projectIds],
     );
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { todo: result.rows[0] } : { error: "not_found" });
   }
 
   if (todoMatch && req.method === "PATCH") {
     const body = await readBody(req);
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM todos WHERE id = $1", [todoMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    }
     const result = await query(
       `UPDATE todos SET
          title = COALESCE(NULLIF($1, ''), title),
@@ -2179,6 +2211,10 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (todoMatch && req.method === "DELETE") {
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM todos WHERE id = $1", [todoMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    }
     await query("DELETE FROM todos WHERE id = $1", [todoMatch[1]]);
     broadcastChange(req, "delete", "todos", `#${todoMatch[1]}`);
     return sendJson(res, 200, { ok: true });
@@ -2195,11 +2231,12 @@ async function handleApiWithContext(req, res, url) {
               pg_column_size(audit_events)::int AS memory_bytes,
               created_at::text
        FROM audit_events
-       WHERE $1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
-          OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%'
+       WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+         AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
+          OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%')
        ORDER BY created_at DESC
        LIMIT 200`,
-      [q],
+      [q, scope.all, scope.projectIds],
     );
     return sendJson(res, 200, { events: result.rows });
   }
@@ -2548,7 +2585,7 @@ async function handleApiWithContext(req, res, url) {
       return sendJson(res, 201, { run: result.rows[0], auto_memory });
     }
     await closeStaleAgentRuns();
-    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs ORDER BY started_at DESC LIMIT 100");
+    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE $1::boolean OR project_id = ANY($2::bigint[]) ORDER BY started_at DESC LIMIT 100", [scope.all, scope.projectIds]);
     return sendJson(res, 200, { runs: result.rows });
   }
 
@@ -2594,10 +2631,11 @@ async function handleApiWithContext(req, res, url) {
       `SELECT id::text, project_id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props,
               pg_column_size(decision_log)::int AS memory_bytes, created_at::text
        FROM decision_log
-       WHERE $1 = '' OR actor ILIKE '%' || $1 || '%' OR title ILIKE '%' || $1 || '%' OR decision ILIKE '%' || $1 || '%'
-          OR rationale ILIKE '%' || $1 || '%' OR impact ILIKE '%' || $1 || '%'
+       WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+         AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR title ILIKE '%' || $1 || '%' OR decision ILIKE '%' || $1 || '%'
+          OR rationale ILIKE '%' || $1 || '%' OR impact ILIKE '%' || $1 || '%')
        ORDER BY created_at DESC LIMIT 200`,
-      [q],
+      [q, scope.all, scope.projectIds],
     );
     return sendJson(res, 200, { decisions: result.rows });
   }

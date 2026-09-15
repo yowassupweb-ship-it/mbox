@@ -1,4 +1,4 @@
-import { AlertTriangle, Download, FolderOpen, Play, RefreshCw, Search, Square } from "lucide-react";
+import { AlertTriangle, Download, FolderOpen, LogOut, Play, RefreshCw, Search, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
@@ -31,6 +31,7 @@ type TopBarProps = {
   roster?: AgentRosterEntry[];
   attentionTodos?: AttentionTodo[];
   onOpenTodo?: (projectId: string) => void;
+  onLogout?: () => void;
   /** Загрузка данных, работа агента, раздумья Джарвиса — любой признак активности приложения:
    * лого-осьминог в шапке начинает шевелить щупальцами вместо статичной позы. */
   busy?: boolean;
@@ -84,6 +85,7 @@ export function TopBar({
   roster = [],
   attentionTodos = [],
   onOpenTodo,
+  onLogout,
   busy = false,
 }: TopBarProps) {
   const [open, setOpen] = useState(false);
@@ -279,6 +281,11 @@ export function TopBar({
         <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
         {notice && <span>{notice}</span>}
       </button>
+      {onLogout && (
+        <button className="topbar-logout" type="button" onClick={onLogout} aria-label="Выйти из MBOX" title="Выйти">
+          <LogOut size={17} />
+        </button>
+      )}
       {popoverMounted && (
         <div className={`agent-status-popover${popoverClosing ? " closing" : ""}`} role="dialog" aria-label="Статус агентов">
           {attentionTodos.length > 0 && (
