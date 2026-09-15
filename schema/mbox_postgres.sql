@@ -114,6 +114,17 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A member can work only inside explicitly granted projects. This is a
+-- server-side boundary: UI filtering alone must never be treated as access control.
+CREATE TABLE IF NOT EXISTS project_memberships (
+  project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'editor', 'viewer')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_memberships_user ON project_memberships(user_id, project_id);
+
 CREATE TABLE IF NOT EXISTS companies (
   id BIGSERIAL PRIMARY KEY,
   folder_id BIGINT REFERENCES folders(id) ON DELETE SET NULL,

@@ -343,7 +343,7 @@ function recallLexicalScore(queryText, memory) {
 /** Ранжированный поиск по памяти: TF-IDF-вектор плюс лексика. Общий для /memories/search (им пользуются
  * внешние агенты через MCP) и инструмента search_memory Джарвиса — у того раньше был свой ILIKE по
  * всей фразе целиком и без номеров записей. */
-async function rankMemories(search, { projectId = "", project = "", tags = [], recencyDays = 0, minScore = 0.05, limit = 20 } = {}) {
+async function rankMemories(search, { projectId = "", project = "", tags = [], recencyDays = 0, minScore = 0.05, limit = 20, allowedProjectIds = null } = {}) {
   const { documents } = await refreshMemoryEmbeddings();
   const documentFrequency = new Map();
   for (const doc of documents) {
@@ -363,8 +363,9 @@ async function rankMemories(search, { projectId = "", project = "", tags = [], r
      WHERE ($1 = '' OR m.project_id::text = $1 OR m.metadata->>'project_id' = $1)
        AND ($2 = '' OR p.name = $2 OR m.metadata->>'project' = $2)
        AND ($3::text[] = '{}'::text[] OR m.tags && $3::text[])
-       AND ($4::int <= 0 OR m.updated_at >= now() - ($4::int * interval '1 day'))`,
-    [projectId, project, tags, recencyDays],
+       AND ($4::int <= 0 OR m.updated_at >= now() - ($4::int * interval '1 day'))
+       AND ($5::boolean OR m.project_id = ANY($6::bigint[]))`,
+    [projectId, project, tags, recencyDays, allowedProjectIds == null, allowedProjectIds || []],
   );
   return result.rows
     .map((memory) => {
@@ -841,6 +842,39 @@ async function requireUser(req, res) {
   return user;
 }
 
+function isOwner(user) {
+  return user?.role === "owner";
+}
+
+async function projectScope(user) {
+  if (isOwner(user)) return { all: true, projectIds: [] };
+  const result = await query(
+    "SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id",
+    [user.id],
+  );
+  return { all: false, projectIds: result.rows.map((row) => row.project_id) };
+}
+
+function hasProjectAccess(scope, projectId) {
+  return scope.all || (projectId != null && scope.projectIds.includes(String(projectId)));
+}
+
+function sendForbidden(res) {
+  return sendJson(res, 403, { error: "project_access_denied" });
+}
+
+// Members use the same console, but are fail-closed for endpoints which do not
+// have a project filter.  New endpoints must be deliberately added here.
+function memberRouteAllowed(pathname) {
+  return pathname === "/api/mbox/auth/me"
+    || pathname === "/api/mbox/agent/skills"
+    || pathname === "/api/mbox/projects"
+    || pathname === "/api/mbox/memories"
+    || pathname === "/api/mbox/memories/search"
+    || pathname === "/api/mbox/agent/inbox"
+    || /^\/api\/mbox\/(projects|memories|agent\/inbox)\/\d+$/.test(pathname);
+}
+
 // Каталог навыков — одноразовые вызовы модели без оркестрации инструментами (см. /jarvis в
 // AgentChat.tsx). Он объявлен здесь, а не в базе, потому что навык существует ровно постольку,
 // поскольку в этом файле есть вызывающий его код: purpose ниже — тот же литерал, что уходит в
@@ -941,6 +975,15 @@ const TOOL_CATALOG = [
 
 const SKILL_CATALOG = [
   {
+    id: "email-campaign",
+    name: "Письмо «Вокруг света»",
+    owner: "Codex · Claude",
+    trigger: "email_campaign",
+    summary: "Собирает письмо из утверждённых шаблонов: сохраняет вёрстку, проверяет ссылки и UTM, не выдумывает недостающие данные.",
+    input: "Бриф, выбранный шаблон и материалы выпуска",
+    output: "Готовый HTML и отчёт предрелизной проверки",
+  },
+  {
     id: "skill-webpage-summary",
     name: "Пересказ веб-страницы",
     owner: "Gemini · резерв oss",
@@ -1012,7 +1055,39 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { user: await currentUser(req) });
   }
 
-  if (!(await requireUser(req, res))) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  const scope = await projectScope(user);
+
+  if (url.pathname === "/api/mbox/admin/users" && req.method === "POST") {
+    if (!isOwner(user)) return sendForbidden(res);
+    const body = await readBody(req);
+    const username = String(body.username || "").trim();
+    const password = String(body.password || "");
+    const projectId = String(body.project_id || "").trim();
+    if (!username || password.length < 8 || !/^\d+$/.test(projectId)) {
+      return sendJson(res, 400, { error: "username_password_and_project_required" });
+    }
+    const email = String(body.email || `${username.toLowerCase()}@mbox.local`).trim();
+    const created = await query(
+      `INSERT INTO users(email, username, password_hash, role)
+       VALUES ($1, $2, crypt($3, gen_salt('bf')), 'member')
+       ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'member'
+       RETURNING id::text, username, role`,
+      [email, username, password],
+    );
+    const member = created.rows[0];
+    const project = await query("SELECT id::text, name FROM projects WHERE id = $1", [projectId]);
+    if (!project.rows[0]) return sendJson(res, 404, { error: "project_not_found" });
+    await query(
+      `INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor')
+       ON CONFLICT (project_id, user_id) DO UPDATE SET role = 'editor'`,
+      [projectId, member.id],
+    );
+    return sendJson(res, 201, { user: member, project: project.rows[0] });
+  }
+
+  if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
 
   if (url.pathname === "/api/mbox/agent/structure") {
     return sendJson(res, 200, { structure: agentStructure });
@@ -1298,14 +1373,19 @@ async function handleApiWithContext(req, res, url) {
     // записи со всеми словами, иначе хотя бы с частью; выше совпадение всей фразы и слов в заголовке.
     const memoryTerms = q ? (searchTerms(q).length ? searchTerms(q) : [q.toLowerCase()]) : [];
     const memoryHaystack = "(title || ' ' || coalesce(content, '') || ' ' || array_to_string(tags, ' '))";
-    const selectMemories = (mode) => query(
+    const selectMemories = (mode) => {
+      const values = mode ? [memoryTerms, q] : [];
+      const projectFilter = scope.all
+        ? ""
+        : `${mode ? " AND" : " WHERE"} project_id = ANY($${values.push(scope.projectIds)}::bigint[])`;
+      return query(
       `SELECT id::text, folder_id::text, project_id::text, todo_id::text, agent_run_id::text, title, content, entity_type, access_level, tags, metadata,
               pg_column_size(memories)::int AS memory_bytes,
               created_at::text, updated_at::text,
               count(*) OVER()::int AS total_count,
               sum(pg_column_size(memories)) OVER()::bigint AS total_bytes
        FROM memories
-       ${mode ? `WHERE (SELECT ${mode}(${memoryHaystack} ILIKE '%' || term || '%') FROM unnest($1::text[]) AS term)` : ""}
+       ${mode ? `WHERE (SELECT ${mode}(${memoryHaystack} ILIKE '%' || term || '%') FROM unnest($1::text[]) AS term)` : ""}${projectFilter}
        ORDER BY ${mode
     ? `(${memoryHaystack} ILIKE '%' || $2 || '%') DESC,
           (SELECT count(*) FROM unnest($1::text[]) AS term WHERE title ILIKE '%' || term || '%') DESC,
@@ -1313,8 +1393,9 @@ async function handleApiWithContext(req, res, url) {
           updated_at DESC`
     : `updated_at ${sortOldest ? "ASC" : "DESC"}`}
        LIMIT 300`,
-      mode ? [memoryTerms, q] : [],
-    );
+      values,
+      );
+    };
     let result = await selectMemories(memoryTerms.length ? "bool_and" : "");
     if (!result.rows.length && memoryTerms.length > 1) result = await selectMemories("bool_or");
     // total/totalBytes — реальные числа по ВСЕМ подходящим записям (до LIMIT 300), не по
@@ -1332,6 +1413,7 @@ async function handleApiWithContext(req, res, url) {
     const minScore = Math.max(0, Number(url.searchParams.get("min_score") || (search ? 0.05 : 0)));
     const project = url.searchParams.get("project")?.trim() || "";
     const projectId = url.searchParams.get("project_id")?.trim() || "";
+    if (!scope.all && projectId && !hasProjectAccess(scope, projectId)) return sendForbidden(res);
     const tags = (url.searchParams.get("tags") || "").split(",").map((tag) => tag.trim()).filter(Boolean);
     const recencyDays = Number(url.searchParams.get("recency_days") || 0);
     if (!search) {
@@ -1347,15 +1429,16 @@ async function handleApiWithContext(req, res, url) {
            AND ($3 = '' OR p.name = $3 OR m.metadata->>'project' = $3)
            AND ($4::text[] = '{}'::text[] OR m.tags && $4::text[])
            AND ($5::int <= 0 OR m.updated_at >= now() - ($5::int * interval '1 day'))
+           AND ($6::boolean OR m.project_id = ANY($7::bigint[]))
          ORDER BY m.updated_at DESC
          LIMIT $1`,
-        [limit, projectId, project, tags, recencyDays],
+        [limit, projectId, project, tags, recencyDays, scope.all, scope.projectIds],
       );
       const memories = recent.rows.map((memory) => ({ ...memory, score: 0 }));
       return sendJson(res, 200, { query: search, detail, memories: detail === "full" ? memories : memories.map((memory) => compactRecallMemoryRow(memory)) });
     }
 
-    const memories = await rankMemories(search, { projectId, project, tags, recencyDays, minScore, limit });
+    const memories = await rankMemories(search, { projectId, project, tags, recencyDays, minScore, limit, allowedProjectIds: scope.all ? null : scope.projectIds });
     return sendJson(res, 200, {
       query: search,
       detail,
@@ -1479,14 +1562,18 @@ async function handleApiWithContext(req, res, url) {
               m.created_at::text, m.updated_at::text
        FROM memories m
        LEFT JOIN projects p ON p.id = m.project_id
-       WHERE m.id = $1`,
-      [memoryMatch[1]],
+       WHERE m.id = $1 AND ($2::boolean OR m.project_id = ANY($3::bigint[]))`,
+      [memoryMatch[1], scope.all, scope.projectIds],
     );
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { memory: result.rows[0] } : { error: "not_found" });
   }
 
   if (memoryMatch && req.method === "PATCH") {
     const body = await readBody(req);
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM memories WHERE id = $1", [memoryMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id) || (Object.prototype.hasOwnProperty.call(body, "project_id") && !hasProjectAccess(scope, body.project_id))) return sendForbidden(res);
+    }
     const result = await query(
       `UPDATE memories SET
          title = COALESCE(NULLIF($1, ''), title),
@@ -1507,6 +1594,10 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (memoryMatch && req.method === "DELETE") {
+    if (!scope.all) {
+      const current = await query("SELECT project_id::text FROM memories WHERE id = $1", [memoryMatch[1]]);
+      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    }
     await recordMemoryAction({ memoryId: memoryMatch[1], actor: actorFromReq(req), action: "delete", note: "memory deleted via API" });
     await query("DELETE FROM memories WHERE id = $1", [memoryMatch[1]]);
     await refreshMemoryEmbeddings();
@@ -1850,7 +1941,7 @@ async function handleApiWithContext(req, res, url) {
                   + (SELECT count(*) FROM memories m WHERE m.project_id = p.id AND m.updated_at >= now() - interval '30 days')
                 ) AS activity_score
        ) activity ON true
-       WHERE $1 = ''
+       WHERE ($4::boolean OR p.id = ANY($5::bigint[])) AND ($1 = ''
           OR p.name ILIKE '%' || $1 || '%'
           OR p.status ILIKE '%' || $1 || '%'
           OR p.git_url ILIKE '%' || $1 || '%'
@@ -1887,12 +1978,15 @@ async function handleApiWithContext(req, res, url) {
             SELECT 1 FROM graph_edges e
             WHERE ((e.from_entity = 'project' AND e.from_id = p.id) OR (e.to_entity = 'project' AND e.to_id = p.id))
               AND (e.edge_type ILIKE '%' || $1 || '%' OR e.title ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.owner ILIKE '%' || $1 || '%' OR e.group_entity ILIKE '%' || $1 || '%')
-          )
+          ))
        ORDER BY activity.activity_score DESC, p.updated_at DESC
        LIMIT $2 OFFSET $3`,
-      [q, limit, offset],
+      [q, limit, offset, scope.all, scope.projectIds],
     );
-    const todos = await query("SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text, pg_column_size(todos)::int AS memory_bytes FROM todos ORDER BY updated_at DESC");
+    const todos = await query(
+      "SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text, pg_column_size(todos)::int AS memory_bytes FROM todos WHERE $1::boolean OR project_id = ANY($2::bigint[]) ORDER BY updated_at DESC",
+      [scope.all, scope.projectIds],
+    );
     const relations = await query(
       `SELECT e.id::text, e.from_id::text AS from_project_id, fp.name AS from_project_name,
               e.to_id::text AS to_project_id, tp.name AS to_project_name, e.edge_type,
@@ -1901,7 +1995,9 @@ async function handleApiWithContext(req, res, url) {
        JOIN projects fp ON fp.id = e.from_id AND e.from_entity = 'project'
        JOIN projects tp ON tp.id = e.to_id AND e.to_entity = 'project'
        WHERE e.from_entity = 'project' AND e.to_entity = 'project'
+         AND ($1::boolean OR (e.from_id = ANY($2::bigint[]) AND e.to_id = ANY($2::bigint[])))
        ORDER BY e.created_at DESC`,
+      [scope.all, scope.projectIds],
     );
     return sendJson(res, 200, {
       page: { limit, offset, count: projects.rows.length },
@@ -2292,6 +2388,7 @@ async function handleApiWithContext(req, res, url) {
   if (url.pathname === "/api/mbox/agent/inbox") {
     if (req.method === "POST") {
       const body = await readBody(req);
+      if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
       const result = await query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
@@ -2357,9 +2454,10 @@ async function handleApiWithContext(req, res, url) {
          AND ($2 = '' OR item_type = $2)
          AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%')
          AND (NULLIF($4, '') IS NULL OR id < NULLIF($4, '')::bigint)
+         AND ($6::boolean OR project_id = ANY($7::bigint[]))
        ORDER BY ${filtered ? "id DESC" : "updated_at DESC"}
        LIMIT $5`,
-      [agent, itemType, search, beforeId, limit],
+      [agent, itemType, search, beforeId, limit, scope.all, scope.projectIds],
     );
     return sendJson(res, 200, { inbox: result.rows });
   }
