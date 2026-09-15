@@ -16,6 +16,8 @@ export type AgentSkill = SkillUsage & {
   summary: string;
   input: string;
   output: string;
+  /** Путь к SKILL.md для навыков, которые живут вне MBOX (выполняют Claude и Codex). */
+  location?: string;
 };
 
 export type SkillServiceMode = SkillUsage & { id: string; name: string };

@@ -70,6 +70,7 @@ export function SkillsBoard() {
                   <div><dt>Вход</dt><dd>{skill.input || "—"}</dd></div>
                   <div><dt>Выход</dt><dd>{skill.output || "—"}</dd></div>
                   <div><dt>Модель</dt><dd>{skill.last_model || "—"}</dd></div>
+                  {skill.location && <div><dt>Где лежит</dt><dd><code>{skill.location}</code></dd></div>}
                   {skill.id === "email-campaign" && <div><dt>Библиотека блоков</dt><dd><a href="/email-library.html" target="_blank" rel="noreferrer">Открыть шаблоны и блоки</a></dd></div>}
                 </dl>
               )}

@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 import { WebSocket, WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
+import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, type TourSheetItem,
@@ -1113,29 +1114,8 @@ function mboxDevApi() {
             return sendJson(res, 200, { tools: TOOL_CATALOG });
           }
 
-          // Каталог навыков продублирован из server/mbox-server.mjs — этот dev-сервер повторяет
-          // весь API целиком (см. соседние ручки), отдельного источника правды для него нет.
+          // Каталог навыков — общий модуль server/skill-catalog.mjs, тот же, что у прода.
           if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {
-            const skillCatalog = [
-              {
-                id: "skill-webpage-summary",
-                name: "Пересказ веб-страницы",
-                owner: "Gemini · резерв oss",
-                trigger: "refresh_data_source",
-                summary: "Источник данных обновился — страница чистится от разметки и сжимается в 5-10 пунктов фактами и цифрами, результат ложится в память как запись «Источник: …».",
-                input: "HTML страницы источника (до 6000 символов текста)",
-                output: "Сводка до 3000 символов, записывается/обновляется в memories",
-              },
-              {
-                id: "skill-delegate-junior",
-                name: "Делегирование Младшему",
-                owner: "Gemini · резерв oss",
-                trigger: "delegate_to_junior",
-                summary: "Джарвис скидывает мелкую текстовую подзадачу — черновик, сводку, пересказ, классификацию — отдельному вызову модели, не тратя на неё свой тесный контекст и квоту.",
-                input: "Формулировка задачи + исходный текст",
-                output: "Готовый текст до 3000 символов обратно в цепочку действий Джарвиса",
-              },
-            ];
             const serviceModes: Record<string, string> = {
               reply: "Ответ в чате",
               cron: "Фоновый разбор по расписанию",
@@ -1161,7 +1141,7 @@ function mboxDevApi() {
                 last_model: row?.last_model || null,
               };
             };
-            const catalog = [...skillCatalog, ...UX_UI_SKILL_CATALOG];
+            const catalog = [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG];
             const skills = catalog.map((skill) => ({ ...skill, ...withUsage(skill.id) }));
             const modes = Object.entries(serviceModes).map(([id, name]) => ({ id, name, ...withUsage(id) }));
             const unknown = usage.rows

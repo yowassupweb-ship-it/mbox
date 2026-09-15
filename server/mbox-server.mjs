@@ -12,6 +12,7 @@ import {
 } from "./jarvis.mjs";
 import { WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./ux-ui-skill-catalog.mjs";
+import { SKILL_CATALOG } from "./skill-catalog.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -977,36 +978,6 @@ const TOOL_CATALOG = [
       { label: "MCP HTTP", command: "npx @browserbasehq/mcp --browserbaseApiKey %BROWSERBASE_API_KEY% --browserbaseProjectId %BROWSERBASE_PROJECT_ID% --host 127.0.0.1 --port 9320 --browserWidth 1440 --browserHeight 900", runnable: true, long_running: true },
       { label: "Stagehand check", command: "node -e \"import('@browserbasehq/stagehand').then(() => console.log('Stagehand OK'))\"", runnable: true },
     ],
-  },
-];
-
-const SKILL_CATALOG = [
-  {
-    id: "email-campaign",
-    name: "Письмо «Вокруг света»",
-    owner: "Codex · Claude",
-    trigger: "email_campaign",
-    summary: "Собирает письмо из утверждённых шаблонов: сохраняет вёрстку, проверяет ссылки и UTM, не выдумывает недостающие данные.",
-    input: "Бриф, выбранный шаблон и материалы выпуска",
-    output: "Готовый HTML и отчёт предрелизной проверки",
-  },
-  {
-    id: "skill-webpage-summary",
-    name: "Пересказ веб-страницы",
-    owner: "Gemini · резерв oss",
-    trigger: "refresh_data_source",
-    summary: "Источник данных обновился — страница чистится от разметки и сжимается в 5-10 пунктов фактами и цифрами, результат ложится в память как запись «Источник: …».",
-    input: "HTML страницы источника (до 6000 символов текста)",
-    output: "Сводка до 3000 символов, записывается/обновляется в memories",
-  },
-  {
-    id: "skill-delegate-junior",
-    name: "Делегирование Младшему",
-    owner: "Gemini · резерв oss",
-    trigger: "delegate_to_junior",
-    summary: "Джарвис скидывает мелкую текстовую подзадачу — черновик, сводку, пересказ, классификацию — отдельному вызову модели, не тратя на неё свой тесный контекст и квоту.",
-    input: "Формулировка задачи + исходный текст",
-    output: "Готовый текст до 3000 символов обратно в цепочку действий Джарвиса",
   },
 ];
 
