@@ -2,7 +2,7 @@
   "name": "mbox-vscode",
   "displayName": "MBOX",
   "description": "Проекты, задачи, память и работа агентов MBOX прямо в VS Code.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "mbox",
   "private": true,
   "icon": "resources/mbox.png",
@@ -24,6 +24,7 @@
     "onCommand:mbox.refresh",
     "onCommand:mbox.switchProject",
     "onCommand:mbox.useSkill",
+    "onCommand:mbox.openEmailLibrary",
     "onCommand:mbox.nextTask",
     "onCommand:mbox.claimTask",
     "onCommand:mbox.openItem",
@@ -142,6 +143,10 @@
       {
         "command": "mbox.useSkill",
         "title": "MBOX: Использовать навык"
+      },
+      {
+        "command": "mbox.openEmailLibrary",
+        "title": "MBOX: Открыть библиотеку блоков писем"
       },
       {
         "command": "mbox.nextTask",

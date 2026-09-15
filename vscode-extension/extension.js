@@ -382,7 +382,7 @@ class MboxTreeProvider {
     if (this.kind === "todos") return this.todoChildren();
     if (this.kind === "console") return this.consoleChildren();
     if (this.kind === "artifacts") return this.artifactChildren();
-    if (this.kind === "skills") return this.skillChildren();
+    if (this.kind === "skills") return this.skillChildren(item);
     return this.memoryChildren();
   }
 
@@ -500,15 +500,26 @@ class MboxTreeProvider {
     }));
   }
 
-  skillChildren() {
+  skillChildren(item) {
+    if (item?.contextValue === "skill") {
+      const skill = item.item;
+      const actions = [new MboxItem("Использовать навык", vscode.TreeItemCollapsibleState.None, {
+        iconPath: themeIcon("play"),
+        command: { command: "mbox.useSkill", title: "Использовать навык", arguments: [skill] }
+      })];
+      if (skill.id === "email-campaign") actions.unshift(new MboxItem("Открыть библиотеку реальных блоков", vscode.TreeItemCollapsibleState.None, {
+        iconPath: themeIcon("preview"),
+        command: { command: "mbox.openEmailLibrary", title: "Открыть библиотеку блоков" }
+      }));
+      return actions;
+    }
     const skills = this.snapshot.skills || [];
     if (!skills.length) return [new MboxItem("Навыков нет", vscode.TreeItemCollapsibleState.None, { iconPath: themeIcon("tools") })];
-    return skills.map((skill) => new MboxItem(skill.name || skill.id, vscode.TreeItemCollapsibleState.None, {
+    return skills.map((skill) => new MboxItem(skill.name || skill.id, vscode.TreeItemCollapsibleState.Collapsed, {
       id: skill.id, item: skill, contextValue: "skill",
       description: skill.description || "",
       tooltip: skill.description || skill.instructions || "",
-      iconPath: themeIcon("tools"),
-      command: { command: "mbox.useSkill", title: "Использовать навык", arguments: [skill] }
+      iconPath: themeIcon("tools")
     }));
   }
 }
@@ -1351,6 +1362,9 @@ async function activate(context) {
       await client.createInboxMessage(`Используй навык ${skill.id}. ${brief}`, "Джарвис");
       vscode.window.showInformationMessage(`Задача передана навыку «${skill.name || skill.id}»`);
       await refresh(true);
+    }),
+    vscode.commands.registerCommand("mbox.openEmailLibrary", async () => {
+      await vscode.env.openExternal(vscode.Uri.parse(`${client.config.url}/email-library.html`));
     }),
     vscode.commands.registerCommand("mbox.nextTask", async () => {
       try {
