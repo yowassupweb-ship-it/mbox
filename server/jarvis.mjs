@@ -2409,17 +2409,26 @@ export async function replyAsJarvis(item) {
       return;
     }
 
-    const projectList = (await client.query("SELECT id::text, name FROM projects ORDER BY name")).rows;
+    const allowedProjectIds = Array.isArray(item.props?.allowed_project_ids)
+      ? item.props.allowed_project_ids.map(String).filter((id) => /^\d+$/.test(id))
+      : null;
+    const projectList = (await client.query(
+      "SELECT id::text, name FROM projects WHERE $1::boolean OR id = ANY($2::bigint[]) ORDER BY name",
+      [allowedProjectIds == null, allowedProjectIds || []],
+    )).rows;
     // "Известные проекты" в промпте так и не включали компании — Джарвис не мог даже заподозрить,
     // что вопрос про компанию (а не про проект), потому что не знал, что компании вообще существуют.
-    const companyNames = (await client.query("SELECT name FROM companies ORDER BY name")).rows.map((c) => c.name);
+    const companyNames = allowedProjectIds == null
+      ? (await client.query("SELECT name FROM companies ORDER BY name")).rows.map((c) => c.name)
+      : [];
     // Раньше не знал даже сколько всего задач в системе — приходилось отвечать "нет функции узнать".
     // Готовая сводка в промпте закрывает большинство "что вообще есть в MBOX"-вопросов без похода
     // в tool calling; list_project_todos/search_memory — для точечных вопросов по конкретному проекту.
     const stats = (await client.query(
-      `SELECT (SELECT count(*) FROM todos)::int AS todos_total,
-              (SELECT count(*) FROM todos WHERE status NOT IN ('done', 'archived'))::int AS todos_open,
-              (SELECT count(*) FROM memories)::int AS memories_total`,
+      `SELECT (SELECT count(*) FROM todos WHERE $1::boolean OR project_id = ANY($2::bigint[]))::int AS todos_total,
+              (SELECT count(*) FROM todos WHERE status NOT IN ('done', 'archived') AND ($1::boolean OR project_id = ANY($2::bigint[])))::int AS todos_open,
+              (SELECT count(*) FROM memories WHERE $1::boolean OR project_id = ANY($2::bigint[]))::int AS memories_total`,
+      [allowedProjectIds == null, allowedProjectIds || []],
     )).rows[0];
     // Промпт больше не перечисляет прозой все инструменты (было ~14К символов): описания живут в их схемах,
     // а в запрос попадают только подключённые группы — см. TOOL_GROUPS. Здесь только то, что не выразить
@@ -2447,6 +2456,7 @@ export async function replyAsJarvis(item) {
       + `Известные компании: ${companyNames.join(", ") || "нет компаний"}. `
       + `Сводка по MBOX сейчас: задач ${stats.todos_total}, незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total} — `
       + "на вопросы об общем числе отвечай из неё. "
+      + (allowedProjectIds == null ? "" : " У этого пользователя доступ только к перечисленным проектам и их общей памяти. Не называй и не ищи другие проекты, записи, компании или статистику.")
       + JARVIS_DATA_RULES
       + (item.props?.current_project_name
         ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
@@ -2465,8 +2475,9 @@ export async function replyAsJarvis(item) {
     const history = (await client.query(
       `SELECT agent_name, body, title, props FROM agent_inbox
        WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = 'Claude' OR agent_name = $1)
+         AND ($2::boolean OR project_id = ANY($3::bigint[]))
        ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
-      [JARVIS_NAME],
+      [JARVIS_NAME, allowedProjectIds == null, allowedProjectIds || []],
     )).rows.reverse();
     // Однократный запрос с несколькими действиями ("удали Тест и Тест 2") ненадёжен — модель
     // часто возвращает только один tool_call за раз, даже когда попросили вызывать функцию на

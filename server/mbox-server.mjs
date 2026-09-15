@@ -2422,7 +2422,13 @@ async function handleApiWithContext(req, res, url) {
         if (allowChain) {
           // .catch() обязателен на fire-and-forget вызове: необработанный reject роняет весь процесс.
           // replyAsJarvis теперь сама не должна выбрасывать наружу, но это последний рубеж, не первый.
-          replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props })
+          replyAsJarvis({
+            id: result.rows[0].id,
+            project_id: body.project_id || null,
+            title: body.title,
+            body: body.body,
+            props: { ...(body.props && typeof body.props === "object" ? body.props : {}), allowed_project_ids: scope.all ? null : scope.projectIds },
+          })
             .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
         } else {
           console.log(`[jarvis] агент-агент цепочка достигла лимита без человека — авто-ответ на #${result.rows[0].id} пропущен`);
