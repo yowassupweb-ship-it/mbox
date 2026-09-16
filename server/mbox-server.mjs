@@ -23,9 +23,6 @@ const publicDir = path.join(root, "public");
 
 configureJarvis({ query, broadcastRealtime, rankMemories, recordMemoryAction });
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
-ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
-ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
-ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 
 const port = Number(process.env.MBOX_PORT || process.env.PORT || 3000);
 const host = process.env.MBOX_HOST || "127.0.0.1";
@@ -2853,6 +2850,12 @@ httpServer.on("upgrade", async (req, socket, head) => {
 });
 
 setInterval(() => broadcastRealtime("server_tick"), 5000).unref();
+
+// Схемы создаём здесь, а не рядом с импортами: query() читает requestContext, объявленный ниже импортов, —
+// вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».
+ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
+ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
+ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 
 httpServer.listen(port, host, () => {
   console.log(`MBOX listening on http://${host}:${port}`);
