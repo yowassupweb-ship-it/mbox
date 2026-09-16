@@ -18,14 +18,15 @@
          остаётся мутным или обрезается системой. -->
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>MBOX</title>
-    <script type="module" crossorigin src="/assets/index-C5fhDdAf.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-WDqX436b.css">
+    <script type="module" crossorigin src="/assets/index-CqjOHyGE.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CJRYOQXp.css">
   </head>
   <body>
     <div id="root"></div>
     <script>
       // Регистрация после load, не до — не задерживать первую отрисовку ради установки SW.
-      if ("serviceWorker" in navigator) {
+      // Встроенный интерфейс MBOX Desktop (mbox://app) сервис-воркер не поддерживает и не нуждается в нём.
+      if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("/sw.js").catch(() => {});
         });

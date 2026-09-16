@@ -22,14 +22,14 @@ type View = "todo" | ProjectEntityKind | `folder:${string}`;
 // жёстко зашито и висело у каждого проекта, даже пустое. Теперь это опциональные разделы, которые
 // подключаются через «Добавить папку», как и любая произвольная папка (см. #159 — посты/документы
 // туда же, обычными папками, без отдельной сущности под каждый тип).
-const MANDATORY_ENTITIES: ProjectEntityKind[] = ["memories", "properties", "relations"];
-const OPTIONAL_ENTITIES: ProjectEntityKind[] = ["git", "figma", "stack", "philosophy", "deploy", "access", "sources"];
+export const MANDATORY_ENTITIES: ProjectEntityKind[] = ["memories", "properties", "relations"];
+export const OPTIONAL_ENTITIES: ProjectEntityKind[] = ["git", "figma", "stack", "philosophy", "deploy", "access", "sources"];
 const entityOrder: ProjectEntityKind[] = [...MANDATORY_ENTITIES, ...OPTIONAL_ENTITIES];
 
 /** Проекты, заведённые до этой правки, не имеют props.enabled_entities — без этого у них молча
  * исчезли бы уже заполненные Git/Стек/Деплой и т.п. Пока список явно не сохранён, считаем
  * подключённым всё, где реально есть данные, а не только то, что отмечено вручную. */
-function autoDetectEnabled(project: Project): string[] {
+export function autoDetectEnabled(project: Project): string[] {
   const detected: string[] = [];
   if (project.git_url) detected.push("git");
   if (project.props?.figma_url) detected.push("figma");
@@ -411,7 +411,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
   );
 }
 
-function entitySummary(project: Project, kind: ProjectEntityKind, memories: Memory[]) {
+export function entitySummary(project: Project, kind: ProjectEntityKind, memories: Memory[]) {
   if (kind === "git") return project.git_url ? "указан" : "не указан";
   if (kind === "figma") return project.props?.figma_url ? "указана" : "не указана";
   if (kind === "stack") return `${project.stack.length}`;

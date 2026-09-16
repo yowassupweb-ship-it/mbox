@@ -1,4 +1,4 @@
-import { AlertTriangle, Download, FolderOpen, LogOut, Play, RefreshCw, Search, Square } from "lucide-react";
+import { AlertTriangle, Download, FolderOpen, LogOut, PanelLeft, Play, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
@@ -22,15 +22,22 @@ export type AgentRosterEntry = {
 export type AttentionTodo = { id: string; title: string; status: string; projectId: string; projectName: string };
 
 type TopBarProps = {
-  query: string;
-  onQueryChange: (query: string) => void;
+  /** Кнопка-«командный центр» по центру шапки: открывает поиск по памяти. */
+  onOpenSearch: () => void;
+  onToggleSidebar?: () => void;
+  onToggleConsole?: () => void;
+  activeTitle?: string;
+  activeHint?: string;
+  activeIcon?: string;
+  activeDirty?: boolean;
+  tabCount?: number;
   realtimeState?: "connecting" | "connected" | "thinking" | "working" | "attention" | "offline";
   realtimeLabel?: string;
   notice?: string;
   notices?: Array<{ id: string; text: string; at: string }>;
   roster?: AgentRosterEntry[];
   attentionTodos?: AttentionTodo[];
-  onOpenTodo?: (projectId: string) => void;
+  onOpenTodo?: (todoId: string) => void;
   onLogout?: () => void;
   /** Загрузка данных, работа агента, раздумья Джарвиса — любой признак активности приложения:
    * лого-осьминог в шапке начинает шевелить щупальцами вместо статичной позы. */
@@ -76,8 +83,14 @@ function detectDesktopShell() {
 }
 
 export function TopBar({
-  query,
-  onQueryChange,
+  onOpenSearch,
+  onToggleSidebar,
+  onToggleConsole,
+  activeTitle = "MBOX",
+  activeHint = "Рабочее место",
+  activeIcon = "/assets/icons/bottom-menu/provodnik.png",
+  activeDirty = false,
+  tabCount = 0,
   realtimeState = "connecting",
   realtimeLabel = "Агент подключается",
   notice = "",
@@ -102,6 +115,7 @@ export function TopBar({
   const closeTimer = useRef<number | undefined>(undefined);
   const burstTimer = useRef<number | undefined>(undefined);
   const firstRun = useRef(true);
+  const desktopOpenRef = useRef(desktopOpen);
   const online = roster.filter((agent) => agent.status === "active");
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy || logoBurst);
@@ -118,6 +132,10 @@ export function TopBar({
       setDesktopError(error instanceof Error ? error.message : String(error));
     }
   }
+
+  useEffect(() => {
+    desktopOpenRef.current = desktopOpen;
+  }, [desktopOpen]);
 
   async function desktopAction(action: () => Promise<unknown>) {
     if (!desktop) return;
@@ -185,16 +203,37 @@ export function TopBar({
   useEffect(() => {
     if (!desktop) return;
     void refreshDesktop();
-    const timer = window.setInterval(() => { void refreshDesktop(); }, 6000);
     desktop.onEvent((event) => {
       if (event.type === "update" && event.message) setDesktopUpdateStatus(event.message);
-      void refreshDesktop();
+      if (desktopOpenRef.current) void refreshDesktop();
     });
-    return () => window.clearInterval(timer);
   }, [desktop]);
 
   return (
     <header className="topbar">
+      <div className="topbar-context" title={activeHint}>
+        <img src={activeIcon} alt="" width={22} height={22} />
+        <div>
+          <strong>{activeTitle}{activeDirty ? " *" : ""}</strong>
+          <span>{activeHint}{tabCount > 1 ? ` · ${tabCount} вкладок` : ""}</span>
+        </div>
+      </div>
+      <button className="command-center" type="button" onClick={onOpenSearch} title="Поиск и команды">
+        <Search size={14} />
+        <span>Поиск и команды</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+      <div className="topbar-actions">
+        {onToggleSidebar && (
+          <button className="topbar-icon-action" type="button" onClick={onToggleSidebar} aria-label="Боковая панель" title="Боковая панель">
+            <PanelLeft size={16} />
+          </button>
+        )}
+        {onToggleConsole && (
+          <button className="topbar-icon-action" type="button" onClick={onToggleConsole} aria-label="Консоль" title="Консоль">
+            <TerminalSquare size={16} />
+          </button>
+        )}
       <div className={isDesktopShell || desktopApi ? "desktop-slot is-desktop-shell" : "desktop-slot"}>
         {desktop ? (
           <button
@@ -202,10 +241,11 @@ export function TopBar({
             type="button"
             onClick={() => { setDesktopOpen((value) => !value); void refreshDesktop(); }}
             aria-expanded={desktopOpen}
+            title="MBOX Desktop"
           >
             <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
-            <strong>Приложение</strong>
-            <span>{codexLive && claudeLive ? "агенты слушают" : desktopRows.length ? "частично" : "тихо"}</span>
+            <strong>Desktop</strong>
+            <span>{codexLive && claudeLive ? "2" : desktopRows.length ? String(desktopRows.length) : "0"}</span>
           </button>
         ) : isDesktopShell ? (
           <button className="desktop-pill bridge-missing" type="button" disabled title="MBOX Desktop IPC не подключился">
@@ -265,10 +305,6 @@ export function TopBar({
           </div>
         )}
       </div>
-      <div className="search-shell">
-        <Search size={18} />
-        <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Поиск" />
-      </div>
       <button className={`realtime-pill monostatus ${realtimeState}`} type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         {stack.length > 0 && (
           <span className="pill-avatars" aria-hidden="true">
@@ -286,6 +322,7 @@ export function TopBar({
           <LogOut size={17} />
         </button>
       )}
+      </div>
       {popoverMounted && (
         <div className={`agent-status-popover${popoverClosing ? " closing" : ""}`} role="dialog" aria-label="Статус агентов">
           {attentionTodos.length > 0 && (
@@ -294,7 +331,7 @@ export function TopBar({
               <ul className="attention-list">
                 {attentionTodos.map((todo) => (
                   <li key={todo.id}>
-                    <button type="button" onClick={() => { onOpenTodo?.(todo.projectId); setOpen(false); }}>
+                    <button type="button" onClick={() => { onOpenTodo?.(todo.id); setOpen(false); }}>
                       <span className={`attention-dot status-${todo.status}`} />
                       <span className="attention-body">
                         <span className="attention-title">{todo.title}</span>

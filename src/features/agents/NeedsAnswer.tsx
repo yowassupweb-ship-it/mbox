@@ -4,6 +4,7 @@ import { AgentAvatar } from "../../components/AgentAvatar";
 import { fetchJson } from "../../lib/api";
 import type { AgentInboxItem } from "../../types";
 import { Button } from "../../ui";
+import { usePersistentState } from "../../app/workbench/tabs";
 
 const HUMAN = "Человек";
 
@@ -17,7 +18,7 @@ export function NeedsAnswer({ inbox, onSaved }: { inbox: AgentInboxItem[]; onSav
   const pending = inbox.filter((item) => item.requires_human && item.status !== "done");
   const [error, setError] = useState("");
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = usePersistentState<Record<string, string>>("mbox.needsAnswer.drafts", {});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   async function answer(item: AgentInboxItem, reply: string) {

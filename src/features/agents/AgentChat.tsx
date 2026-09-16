@@ -6,6 +6,8 @@ import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
+import { usePersistentState } from "../../app/workbench/tabs";
+import { useDraft } from "../../app/workbench/uiMemory";
 
 const JARVIS_NAME = "Джарвис";
 
@@ -504,7 +506,7 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
   );
 }
 
-export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved }: {
+export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
@@ -513,18 +515,22 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   projectId?: string;
   currentProjectName?: string;
   onSaved: () => void;
+  /** Встроена в нижнюю панель рабочего места: без своей кнопки, пристыковки и ресайза. */
+  embedded?: boolean;
+  visible?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openState, setOpen] = useState(false);
+  const open = embedded ? visible : openState;
   const [panelWidth, setPanelWidth] = useState(() => {
     const stored = Number(window.localStorage.getItem("mbox.console.width"));
     return stored > 0 ? stored : Math.round(window.innerWidth / 3);
   });
   const resizingRef = useRef(false);
-  const [text, setText] = useState("");
+  const [text, setText] = useDraft("chat:input", "");
   const [cursor, setCursor] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
-  const [history, setHistory] = useState<string[]>([]);
+  const [history, setHistory] = usePersistentState<string[]>("mbox.chat.history", []);
   const [historyPos, setHistoryPos] = useState(-1);
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
   const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
@@ -538,6 +544,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const liveMention = parseMention(text);
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    window.requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  }, []);
 
   // field-sizing: content не работает в Safari/Firefox — растим textarea вручную по scrollHeight,
   // это единственный способ, который реально работает везде.
@@ -690,9 +702,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // не трогаем уже выверенную мобильную раскладку). На уже открытых узких экранах переменная
   // просто не используется соответствующим медиа-запросом.
   useEffect(() => {
+    if (embedded) return;
     document.documentElement.style.setProperty("--console-width", open ? `${panelWidth}px` : "0px");
     return () => { document.documentElement.style.setProperty("--console-width", "0px"); };
-  }, [open, panelWidth]);
+  }, [open, panelWidth, embedded]);
 
   function startResize(event: ReactMouseEvent) {
     event.preventDefault();
@@ -758,14 +771,42 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return [...fromConversation, ...fromPending, ...localLines].sort((a, b) => a.at.localeCompare(b.at));
   }, [conversation, stillPending, localLines]);
 
-  // "Всегда проматывать вниз при новом сообщении" — раньше зависело только от lines.length,
-  // а индикатор "Джарвис думает…" не входит в lines (отдельный conditional-рендер), поэтому его
-  // появление/пропажа меняло высоту контента без прокрутки следом.
-  useEffect(() => {
-    if (!open) return;
+  // Чат прилипает к низу, как в мессенджере. Прокрутка только на новое сообщение не спасала: если лог в
+  // этот момент был скрыт (другая группа консоли, свёрнутая панель, неактивная вкладка), браузер её
+  // игнорировал — и при переключении чатов человек оказывался в самом начале. Пока человек у нижнего
+  // края, появление лога, смена размера и дорисовка содержимого (картинки, «думает…») держат низ;
+  // отмотал вверх сам — не дёргаем, пока не вернётся вниз.
+  const stickToBottomRef = useRef(true);
+  useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [open, lines.length, awaitingJarvisId, working.length]);
+    if (!el) return;
+    const pin = () => { if (stickToBottomRef.current && el.clientHeight) el.scrollTop = el.scrollHeight; };
+    const onScroll = () => {
+      // У скрытого лога clientHeight 0 и scroll при сбросе — это не решение человека.
+      if (!el.clientHeight) return;
+      stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    };
+    const resize = new ResizeObserver(pin);
+    resize.observe(el);
+    const mutations = new MutationObserver(pin);
+    mutations.observe(el, { childList: true, subtree: true, characterData: true });
+    el.addEventListener("load", pin, true);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    pin();
+    return () => {
+      resize.disconnect();
+      mutations.disconnect();
+      el.removeEventListener("load", pin, true);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [open]);
+
+  // Новое сообщение или «агент думает» — вниз, даже если человек читал историю выше.
+  useLayoutEffect(() => {
+    if (!open) return;
+    stickToBottomRef.current = true;
+    scrollToBottom();
+  }, [open, lines.length, awaitingJarvisId, working.length, scrollToBottom]);
 
   function pushLocal(kind: "sys" | "cmd", text: string) {
     setLocalLines((current) => [...current, { id: `local-${Date.now()}-${Math.random()}`, kind, actor: kind === "cmd" ? "Ты" : "mbox", text, at: new Date().toISOString() }]);
@@ -833,7 +874,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     const raw = (overrideText ?? text).trim();
     if (!raw) return;
     if (overrideText === undefined) {
-      setHistory((current) => [...current, raw]);
+      setHistory((current) => [...current, raw].slice(-100));
       setHistoryPos(-1);
       setText("");
     }
@@ -915,16 +956,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   let lastDay = "";
 
   return (
-    <div className="agent-chat">
-      {open && (
+    <div className={embedded ? "agent-chat is-embedded" : "agent-chat"}>
+      {(open || embedded) && (
         <div className="agent-chat-shell console" style={{ ["--console-panel-width" as string]: `${panelWidth}px` }}>
           {/* Только на пристыкованной раскладке (см. брейкпоинт ≥1201px в chat.css) — на
               floating/fullscreen режимах уже, тянуть нечего. */}
-          <div className="console-resize-handle" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Изменить ширину консоли" />
+          {!embedded && <div className="console-resize-handle" onMouseDown={startResize} role="separator" aria-orientation="vertical" aria-label="Изменить ширину консоли" />}
           <div className="console-bar">
             <div className="console-bar-roster" title={rosterSummary}>
               {states.length ? states.map(({ agent, state }) => (
-                <span className={`console-bar-agent ${state.key}`} key={agent.id} title={`${agent.name} · ${state.label}${state.detail ? " — " + state.detail : ""}`}>
+                <span className={`console-bar-agent ${state.key}`} key={agent.id} title={`${agent.name} · ${state.label}`}>
                   <AgentAvatar name={agent.name} status={state.key} live={state.key === "working"} size={20} />
                   <span className="console-bar-agent-name">{agent.name}</span>
                   {state.key === "working" && <span className="console-bar-agent-phase">{state.label}</span>}
@@ -941,7 +982,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             <NeedsAnswer inbox={inbox} onSaved={onSaved} />
           </div>
 
-          <div className="console-log" ref={scrollRef}>
+          <div className="console-log" ref={scrollRef} data-scroll-memory="off">
             {lines.length === 0 && (
               <div className="console-log-line sys"><span className="console-log-text">mbox консоль готова. /help — список команд.</span></div>
             )}
@@ -1008,7 +1049,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-log-time" />
                 <span className="console-thinking-row">
                   <ThinkingSpinner />
-                  <span className="console-log-text">{working[0].agent.name}: {working[0].state.label}{working[0].state.detail ? ` — ${working[0].state.detail}` : ""}</span>
+                  <span className="console-log-text">{working[0].agent.name}: {working[0].state.label}</span>
                 </span>
               </div>
             )}
@@ -1067,12 +1108,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         </div>
       )}
 
-      <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
+      {!embedded && <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
         <Terminal size={11} />
         <span className="agent-chat-toggle-label">Консоль</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}
-      </button>
+      </button>}
     </div>
   );
 }

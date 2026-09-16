@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog } = require("electron");
+const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, clipboard } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const localUi = require("./localUi");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -17,10 +18,17 @@ const processPatterns = {
   Claude: "claude-inbox-watcher.mjs"
 };
 
+// Встроенный интерфейс (ui/) вместо загрузки сайта — см. localUi.js. Схему регистрируем до ready.
+const useLocalUi = localUi.localUiAvailable();
+if (useLocalUi) localUi.registerSchemePrivileges();
+
 let mainWindow = null;
 let tray = null;
 let tracked = new Map();
 let updatePromptOpen = false;
+let processStatusCache = { at: 0, rows: [] };
+let processStatusInFlight = null;
+const PROCESS_STATUS_CACHE_MS = 2500;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
@@ -33,12 +41,16 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(async () => {
+  if (useLocalUi) {
+    localUi.installLocalUi(mboxUrl);
+    await localUi.prepareStorageMigration(mboxUrl);
+  }
   createWindow();
   createTray();
   setMenu();
   setupAutoUpdates();
   if (process.env.MBOX_DESKTOP_SKIP_AGENT_AUTOSTART !== "1") {
-    await startResponders().catch((error) => log(`autostart responders failed: ${error.message}`));
+    await startResponders({ reveal: false }).catch((error) => log(`autostart responders failed: ${error.message}`));
   }
 });
 
@@ -128,10 +140,53 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Размер, положение, развёрнутость и масштаб окна переживают перезапуск: раньше окно каждый раз
+// открывалось 1360×900 в центре со сброшенным масштабом.
+const WINDOW_STATE = () => path.join(app.getPath("userData"), "window-state.json");
+const ZOOM_STEP = 0.1;
+
+function loadWindowState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(WINDOW_STATE(), "utf8"));
+    const { screen } = require("electron");
+    const bounds = { x: Number(state.x), y: Number(state.y), width: Number(state.width), height: Number(state.height) };
+    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return { zoom: Number(state.zoom) || 1 };
+    // Монитор, на котором было окно, могли отключить — тогда не восстанавливаем координаты.
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const visible = bounds.x < area.x + area.width - 80 && bounds.x + bounds.width > area.x + 80 && bounds.y >= area.y - 20 && bounds.y < area.y + area.height - 80;
+    return { ...(visible ? bounds : { width: bounds.width, height: bounds.height }), maximized: Boolean(state.maximized), zoom: Number(state.zoom) || 1 };
+  } catch {
+    return { zoom: 1 };
+  }
+}
+
+let windowStateTimer = null;
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const maximized = mainWindow.isMaximized();
+    // Для развёрнутого окна храним обычные границы, чтобы «восстановить» вернуло прежний размер.
+    const bounds = maximized || mainWindow.isMinimized() ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+    const state = { ...bounds, maximized, zoom: Math.round(mainWindow.webContents.getZoomFactor() * 100) / 100 };
+    try { fs.writeFileSync(WINDOW_STATE(), JSON.stringify(state)); } catch {}
+  }, 400);
+}
+
+function setZoom(next) {
+  if (!mainWindow) return;
+  const factor = next === null ? 1 : Math.max(0.5, Math.min(2, Math.round((mainWindow.webContents.getZoomFactor() + next) * 100) / 100));
+  mainWindow.webContents.setZoomFactor(factor);
+  saveWindowState();
+}
+
 function createWindow() {
+  const saved = loadWindowState();
   mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 900,
+    width: saved.width || 1360,
+    height: saved.height || 900,
+    ...(Number.isFinite(saved.x) ? { x: saved.x, y: saved.y } : {}),
     minWidth: 980,
     minHeight: 640,
     title: "MBOX Desktop",
@@ -140,17 +195,35 @@ function createWindow() {
     titleBarStyle: "hiddenInset",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
+      additionalArguments: [`--mbox-server=${mboxUrl}`, `--mbox-local-ui=${useLocalUi ? "1" : "0"}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
     }
   });
 
+  if (saved.maximized) mainWindow.maximize();
+  for (const event of ["resize", "move", "maximize", "unmaximize"]) mainWindow.on(event, saveWindowState);
+  mainWindow.webContents.on("did-finish-load", () => mainWindow?.webContents.setZoomFactor(saved.zoom || 1));
+  // Ctrl+колесо меняет масштаб мимо меню — ловим и сохраняем тоже.
+  mainWindow.webContents.on("zoom-changed", (_event, direction) => setZoom(direction === "in" ? ZOOM_STEP : -ZOOM_STEP));
   mainWindow.webContents.setUserAgent(`${mainWindow.webContents.getUserAgent()} MBOXDesktop/${app.getVersion()}`);
-  mainWindow.loadURL(withDesktopFlag(mboxUrl));
+  mainWindow.loadURL(withDesktopFlag(useLocalUi ? `${localUi.APP_ORIGIN}/` : mboxUrl));
+  // Ссылки наружу (документация, github, сайт) — в браузер, а не новым окном приложения с мостом.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const inside = useLocalUi ? url.startsWith(`${localUi.APP_ORIGIN}/`) : url.startsWith(mboxUrl);
+    if (inside) return;
+    event.preventDefault();
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+  });
   mainWindow.on("close", (event) => {
     if (app.isQuitting) return;
     event.preventDefault();
+    saveWindowState();
     mainWindow.hide();
   });
 }
@@ -217,9 +290,10 @@ function setMenu() {
       label: "Вид",
       submenu: [
         { role: "toggleDevTools" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" }
+        { label: "Масштаб 100%", accelerator: "CmdOrCtrl+0", click: () => setZoom(null) },
+        { label: "Крупнее", accelerator: "CmdOrCtrl+=", click: () => setZoom(ZOOM_STEP) },
+        { label: "Крупнее", accelerator: "CmdOrCtrl+Plus", visible: false, click: () => setZoom(ZOOM_STEP) },
+        { label: "Мельче", accelerator: "CmdOrCtrl+-", click: () => setZoom(-ZOOM_STEP) }
       ]
     }
   ]));
@@ -232,14 +306,14 @@ function wrapperPath(name) {
   return fs.existsSync(repoPath) ? repoPath : packagedPath;
 }
 
-async function startResponders() {
+async function startResponders(options = {}) {
   const results = [];
-  results.push(await startResponder("Codex"));
-  results.push(await startResponder("Claude"));
+  results.push(await startResponder("Codex", options));
+  results.push(await startResponder("Claude", options));
   return results;
 }
 
-async function startResponder(name) {
+async function startResponder(name, { reveal = true } = {}) {
   if ((await processStatus()).some((item) => item.agent === name)) return { agent: name, status: "already-running" };
   const file = wrapperPath(name);
   if (!fs.existsSync(file)) throw new Error(`${name} wrapper not found: ${file}`);
@@ -256,20 +330,36 @@ async function startResponder(name) {
   // конкатенирует argv в одну строку БЕЗ экранирования (см. предупреждение Node про DEP0190), так что
   // невзятый в кавычки путь резался по пробелу в "MBOX Desktop" и cmd.exe получал "MBOX" как команду —
   // responder падал мгновенно с "не является внутренней командой", молча (stdio: "ignore" глушил и это).
+  // Раньше responder уходил в отсоединённый процесс с выводом только в лог-файл, а CLI агентов,
+  // которые он запускает, всплывали отдельными окнами консоли. Теперь вывод идёт в сессию —
+  // её показывает встроенная консоль MBOX (и дублируется в лог-файл, как раньше).
+  // /s /c ""путь"": cmd снимает внешнюю пару кавычек, путь с пробелом ("MBOX Desktop") остаётся целым.
   const logFile = path.join(app.getPath("userData"), "responder-logs", `${name}.log`);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
-  const logFd = fs.openSync(logFile, "a");
-  const child = spawn("cmd.exe", ["/d", "/c", `"${file}"`], {
+  const child = spawn("cmd.exe", ["/d", "/s", "/c", `""${file}""`], {
     cwd: workdir,
-    shell: true,
     windowsHide: true,
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
+    windowsVerbatimArguments: true,
+    stdio: ["ignore", "pipe", "pipe"],
     env
   });
-  child.unref();
   tracked.set(name, child);
-  child.on("exit", (code, signal) => log(`${name} responder exited code=${code ?? ""} signal=${signal ?? ""}`));
+  invalidateProcessStatus();
+  startSession({
+    id: `agent:${name}`,
+    kind: "agent",
+    title: `${name} · наблюдатель`,
+    command: file,
+    cwd: workdir,
+    child,
+    reveal,
+    logFile,
+    onExit: (code, signal) => {
+      tracked.delete(name);
+      invalidateProcessStatus();
+      log(`${name} responder exited code=${code ?? ""} signal=${signal ?? ""}`);
+    }
+  });
   log(`started ${name} responder from ${file}`);
   return { agent: name, status: "started", script: file };
 }
@@ -281,15 +371,29 @@ async function stopResponders() {
 
 async function stopResponder(name) {
   const pattern = processPatterns[name];
+  markStopped(`agent:${name}`);
   const matches = (await processStatus()).filter((item) => item.agent === name);
   for (const item of matches) await killPid(item.pid);
   const child = tracked.get(name);
-  if (child && !child.killed) child.kill();
+  if (child && !child.killed) killTree(child.pid);
   tracked.delete(name);
+  invalidateProcessStatus();
   log(`stopped ${name} responder (${pattern})`);
 }
 
 function processStatus() {
+  const now = Date.now();
+  if (now - processStatusCache.at < PROCESS_STATUS_CACHE_MS) {
+    return Promise.resolve(processStatusCache.rows);
+  }
+  if (processStatusInFlight) return processStatusInFlight;
+  processStatusInFlight = readProcessStatus().finally(() => {
+    processStatusInFlight = null;
+  });
+  return processStatusInFlight;
+}
+
+function readProcessStatus() {
   return new Promise((resolve) => {
     execFile("powershell.exe", [
       "-NoProfile",
@@ -298,20 +402,30 @@ function processStatus() {
       "-Command",
       "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -match 'node' -and $_.CommandLine -match 'codex-chat-watcher|claude-inbox-watcher' } | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
     ], { windowsHide: true }, (error, stdout) => {
-      if (error || !stdout.trim()) return resolve([]);
+      if (error || !stdout.trim()) {
+        processStatusCache = { at: Date.now(), rows: [] };
+        return resolve([]);
+      }
       try {
         const parsed = JSON.parse(stdout);
         const rows = Array.isArray(parsed) ? parsed : [parsed];
-        resolve(rows.map((row) => ({
+        const result = rows.map((row) => ({
           pid: row.ProcessId,
           commandLine: row.CommandLine,
           agent: /codex-chat-watcher/i.test(row.CommandLine || "") ? "Codex" : "Claude"
-        })));
+        }));
+        processStatusCache = { at: Date.now(), rows: result };
+        resolve(result);
       } catch {
+        processStatusCache = { at: Date.now(), rows: [] };
         resolve([]);
       }
     });
   });
+}
+
+function invalidateProcessStatus() {
+  processStatusCache = { at: 0, rows: [] };
 }
 
 function killPid(pid) {
@@ -450,15 +564,30 @@ async function checkForUpdates(manual) {
 ipcMain.handle("mbox-desktop:status", async () => processStatus());
 ipcMain.handle("mbox-desktop:start", async (_event, name) => {
   if (name === "All") await startResponders();
-  else await startResponder(name);
+  else if (name === "Codex" || name === "Claude") await startResponder(name);
   await sleep(1200);
   return processStatus();
 });
 ipcMain.handle("mbox-desktop:stop", async (_event, name) => {
   if (name === "All") await stopResponders();
-  else await stopResponder(name);
+  else if (name === "Codex" || name === "Claude") await stopResponder(name);
   return processStatus();
 });
+// Агент, запущенный вне приложения (автозапуск Windows, старая версия), не отдаёт вывод —
+// перезапуск переносит его внутрь, в сессию консоли.
+ipcMain.handle("mbox-desktop:restart-agent", async (_event, name) => {
+  if (name !== "Codex" && name !== "Claude") throw new Error("Неизвестный агент");
+  await stopResponder(name);
+  await sleep(600);
+  await startResponder(name);
+  return processStatus();
+});
+ipcMain.handle("mbox-desktop:ssh-start", async (_event, target, cols, rows) => startSshSession(target, cols, rows));
+ipcMain.handle("mbox-desktop:session-resize", async (_event, id, cols, rows) => resizeSession(String(id || ""), cols, rows));
+ipcMain.handle("mbox-desktop:sessions", async () => listSessions());
+ipcMain.handle("mbox-desktop:session-input", async (_event, id, input) => sendSessionInput(String(id || ""), String(input ?? "")));
+ipcMain.handle("mbox-desktop:session-stop", async (_event, id) => stopSession(String(id || "")));
+ipcMain.handle("mbox-desktop:session-remove", async (_event, id) => removeSession(String(id || "")));
 ipcMain.handle("mbox-desktop:install-autostart", async () => installResponderAutostart());
 ipcMain.handle("mbox-desktop:remove-autostart", async () => removeResponderAutostart());
 ipcMain.handle("mbox-desktop:install-app-autostart", async () => installAppAutostart());
@@ -486,6 +615,651 @@ async function openAllowedPath(targetPath) {
   if (error) throw new Error(error);
   return { ok: true, path: requested };
 }
+
+// --- Сессии встроенной консоли ---------------------------------------------------------------
+//
+// Процесс, который MBOX запускает сам (агент-наблюдатель, команда инструмента), становится сессией:
+// вывод буферизуется здесь и транслируется в окно, консоль MBOX показывает его во вкладке-панели.
+// Ввода в процессы нет сознательно: окно грузит удалённую страницу, и stdin/«свой терминал» из неё
+// превратили бы любую XSS на сайте в выполнение команд на этом компьютере.
+
+const sessions = new Map();
+const SESSION_LINE_LIMIT = 2000;
+
+function sessionMeta(session) {
+  return {
+    id: session.id,
+    kind: session.kind,
+    title: session.title,
+    command: session.command,
+    cwd: session.cwd,
+    pid: session.child?.pid ?? session.pty?.pid ?? null,
+    terminal: Boolean(session.pty),
+    status: session.status,
+    code: session.code,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt
+  };
+}
+
+function emitSession(payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("mbox-desktop:session", { at: new Date().toISOString(), ...payload });
+}
+
+function startSession({ id, kind, title, command, cwd, child, reveal = true, logFile = "", onLine, onExit }) {
+  const previous = sessions.get(id);
+  if (previous?.status === "running" && previous.child && previous.child !== child) killTree(previous.child.pid);
+  const session = { id, kind, title, command, cwd, child, lines: [], status: "running", code: null, startedAt: Date.now(), endedAt: null };
+  sessions.set(id, session);
+  const logStream = logFile ? fs.createWriteStream(logFile, { flags: "a" }) : null;
+  emitSession({ id, event: "started", reveal, session: sessionMeta(session) });
+
+  function push(stream, chunk) {
+    const text = decodeConsole(chunk);
+    logStream?.write(text);
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const clean = line.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+      session.lines.push({ stream, line: clean });
+      if (session.lines.length > SESSION_LINE_LIMIT) session.lines.shift();
+      emitSession({ id, event: "output", stream, line: clean });
+      onLine?.(stream, clean);
+    }
+  }
+
+  child.stdout?.on("data", (chunk) => push("out", chunk));
+  child.stderr?.on("data", (chunk) => push("err", chunk));
+  child.on("error", (error) => {
+    session.status = "failed";
+    session.endedAt = Date.now();
+    emitSession({ id, event: "failed", message: error.message, session: sessionMeta(session) });
+    logStream?.end();
+  });
+  child.on("exit", (code, signal) => {
+    if (sessions.get(id) !== session) return;
+    // taskkill завершает процесс с кодом 4294967295 (-1) — остановку человеком показываем словом, не кодом.
+    session.status = session.stopRequested ? "stopped" : "exited";
+    session.code = session.stopRequested ? null : code ?? signal ?? null;
+    session.endedAt = Date.now();
+    emitSession({ id, event: "exited", code: session.code, session: sessionMeta(session) });
+    logStream?.end();
+    onExit?.(code, signal);
+  });
+  return session;
+}
+
+function markStopped(id) {
+  const session = sessions.get(id);
+  if (session?.status === "running") session.stopRequested = true;
+}
+
+function listSessions() {
+  return [...sessions.values()].map((session) => ({ ...sessionMeta(session), lines: session.lines.slice(-500), buffer: session.pty ? session.buffer : undefined }));
+}
+
+function sendSessionInput(id, input) {
+  const session = sessions.get(id);
+  if (!session || session.status !== "running") return { ok: false, reason: "session is not running" };
+  if (session.kind !== "ssh" || !session.pty) return { ok: false, reason: "interactive input is only enabled for SSH sessions" };
+  session.pty.write(input);
+  return { ok: true };
+}
+
+function resizeSession(id, cols, rows) {
+  const session = sessions.get(id);
+  if (!session?.pty || session.status !== "running") return { ok: false };
+  const safeCols = Math.max(20, Math.min(500, Math.floor(Number(cols) || 0)));
+  const safeRows = Math.max(5, Math.min(200, Math.floor(Number(rows) || 0)));
+  try { session.pty.resize(safeCols, safeRows); } catch { return { ok: false }; }
+  return { ok: true };
+}
+
+function killTree(pid) {
+  if (!pid) return;
+  try {
+    execFile("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true }, () => {});
+  } catch {
+    // процесс уже завершился
+  }
+}
+
+async function stopSession(id) {
+  const session = sessions.get(id);
+  if (!session) return { ok: false, reason: "нет такой сессии" };
+  if (id.startsWith("agent:")) {
+    await stopResponder(id.slice(6));
+    return { ok: true };
+  }
+  if (id.startsWith("tool:")) return stopTool(id.slice(5));
+  if (session.status === "running") {
+    markStopped(id);
+    if (session.pty) {
+      try { session.pty.kill(); } catch { killTree(session.pty.pid); }
+    } else {
+      killTree(session.child?.pid);
+    }
+  }
+  return { ok: true };
+}
+
+function removeSession(id) {
+  const session = sessions.get(id);
+  if (!session) return { ok: true };
+  if (session.status === "running") return { ok: false, reason: "сессия ещё работает — сначала остановите" };
+  sessions.delete(id);
+  emitSession({ id, event: "removed" });
+  return { ok: true };
+}
+
+// --- Локальные рабочие папки ------------------------------------------------------------------
+//
+// Папку подключает человек через системный диалог — из страницы путь не принимается. Страница
+// оперирует только ключом папки и относительным путём; всё, что выходит за корень, отклоняется.
+// Запись запрещена в .git и в файлы, которые Windows выполняет напрямую (.exe, .cmd, .ps1 …):
+// окно грузит удалённую страницу, и подмена такого файла была бы готовым запуском кода.
+
+function normalizeSshTarget(raw) {
+  const value = String(raw || "").trim();
+  const cleaned = value.replace(/^ssh\s+/i, "").trim();
+  // Первый символ не «-»: иначе адрес читался бы ssh как ключ командной строки.
+  if (!/^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?[A-Za-z0-9._][A-Za-z0-9._-]*(?::[0-9]{1,5})?$/.test(cleaned)) {
+    throw new Error("SSH: укажите host, user@host или user@host:port");
+  }
+  const [hostPart, portPart] = cleaned.split(":");
+  const port = portPart ? Number(portPart) : null;
+  if (portPart && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error("SSH: порт должен быть от 1 до 65535");
+  return { target: hostPart, port, label: cleaned };
+}
+
+// SSH идёт через псевдотерминал (node-pty, ConPTY в Windows), а не через трубы: без терминала ssh не может
+// спросить пароль и ключевую фразу, а удалённая оболочка не получает TTY — ни Tab, ни vim, ни Ctrl+C.
+// Страница рисует поток в xterm.js; буфер хранит хвост вывода, чтобы панель, открытая позже, увидела экран.
+const SSH_BUFFER_LIMIT = 256 * 1024;
+
+function startSshSession(rawTarget, cols, rows) {
+  const { target, port, label } = normalizeSshTarget(rawTarget);
+  const id = `ssh:${label.toLowerCase()}`;
+  const previous = sessions.get(id);
+  if (previous?.status === "running") {
+    emitSession({ id, event: "started", reveal: true, session: sessionMeta(previous) });
+    return { ok: true, id, pid: previous.pty?.pid ?? null, target: label, reused: true };
+  }
+  const args = [];
+  if (port) args.push("-p", String(port));
+  args.push(target);
+  const pty = require("node-pty");
+  const term = pty.spawn("ssh.exe", args, {
+    name: "xterm-256color",
+    cols: Math.max(20, Math.min(500, Math.floor(Number(cols) || 100))),
+    rows: Math.max(5, Math.min(200, Math.floor(Number(rows) || 30))),
+    cwd: os.homedir(),
+    env: { ...process.env, TERM: "xterm-256color" }
+  });
+  const session = {
+    id,
+    kind: "ssh",
+    title: `SSH · ${label}`,
+    command: `ssh ${port ? `-p ${port} ` : ""}${target}`,
+    cwd: os.homedir(),
+    pty: term,
+    buffer: "",
+    lines: [],
+    status: "running",
+    code: null,
+    startedAt: Date.now(),
+    endedAt: null
+  };
+  sessions.set(id, session);
+  emitSession({ id, event: "started", reveal: true, session: sessionMeta(session) });
+  term.onData((data) => {
+    if (sessions.get(id) !== session) return;
+    session.buffer += data;
+    if (session.buffer.length > SSH_BUFFER_LIMIT) session.buffer = session.buffer.slice(-SSH_BUFFER_LIMIT);
+    emitSession({ id, event: "data", data });
+  });
+  term.onExit(({ exitCode }) => {
+    if (sessions.get(id) !== session) return;
+    session.status = session.stopRequested ? "stopped" : "exited";
+    session.code = session.stopRequested ? null : exitCode ?? null;
+    session.endedAt = Date.now();
+    emitSession({ id, event: "exited", code: session.code, session: sessionMeta(session) });
+  });
+  return { ok: true, id, pid: term.pid, target: label };
+}
+
+const crypto = require("crypto");
+const WORKSPACE_CONFIG = () => path.join(app.getPath("userData"), "workspaces.json");
+const MAX_READ_BYTES = 5 * 1024 * 1024;
+const BLOCKED_WRITE_EXT = new Set([".exe", ".dll", ".bat", ".cmd", ".com", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js.lnk", ".lnk", ".msi", ".scr", ".reg", ".wsf", ".wsh", ".hta", ".cpl", ".sys"]);
+const HIDDEN_DIRS = new Set([".git"]);
+const HEAVY_DIRS = new Set(["node_modules", ".next", "dist", "build", "target", ".venv", "__pycache__", ".cache"]);
+const workspaceWatchers = new Map();
+
+function loadWorkspaceConfig() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(WORKSPACE_CONFIG(), "utf8"));
+    if (parsed && parsed.deviceId && Array.isArray(parsed.roots)) return parsed;
+  } catch {
+    // первый запуск
+  }
+  const config = { deviceId: crypto.randomUUID(), roots: [] };
+  saveWorkspaceConfig(config);
+  return config;
+}
+
+function saveWorkspaceConfig(config) {
+  fs.mkdirSync(path.dirname(WORKSPACE_CONFIG()), { recursive: true });
+  fs.writeFileSync(WORKSPACE_CONFIG(), JSON.stringify(config, null, 2), "utf8");
+}
+
+function workspaceInfo() {
+  const config = loadWorkspaceConfig();
+  return {
+    deviceId: config.deviceId,
+    deviceName: os.hostname(),
+    roots: config.roots.filter((root) => fs.existsSync(root.path)).map((root) => ({ key: root.key, name: root.name, path: root.path }))
+  };
+}
+
+function rootByKey(key) {
+  const root = loadWorkspaceConfig().roots.find((item) => item.key === String(key || ""));
+  if (!root) throw new Error("Папка не подключена");
+  return root;
+}
+
+function resolveInRoot(key, rel) {
+  const root = rootByKey(key);
+  const base = path.resolve(root.path);
+  const target = path.resolve(base, String(rel || "").replace(/\//g, path.sep));
+  const relative = path.relative(base, target);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Путь выходит за пределы папки");
+  return { root, base, target, rel: relative.split(path.sep).join("/") };
+}
+
+function assertWritable(rel, target) {
+  const parts = rel.split("/");
+  if (parts.includes(".git")) throw new Error("Запись в .git запрещена");
+  if (BLOCKED_WRITE_EXT.has(path.extname(target).toLowerCase())) throw new Error(`Файлы ${path.extname(target)} из MBOX не записываются — их Windows выполняет напрямую`);
+}
+
+async function addWorkspaceRoot() {
+  const result = await dialog.showOpenDialog(mainWindow, { title: "Подключить папку к MBOX", properties: ["openDirectory"] });
+  if (result.canceled || !result.filePaths[0]) return workspaceInfo();
+  const folder = path.resolve(result.filePaths[0]);
+  const config = loadWorkspaceConfig();
+  if (!config.roots.some((root) => path.resolve(root.path).toLowerCase() === folder.toLowerCase())) {
+    config.roots.push({ key: crypto.randomBytes(4).toString("hex"), name: path.basename(folder) || folder, path: folder });
+    saveWorkspaceConfig(config);
+  }
+  syncWorkspaceWatchers();
+  return workspaceInfo();
+}
+
+function removeWorkspaceRoot(key) {
+  const config = loadWorkspaceConfig();
+  config.roots = config.roots.filter((root) => root.key !== key);
+  saveWorkspaceConfig(config);
+  syncWorkspaceWatchers();
+  return workspaceInfo();
+}
+
+async function listWorkspaceDir(key, rel) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  const entries = await fs.promises.readdir(target, { withFileTypes: true });
+  const rows = [];
+  for (const entry of entries) {
+    if (HIDDEN_DIRS.has(entry.name)) continue;
+    const childRel = cleanRel ? `${cleanRel}/${entry.name}` : entry.name;
+    let size = 0;
+    let mtime = 0;
+    try {
+      const stat = await fs.promises.stat(path.join(target, entry.name));
+      size = stat.size;
+      mtime = stat.mtimeMs;
+    } catch {
+      continue;
+    }
+    rows.push({ name: entry.name, path: childRel, type: entry.isDirectory() ? "dir" : "file", size, mtime, heavy: entry.isDirectory() && HEAVY_DIRS.has(entry.name) });
+  }
+  rows.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, "ru", { numeric: true }) : a.type === "dir" ? -1 : 1));
+  return rows;
+}
+
+async function readWorkspaceFile(key, rel) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  const stat = await fs.promises.stat(target);
+  if (!stat.isFile()) throw new Error("Это не файл");
+  if (stat.size > MAX_READ_BYTES) return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, tooLarge: true, content: "" };
+  const buffer = await fs.promises.readFile(target);
+  const binary = buffer.subarray(0, 8000).includes(0);
+  return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, binary, content: binary ? "" : buffer.toString("utf8") };
+}
+
+// Картинки отдаются data-URL: страница грузится с сервера и не может открыть file://, а отдельный протокол
+// дал бы ей доступ к диску мимо проверки корня. Здесь путь проходит тот же resolveInRoot, что и чтение текста.
+const IMAGE_TYPES = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+  ".bmp": "image/bmp", ".ico": "image/x-icon", ".avif": "image/avif", ".svg": "image/svg+xml"
+};
+const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+
+async function readWorkspaceImage(key, rel) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  const mime = IMAGE_TYPES[path.extname(target).toLowerCase()];
+  if (!mime) throw new Error("Это не картинка");
+  const stat = await fs.promises.stat(target);
+  if (!stat.isFile()) throw new Error("Это не файл");
+  if (stat.size > MAX_IMAGE_BYTES) return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, tooLarge: true, dataUrl: "" };
+  const buffer = await fs.promises.readFile(target);
+  return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, dataUrl: `data:${mime};base64,${buffer.toString("base64")}` };
+}
+
+async function writeWorkspaceFile(key, rel, content, expectedMtime) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  assertWritable(cleanRel, target);
+  let previous = null;
+  try {
+    const stat = await fs.promises.stat(target);
+    if (expectedMtime && Math.abs(stat.mtimeMs - Number(expectedMtime)) > 1) {
+      const error = new Error("Файл изменился на диске после открытия");
+      error.code = "CONFLICT";
+      throw error;
+    }
+    if (stat.size <= MAX_READ_BYTES) previous = await fs.promises.readFile(target, "utf8");
+  } catch (error) {
+    if (error.code === "CONFLICT") throw error;
+  }
+  await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await fs.promises.writeFile(target, String(content ?? ""), "utf8");
+  const stat = await fs.promises.stat(target);
+  return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, previous };
+}
+
+async function createWorkspaceEntry(key, rel, type) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  assertWritable(cleanRel, target);
+  if (fs.existsSync(target)) throw new Error("Такой файл или папка уже есть");
+  if (type === "dir") await fs.promises.mkdir(target, { recursive: true });
+  else {
+    await fs.promises.mkdir(path.dirname(target), { recursive: true });
+    await fs.promises.writeFile(target, "", "utf8");
+  }
+  return { path: cleanRel };
+}
+
+async function renameWorkspaceEntry(key, rel, nextRel) {
+  const from = resolveInRoot(key, rel);
+  const to = resolveInRoot(key, nextRel);
+  assertWritable(from.rel, from.target);
+  assertWritable(to.rel, to.target);
+  if (fs.existsSync(to.target)) throw new Error("Такое имя уже занято");
+  await fs.promises.rename(from.target, to.target);
+  return { path: to.rel };
+}
+
+async function trashWorkspaceEntry(key, rel) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  if (!cleanRel) throw new Error("Корень папки не удаляется");
+  assertWritable(cleanRel, target);
+  await shell.trashItem(target);
+  return { ok: true };
+}
+
+async function findWorkspaceFiles(key, queryText, limit = 60) {
+  const { base } = resolveInRoot(key, "");
+  const needle = String(queryText || "").toLowerCase().trim();
+  if (!needle) return [];
+  const found = [];
+  const stack = [""];
+  let visited = 0;
+  while (stack.length && found.length < limit && visited < 20000) {
+    const rel = stack.pop();
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(path.join(base, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      visited += 1;
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!HIDDEN_DIRS.has(entry.name) && !HEAVY_DIRS.has(entry.name)) stack.push(childRel);
+      } else if (childRel.toLowerCase().includes(needle)) {
+        found.push(childRel);
+        if (found.length >= limit) break;
+      }
+    }
+  }
+  return found;
+}
+
+function git(cwd, args, maxBuffer = 8 * 1024 * 1024) {
+  return new Promise((resolve) => {
+    execFile("git", ["-c", "core.quotepath=false", ...args], { cwd, windowsHide: true, maxBuffer, encoding: "utf8" }, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: stdout || "", stderr: stderr || (error ? error.message : "") });
+    });
+  });
+}
+
+const COMMIT_FORMAT = "%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e";
+
+function parseCommits(stdout) {
+  return stdout.split("\x1e").map((row) => row.trim()).filter(Boolean).map((row) => {
+    const [hash, short, author, date, subject] = row.split("\x1f");
+    return { hash, short, author, date, subject };
+  });
+}
+
+async function workspaceGitSummary(key) {
+  const { base } = resolveInRoot(key, "");
+  const inside = await git(base, ["rev-parse", "--is-inside-work-tree"]);
+  if (!inside.ok || inside.stdout.trim() !== "true") return { isRepo: false };
+  const [status, log, remote, top] = await Promise.all([
+    git(base, ["status", "--porcelain=v1", "-b", "--untracked-files=normal"]),
+    git(base, ["log", "-n", "15", `--pretty=format:${COMMIT_FORMAT}`]),
+    git(base, ["remote", "get-url", "origin"]),
+    git(base, ["rev-parse", "--show-toplevel"])
+  ]);
+  const lines = status.stdout.split(/\r?\n/).filter(Boolean);
+  const head = lines[0]?.startsWith("## ") ? lines.shift().slice(3) : "";
+  const branchMatch = head.match(/^(?:No commits yet on )?([^.\s]+)(?:\.\.\.(\S+))?(?: \[(.+)\])?/);
+  const tracking = branchMatch?.[3] || "";
+  const toplevel = top.stdout.trim().replace(/\//g, path.sep);
+  // Пути в git status — от корня репозитория; если подключена его подпапка, переводим в пути папки.
+  const prefix = toplevel ? path.relative(toplevel, base).split(path.sep).join("/") : "";
+  const changes = lines.slice(0, 500).map((line) => {
+    const code = line.slice(0, 2);
+    let file = line.slice(3);
+    if (file.includes(" -> ")) file = file.split(" -> ")[1];
+    file = file.replace(/^"|"$/g, "");
+    if (prefix) file = file.startsWith(`${prefix}/`) ? file.slice(prefix.length + 1) : `../${file}`;
+    return { path: file, index: code[0], worktree: code[1], untracked: code === "??" };
+  });
+  return {
+    isRepo: true,
+    branch: branchMatch?.[1] || "",
+    upstream: branchMatch?.[2] || "",
+    ahead: Number(tracking.match(/ahead (\d+)/)?.[1] || 0),
+    behind: Number(tracking.match(/behind (\d+)/)?.[1] || 0),
+    remote: remote.ok ? remote.stdout.trim() : "",
+    changes,
+    changesTotal: lines.length,
+    commits: parseCommits(log.stdout),
+    checkedAt: new Date().toISOString()
+  };
+}
+
+async function workspaceGitFileLog(key, rel) {
+  const { base, rel: cleanRel } = resolveInRoot(key, rel);
+  const log = await git(base, ["log", "-n", "30", "--follow", `--pretty=format:${COMMIT_FORMAT}`, "--", cleanRel]);
+  return log.ok ? parseCommits(log.stdout) : [];
+}
+
+async function workspaceGitDiff(key, rel) {
+  const { base, rel: cleanRel } = resolveInRoot(key, rel);
+  const diff = await git(base, ["diff", "HEAD", "--", cleanRel]);
+  if (diff.ok && diff.stdout.trim()) return { diff: diff.stdout };
+  const untracked = await git(base, ["ls-files", "--others", "--exclude-standard", "--", cleanRel]);
+  if (untracked.stdout.trim()) return { diff: "", note: "Файл ещё не добавлен в git — сравнивать не с чем." };
+  return { diff: diff.stdout, note: diff.ok ? "Изменений относительно последнего коммита нет." : diff.stderr };
+}
+
+async function workspaceGitShow(key, hash) {
+  if (!/^[0-9a-f]{4,40}$/i.test(String(hash || ""))) throw new Error("Некорректный коммит");
+  const { base } = resolveInRoot(key, "");
+  const show = await git(base, ["show", "--stat", "--patch", `--pretty=format:%H%n%an <%ae>%n%aI%n%n%B`, hash]);
+  if (!show.ok) throw new Error(show.stderr);
+  return { text: show.stdout.length > 400000 ? `${show.stdout.slice(0, 400000)}\n… обрезано …` : show.stdout };
+}
+
+function syncWorkspaceWatchers() {
+  const roots = loadWorkspaceConfig().roots;
+  for (const [key, watcher] of workspaceWatchers) {
+    if (!roots.some((root) => root.key === key)) {
+      watcher.close();
+      workspaceWatchers.delete(key);
+    }
+  }
+  for (const root of roots) {
+    if (workspaceWatchers.has(root.key) || !fs.existsSync(root.path)) continue;
+    const pending = new Set();
+    let timer = null;
+    try {
+      const watcher = fs.watch(root.path, { recursive: true }, (_event, filename) => {
+        if (!filename) return;
+        const rel = String(filename).split(path.sep).join("/");
+        const parts = rel.split("/");
+        if (parts.some((part) => HIDDEN_DIRS.has(part) || HEAVY_DIRS.has(part))) {
+          // .git/index и HEAD меняются при коммите/checkout — это повод обновить git-сводку.
+          if (parts[0] !== ".git" || !/^(index|HEAD)$/.test(parts[1] || "")) return;
+          pending.add(".git");
+        } else {
+          pending.add(rel);
+        }
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const paths = [...pending];
+          pending.clear();
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("mbox-desktop:workspace-change", { key: root.key, paths });
+        }, 400);
+      });
+      watcher.on("error", () => { watcher.close(); workspaceWatchers.delete(root.key); });
+      workspaceWatchers.set(root.key, watcher);
+    } catch (error) {
+      log(`workspace watch failed for ${root.path}: ${error.message}`);
+    }
+  }
+}
+
+/** Свободное имя рядом: «отчёт.md» → «отчёт копия.md» → «отчёт копия 2.md». */
+function uniqueTarget(dir, name) {
+  let candidate = path.join(dir, name);
+  if (!fs.existsSync(candidate)) return candidate;
+  const ext = path.extname(name);
+  const base = name.slice(0, name.length - ext.length);
+  for (let index = 1; index < 1000; index += 1) {
+    candidate = path.join(dir, `${base} копия${index > 1 ? ` ${index}` : ""}${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error("Не нашлось свободного имени");
+}
+
+async function transferWorkspaceEntry(fromKey, fromRel, toKey, toDirRel, move) {
+  const from = resolveInRoot(fromKey, fromRel);
+  const toDir = resolveInRoot(toKey, toDirRel);
+  if (!from.rel) throw new Error("Корень папки не копируется");
+  if (!fs.existsSync(from.target)) throw new Error("Исходный файл не найден");
+  if (!fs.statSync(toDir.target).isDirectory()) throw new Error("Вставлять можно только в папку");
+  const destination = uniqueTarget(toDir.target, path.basename(from.target));
+  const relative = path.relative(toDir.base, destination).split(path.sep).join("/");
+  assertWritable(relative, destination);
+  if (move) assertWritable(from.rel, from.target);
+  if (path.resolve(destination).toLowerCase().startsWith(`${path.resolve(from.target).toLowerCase()}${path.sep}`)) throw new Error("Папку нельзя вложить саму в себя");
+  if (move) {
+    try {
+      await fs.promises.rename(from.target, destination);
+    } catch {
+      await fs.promises.cp(from.target, destination, { recursive: true, errorOnExist: true });
+      await shell.trashItem(from.target);
+    }
+  } else {
+    await fs.promises.cp(from.target, destination, { recursive: true, errorOnExist: true });
+  }
+  return { path: relative };
+}
+
+/** Файлы, скопированные в Проводнике Windows (Ctrl+C), — в папку MBOX. Берём пути из буфера обмена
+ * сами: страница их не передаёт и не видит. */
+async function pasteFromSystemClipboard(key, toDirRel) {
+  const toDir = resolveInRoot(key, toDirRel);
+  const raw = clipboard.readBuffer("FileNameW");
+  const sources = raw.length ? raw.toString("ucs2").split("\0").map((item) => item.trim()).filter(Boolean) : [];
+  if (!sources.length) throw new Error("В буфере обмена нет файлов — скопируйте их в Проводнике (Ctrl+C)");
+  const pasted = [];
+  for (const source of sources) {
+    if (!fs.existsSync(source)) continue;
+    const destination = uniqueTarget(toDir.target, path.basename(source));
+    const relative = path.relative(toDir.base, destination).split(path.sep).join("/");
+    assertWritable(relative, destination);
+    await fs.promises.cp(source, destination, { recursive: true, errorOnExist: true });
+    pasted.push(relative);
+  }
+  return { paths: pasted };
+}
+
+/** Обратно в Проводник: файл кладётся в буфер как файл (CF_HDROP через FileNameW), вставляется Ctrl+V. */
+function copyToSystemClipboard(key, rel) {
+  const { target } = resolveInRoot(key, rel);
+  if (!fs.existsSync(target)) throw new Error("Файл не найден");
+  clipboard.writeBuffer("FileNameW", Buffer.from(`${target}\0`, "ucs2"));
+  return { ok: true };
+}
+
+function openWorkspaceEntry(key, rel) {
+  const { target } = resolveInRoot(key, rel);
+  shell.showItemInFolder(target);
+  return { ok: true };
+}
+
+ipcMain.handle("mbox-desktop:ws-info", async () => { syncWorkspaceWatchers(); return workspaceInfo(); });
+ipcMain.handle("mbox-desktop:ws-add", async () => addWorkspaceRoot());
+ipcMain.handle("mbox-desktop:ws-remove", async (_event, key) => removeWorkspaceRoot(String(key || "")));
+ipcMain.handle("mbox-desktop:ws-list", async (_event, key, rel) => listWorkspaceDir(key, rel));
+ipcMain.handle("mbox-desktop:ws-read", async (_event, key, rel) => readWorkspaceFile(key, rel));
+// Разовый перенос localStorage со старого адреса сайта во встроенный интерфейс (см. localUi.js).
+ipcMain.on("mbox-desktop:take-storage-migration", (event) => {
+  const trusted = useLocalUi && event.senderFrame?.url?.startsWith(`${localUi.APP_ORIGIN}/`);
+  event.returnValue = trusted ? localUi.takePendingStorage() : null;
+});
+ipcMain.handle("mbox-desktop:ws-read-image", async (_event, key, rel) => readWorkspaceImage(key, rel));
+ipcMain.handle("mbox-desktop:ws-write", async (_event, key, rel, content, expectedMtime) => writeWorkspaceFile(key, rel, content, expectedMtime));
+ipcMain.handle("mbox-desktop:ws-create", async (_event, key, rel, type) => createWorkspaceEntry(key, rel, type));
+ipcMain.handle("mbox-desktop:ws-rename", async (_event, key, rel, nextRel) => renameWorkspaceEntry(key, rel, nextRel));
+ipcMain.handle("mbox-desktop:ws-trash", async (_event, key, rel) => trashWorkspaceEntry(key, rel));
+ipcMain.handle("mbox-desktop:ws-find", async (_event, key, queryText) => findWorkspaceFiles(key, queryText));
+ipcMain.handle("mbox-desktop:ws-reveal", async (_event, key, rel) => openWorkspaceEntry(key, rel));
+ipcMain.handle("mbox-desktop:ws-transfer", async (_event, fromKey, fromRel, toKey, toDirRel, move) => transferWorkspaceEntry(fromKey, fromRel, toKey, toDirRel, Boolean(move)));
+ipcMain.handle("mbox-desktop:ws-paste-system", async (_event, key, toDirRel) => pasteFromSystemClipboard(key, toDirRel));
+ipcMain.handle("mbox-desktop:ws-copy-system", async (_event, key, rel) => copyToSystemClipboard(key, rel));
+ipcMain.handle("mbox-desktop:ws-open-default", async (_event, key, rel) => {
+  const { target } = resolveInRoot(key, rel);
+  // Открыть .exe/.cmd «программой по умолчанию» — значит запустить его: из страницы так нельзя.
+  if (BLOCKED_WRITE_EXT.has(path.extname(target).toLowerCase())) throw new Error("Исполняемые файлы из MBOX не открываются — используйте «Показать в проводнике»");
+  const error = await shell.openPath(target);
+  if (error) throw new Error(error);
+  return { ok: true };
+});
+ipcMain.handle("mbox-desktop:ws-git", async (_event, key) => workspaceGitSummary(key));
+ipcMain.handle("mbox-desktop:ws-git-log", async (_event, key, rel) => workspaceGitFileLog(key, rel));
+ipcMain.handle("mbox-desktop:ws-git-diff", async (_event, key, rel) => workspaceGitDiff(key, rel));
+ipcMain.handle("mbox-desktop:ws-git-show", async (_event, key, hash) => workspaceGitShow(key, hash));
+
+app.on("before-quit", () => {
+  for (const watcher of workspaceWatchers.values()) watcher.close();
+  workspaceWatchers.clear();
+});
 
 // --- Запуск инструментов из MBOX -------------------------------------------------------------
 //
@@ -612,8 +1386,6 @@ async function runTool(toolId, commandLabel) {
   if (!toolWorkdirAllowed(workdir)) throw new Error("Каталог инструмента вне рабочей папки MBOX");
   if (!fs.existsSync(workdir)) throw new Error(`Каталог инструмента не найден: ${workdir}`);
 
-  // Команду отдаём видимому cmd.exe: на вкладке "Инструменты" это именно ручной запуск
-  // локального проекта из Electron, а не тихий фоновой процесс без окна и контекста.
   const externalUrl = externalUrlFromStartCommand(entry.command);
   if (externalUrl) {
     emitTool({ tool: key, event: "started", label: commandLabel, command: entry.command, cwd: workdir });
@@ -622,37 +1394,40 @@ async function runTool(toolId, commandLabel) {
     return { ok: true, command: entry.command, cwd: workdir };
   }
 
-  const child = spawn("cmd.exe", ["/d", "/k", entry.command], {
+  // Раньше команда уходила видимому cmd.exe /k — отдельное окно вне приложения, вывод MBOX не видел.
+  // Теперь без окна, с перехватом вывода: он идёт во встроенную консоль (сессия tool:<id>) и на
+  // страницу инструмента. /s /c "команда": cmd снимает только внешние кавычки, кавычки внутри целы.
+  const child = spawn("cmd.exe", ["/d", "/s", "/c", `"${entry.command}"`], {
     cwd: workdir,
-    windowsHide: false,
-    detached: true,
-    stdio: "ignore",
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+    stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...(entry.env || {}) }
   });
 
   const state = { child, lines: [], label: commandLabel, toolId: key, startedAt: Date.now() };
   runningTools.set(key, state);
   emitTool({ tool: key, event: "started", label: commandLabel, command: entry.command, cwd: workdir, pid: child.pid });
-  state.lines.push({ stream: "out", line: `Открыта консоль: ${entry.command}` });
-  emitTool({ tool: key, event: "output", stream: "out", line: `Открыта консоль: ${entry.command}` });
-
-  function push(stream, chunk) {
-    for (const line of decodeConsole(chunk).split(/\r?\n/)) {
-      if (!line) continue;
+  startSession({
+    id: `tool:${key}`,
+    kind: "tool",
+    title: `${tool.name} · ${commandLabel}`,
+    command: entry.command,
+    cwd: workdir,
+    child,
+    onLine: (stream, line) => {
       state.lines.push({ stream, line });
       if (state.lines.length > TOOL_OUTPUT_LIMIT) state.lines.shift();
       emitTool({ tool: key, event: "output", stream, line });
+    },
+    onExit: (code, signal) => {
+      runningTools.delete(key);
+      emitTool({ tool: key, event: "exited", code, signal, ms: Date.now() - state.startedAt });
     }
-  }
-  child.stdout?.on("data", (chunk) => push("out", chunk));
-  child.stderr?.on("data", (chunk) => push("err", chunk));
+  });
   child.on("error", (error) => {
     runningTools.delete(key);
     emitTool({ tool: key, event: "failed", message: error.message });
-  });
-  child.on("exit", (code, signal) => {
-    runningTools.delete(key);
-    emitTool({ tool: key, event: "exited", code, signal, ms: Date.now() - state.startedAt });
   });
 
   return { ok: true, pid: child.pid, command: entry.command, cwd: workdir };
@@ -662,11 +1437,8 @@ function stopTool(toolId) {
   const state = runningTools.get(String(toolId || ""));
   if (!state) return { ok: false, reason: "не запущен" };
   // Дерево процессов: cargo/obscura порождают детей, один kill по pid оставил бы их висеть.
-  try {
-    execFile("taskkill", ["/pid", String(state.child.pid), "/t", "/f"], () => {});
-  } catch {
-    state.child.kill();
-  }
+  markStopped(`tool:${toolId}`);
+  killTree(state.child.pid);
   return { ok: true };
 }
 
@@ -686,4 +1458,10 @@ ipcMain.handle("mbox-desktop:tool-status", async () => toolStatus());
 
 app.on("before-quit", () => {
   for (const toolId of [...runningTools.keys()]) stopTool(toolId);
+  for (const session of sessions.values()) {
+    if (session.status === "running" && session.kind === "agent") killTree(session.child?.pid);
+    if (session.status === "running" && session.pty) {
+      try { session.pty.kill(); } catch {}
+    }
+  }
 });

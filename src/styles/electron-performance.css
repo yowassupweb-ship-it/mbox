@@ -1,0 +1,46 @@
+html[data-mbox-desktop="true"] {
+  --blur-glass: 0px;
+  --duration-fast: 0.01ms;
+  --duration-base: 0.01ms;
+}
+
+html[data-mbox-desktop="true"] *,
+html[data-mbox-desktop="true"] *::before,
+html[data-mbox-desktop="true"] *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+html[data-mbox-desktop="true"] .topbar,
+html[data-mbox-desktop="true"] .desktop-pill,
+html[data-mbox-desktop="true"] .desktop-popover,
+html[data-mbox-desktop="true"] .agent-status-popover,
+html[data-mbox-desktop="true"] .agent-chat-toggle,
+html[data-mbox-desktop="true"] .map-toolbar,
+html[data-mbox-desktop="true"] .map-panel,
+html[data-mbox-desktop="true"] .tree-menu,
+html[data-mbox-desktop="true"] .topbar-logout,
+html[data-mbox-desktop="true"] .realtime-pill,
+html[data-mbox-desktop="true"] .bottom-nav {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-mbox-desktop="true"] .wb,
+html[data-mbox-desktop="true"] .wb-center,
+html[data-mbox-desktop="true"] .wb-editor,
+html[data-mbox-desktop="true"] .wb-document,
+html[data-mbox-desktop="true"] .wb-panel,
+html[data-mbox-desktop="true"] .wb-console,
+html[data-mbox-desktop="true"] .agent-chat-shell.console {
+  contain: layout style;
+}
+
+html[data-mbox-desktop="true"] .console-log,
+html[data-mbox-desktop="true"] .wb-view-body,
+html[data-mbox-desktop="true"] .wb-editor-scroll,
+html[data-mbox-desktop="true"] .wb-panel-pane,
+html[data-mbox-desktop="true"] .wb-console-pane-body {
+  content-visibility: auto;
+}

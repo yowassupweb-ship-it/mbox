@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { saveEntity } from "../../lib/api";
 import type { Project } from "../../types";
@@ -6,11 +6,26 @@ import { Button, EmptyState, SaveButton, type SaveState } from "../../ui";
 
 type Row = { id: number; key: string; value: string };
 
+/** Ключи, которыми управляет сам MBOX или отдельные разделы проекта (порядок в дереве, структура
+ * репозитория для Джарвиса, Философия, Figma, набор разделов). В таблице их не показываем и при
+ * сохранении не трогаем: раньше repo_structure-объект выводился как «[object Object]» и сохранение
+ * записывало эту строку поверх настоящей структуры. */
+const MANAGED_KEYS = new Set(["position", "repo_structure", "enabled_entities", "philosophy", "principles", "figma_url"]);
+
+function isEditable(key: string, value: unknown) {
+  return !MANAGED_KEYS.has(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean");
+}
+
 let seed = 0;
 const nextId = () => ++seed;
 
 function toRows(props: Record<string, string>): Row[] {
-  return Object.entries(props || {}).map(([key, value]) => ({ id: nextId(), key, value }));
+  return Object.entries(props || {}).filter(([key, value]) => isEditable(key, value)).map(([key, value]) => ({ id: nextId(), key, value: String(value) }));
+}
+
+function fitTextarea(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
 }
 
 /**
@@ -59,9 +74,11 @@ export function PropsEditor({ project, onSaved }: { project: Project; onSaved: (
   async function save() {
     setState("saving");
     try {
-      const props = Object.fromEntries(
-        rows.map((row) => [row.key.trim(), row.value]).filter(([key]) => key),
-      );
+      const managed = Object.fromEntries(Object.entries(project.props || {}).filter(([key, value]) => !isEditable(key, value)));
+      const props = {
+        ...managed,
+        ...Object.fromEntries(rows.map((row) => [row.key.trim(), row.value]).filter(([key]) => key && !MANAGED_KEYS.has(key))),
+      };
       await saveEntity("/api/mbox/projects", project.id, { props });
       setState("saved");
       onSaved();
@@ -72,9 +89,6 @@ export function PropsEditor({ project, onSaved }: { project: Project; onSaved: (
 
   return (
     <div className="env-editor">
-      <p className="muted env-hint">
-        Структурные факты о проекте. Их читают агенты, поэтому ключ важнее формулировки: <code>deploy_host</code> полезнее, чем «где развёрнуто».
-      </p>
 
       {rows.length ? (
         <div className="env-rows">

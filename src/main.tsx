@@ -18,7 +18,6 @@ import {
   ShieldCheck,
   Zap,
 } from "lucide-react";
-import { BottomNav } from "./components/BottomNav";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
 import { TopBar, type AgentRosterEntry } from "./components/TopBar";
 import { AgentAvatar } from "./components/AgentAvatar";
@@ -26,25 +25,17 @@ import { RUN_STALE_MS, agentFamily, effectiveStatus, isAgentWorking, liveRunOf }
 import { fetchJson, saveEntity } from "./lib/api";
 import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
 import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
-import { findNodeByRouteKey, nodeFromLocation, nodeRouteKey, queryFromLocation, routeFor, sectionFromLocation } from "./lib/routing";
 import { filterTree, formatProps, parseProps, projectToTree, rollupBytes, sortTodos } from "./lib/tree";
-import { sections } from "./app/sections";
 import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
-import { Overview } from "./pages/Overview";
-import { MemoryBoard } from "./pages/Memories";
-import { ArtifactsBoard } from "./pages/Artifacts";
-import { AbilitiesBoard } from "./pages/Abilities";
 import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
-import { ProjectsBoard } from "./pages/Projects";
-import { AgentChat } from "./features/agents/AgentChat";
-import { AddTodoForm, TodoCardGrid } from "./features/projects/TodoCards";
+import { TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
-import type { ProjectEntityKind } from "./features/tree/entityKinds";
 import { EmptyState, ManualForm, Panel } from "./ui";
-import { bootstrapSeen, countUnseen, loadSeen, onSeenChange } from "./lib/seen";
+import { bootstrapSeen, loadSeen } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
+import { Workbench } from "./app/workbench/Workbench";
 import type {
   AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, DecisionEntry, FolderRow,
   GraphEdge, GroqUsage, Me, Memory, Project,
@@ -68,10 +59,9 @@ function App() {
   return <Workspace user={me.user} onLogout={() => setMe({ user: null })} />;
 }
 function Workspace({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
-  const [section, setSectionState] = useState<SectionKey>(() => sectionFromLocation());
-  const [query, setQueryState] = useState(() => queryFromLocation());
-  const [selectedNodeKey, setSelectedNodeKeyState] = useState(() => nodeFromLocation());
-  const data = useMboxData(query, onLogout);
+  // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
+  // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
+  const data = useMboxData("", onLogout);
   const realtime = useRealtime(data.reload);
   const agentNotices = useMemo(
     () => [...realtime.notices, ...data.auditEvents.slice(0, 12).map(auditNotice)].slice(0, 12),
@@ -142,90 +132,61 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
     };
   }), [data.agents, data.runs]);
 
-  const [seenTick, setSeenTick] = useState(0);
-  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
+  const [projectMenu, setProjectMenu] = useState<TreeMenuState | null>(null);
 
+  // Сначала тянем отметки «просмотрено» из базы, и только потом решаем, что считать новым.
   const todoMarks = useMemo(
     () => data.projects.flatMap((project) => project.todos.map((todo) => ({ key: `todo:${todo.id}`, bytes: todo.memory_bytes }))),
     [data.projects],
   );
-
-  // Сначала тянем отметки из базы, и только потом решаем, что считать новым.
   useEffect(() => { void loadSeen(); }, []);
-
-  useEffect(() => {
-    if (todoMarks.length) bootstrapSeen(todoMarks);
-  }, [todoMarks, seenTick]);
-
-  const [projectMenu, setProjectMenu] = useState<TreeMenuState | null>(null);
-  useEffect(() => onSeenChange(() => setSeenTick((value) => value + 1)), []);
-  const unseenTodos = useMemo(() => countUnseen(todoMarks), [todoMarks, seenTick]);
-
-  const setRoute = useCallback((nextSection: SectionKey, nextQuery = query, nextNodeKey = selectedNodeKey, mode: "push" | "replace" = "push") => {
-    setSectionState(nextSection);
-    setQueryState(nextQuery);
-    setSelectedNodeKeyState(nextNodeKey);
-    const nextUrl = routeFor(nextSection, nextQuery, nextNodeKey);
-    if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
-      window.history[mode === "push" ? "pushState" : "replaceState"]({}, "", nextUrl);
-    }
-  }, [query, selectedNodeKey]);
-
-  const setSection = useCallback((nextSection: SectionKey) => setRoute(nextSection, query, "", "push"), [query, setRoute]);
-  const setQuery = useCallback((nextQuery: string) => setRoute(section, nextQuery, selectedNodeKey, "replace"), [section, selectedNodeKey, setRoute]);
-  const setSelectedNodeKey = useCallback((nextNodeKey: string) => setRoute(section, query, nextNodeKey, "replace"), [section, query, setRoute]);
-
-  useEffect(() => {
-    function syncFromLocation() {
-      setSectionState(sectionFromLocation());
-      setQueryState(queryFromLocation());
-      setSelectedNodeKeyState(nodeFromLocation());
-    }
-    window.addEventListener("popstate", syncFromLocation);
-    return () => window.removeEventListener("popstate", syncFromLocation);
-  }, []);
-
-  const currentProjectName = section === "projects" && selectedNodeKey
-    ? data.projects.find((project) => project.id === selectedNodeKey.split(":")[0])?.name
-    : undefined;
+  useEffect(() => { if (todoMarks.length) bootstrapSeen(todoMarks); }, [todoMarks]);
 
   return (
-    <div className="app dark">
-      <main className="workspace">
-        <TopBar
-          query={query}
-          onQueryChange={setQuery}
-          realtimeState={headerState}
-          realtimeLabel={agentLabel}
-          notice={realtime.notice}
-          notices={agentNotices}
-          roster={agentRoster}
-          attentionTodos={attentionTodos}
-          onOpenTodo={(projectId) => setRoute("projects", query, `${projectId}:todo`, "push")}
-          onLogout={async () => {
-            await fetch("/api/mbox/auth/logout", { method: "POST" });
-            onLogout();
-          }}
-          busy={data.loading || headerState === "working"}
-        />
-        {data.offline && <OfflineBanner onRetry={data.reload} />}
-        {data.loading && <p className="muted empty-state">Загрузка данных</p>}
-        {section === "overview" && <Overview data={data} onOpenProject={(projectId) => setRoute("projects", query, `${projectId}:todo`, "push")} />}
-        {section === "memories" && <MemoryBoard memories={data.memories} projects={data.projects} decisions={data.decisions} onSaved={data.reload} />}
-        {section === "artifacts" && <ArtifactsBoard artifacts={data.artifacts} folders={data.folders} projects={data.projects} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} />}
-        {section === "projects" && <ProjectsBoard projects={data.projects} companies={data.companies} folders={data.folders} memories={data.memories} decisions={data.decisions} query={query} selectedNodeKey={selectedNodeKey} onSelectedNodeKey={setSelectedNodeKey} onSaved={data.reload} renderEntity={(project, kind: ProjectEntityKind) => <ProjectEntityView project={project} projects={data.projects} memories={data.memories} kind={kind} onSaved={data.reload} />} renderTodoForm={(project) => <AddTodoForm project={project} onSaved={data.reload} />} onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })} />}
-        {section === "abilities" && <AbilitiesBoard />}
-        {section === "history" && <HistoryBoard events={data.auditEvents} />}
-        {section === "settings" && (
-          <SettingsBoard
-            server={<ServerBoard pulse={realtime.pulse} />}
-            access={<AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
+    <div className="app dark app-workbench">
+      {data.offline && <OfflineBanner onRetry={data.reload} />}
+      <Workbench
+        data={data}
+        user={user}
+        realtime={realtime}
+        status={{ state: headerState, label: agentLabel }}
+        onProjectContext={(project, position) => setProjectMenu({ node: { id: project.id, type: "project", name: project.name, color: project.color }, position })}
+        titleBar={({ openSearch, openTodo, toggleSidebar, toggleConsole, activeTab }) => (
+          <TopBar
+            onOpenSearch={openSearch}
+            onToggleSidebar={toggleSidebar}
+            onToggleConsole={toggleConsole}
+            activeTitle={activeTab.title}
+            activeHint={activeTab.hint}
+            activeIcon={activeTab.icon}
+            activeDirty={activeTab.dirty}
+            tabCount={activeTab.tabs}
+            realtimeState={headerState}
+            realtimeLabel={agentLabel}
+            notice={realtime.notice}
+            notices={agentNotices}
+            roster={agentRoster}
+            attentionTodos={attentionTodos}
+            onOpenTodo={openTodo}
+            onLogout={async () => {
+              await fetch("/api/mbox/auth/logout", { method: "POST" });
+              onLogout();
+            }}
+            busy={data.loading || headerState === "working"}
           />
         )}
-      </main>
-      <AgentChat inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
+        renderers={{
+          history: () => <HistoryBoard events={data.auditEvents} />,
+          settings: () => (
+            <SettingsBoard
+              server={<ServerBoard pulse={realtime.pulse} />}
+              access={<AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
+            />
+          ),
+          todo: (project, todo) => <TodoNote project={project} todo={todo} onSaved={data.reload} />,
+        }}
+      />
       {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
-      <BottomNav sections={sections} activeSection={section} onSelect={setSection} hrefFor={(key) => routeFor(key, key === section ? query : "")} badges={{ projects: unseenTodos }} />
     </div>
   );
 }
@@ -661,6 +622,10 @@ function ServerBoard({ pulse }: { pulse: number }) {
   return (
     <div className="content-grid server-grid">
       <Panel title="Сервер" icon={Server}>
+        {/* Сборщик метрик на хосте может молча остановиться — старые цифры не должны выглядеть текущими. */}
+        {Date.now() - Date.parse(metrics.captured_at) > 10 * 60 * 1000 && (
+          <p className="error-text">Метрики устарели: последний снимок {formatDateTime(metrics.captured_at)}. На сервере не работает scripts/server_metrics_collector.sh.</p>
+        )}
         <div className="entity-list">
           <EntityLine title="Хост" value={metrics.hostname} />
           <EntityLine title="Load" value={String(metrics.load_1)} />

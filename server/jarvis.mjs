@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import { describeWorkspaceError, findWorkspace, listVersions, listWorkspaces, requestWorkspaceOp } from "./workspaces.mjs";
 
 // Джарвис целиком: инструменты, агентный цикл, модели, источники данных. Раньше он жил в трёх копиях
 // (server/mbox-server.mjs, vite.config.ts, scripts/mbox-archivist.mjs), и каждая правка расходилась
@@ -561,6 +562,104 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "list_workspaces",
+      description: "Локальные папки, подключённые в MBOX Desktop на компьютерах владельца: имя, компьютер, в сети ли приложение, можно ли агентам писать, и git-сводка (ветка, число изменённых файлов, последние коммиты). Вызывай первым, когда просят что-то про локальные файлы, репозиторий или git.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_list_dir",
+      description: "Содержимое каталога в локальной папке (файлы и подпапки). Путь — относительно корня папки, пустой — корень.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки из list_workspaces; можно не указывать, если папка одна" },
+          path: { type: "string", description: "Относительный путь каталога, например docs/notes" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_find_files",
+      description: "Найти файлы в локальной папке по части имени или пути (например «readme», «.md», «notes/2026»).",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          query: { type: "string", description: "Часть имени или пути файла" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_read_file",
+      description: "Прочитать текстовый файл (md, txt, код) из локальной папки целиком.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла, например README.md" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_write_file",
+      description: "Записать текстовый файл в локальной папке ЦЕЛИКОМ (создаст, если его нет). Прежнее содержимое сохраняется в истории версий MBOX, откатить можно из интерфейса. Перед правкой существующего файла сначала прочитай его workspace_read_file и пришли полный новый текст, а не кусок.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла" },
+          content: { type: "string", description: "Полный новый текст файла" },
+          message: { type: "string", description: "Коротко — что и зачем изменено (попадёт в историю версий)" },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_file_history",
+      description: "История версий файла в MBOX: кто (человек, агент, правка на диске) и когда менял.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_git",
+      description: "Git локальной папки: без path — ветка, отставание/опережение, изменённые файлы и последние коммиты; с path — коммиты, где менялся этот файл.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла (необязательно)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_memory",
       description: "Вывести ПОЛНЫЙ текст записи памяти по её номеру (ID) — search_memory отдаёт только короткий обрезанный summary, этим инструментом читай запись целиком, когда попросят «выведи полностью», «покажи запись #N» и т.п.",
       parameters: {
@@ -1026,6 +1125,11 @@ export const TOOL_GROUPS = {
     label: "аналитика постов Telegram-канала",
     match: /(пост|канал|телеграм|telegram|реакци|контент|лайк|охват)/,
     tools: ["analyze_posts"],
+  },
+  local_files: {
+    label: "локальные папки на компьютере: прочитать и записать файл (с историей версий), найти файл, git-статус и коммиты",
+    match: /(локальн|файл|\.md(?![a-z])|\.txt(?![a-z])|readme|git|гит|коммит|ветк|diff|репозитор|на диске|в папке)/,
+    tools: ["list_workspaces", "workspace_list_dir", "workspace_find_files", "workspace_read_file", "workspace_write_file", "workspace_file_history", "workspace_git"],
   },
   workspace: {
     label: "папки, артефакты, журнал решений, лента активности, расход токенов, черновики младшей модели",
@@ -2033,6 +2137,57 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
     return `последние события${project ? ` в «${project.name}»` : ""}: ${lines.join("; ")}`;
   }
 
+  if (["list_workspaces", "workspace_list_dir", "workspace_find_files", "workspace_read_file", "workspace_write_file", "workspace_file_history", "workspace_git"].includes(name)) {
+    const run = (sql, values) => client.query(sql, values);
+    if (name === "list_workspaces") {
+      const rows = await listWorkspaces(run);
+      if (!rows.length) return "локальных папок пока нет — их подключают в MBOX Desktop (значок «Папки»)";
+      return rows.map((row) => {
+        const git = row.git?.isRepo ? `git: ветка ${row.git.branch || "?"}, изменено файлов ${row.git.changesTotal ?? 0}${row.git.ahead ? `, не отправлено коммитов ${row.git.ahead}` : ""}; последние коммиты: ${(row.git.commits || []).slice(0, 3).map((commit) => `${commit.short} ${commit.subject}`).join(" | ")}` : "не git-репозиторий";
+        return `#${row.id} «${row.name}» на ${row.device_name || "компьютере"} — ${row.online ? "в сети" : "приложение не в сети"}, запись агентам ${row.agent_write ? "разрешена" : "запрещена"}; ${git}`;
+      }).join("\n");
+    }
+    const workspace = await findWorkspace(run, args.workspace);
+    if (!workspace) return `не понял, какая папка — укажи workspace; есть: ${(await listWorkspaces(run)).map((row) => `#${row.id} ${row.name}`).join(", ") || "ни одной"}`;
+    if (name === "workspace_file_history") {
+      const versions = await listVersions(run, workspace.id, String(args.path || ""), 20);
+      if (!versions.length) return `у файла «${args.path}» в «${workspace.name}» истории версий пока нет`;
+      return versions.map((version) => `${version.created_at.slice(0, 16)} — ${version.author || "?"} (${version.source})${version.message ? `: ${version.message}` : ""}`).join("\n");
+    }
+    if (name === "workspace_git" && !args.path) {
+      const git = workspace.git || {};
+      if (!git.isRepo) return `«${workspace.name}» не git-репозиторий (или приложение ещё не прислало сводку)`;
+      const changes = (git.changes || []).slice(0, 40).map((change) => `${change.untracked ? "U" : (change.worktree !== " " ? change.worktree : change.index)} ${change.path}`).join("\n");
+      const commits = (git.commits || []).map((commit) => `${commit.short} ${commit.date?.slice(0, 10)} ${commit.author}: ${commit.subject}`).join("\n");
+      return `ветка ${git.branch}${git.upstream ? ` → ${git.upstream}` : ""}, ↑${git.ahead || 0} ↓${git.behind || 0}, сводка от ${git.checkedAt || "?"}\nизменённые файлы (${git.changesTotal ?? 0}):\n${changes || "нет"}\nпоследние коммиты:\n${commits || "нет"}`;
+    }
+    const opByTool = { workspace_list_dir: "list", workspace_find_files: "find", workspace_read_file: "read", workspace_write_file: "write", workspace_git: "git_log" };
+    try {
+      const op = await requestWorkspaceOp(run, {
+        workspace,
+        op: opByTool[name],
+        path: name === "workspace_find_files" ? String(args.query || "") : String(args.path || ""),
+        content: name === "workspace_write_file" ? String(args.content ?? "") : null,
+        message: String(args.message || ""),
+        requestedBy: JARVIS_NAME,
+      });
+      if (op.status !== "done") return `не получилось: ${describeWorkspaceError(op.error, workspace)}`;
+      const result = op.result || {};
+      if (name === "workspace_list_dir") return (result.entries || []).map((entry) => `${entry.type === "dir" ? "📁" : "📄"} ${entry.path}${entry.type === "file" ? ` (${entry.size} байт)` : ""}`).join("\n") || "каталог пуст";
+      if (name === "workspace_find_files") return (result.paths || []).join("\n") || "ничего не нашлось";
+      if (name === "workspace_read_file") {
+        if (result.binary) return "это двоичный файл — прочитать как текст нельзя";
+        if (result.tooLarge) return `файл слишком большой (${result.size} байт)`;
+        const text = String(result.content || "");
+        return text.length > 12000 ? `${text.slice(0, 12000)}\n… (показаны первые 12000 из ${text.length} символов)` : text || "(файл пуст)";
+      }
+      if (name === "workspace_write_file") return `записал «${result.path}» в «${workspace.name}» (${result.size} байт); прежняя версия сохранена в истории MBOX`;
+      if (name === "workspace_git") return (result.commits || []).map((commit) => `${commit.short} ${commit.date?.slice(0, 10)} ${commit.author}: ${commit.subject}`).join("\n") || "коммитов с этим файлом нет";
+    } catch (error) {
+      return `не получилось: ${describeWorkspaceError(error, workspace)}`;
+    }
+  }
+
   if (name === "find_file") {
     const project = matchProjectFuzzy(args.project_name, projectList);
     if (!project) return `не нашёл проект «${args.project_name}» — есть: ${projectList.map((p) => p.name).join(", ")}`;
@@ -2430,6 +2585,14 @@ export async function replyAsJarvis(item) {
               (SELECT count(*) FROM memories WHERE $1::boolean OR project_id = ANY($2::bigint[]))::int AS memories_total`,
       [allowedProjectIds == null, allowedProjectIds || []],
     )).rows[0];
+    // Джарвис отвечал «@Claude и @Codex я не вижу в чате», когда оба были на связи: о присутствии
+    // других агентов он не знал ничего. Берём тот же пульс, что и ростер (agent_presence, 2 минуты).
+    const onlineAgents = allowedProjectIds == null
+      ? (await client.query(
+        "SELECT agent_name FROM agent_presence WHERE last_seen > now() - interval '2 minutes' AND agent_name <> $1 ORDER BY agent_name",
+        [JARVIS_NAME],
+      ).catch(() => ({ rows: [] }))).rows.map((row) => row.agent_name)
+      : [];
     // Промпт больше не перечисляет прозой все инструменты (было ~14К символов): описания живут в их схемах,
     // а в запрос попадают только подключённые группы — см. TOOL_GROUPS. Здесь только то, что не выразить
     // описанием одного инструмента.
@@ -2456,6 +2619,10 @@ export async function replyAsJarvis(item) {
       + `Известные компании: ${companyNames.join(", ") || "нет компаний"}. `
       + `Сводка по MBOX сейчас: задач ${stats.todos_total}, незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total} — `
       + "на вопросы об общем числе отвечай из неё. "
+      + (allowedProjectIds == null
+        ? `Сейчас на связи другие агенты: ${onlineAgents.join(", ") || "никого"}. Они читают чат MBOX и отвечают сами, когда к ним обращаются через @имя; `
+          + "на вопрос «где Claude/Codex» отвечай по этому списку, не выдумывай. "
+        : "")
       + (allowedProjectIds == null ? "" : " У этого пользователя доступ только к перечисленным проектам и их общей памяти. Не называй и не ищи другие проекты, записи, компании или статистику.")
       + JARVIS_DATA_RULES
       + (item.props?.current_project_name

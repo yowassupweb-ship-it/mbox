@@ -1,18 +1,20 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
     "start": "node launch.js",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack": "npm run build:ui && electron-builder --dir",
+    "dist": "npm run build:ui && electron-builder",
+    "build:ui": "node ../scripts/build-desktop-ui.mjs"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "electron": "^33.4.11",
@@ -26,7 +28,9 @@
       "main.js",
       "preload.js",
       "resources/**/*",
-      "package.json"
+      "package.json",
+      "localUi.js",
+      "ui/**/*"
     ],
     "extraResources": [
       {
@@ -54,6 +58,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "npmRebuild": false
   }
 }

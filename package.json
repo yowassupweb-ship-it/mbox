@@ -26,6 +26,8 @@
     "@chatscope/chat-ui-kit-styles": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "lucide-react": "^0.468.0",
     "pg": "^8.23.0",
     "react": "^19.0.0",

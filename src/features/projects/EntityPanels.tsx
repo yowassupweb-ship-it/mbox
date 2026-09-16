@@ -8,9 +8,10 @@ import { PropsEditor } from "./PropsEditor";
 import { RelationsPanel } from "./RelationsPanel";
 import { DataSourcesPanel } from "./DataSourcesPanel";
 import type { ProjectEntityKind } from "../tree/entityKinds";
+import { usePersistentState } from "../../app/workbench/tabs";
 
 /** Единая точка входа для постоянных сущностей проекта. */
-export function ProjectEntityView({ project, projects, memories, kind, onSaved }: { project: Project; projects: Project[]; memories: Memory[]; kind: ProjectEntityKind; onSaved: () => void }) {
+export function ProjectEntityView({ project, projects, memories, kind, onSaved, onOpenMemory }: { project: Project; projects: Project[]; memories: Memory[]; kind: ProjectEntityKind; onSaved: () => void; onOpenMemory?: (memoryId: string) => void }) {
   if (kind === "properties") return <PropsEditor project={project} onSaved={onSaved} />;
   if (kind === "relations") return <RelationsPanel project={project} projects={projects} onSaved={onSaved} />;
   if (kind === "stack") return <StackPanel project={project} onSaved={onSaved} />;
@@ -18,7 +19,7 @@ export function ProjectEntityView({ project, projects, memories, kind, onSaved }
   if (kind === "figma") return <FigmaPanel project={project} onSaved={onSaved} />;
   if (kind === "deploy") return <DeployPanel project={project} onSaved={onSaved} />;
   if (kind === "philosophy") return <PhilosophyPanel project={project} onSaved={onSaved} />;
-  if (kind === "memories") return <MemoriesPanel project={project} memories={memories} />;
+  if (kind === "memories") return <MemoriesPanel project={project} memories={memories} onOpenMemory={onOpenMemory} />;
   if (kind === "sources") return <DataSourcesPanel project={project} />;
   return <AccessPanel project={project} onSaved={onSaved} />;
 }
@@ -389,8 +390,8 @@ function hostOf(value: string) {
 
 /** Полноценная вкладка вместо тизера на странице проекта — весь пул памяти проекта с поиском,
  * как Git/Стек/Доступ. Джарвис ищет по этому же пулу через свой инструмент search_memory. */
-export function MemoriesPanel({ project, memories }: { project: Project; memories: Memory[] }) {
-  const [search, setSearch] = useState("");
+export function MemoriesPanel({ project, memories, onOpenMemory }: { project: Project; memories: Memory[]; onOpenMemory?: (memoryId: string) => void }) {
+  const [search, setSearch] = usePersistentState(`mbox.entity.search.${project.id}`, "");
   const todoIds = new Set(project.todos.map((todo) => todo.id));
   const projectMemories = memories
     .filter((memory) => projectMemoryMatches(memory, project, todoIds))
@@ -419,7 +420,21 @@ export function MemoriesPanel({ project, memories }: { project: Project; memorie
       />
       <div className="project-facts-list memories-tab-list">
         {visible.map((memory) => (
-          <article key={memory.id} className="project-fact-card">
+          <article
+            key={memory.id}
+            className={onOpenMemory ? "project-fact-card is-clickable" : "project-fact-card"}
+            onClick={() => onOpenMemory?.(memory.id)}
+            onKeyDown={(event) => {
+              if (!onOpenMemory) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpenMemory(memory.id);
+              }
+            }}
+            role={onOpenMemory ? "button" : undefined}
+            tabIndex={onOpenMemory ? 0 : undefined}
+            title={onOpenMemory ? `Открыть запись #${memory.id}` : undefined}
+          >
             <b>{memory.title}</b>
             <p>{memory.content}</p>
             <time>{memory.entity_type} · {new Date(memory.updated_at).toLocaleDateString("ru-RU")}</time>

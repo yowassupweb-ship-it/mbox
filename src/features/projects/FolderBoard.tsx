@@ -5,6 +5,8 @@ import { formatDate, formatSince } from "../../lib/format";
 import { MemoryModal } from "../memories/MemoryModal";
 import type { FolderRow, Memory, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
+import { usePersistentState } from "../../app/workbench/tabs";
+import { useDraft } from "../../app/workbench/uiMemory";
 
 /**
  * Содержимое папки проекта.
@@ -14,13 +16,15 @@ import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } f
  * с folder_id и project_id. То есть это та же память MBOX, просто разложенная по полкам, а не
  * отдельная сущность: агенты видят её обычным поиском по памяти.
  */
-export function FolderBoard({ folder, project, memories, onSaved }: {
+export function FolderBoard({ folder, project, memories, onSaved, onOpenMemory }: {
   folder: FolderRow;
   project: Project;
   memories: Memory[];
   onSaved: () => void;
+  /** Рабочее место открывает запись во вкладке вместо модалки. */
+  onOpenMemory?: (memoryId: string) => void;
 }) {
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = usePersistentState(`mbox.folder.adding.${folder.id}`, false);
   const [open, setOpen] = useState<Memory | null>(null);
   const items = memories.filter((memory) => memory.folder_id === folder.id);
 
@@ -40,7 +44,7 @@ export function FolderBoard({ folder, project, memories, onSaved }: {
 
       {items.length ? (
         <div className="folder-notes">
-          {items.map((memory) => <FolderNote key={memory.id} memory={memory} onOpen={() => setOpen(memory)} onSaved={onSaved} />)}
+          {items.map((memory) => <FolderNote key={memory.id} memory={memory} onOpen={() => (onOpenMemory ? onOpenMemory(memory.id) : setOpen(memory))} onSaved={onSaved} />)}
         </div>
       ) : <EmptyState text={`В папке «${folder.name}» пока пусто. Первая запись — выше.`} />}
 
@@ -50,9 +54,10 @@ export function FolderBoard({ folder, project, memories, onSaved }: {
 }
 
 function NewNote({ folder, project, onDone, onSaved }: { folder: FolderRow; project: Project; onDone: () => void; onSaved: () => void }) {
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
+  const [title, setTitle, discardTitle] = useDraft(`folder:${folder.id}:title`, "");
+  const [content, setContent, discardContent] = useDraft(`folder:${folder.id}:content`, "");
   const [state, setState] = useState<SaveState>("idle");
+  const done = () => { discardTitle(""); discardContent(""); onDone(); };
 
   async function save() {
     if (!title.trim() && !content.trim()) return;
@@ -69,7 +74,7 @@ function NewNote({ folder, project, onDone, onSaved }: { folder: FolderRow; proj
       });
       setState("saved");
       onSaved();
-      onDone();
+      done();
     } catch {
       setState("error");
     }
@@ -80,7 +85,7 @@ function NewNote({ folder, project, onDone, onSaved }: { folder: FolderRow; proj
       <TextInput label="Заголовок" hint="Можно не заполнять — возьмём начало текста" value={title} onChange={(event) => { setTitle(event.target.value); setState("idle"); }} />
       <TextArea label="Текст" value={content} rows={6} onChange={(event) => { setContent(event.target.value); setState("idle"); }} placeholder="Что положить в эту папку" />
       <div className="folder-note-actions">
-        <Button variant="ghost" onClick={onDone}>Отмена</Button>
+        <Button variant="ghost" onClick={done}>Отмена</Button>
         <SaveButton state={state} idleLabel="Положить в папку" disabled={!title.trim() && !content.trim()} onClick={save} />
       </div>
     </div>

@@ -1,0 +1,2360 @@
+/* Рабочее место по образцу VS Code: шапка, полоса разделов, боковая панель, вкладки, нижняя панель,
+   строка состояния. Всё в пределах одного экрана — прокручиваются только сами области. */
+
+.app.app-workbench {
+  display: block;
+  min-height: 0;
+  height: 100dvh;
+  padding: 0;
+  overflow: hidden;
+}
+
+.wb {
+  /* Иерархия по важности. Текст документа — обычное начертание и самый удобный для чтения размер;
+     обвязка (вкладки, дерево, подписи) — мельче и тише; жирное — только заголовки и имена.
+     Токены переопределены здесь, чтобы старые панели внутри вкладок сели в ту же шкалу. */
+  /* Cascadia Code (первый доступный моноширинный на Windows) — вариативный и плотный на мелком
+     кегле: основной текст на 350 читается легче, подписи и дерево — 400, заголовки — 600. */
+  --weight-text: 350;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", "Liberation Mono", monospace;
+  font-family: var(--font-mono);
+  --weight-normal: 400;
+  --weight-medium: 540;
+  --weight-bold: 640;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 17px;
+  --text-2xl: 20px;
+  --wb-fs-reading: 13.5px;
+  --wb-activity: 44px;
+  --wb-titlebar: 38px;
+  --wb-status: 22px;
+  --wb-line: rgba(133, 245, 219, 0.12);
+  --wb-surface: #0c0d0f;
+  --wb-surface-2: #101114;
+  --wb-hover: rgba(133, 245, 219, 0.06);
+  --wb-selected: rgba(41, 224, 214, 0.13);
+  height: 100dvh;
+  width: 100%;
+  /* Раскладка никогда не прокручивает окно: переполнение внутри панели не должно сдвигать весь интерфейс. */
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: var(--wb-activity) var(--wb-sidebar) minmax(0, 1fr) var(--wb-right, 0px);
+  grid-template-rows: var(--wb-titlebar) minmax(0, 1fr) var(--wb-status);
+  grid-template-areas:
+    "title title title title"
+    "activity sidebar center right"
+    "status status status status";
+  background: var(--bg-color);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+}
+
+body.wb-resizing,
+body.wb-resizing * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* ─── Шапка ─────────────────────────────────────────── */
+
+.wb-titlebar {
+  grid-area: title;
+  min-width: 0;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-surface);
+}
+
+.wb-titlebar .topbar {
+  position: relative;
+  top: auto;
+  height: 100%;
+  padding: 0 10px;
+  gap: 10px;
+  justify-content: space-between;
+  pointer-events: auto;
+}
+
+.topbar-context {
+  min-width: 0;
+  flex: 1 1 240px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-main);
+}
+
+.topbar-context img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  opacity: 0.9;
+}
+
+.topbar-context div {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.topbar-context strong,
+.topbar-context span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-context strong {
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  line-height: 1.1;
+}
+
+.topbar-context span {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.1;
+}
+
+.topbar-actions {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.wb-titlebar .desktop-pill,
+.wb-titlebar .realtime-pill {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: var(--text-xs);
+  box-shadow: none;
+  border-radius: var(--radius-md);
+}
+
+.wb-titlebar .desktop-pill {
+  min-width: 0;
+  max-width: 128px;
+}
+
+.wb-titlebar .desktop-pill strong,
+.wb-titlebar .desktop-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-titlebar .realtime-pill { min-width: 0; max-width: min(28vw, 310px); }
+.wb-titlebar .realtime-pill .topbar-logo { width: 22px; height: 22px; }
+.wb-titlebar .realtime-pill strong.is-brand { font-size: 12px; top: 1px; margin-left: 0; }
+.wb-titlebar .realtime-pill span:not(.pill-avatars) { display: none; }
+.wb-titlebar .pill-avatars .agent-avatar { width: 18px !important; height: 18px !important; }
+.wb-titlebar .topbar-logout { width: 28px; min-height: 28px; }
+.wb-titlebar .agent-status-popover { top: 34px; left: auto; right: 44px; transform: none; z-index: 90; max-height: 60vh; }
+.topbar-actions .desktop-popover { left: auto; right: 0; top: 34px; z-index: 100; }
+
+.command-center {
+  flex: 0 1 340px;
+  width: auto;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-md);
+  background: var(--wb-surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.command-center span { flex: 1; text-align: left; }
+.command-center:hover { color: var(--text-2); border-color: color-mix(in srgb, var(--accent-color) 40%, transparent); }
+
+.topbar-icon-action,
+.topbar-logout {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-md);
+  background: var(--wb-surface-2);
+  color: var(--text-muted);
+}
+
+.topbar-icon-action:hover,
+.topbar-logout:hover {
+  color: var(--text-main);
+  border-color: color-mix(in srgb, var(--accent-color) 36%, transparent);
+  background: var(--wb-hover);
+}
+
+.wb kbd,
+.command-center kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--wb-line);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+}
+
+/* ─── Полоса разделов ───────────────────────────────── */
+
+.wb-activitybar {
+  grid-area: activity;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px 0;
+  border-right: 1px solid var(--wb-line);
+  background: var(--wb-surface);
+}
+
+.wb-activity {
+  position: relative;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+.wb-activity img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  opacity: 1;
+  image-rendering: pixelated;
+}
+.wb-activity:hover { background: color-mix(in srgb, var(--accent-color) 9%, transparent); }
+.wb-activity.is-active { border-left-color: var(--accent-color); }
+.wb-activity.is-active img { opacity: 1; }
+.wb-activity:focus-visible { outline: 1px solid var(--accent-color); outline-offset: -3px; }
+
+.wb-activity-tip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  z-index: 120;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 26%, var(--wb-line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--wb-surface-2) 94%, #000 6%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-4px, -50%);
+  transition: opacity var(--duration-fast) ease, transform var(--duration-fast) ease;
+}
+
+.wb-activity:hover .wb-activity-tip,
+.wb-activity:focus-visible .wb-activity-tip {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.wb-activity b {
+  position: absolute;
+  right: 6px;
+  bottom: 7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--state-warn);
+  color: #000;
+  font-size: 9px;
+  line-height: 15px;
+}
+
+.wb-activity-fill { flex: 1; }
+.wb-activity.is-mobile-only { display: none; color: var(--text-muted); }
+.wb-activity.is-mobile-only.is-active { color: var(--accent-color); }
+
+/* ─── Боковая панель ────────────────────────────────── */
+
+.wb-sidebar {
+  grid-area: sidebar;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--wb-line);
+  background: var(--wb-surface-2);
+}
+
+.wb:not(.has-sidebar) .wb-sidebar { border-right: 0; }
+
+.wb-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wb-view-head {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 16px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-view-actions { display: flex; gap: 2px; }
+
+.wb-view-actions button,
+.wb-icon-btn {
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.wb-view-actions button:hover,
+.wb-icon-btn:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-view-actions button.is-on { color: var(--accent-color); background: var(--wb-selected); }
+.wb-view-actions button img { opacity: 0.8; }
+.wb-view-actions button b { font-size: 10px; }
+
+.wb-filter {
+  position: relative;
+  flex: none;
+  margin: 0 8px 6px;
+}
+
+.wb-filter input {
+  width: 100%;
+  height: 28px;
+  padding: 0 28px 0 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-color);
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.wb-filter input:focus { border-color: var(--accent-color); }
+
+.wb-filter > button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.wb-search-input input { height: 32px; font-size: var(--text-md); }
+.wb-search-input > button { top: 6px; }
+
+.wb-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+}
+
+.wb-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0 60% 0 0;
+  background: var(--accent-color);
+  animation: wb-progress 0.9s ease-in-out infinite;
+}
+
+@keyframes wb-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(260%); }
+}
+
+.wb-view-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+}
+
+.wb-empty,
+.wb-tree-empty {
+  margin: 12px 16px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  list-style: none;
+}
+
+.wb-error { color: var(--state-danger); }
+
+.wb-sash {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+  transition: background-color 0.15s ease 0.1s;
+}
+
+.wb-sash.is-vertical { top: 0; right: -3px; bottom: 0; width: 6px; cursor: ew-resize; }
+.wb-sash.is-vertical.is-left { right: auto; left: -3px; }
+.wb-sash.is-horizontal { top: -3px; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.wb-sash:hover,
+.wb-sash:active { background: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+
+/* ─── Дерево проводника ─────────────────────────────── */
+
+.wb-tree-group { margin-bottom: 6px; }
+
+.wb-tree-group-label {
+  margin: 10px 16px 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-tree,
+.wb-tree-children { margin: 0; padding: 0; list-style: none; }
+
+.wb-tree-row {
+  --depth: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px 0 calc(8px + var(--depth) * 14px);
+  border: 1px solid transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.wb-tree-row:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-tree-row.is-active { background: var(--wb-selected); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+.wb-tree-row img { flex: none; image-rendering: pixelated; }
+
+.wb-tree-project { color: var(--text-main); font-weight: var(--weight-medium); }
+li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-color); }
+
+.wb-chevron { flex: none; color: var(--text-muted); transition: transform var(--duration-fast) ease; }
+.wb-chevron.is-open { transform: rotate(90deg); }
+.wb-chevron-space { width: 14px; flex: none; }
+
+.wb-project-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--project-color, var(--state-off));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.wb-tree-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-tree-label.is-muted { color: var(--text-muted); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.2); }
+.wb-tree-count,
+.wb-tree-hint { flex: none; color: var(--text-muted); font-size: 11px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+
+.wb-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.wb-badge.is-warn { background: color-mix(in srgb, var(--state-warn) 25%, transparent); color: var(--state-warn); }
+
+.wb-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--state-off);
+}
+
+.wb-status-dot.status-doing { background: var(--state-live); box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-live) 30%, transparent); }
+.wb-status-dot.status-next { background: #8ab4ff; }
+.wb-status-dot.status-open { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-muted); }
+.wb-status-dot.status-blocked { background: var(--state-danger); }
+.wb-status-dot.status-review { background: var(--state-warn); }
+.wb-status-dot.status-done { background: var(--state-ok); opacity: 0.6; }
+.wb-status-dot.status-archived { background: var(--state-off); opacity: 0.5; }
+
+.wb-priority { flex: none; font-weight: var(--weight-bold); }
+.wb-priority.priority-urgent { color: var(--state-danger); }
+.wb-priority.priority-high { color: var(--state-warn); }
+
+/* ─── Поиск ─────────────────────────────────────────── */
+
+.wb-search-filters {
+  display: grid;
+  gap: 6px;
+  margin: 0 8px 8px;
+  padding: 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.wb-search-filters select {
+  height: 26px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-color);
+  color: var(--text-main);
+  font: inherit;
+}
+
+.wb-search-filters label { display: flex; align-items: center; gap: 6px; color: var(--text-2); cursor: pointer; }
+.wb-search-filters button { justify-self: start; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; padding: 0; }
+
+.wb-search-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 16px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.wb-search-summary button { border: 0; background: none; color: var(--text-muted); font: inherit; cursor: pointer; text-decoration: underline dotted; }
+.wb-search-summary button:hover { color: var(--accent-color); }
+
+.wb-hit {
+  padding: 7px 12px 7px 16px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.wb-hit:hover { background: var(--wb-hover); }
+.wb-hit.is-cursor { background: var(--wb-selected); border-left-color: var(--accent-color); }
+.wb-hit.is-active .wb-hit-title { color: var(--accent-color); }
+
+.wb-hit-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-main);
+  font-weight: var(--weight-medium);
+  line-height: 1.35;
+}
+
+.wb-hit-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.wb-hit mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--state-warn) 26%, transparent);
+  color: #ffe2a3;
+}
+
+.wb-hit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.wb-hit-meta .is-fact { color: var(--accent-color); }
+
+.wb-score {
+  width: 38px;
+  height: 3px;
+  margin-left: auto;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.wb-score i { display: block; height: 100%; background: var(--accent-color); }
+
+/* ─── Агенты в боковой панели ───────────────────────── */
+
+.wb-side-section { padding: 4px 8px 10px; }
+
+.wb-side-section h3,
+.wb-memory-side h3 {
+  margin: 8px 8px 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-agent-list { margin: 0; padding: 0; list-style: none; }
+
+.wb-agent-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.wb-agent-list li.is-live { background: color-mix(in srgb, var(--state-live) 7%, transparent); }
+.wb-agent-list li > div { min-width: 0; display: grid; }
+.wb-agent-list strong { color: var(--text-main); font-size: var(--text-sm); }
+.wb-agent-list span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Центр: вкладки и документы ────────────────────── */
+
+.wb-center {
+  grid-area: center;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) var(--wb-panel);
+}
+
+.wb-editor {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
+}
+
+.wb-tabs {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-surface);
+  scrollbar-width: none;
+}
+
+.wb-tabs::-webkit-scrollbar { display: none; }
+
+.wb-tab {
+  position: relative;
+  flex: none;
+  max-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 10px;
+  border-right: 1px solid var(--wb-line);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wb-tab img { flex: none; image-rendering: pixelated; opacity: 0.8; }
+.wb-tab:hover { background: var(--wb-hover); color: var(--text-2); }
+.wb-tab.is-active { background: var(--bg-color); color: var(--text-main); box-shadow: inset 0 1px 0 var(--accent-color); }
+.wb-tab.is-active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg-color); }
+.wb-tab.is-preview .wb-tab-title { font-style: italic; }
+.wb-tab.is-drop-zone:hover { box-shadow: inset 2px 0 0 var(--accent-color); }
+
+.wb-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.wb-tab-close {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.wb-tab:hover .wb-tab-close,
+.wb-tab.is-active .wb-tab-close { visibility: visible; }
+.wb-tab-close:hover { background: rgba(255, 255, 255, 0.08); }
+
+.wb-tab.is-dirty .wb-tab-close { visibility: visible; }
+.wb-tab.is-dirty .wb-tab-close svg { display: none; }
+.wb-tab.is-dirty .wb-tab-close::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); }
+.wb-tab.is-dirty .wb-tab-close:hover svg { display: block; }
+.wb-tab.is-dirty .wb-tab-close:hover::before { display: none; }
+
+.wb-docs { position: relative; min-height: 0; overflow: hidden; }
+
+.wb-doc {
+  height: 100%;
+  overflow: auto;
+  background: var(--bg-color);
+}
+
+.wb-doc-page {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 16px 24px 48px;
+}
+
+.wb-doc-page.is-narrow { max-width: 920px; }
+
+.wb-doc-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-doc-header h2 { margin: 0; font-size: var(--text-lg); }
+.wb-doc-sep { color: var(--text-muted); }
+.wb-doc-detail { margin-left: auto; color: var(--text-muted); font-size: var(--text-xs); }
+
+.wb-doc-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-doc-project:hover { color: var(--accent-color); }
+
+.wb-doc-missing {
+  padding: 40px 24px;
+  color: var(--text-muted);
+}
+
+.wb-watermark {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 22px;
+  color: var(--text-muted);
+}
+
+.wb-watermark img { opacity: 0.25; image-rendering: pixelated; }
+.wb-watermark dl { display: grid; grid-template-columns: auto auto; gap: 8px 18px; margin: 0; font-size: var(--text-xs); }
+.wb-watermark dt { text-align: right; }
+.wb-watermark dd { margin: 0; }
+
+/* Старые страницы внутри вкладок: гасим отступы, рассчитанные на отдельную страницу с нижним меню. */
+.wb-doc > .settings-board,
+.wb-doc > .content-grid,
+.wb-doc > .overview-grid,
+.wb-doc > .panel,
+.wb-doc > .agent-work-board,
+.wb-doc > div:not([class]) { padding: 16px 24px 48px; }
+
+/* ─── Документ памяти ───────────────────────────────── */
+
+.wb-memory {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.wb-memory-main {
+  min-width: 0;
+  padding: 0 32px 64px;
+}
+
+.wb-doc-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  margin: 0 -32px 8px;
+  padding: 0 32px;
+  background: color-mix(in srgb, var(--bg-color) 94%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-doc-crumbs { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+
+.wb-doc-actions { display: flex; align-items: center; gap: 6px; }
+
+.wb-doc-actions button {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.wb-doc-actions button:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
+.wb-doc-actions button.is-primary { background: var(--accent-color); border-color: var(--accent-color); color: #031312; font-weight: var(--weight-medium); }
+.wb-doc-actions button.is-primary kbd { border-color: rgba(0, 0, 0, 0.25); color: rgba(0, 0, 0, 0.6); }
+.wb-doc-actions button.is-danger:hover { color: var(--state-danger); border-color: var(--state-danger); }
+
+.wb-memory-title {
+  margin: 18px 0 16px;
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: var(--weight-bold);
+}
+
+.wb-memory-body {
+  max-width: 820px;
+  color: var(--text-main);
+  font-size: var(--text-md);
+  line-height: 1.65;
+}
+
+.wb-memory-body p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-memory-body p.is-muted { color: var(--text-muted); }
+.wb-memory-body p.is-list { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding-left: calc(var(--indent, 0) * 18px + 4px); }
+.wb-memory-body p.is-list > span:first-child { color: var(--accent-color); }
+.wb-memory-body .is-gap { height: 0.7em; }
+.wb-memory-body h4 { margin: 1em 0 0.3em; color: var(--text-main); font-size: var(--text-lg); }
+.wb-memory-body h4.level-1 { font-size: var(--text-xl); }
+.wb-memory-body h4.level-3,
+.wb-memory-body h4.level-4 { font-size: var(--text-md); color: var(--eyebrow); }
+.wb-memory-body code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: #b9f5ec; font-size: 0.92em; }
+
+.wb-memory-body pre {
+  margin: 0.5em 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.wb-memory-editor { display: grid; gap: 10px; padding-top: 12px; }
+
+.wb-memory-title-input,
+.wb-memory-editor textarea,
+.wb-props-form input,
+.wb-props-form select {
+  width: 100%;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface);
+  color: var(--text-main);
+  font: inherit;
+  outline: none;
+}
+
+.wb-memory-title-input { height: 40px; padding: 0 10px; font-size: 18px; font-weight: var(--weight-medium); }
+.wb-memory-editor textarea { min-height: calc(100dvh - 330px); padding: 12px; resize: vertical; font-size: var(--text-md); line-height: 1.6; }
+.wb-memory-title-input:focus,
+.wb-memory-editor textarea:focus,
+.wb-props-form input:focus,
+.wb-props-form select:focus { border-color: var(--accent-color); }
+
+.wb-memory-side {
+  min-width: 0;
+  padding: 8px 12px 32px;
+  border-left: 1px solid var(--wb-line);
+  background: var(--wb-surface-2);
+}
+
+.wb-props { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0 8px; font-size: var(--text-xs); }
+.wb-props dt { color: var(--text-muted); }
+.wb-props dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.wb-props dd button { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; text-align: left; }
+.wb-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-tags span { padding: 1px 6px; border: 1px solid var(--wb-line); border-radius: 3px; }
+
+.wb-props-form { display: grid; gap: 8px; margin: 0 8px; font-size: var(--text-xs); color: var(--text-muted); }
+.wb-props-form label { display: grid; gap: 4px; }
+.wb-props-form input,
+.wb-props-form select { height: 28px; padding: 0 6px; font-size: var(--text-sm); }
+
+.wb-side-list { margin: 0; padding: 0; list-style: none; }
+
+.wb-side-list button {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-side-list button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-side-list svg { flex: none; align-self: center; color: var(--text-muted); }
+.wb-side-list em { flex: none; color: var(--eyebrow); font-style: normal; }
+.wb-side-id { flex: none; color: var(--text-muted); }
+
+/* ─── Нижняя панель ─────────────────────────────────── */
+
+.wb-panel {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
+  border-top: 1px solid var(--wb-line);
+  background: var(--wb-surface-2);
+}
+
+.wb:not(.has-panel) .wb-panel { display: none; }
+
+.wb-panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px 0 12px;
+}
+
+.wb-panel-tab {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wb-panel-tab:hover { color: var(--text-2); }
+.wb-panel-tab.is-active { color: var(--text-main); border-bottom-color: var(--accent-color); }
+.wb-panel-tab b { min-width: 16px; padding: 0 4px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); color: var(--text-2); font-size: 10px; letter-spacing: 0; line-height: 16px; }
+.wb-panel-tab b.is-warn { background: var(--state-warn); color: #000; }
+.wb-panel-fill { flex: 1; }
+
+.wb-panel-body { position: relative; min-height: 0; overflow: hidden; }
+.wb-panel-pane { height: 100%; min-height: 0; }
+.wb-panel-pane.is-scroll { overflow: auto; padding: 4px 12px 16px; }
+.wb-panel-pane.is-scroll > .panel { padding: 0; }
+
+.wb-attention { margin: 4px 0 0; padding: 0; list-style: none; }
+
+.wb-attention button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-attention button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-attention-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-attention-meta { flex: none; color: var(--text-muted); font-size: var(--text-xs); }
+
+/* Консоль агентов, встроенная в панель: без плавающей кнопки, фиксированного позиционирования и рамки. */
+.wb .agent-chat.is-embedded {
+  position: static;
+  height: 100%;
+  display: block;
+}
+
+.wb .agent-chat.is-embedded .agent-chat-shell.console {
+  position: static;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.wb .agent-chat.is-embedded .console-bar { display: none; }
+
+/* Журнал в панели: лента сама занимает всю высоту и скроллится. Раньше у .console-body был
+   overflow-x + overscroll-behavior: contain без ограничения высоты — колесо уходило в никуда. */
+.wb-panel-pane.is-journal { overflow: hidden; }
+.wb-panel-pane.is-journal > .panel { height: 100%; display: flex; flex-direction: column; margin: 0; padding: 0; }
+.wb-panel-pane.is-journal > .panel > .panel-title { display: none; }
+.wb-panel-pane.is-journal .console { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.wb-panel-pane.is-journal .console-bar { flex: none; padding: 4px 14px; background: transparent; }
+.wb-panel-pane.is-journal .console-body { flex: 1; min-height: 0; overflow: auto; padding-top: 2px; }
+
+/* ─── Консоль справа ────────────────────────────────── */
+
+.wb-right {
+  grid-area: right;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+  overflow: hidden;
+  border-left: 1px solid var(--wb-line);
+  background: var(--wb-surface-2);
+}
+
+.wb:not(.has-right) .wb-right { display: none; }
+
+.wb-right-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-right-body { min-height: 0; }
+
+.wb-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--state-live);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-live) 30%, transparent);
+  vertical-align: middle;
+}
+
+/* ─── Пункты меню: навыки, инструменты ──────────────── */
+
+.wb-menu-group { margin-bottom: 4px; }
+
+.wb-menu-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 4px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-menu-group-head.is-static { cursor: default; padding-top: 12px; }
+.wb-menu-group-head b { margin-left: auto; font-weight: 500; letter-spacing: 0; }
+
+.wb-caret { display: inline-block; width: 10px; color: var(--text-muted); font-size: 13px; line-height: 1; transition: transform var(--duration-fast) ease; }
+.wb-caret.is-open { transform: rotate(90deg); }
+
+.wb-menu-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  padding: 6px 12px 6px 26px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-menu-item.has-icon { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding-left: 14px; align-items: center; }
+.wb-menu-item.has-icon > img,
+.wb-menu-item.has-icon > .wb-menu-item-icon { grid-row: span 2; width: 22px; height: 22px; border-radius: 4px; object-fit: contain; }
+.wb-menu-item:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-menu-item.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); color: var(--text-main); }
+.wb-menu-item.is-static { cursor: default; }
+.wb-menu-item.is-static:hover { background: none; color: var(--text-2); }
+.wb-menu-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.wb-menu-item-meta { overflow: hidden; color: var(--text-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Страницы навыка и инструмента ─────────────────── */
+
+.wb-catalog-doc { gap: 18px; padding-top: 24px; }
+.wb-catalog-head h1 { margin: 6px 0 8px; font-size: 22px; }
+.wb-catalog-head p { margin: 0; max-width: 760px; color: var(--text-2); font-size: var(--text-md); line-height: 1.6; }
+.wb-catalog-head.has-icon { display: flex; gap: 16px; align-items: flex-start; }
+.wb-catalog-head.has-icon > img,
+.wb-catalog-head.has-icon > .wb-menu-item-icon { flex: none; margin-top: 18px; border-radius: 8px; }
+.wb-menu-item-icon { display: grid; place-items: center; border: 1px solid var(--wb-line); border-radius: 4px; background: var(--wb-surface); color: var(--accent-color); font-weight: var(--weight-bold); text-transform: uppercase; }
+.wb-catalog-head .wb-menu-item-icon { font-size: 20px; }
+
+.wb-stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); border: 1px solid var(--wb-line); border-radius: var(--radius-md); overflow: hidden; }
+.wb-stat-row > div { display: grid; gap: 2px; padding: 10px 14px; border-right: 1px solid var(--wb-line); }
+.wb-stat-row > div:last-child { border-right: 0; }
+.wb-stat-row b { color: var(--text-main); font-size: var(--text-lg); }
+.wb-stat-row span { color: var(--text-muted); font-size: 11px; }
+
+.wb-spec { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: var(--text-sm); }
+.wb-spec dt { color: var(--text-muted); }
+.wb-spec dd { margin: 0; color: var(--text-main); line-height: 1.55; overflow-wrap: anywhere; }
+.wb-spec code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: #b9f5ec; }
+.wb-spec a,
+.wb-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-color); text-decoration: none; }
+.wb-links { display: flex; flex-wrap: wrap; gap: 14px; }
+
+.wb-inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--wb-line);
+  border-radius: 3px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.wb-inline-btn:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
+
+.wb-commands h3 { margin: 0 0 8px; color: var(--text-muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.wb-commands h3 span { letter-spacing: 0; text-transform: none; }
+
+.wb-command {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-command-label { color: var(--text-main); }
+.wb-command code { overflow: hidden; color: #b9f5ec; font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.wb-command-actions { display: flex; gap: 6px; }
+
+.wb-command-actions button {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wb-command-actions button.is-primary { border-color: color-mix(in srgb, var(--accent-color) 60%, transparent); color: var(--accent-color); }
+.wb-command-actions button.is-danger { border-color: var(--state-danger); color: var(--state-danger); }
+.wb-command-actions button:disabled { opacity: 0.4; cursor: default; }
+
+.wb-run-log { border: 1px solid var(--wb-line); border-radius: var(--radius-md); overflow: hidden; }
+.wb-run-log header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--wb-surface); color: var(--text-2); font-size: var(--text-xs); }
+.wb-run-log header i { width: 7px; height: 7px; border-radius: 50%; background: var(--state-off); }
+.wb-run-log header i.is-live { background: var(--state-live); }
+.wb-run-log header span { margin-left: auto; color: var(--text-muted); }
+.wb-run-log > div { max-height: 380px; overflow: auto; padding: 8px 12px; font-size: var(--text-xs); line-height: 1.5; white-space: pre-wrap; }
+.wb-run-log .is-err { color: var(--state-danger); }
+
+/* ─── Файлы ─────────────────────────────────────────── */
+
+.wb-view.is-drop { position: relative; }
+
+.wb-drop-hint {
+  position: absolute;
+  inset: 8px;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed var(--accent-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-color) 85%, transparent);
+  color: var(--accent-color);
+  pointer-events: none;
+}
+
+.wb-files-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.wb-files-notice button { margin-left: auto; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+
+.wb-file { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.wb-file-toolbar { position: static; margin: 0; padding: 0 16px; }
+.wb-doc-crumbs b { color: var(--text-main); font-weight: var(--weight-medium); }
+.wb-file-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 260px; }
+.wb-file-main { min-width: 0; min-height: 0; overflow: auto; }
+.wb-file-side { overflow: auto; }
+
+.wb-segmented { display: inline-flex; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); overflow: hidden; }
+.wb-doc-actions .wb-segmented button { height: 26px; border: 0; border-radius: 0; background: none; }
+.wb-doc-actions .wb-segmented button + button { border-left: 1px solid var(--wb-line); }
+.wb-doc-actions .wb-segmented button.is-on { background: var(--wb-selected); color: var(--accent-color); }
+
+.wb-code-view { display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 100%; font-size: 12.5px; line-height: 1.6; }
+
+.wb-code-gutter {
+  display: grid;
+  align-content: start;
+  padding: 12px 10px 24px 16px;
+  border-right: 1px solid var(--wb-line);
+  color: rgba(238, 244, 241, 0.25);
+  text-align: right;
+  user-select: none;
+}
+
+.wb-code-view pre { margin: 0; padding: 12px 16px 24px; overflow: visible; color: #d9e7e3; white-space: pre; tab-size: 2; }
+
+.wb-code-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  display: block;
+  padding: 12px 16px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: var(--bg-color);
+  color: #d9e7e3;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.wb-html-preview { height: 100%; display: flex; justify-content: center; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
+.wb-html-preview iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: 4px; background: #fff; }
+.wb-html-preview.is-mobile iframe { width: 390px; max-width: 100%; }
+
+.wb-file-markdown { padding: 20px 32px 48px; }
+
+/* ─── Консоль: панели и сессии процессов ────────────── */
+
+/* minmax(0, 1fr) по ширине: без неё колонка сетки не сжималась ниже содержимого (терминал, заголовки),
+   и список терминалов уезжал за правый край консоли. */
+.wb-console { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 30px minmax(0, 1fr); overflow: hidden; }
+
+.wb-console-toolbar {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--wb-line);
+  font-size: 11px;
+}
+
+.wb-console-toolbar button {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-console-toolbar button:hover { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
+.wb-console-toolbar button:disabled { opacity: 0.4; cursor: default; }
+.wb-console-toolbar button.is-live { color: var(--state-live); }
+.wb-console-toolbar button.is-outside { color: var(--state-warn); }
+.wb-console-label { margin-right: 4px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+.wb-console-label.is-hint { letter-spacing: 0; text-transform: none; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-console-count { margin-left: 6px; color: var(--text-muted); white-space: nowrap; }
+.wb-console-fill { flex: 1; }
+
+.wb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--state-off); }
+.wb-dot.is-live { background: var(--state-live); box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-live) 30%, transparent); }
+.wb-dot.is-outside { background: var(--state-warn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-warn) 26%, transparent); }
+
+.wb-console-body { min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+
+.wb-console-panes {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+}
+.wb-console-panes.is-column { flex-direction: column; }
+
+/* Столбец группы: в обычной группе панели в нём друг под другом, в повёрнутой — рядом. */
+.wb-console-column { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 3px; }
+.wb-console-panes.is-column > .wb-console-column { flex-direction: row; }
+
+.wb-console-pane {
+  flex: 1 1 0;
+  flex-basis: 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface);
+  overflow: hidden;
+}
+
+.wb-console-pane.is-chat {
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+}
+
+.wb-console-pane.is-agent {
+  border-color: color-mix(in srgb, var(--accent-color) 52%, var(--wb-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent);
+}
+
+.wb-console-pane.is-ssh {
+  border-color: color-mix(in srgb, #73c991 56%, var(--wb-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #73c991 10%, transparent);
+}
+
+.wb-console-pane > .wb-console-pane-head { flex: none; height: 28px; }
+.wb-console-pane > .wb-console-pane-body { flex: 1; }
+
+.wb-console-sash {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  background: var(--wb-line);
+  touch-action: none;
+  transition: background-color 0.15s ease 0.1s;
+}
+
+.wb-console-panes.is-row > .wb-console-sash,
+.wb-console-panes.is-column > .wb-console-column > .wb-console-sash,
+.wb-console-sash.is-list-sash { width: 1px; margin: 0 1px; cursor: ew-resize; }
+.wb-console-panes.is-column > .wb-console-sash,
+.wb-console-panes.is-row > .wb-console-column > .wb-console-sash { height: 1px; margin: 1px 0; cursor: ns-resize; }
+
+/* Видимая линия в 1px, а хватать можно за полосу пошире. */
+.wb-console-sash::before { content: ""; position: absolute; }
+.wb-console-panes.is-row > .wb-console-sash::before,
+.wb-console-panes.is-column > .wb-console-column > .wb-console-sash::before,
+.wb-console-sash.is-list-sash::before { top: 0; bottom: 0; left: -4px; right: -4px; }
+.wb-console-panes.is-column > .wb-console-sash::before,
+.wb-console-panes.is-row > .wb-console-column > .wb-console-sash::before { left: 0; right: 0; top: -4px; bottom: -4px; }
+.wb-console-sash:hover,
+.wb-console-sash:active { background: var(--accent-color); }
+.wb-console-pane.is-agent.is-focused {
+  border-color: color-mix(in srgb, var(--accent-color) 78%, var(--wb-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 18%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent-color) 16%, transparent);
+}
+.wb-console-pane.is-ssh.is-focused {
+  border-color: color-mix(in srgb, #73c991 78%, var(--wb-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #73c991 18%, transparent), 0 0 0 1px color-mix(in srgb, #73c991 16%, transparent);
+}
+.wb-console-pane.is-focused > .wb-console-pane-head { box-shadow: inset 0 1px 0 var(--accent-color); }
+
+.wb-console-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 4px 0 8px;
+  background: var(--wb-surface);
+}
+
+.wb-console-pane-head select {
+  min-width: 0;
+  max-width: 60%;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.wb-console-pane-head select:hover,
+.wb-console-pane-head select:focus { border-color: var(--wb-line); outline: none; }
+.wb-console-pane-head select option { background: var(--wb-surface-2); }
+.wb-console-pane-icon { color: var(--text-muted); }
+.wb-console-pane-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.wb-agent-pane-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+}
+.wb-agent-pane-title .agent-avatar { flex: none; }
+.wb-agent-pane-title strong,
+.wb-agent-pane-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-agent-pane-title strong {
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+}
+.wb-agent-pane-title span {
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.wb-console-pane-head > .wb-icon-btn { margin-left: 2px; }
+.wb-console-pane-head > .wb-console-pane-icon + .wb-icon-btn,
+.wb-console-pane-head > select + .wb-icon-btn { margin-left: auto; }
+.wb-session-state { margin-right: 4px; color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
+.wb-session-state.is-running { color: var(--state-live); }
+.wb-session-state.is-failed { color: var(--state-danger); }
+
+.wb-console-pane-body { min-height: 0; overflow: hidden; }
+
+.wb-session-shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-session-log {
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px 16px;
+  color: #d9e7e3;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wb-session-log .is-err { color: #ff9aa4; }
+.wb-session-cmd { margin-bottom: 6px; color: var(--text-muted); }
+.wb-session-end { margin-top: 8px; color: var(--text-muted); }
+
+.wb-terminal { height: 100%; min-height: 0; padding: 4px 0 0 8px; background: var(--wb-surface); overflow: hidden; }
+.wb-terminal .xterm { height: 100%; }
+.wb-terminal .xterm-viewport { background: transparent !important; }
+
+.wb-session-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 16px; color: var(--text-muted); text-align: center; }
+.wb-session-empty p { margin: 0; max-width: 360px; }
+.wb-session-empty p.wb-muted { font-size: 12px; opacity: 0.75; }
+.wb-session-empty button { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent-color) 55%, transparent); border-radius: var(--radius-sm); background: none; color: var(--accent-color); font: inherit; cursor: pointer; }
+
+/* ─── Локальные папки и git ─────────────────────────── */
+
+.wb-tree-row.is-heavy .wb-tree-label { color: var(--text-muted); }
+.wb-root-row { position: relative; }
+.wb-root-actions { display: none; gap: 2px; }
+.wb-root-row:hover .wb-root-actions { display: inline-flex; }
+.wb-root-actions button,
+.wb-agent-toggle { width: 22px; height: 20px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; }
+.wb-root-actions button:hover,
+.wb-agent-toggle:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-agent-toggle.is-on { color: var(--accent-color); }
+
+.wb-git-letter { flex: none; width: 14px; text-align: center; font-size: 10.5px; font-weight: var(--weight-bold); }
+.wb-git-letter.is-M { color: #e2c08d; }
+.wb-git-letter.is-A,
+.wb-git-letter.is-U { color: #73c991; }
+.wb-git-letter.is-D { color: #f48771; }
+.wb-git-letter.is-R { color: #8ab4ff; }
+.wb-tree-row.git-M .wb-tree-label { color: #e2c08d; }
+.wb-tree-row.git-A .wb-tree-label,
+.wb-tree-row.git-U .wb-tree-label { color: #73c991; }
+.wb-doc-crumbs .wb-git-letter { margin-left: 8px; }
+.wb-dirty-mark { color: var(--text-2); }
+
+.wb-git-panel { flex: none; max-height: 45%; display: flex; flex-direction: column; border-top: 1px solid var(--wb-line); }
+.wb-git-panel.is-open { min-height: 140px; }
+.wb-git-body { min-height: 0; overflow: auto; padding-bottom: 8px; }
+.wb-git-root + .wb-git-root { border-top: 1px dashed var(--wb-line); margin-top: 6px; padding-top: 6px; }
+.wb-git-branch { display: flex; align-items: center; gap: 6px; padding: 2px 8px 4px 14px; color: var(--text-2); font-size: 11.5px; }
+.wb-git-branch b { color: var(--text-main); font-weight: var(--weight-medium); }
+.wb-git-branch span { color: var(--state-warn); }
+.wb-git-branch .wb-git-count { margin-left: auto; color: var(--text-muted); }
+
+.wb-git-change,
+.wb-git-commit {
+  width: 100%;
+  height: 22px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 24px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-git-change .wb-tree-label,
+.wb-git-commit .wb-tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-git-change .wb-tree-hint,
+.wb-git-commit .wb-tree-hint {
+  justify-self: end;
+  max-width: 92px;
+  min-width: 54px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-git-change:hover,
+.wb-git-commit:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-git-commits { margin-top: 6px; }
+.wb-git-hash { color: var(--eyebrow); font-size: 10.5px; white-space: nowrap; }
+
+.wb-ws-card { margin: 6px 10px; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); font-size: var(--text-xs); }
+.wb-ws-card-head { display: flex; align-items: center; gap: 6px; }
+.wb-ws-card-head span { margin-left: auto; color: var(--text-muted); }
+.wb-ws-card-git { margin-top: 6px; color: var(--text-2); }
+
+.wb-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-surface);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+.wb-banner.is-warn { background: color-mix(in srgb, var(--state-warn) 12%, var(--wb-surface)); color: #ffd98a; }
+.wb-banner.is-error { background: color-mix(in srgb, var(--state-danger) 12%, var(--wb-surface)); color: #ffb3bb; }
+.wb-banner button { height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-main); font: inherit; cursor: pointer; }
+.wb-banner button.is-on { border-color: var(--accent-color); color: var(--accent-color); }
+
+.wb-version-view { min-height: 100%; }
+.wb-version-text { margin: 0; padding: 12px 16px 24px; color: #d9e7e3; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.wb-diff { padding: 8px 0 24px; font-size: 12px; line-height: 1.55; }
+.wb-diff-line { padding: 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: #c9d6d2; }
+.wb-diff-line > span { display: inline-block; width: 16px; color: var(--text-muted); user-select: none; }
+.wb-diff-line.is-add { background: rgba(115, 201, 145, 0.12); color: #a8e6bd; }
+.wb-diff-line.is-del { background: rgba(244, 135, 113, 0.12); color: #f5b5a8; }
+.wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: #8ab4ff; }
+.wb-diff-line.is-meta { color: var(--text-muted); }
+.wb-diff-gap { padding: 2px 16px; color: var(--text-muted); font-size: 11px; background: rgba(255, 255, 255, 0.02); }
+.wb-commit-meta { margin: 0; padding: 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); color: var(--text-main); font-size: 12.5px; white-space: pre-wrap; }
+
+.wb-side-tabs { display: flex; gap: 4px; margin: 4px 4px 8px; }
+.wb-side-tabs button { flex: 1; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.wb-side-tabs button.is-on { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); color: var(--accent-color); background: var(--wb-selected); }
+
+.wb-version-list { margin: 0; padding: 0; list-style: none; }
+.wb-version-list button { width: 100%; display: grid; gap: 1px; padding: 6px 8px; border: 0; border-left: 2px solid transparent; background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); text-align: left; cursor: pointer; }
+.wb-version-list button:hover { background: var(--wb-hover); }
+.wb-version-list button.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); }
+.wb-version-list b { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.wb-version-list em { color: var(--text-muted); font-style: normal; }
+.wb-version-source { justify-self: start; padding: 0 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.06); color: var(--text-muted); font-size: 10px; }
+.wb-version-source.is-agent { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--accent-color); }
+.wb-version-source.is-disk { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
+.wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: #8ab4ff; }
+.wb-file-meta { margin-top: 14px; }
+
+/* ─── Каркас документа: текст главный, сведения — выдвижная панель ─── */
+
+.wb-doc-shell {
+  container-type: inline-size;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.wb-doc-bar,
+.wb-file > .wb-doc-bar {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--bg-color);
+}
+
+.wb-doc-bar .wb-doc-crumbs { min-width: 0; font-size: 11px; }
+.wb-doc-bar .wb-doc-actions { flex: none; gap: 4px; }
+.wb-doc-bar .wb-doc-actions button { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.wb-doc-bar .wb-doc-actions .wb-segmented button { height: 22px; }
+
+.wb-drawer-toggle b { min-width: 16px; padding: 0 4px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); color: var(--text-2); font-size: 10px; font-weight: 500; line-height: 16px; text-align: center; }
+.wb-drawer-toggle.is-on { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent) !important; color: var(--accent-color) !important; }
+
+.wb-doc-layout { position: relative; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.wb-doc-layout.has-drawer { grid-template-columns: minmax(0, 1fr) 280px; }
+.wb-doc-main { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.wb-doc-main > .wb-code-editor { flex: 1; }
+
+.wb-drawer {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 24px;
+  border-left: 1px solid var(--wb-line);
+  background: var(--wb-surface-2);
+}
+
+.wb-drawer h3 { margin: 10px 4px 6px; color: var(--text-muted); font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+.wb-drawer-close { display: none; position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); font-size: 16px; cursor: pointer; }
+
+/* Узкая вкладка (консоль справа, открыт сайдбар): панель накрывает текст, а не сжимает его. */
+@container (max-width: 820px) {
+  .wb-doc-layout.has-drawer { grid-template-columns: minmax(0, 1fr); }
+  .wb-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 4; width: min(300px, 88%); box-shadow: -12px 0 32px rgba(0, 0, 0, 0.5); }
+  .wb-drawer-close { display: block; }
+  .wb-doc-bar .wb-drawer-toggle span { display: none; }
+}
+
+.wb-reading {
+  width: 100%;
+  max-width: 820px;
+  padding: 18px 28px 64px;
+  box-sizing: border-box;
+}
+
+.wb-doc-title {
+  margin: 0 0 6px;
+  color: var(--text-main);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.wb-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 0;
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.wb-file > .wb-meta-strip { margin: 0; padding: 4px 20px; border-bottom: 1px solid var(--wb-line); }
+.wb-meta-strip > span { display: inline-flex; align-items: center; }
+.wb-meta-strip > span + span::before { content: "·"; margin: 0 7px; color: rgba(238, 244, 241, 0.22); }
+.wb-meta-link { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; }
+.wb-meta-link:hover { text-decoration: underline; }
+.wb-meta-tag { padding: 0 5px; border: 1px solid var(--wb-line); border-radius: 3px; }
+
+.wb-memory-body { max-width: none; font-size: var(--wb-fs-reading); font-weight: var(--weight-text); line-height: 1.7; }
+.wb-memory-body h4 { font-weight: 600; }
+.wb-memory-body h4.level-1 { font-size: 16px; }
+.wb-memory-body h4:not(.level-1):not(.level-3):not(.level-4) { font-size: 14.5px; }
+.wb-memory-body b { font-weight: 600; }
+
+.wb-memory-editor.wb-reading { display: grid; gap: 8px; max-width: 900px; }
+.wb-memory-editor .wb-memory-title-input { height: 34px; font-size: 16px; font-weight: 600; }
+.wb-memory-editor textarea { min-height: calc(100dvh - 260px); font-size: var(--wb-fs-reading); font-weight: var(--weight-text); }
+
+.wb-inline-props { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-inline-props.is-bar { padding: 6px 20px; border-bottom: 1px solid var(--wb-line); }
+.wb-inline-props input,
+.wb-inline-props select {
+  height: 26px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.wb-inline-props input { flex: 1 1 160px; }
+.wb-inline-props input.is-short { flex: 0 1 90px; }
+.wb-inline-props input:focus,
+.wb-inline-props select:focus { border-color: var(--accent-color); }
+
+.wb-file { height: 100%; display: flex; flex-direction: column; }
+.wb-file > .wb-file-main { flex: 1; min-height: 0; overflow: auto; }
+.wb-code-editor,
+.wb-code-view,
+.wb-session-log,
+.wb-diff,
+.wb-version-text { font-weight: var(--weight-text); }
+.wb-doc-foot { flex: none; padding: 4px 20px; border-top: 1px solid var(--wb-line); color: var(--text-muted); font-size: 10.5px; }
+
+/* Консоль и старые панели внутри рабочего места — в ту же шкалу, без жирного основного текста. */
+.wb pre,
+.wb code,
+.wb kbd,
+.wb textarea { font-family: var(--font-mono); }
+.wb-memory-body pre { color: #c9d6d2; }
+.wb .console-log { font-size: 12px; line-height: 1.6; }
+.wb .console-log-text { font-weight: var(--weight-text); }
+.wb .console-log-actor { font-weight: 600; }
+.wb .panel-title h2 { font-size: var(--text-lg); }
+.wb .rows-head h1 { font-size: var(--text-xl); }
+
+/* ─── Заметки ───────────────────────────────────────── */
+
+.wb-note-item {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 7px 30px 7px 14px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.wb-note-item:hover { background: var(--wb-hover); }
+.wb-note-item.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); }
+.wb-note-item-title { overflow: hidden; color: var(--text-main); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.wb-note-item-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-2); font-size: 11px; line-height: 1.4; }
+.wb-note-item-meta { color: var(--text-muted); font-size: 10px; }
+.wb-note-pin { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; opacity: 0; }
+.wb-note-item:hover .wb-note-pin,
+.wb-note-pin.is-on { opacity: 1; }
+.wb-note-pin.is-on { color: var(--accent-color); }
+
+.wb-note-editor {
+  flex: 1;
+  width: 100%;
+  max-width: 860px;
+  min-height: 100%;
+  padding: 20px 28px 64px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: var(--wb-fs-reading);
+  font-weight: var(--weight-text);
+  line-height: 1.7;
+  box-sizing: border-box;
+}
+
+.wb-note-editor::placeholder { color: var(--text-muted); }
+.wb-save-state { margin-left: 8px; color: var(--text-muted); }
+.wb-save-state.is-error { color: var(--state-danger); }
+.wb-save-state.is-saving,
+.wb-save-state.is-pending { color: var(--state-warn); }
+.wb-bar-select { height: 24px; max-width: 150px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; font-size: 11.5px; }
+.wb-doc-actions button.is-on { color: var(--accent-color); border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+
+/* ─── Хранилище S3 ──────────────────────────────────── */
+
+.wb-storage { position: relative; height: 100%; display: flex; flex-direction: column; }
+.wb-storage-crumbs { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; color: var(--text-muted); font-size: 12px; }
+.wb-storage-crumbs span { display: inline-flex; align-items: center; gap: 2px; }
+.wb-storage-crumbs button { padding: 0 4px; border: 0; background: none; color: var(--text-2); font: inherit; cursor: pointer; }
+.wb-storage-crumbs button:hover { color: var(--accent-color); }
+.wb-storage-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 24px; }
+.wb-storage-list table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.wb-storage-list th { position: sticky; top: 0; padding: 6px 8px; background: var(--bg-color); color: var(--text-muted); font-size: 10.5px; font-weight: 500; text-align: left; border-bottom: 1px solid var(--wb-line); }
+.wb-storage-list td { padding: 3px 8px; border-bottom: 1px solid rgba(133, 245, 219, 0.05); color: var(--text-2); white-space: nowrap; }
+.wb-storage-list tr:hover td { background: var(--wb-hover); }
+.wb-storage-list .is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.wb-storage-name { max-width: 520px; display: inline-flex; align-items: center; gap: 8px; overflow: hidden; padding: 3px 0; border: 0; background: none; color: var(--text-main); font: inherit; text-overflow: ellipsis; cursor: pointer; }
+.wb-storage-name:hover { color: var(--accent-color); }
+.wb-storage-actions { width: 1%; text-align: right; }
+.wb-storage-actions button { width: 24px; height: 22px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; opacity: 0.4; }
+.wb-storage-list tr:hover .wb-storage-actions button { opacity: 1; }
+.wb-storage-actions button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-storage-actions button.is-danger:hover { color: var(--state-danger); }
+.wb-uploads { display: grid; gap: 4px; padding: 6px 20px; border-bottom: 1px solid var(--wb-line); }
+.wb-upload { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 3px 8px; overflow: hidden; border-radius: var(--radius-sm); background: var(--wb-surface); font-size: 11px; }
+.wb-upload i { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent-color) 18%, transparent); transition: width 0.2s ease; }
+.wb-upload span,
+.wb-upload em { position: relative; font-style: normal; }
+.wb-upload em { color: var(--text-muted); }
+.wb-upload.is-error em { color: var(--state-danger); }
+
+.wb-storage-settings { max-width: 760px; }
+.wb-storage-form { display: grid; gap: 10px; }
+.wb-storage-form label { display: grid; gap: 4px; color: var(--text-muted); font-size: 11px; }
+.wb-storage-form input { height: 30px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 13px; outline: none; }
+.wb-storage-form input:focus { border-color: var(--accent-color); }
+.wb-storage-form details { display: grid; gap: 8px; color: var(--text-muted); font-size: 11px; }
+.wb-storage-form details label { margin-top: 8px; }
+.wb-storage-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.wb-storage-form-actions button { height: 30px; padding: 0 14px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
+.wb-storage-form-actions button.is-primary { border-color: var(--accent-color); background: var(--accent-color); color: #031312; font-weight: 600; }
+.wb-howto { margin-top: 8px; padding: 14px 18px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
+.wb-howto h3 { margin: 0 0 8px; font-size: 13px; }
+.wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
+.wb-howto code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); color: #b9f5ec; }
+.wb-howto i { color: var(--text-main); font-style: normal; }
+
+/* ─── Доска задач и задача ──────────────────────────── */
+
+.wb-board { height: 100%; display: flex; flex-direction: column; }
+.wb-doc-crumbs .wb-project-dot { display: inline-block; vertical-align: middle; }
+.wb-board-add { display: flex; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--wb-line); }
+.wb-board-add input { flex: 1; height: 28px; padding: 0 10px; border: 1px solid var(--accent-color); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 13px; outline: none; }
+.wb-board-add button { height: 28px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
+.wb-board-add button:disabled { opacity: 0.4; }
+
+.wb-board-columns { flex: 1; min-height: 0; display: flex; gap: 8px; padding: 10px 12px 16px; overflow-x: auto; }
+
+.wb-board-column {
+  flex: 1 1 250px;
+  min-width: 220px;
+  max-width: 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding: 0 4px 12px;
+  border-radius: var(--radius-md);
+}
+
+/* Пустая или свёрнутая колонка не держит ширину — места под текст карточек больше. */
+.wb-board-column.is-slim { flex: 0 0 150px; min-width: 150px; }
+.wb-board-column.is-over { background: color-mix(in srgb, var(--accent-color) 6%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent); }
+.wb-board-column > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; padding: 6px 4px; background: var(--bg-color); color: var(--text-2); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.wb-board-column > header b { margin-left: auto; color: var(--text-muted); font-weight: 500; }
+.wb-board-more { align-self: flex-start; padding: 2px 6px; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.wb-board-more:hover { color: var(--accent-color); }
+
+.wb-card {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-md);
+  background: var(--wb-surface-2);
+  cursor: pointer;
+}
+
+.wb-card:hover { border-color: color-mix(in srgb, var(--accent-color) 40%, var(--wb-line)); }
+.wb-card.is-active { border-color: var(--accent-color); background: var(--wb-selected); }
+.wb-card.is-dragging { opacity: 0.4; }
+.wb-card.is-unseen { box-shadow: inset 2px 0 0 var(--state-warn); }
+.wb-board-column.status-done .wb-card { opacity: 0.65; }
+.wb-card-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-main); font-size: 12.5px; font-weight: 540; line-height: 1.4; }
+.wb-card-title .wb-priority { margin-right: 5px; }
+.wb-card-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-muted); font-size: 11px; font-weight: var(--weight-text); line-height: 1.45; }
+.wb-card-foot { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 10.5px; }
+.wb-card-new { color: var(--state-warn); }
+.wb-card-agent,
+.wb-meta-agent { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); }
+.wb-meta-agent { margin-left: 0; }
+
+.wb-title-input {
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.wb-title-input:focus { box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-color) 50%, transparent); }
+.wb-note-editor.is-inline { min-height: 50vh; max-width: none; padding: 10px 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); }
+.wb-empty-action { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px dashed var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; cursor: pointer; }
+.wb-empty-action:hover { color: var(--accent-color); border-color: var(--accent-color); }
+
+.wb-kv { display: grid; gap: 4px; }
+.wb-kv-row { display: grid; grid-template-columns: minmax(70px, 38%) minmax(0, 1fr) 20px; align-items: center; gap: 6px; }
+.wb-kv-row > span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-kv-row input,
+.wb-kv-add input { min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 11.5px; outline: none; }
+.wb-kv-row input:focus,
+.wb-kv-add input:focus { border-color: var(--accent-color); }
+.wb-kv-row button,
+.wb-kv-add button { width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; }
+.wb-kv-row button:hover { color: var(--state-danger); }
+.wb-kv-add { display: grid; grid-template-columns: minmax(0, 1fr) 20px; gap: 6px; margin-top: 6px; }
+.wb-drawer h3 svg { vertical-align: -1px; }
+
+/* ─── Списки и старые панели внутри рабочего места ──── */
+
+.wb-list-filter { margin: 8px 20px 4px; max-width: 520px; }
+.wb-rows { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 4px 12px 24px; list-style: none; }
+.wb-rows button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 7px 10px; border: 0; border-bottom: 1px solid rgba(133, 245, 219, 0.05); background: none; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.wb-rows button:hover { background: var(--wb-hover); }
+.wb-rows button.is-active { background: var(--wb-selected); }
+.wb-rows-title { overflow: hidden; color: var(--text-main); font-size: 12.5px; font-weight: 540; text-overflow: ellipsis; white-space: nowrap; }
+.wb-rows-meta { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
+.wb-rows-snippet { grid-column: 1 / -1; overflow: hidden; color: var(--text-muted); font-size: 11px; font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
+
+.wb-titlebar .desktop-pill.download strong { display: none; }
+.wb-titlebar .desktop-pill.download { width: 28px; padding: 0; justify-content: center; }
+
+/* Пиксельный шрифт — только логотип в шапке; в заголовках панелей он раздувал строку втрое. */
+.wb-docs,
+.wb-panel,
+.wb-sidebar,
+.wb-right { --font-pixel: var(--font-mono); }
+.wb-docs .panel-title h2 { font-size: 13px; letter-spacing: 0.02em; }
+.wb-docs .panel { padding: 12px 14px; }
+.wb-docs .entity-list { gap: 0; }
+.wb-docs .entity-line { min-height: 28px; padding: 4px 2px; border-radius: 0; background: none; box-shadow: none; border-bottom: 1px solid rgba(133, 245, 219, 0.06); font-size: 12px; }
+.wb-docs .entity-line strong { font-weight: 500; color: var(--text-2); }
+.wb-docs .content-grid { gap: 10px; }
+
+/* Свойства проекта: плотная таблица ключ–значение вместо крупных полей. */
+.wb-docs .env-rows { gap: 3px; }
+.wb-docs .env-row { grid-template-columns: minmax(120px, 220px) minmax(0, 1fr) 28px; gap: 6px; }
+.wb-docs .env-key,
+.wb-docs .env-value { min-height: 28px; padding: 5px 8px; font-size: 12px; }
+.wb-docs .env-remove { width: 28px; height: 28px; }
+
+/* ─── SSH ───────────────────────────────────────────── */
+
+.wb-ssh-connect { margin-top: 2px; }
+.wb-ssh-item { position: relative; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 8px; padding-right: 30px; }
+.wb-ssh-item > .wb-dot { grid-row: span 2; align-self: center; justify-self: center; }
+.wb-ssh-item > img { grid-row: 1; }
+.wb-ssh-stop { position: absolute; top: 50%; right: 8px; width: 20px; height: 20px; display: grid; place-items: center; transform: translateY(-50%); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; opacity: 0; }
+.wb-ssh-item:hover .wb-ssh-stop { opacity: 1; }
+.wb-ssh-stop:hover { background: var(--wb-hover); color: var(--state-danger); }
+
+/* ─── Строка состояния ──────────────────────────────── */
+
+.wb-statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-top: 1px solid var(--wb-line);
+  background: var(--wb-surface);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.wb-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-status-item:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-status-item.is-static { cursor: default; }
+.wb-status-item.is-static:hover { background: none; color: inherit; }
+.wb-status-item.is-on { color: var(--accent-color); }
+.wb-status-item.is-warn { background: color-mix(in srgb, var(--state-warn) 20%, transparent); color: var(--state-warn); }
+.wb-status-item.is-state { max-width: 45vw; overflow: hidden; text-overflow: ellipsis; }
+.wb-status-fill { flex: 1; }
+
+.wb-state-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--state-ok); }
+.state-working .wb-state-dot { background: var(--state-live); box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-live) 30%, transparent); }
+.state-attention .wb-state-dot { background: var(--state-warn); }
+.state-offline .wb-state-dot { background: var(--state-danger); }
+.state-connecting .wb-state-dot { background: var(--state-off); }
+
+/* ─── Контекстное меню вкладки ──────────────────────── */
+
+.wb-menu-scrim { position: fixed; inset: 0; z-index: 200; }
+
+.wb-menu {
+  position: fixed;
+  min-width: 190px;
+  display: grid;
+  padding: 4px;
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-md);
+  background: var(--wb-surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.wb-menu button {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-menu button:hover { background: var(--wb-selected); color: var(--text-main); }
+.wb-menu button { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.wb-menu button kbd { border: 0; background: none; color: var(--text-muted); font-size: 10px; }
+.wb-menu button.is-danger:hover { background: color-mix(in srgb, var(--state-danger) 18%, transparent); color: #ffb3bb; }
+.wb-menu-sep { height: 1px; margin: 4px 6px; background: var(--wb-line); }
+.wb-tree-row.is-selected:not(.is-active) { background: rgba(255, 255, 255, 0.05); }
+.wb-view-body:focus-within .wb-tree-row.is-selected:not(.is-active) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent); }
+.wb-view-body:focus { outline: none; }
+.wb-tree-row.is-cut { opacity: 0.5; }
+
+/* ─── Узкие экраны: одна область за раз ─────────────── */
+
+@media (max-width: 900px) {
+  .wb-memory,
+  .wb-file-body { grid-template-columns: 1fr; }
+  .wb-command { grid-template-columns: 1fr; }
+  .wb-memory-side { border-left: 0; border-top: 1px solid var(--wb-line); }
+  .wb-titlebar .realtime-pill { display: none; }
+  .topbar-context { flex-basis: 180px; }
+  .topbar-actions { flex: 0 0 auto; }
+}
+
+@media (max-width: 720px) {
+  .wb {
+    --wb-titlebar: calc(44px + env(safe-area-inset-top));
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--wb-titlebar) minmax(0, 1fr) calc(52px + env(safe-area-inset-bottom));
+    grid-template-areas:
+      "title"
+      "center"
+      "activity";
+  }
+
+  .wb-titlebar { padding-top: env(safe-area-inset-top); }
+  .wb-titlebar .topbar { position: relative; top: auto; pointer-events: auto; }
+  .topbar-context { flex: 1 1 auto; }
+  .topbar-context span { display: none; }
+  .topbar-actions { gap: 4px; }
+  .wb-titlebar .desktop-slot { display: none; }
+  .command-center { width: auto; flex: 0 0 38px; justify-content: center; padding: 0; }
+  .command-center span,
+  .command-center kbd { display: none; }
+
+  .wb-activitybar {
+    flex-direction: row;
+    justify-content: space-around;
+    padding: 0 0 env(safe-area-inset-bottom);
+    border-right: 0;
+    border-top: 1px solid var(--wb-line);
+  }
+
+  .wb-activity { flex: 1; height: 52px; border-left: 0; border-top: 2px solid transparent; }
+  .wb-activity img { width: 31px; height: 31px; }
+  .wb-activity-tip {
+    left: 50%;
+    top: auto;
+    bottom: calc(100% + 8px);
+    max-width: min(220px, 80vw);
+    white-space: normal;
+    text-align: center;
+    transform: translate(-50%, 4px);
+  }
+  .wb-activity:hover .wb-activity-tip,
+  .wb-activity:focus-visible .wb-activity-tip {
+    transform: translate(-50%, 0);
+  }
+  .wb-activity.is-active { border-top-color: var(--accent-color); }
+  .wb-activity-fill { display: none; }
+  .wb-activity.is-mobile-only { display: grid; }
+
+  .wb-sidebar {
+    position: fixed;
+    top: var(--wb-titlebar);
+    left: 0;
+    right: 0;
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    z-index: 40;
+    width: auto;
+    border-right: 0;
+  }
+
+  .wb:not(.has-sidebar) .wb-sidebar { display: none; }
+  .wb-sash { display: none; }
+  .wb-statusbar { display: none; }
+
+  .wb-center { grid-template-rows: minmax(0, 1fr) 0; }
+
+  .wb.has-right .wb-right,
+  .wb.has-panel .wb-panel {
+    position: fixed;
+    top: var(--wb-titlebar);
+    left: 0;
+    right: 0;
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    z-index: 50;
+  }
+
+  .wb-doc-page,
+  .wb-memory-main { padding-left: 14px; padding-right: 14px; }
+  .wb-doc-toolbar { margin: 0 -14px 8px; padding: 0 14px; }
+}
+
+/* ─── Консоль: перетаскивание, список терминалов, вкладка редактора ─── */
+
+.wb-console-pane { position: relative; }
+.wb-console-pane[class*="is-drop-"]::after {
+  content: "";
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent-color) 70%, transparent);
+  outline-offset: -1px;
+}
+.wb-console-pane.is-drop-center::after { inset: 0; }
+.wb-console-pane.is-drop-left::after { inset: 0 50% 0 0; }
+.wb-console-pane.is-drop-right::after { inset: 0 0 0 50%; }
+.wb-console-pane.is-drop-top::after { inset: 0 0 50% 0; }
+.wb-console-pane.is-drop-bottom::after { inset: 50% 0 0 0; }
+.wb-console-pane-head[draggable="true"] { cursor: grab; }
+.wb-console-pane-head[draggable="true"]:active { cursor: grabbing; }
+.wb-console-pane-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.wb-console-pane-more { font-size: 14px; line-height: 1; }
+.wb-console-pane-head > .wb-console-pane-actions ~ .wb-icon-btn { margin-left: 0; }
+.wb-console-pane-head:not(:has(.wb-console-pane-actions)) > .wb-console-pane-more { margin-left: auto; }
+/* Кнопки разделения видны у панели под мышью и у активной. Прячем прозрачностью, а не display:
+   появление кнопок меняло ширину заголовка, узкая панель раздвигалась, терминал пересчитывал размер,
+   мышь уходила с панели — и раскладка дёргалась туда-сюда. */
+.wb-console-pane-head > .wb-icon-btn { flex: none; }
+.wb-console-pane-head > .wb-icon-btn[title^="Разделить"] { opacity: 0; transition: opacity 0.12s; }
+.wb-console-pane:hover > .wb-console-pane-head > .wb-icon-btn[title^="Разделить"],
+.wb-console-pane.is-focused > .wb-console-pane-head > .wb-icon-btn[title^="Разделить"],
+.wb-console-pane-head > .wb-icon-btn[title^="Разделить"]:focus-visible { opacity: 1; }
+
+.wb-console-toolbar button.is-on { color: var(--accent-color); }
+
+.wb-console-list {
+  flex: none;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  border-left: 1px solid var(--wb-line);
+  background: var(--wb-surface);
+}
+.wb-console-list.is-drop { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 60%, transparent); }
+.wb-console-list-group { padding: 1px 0; }
+.wb-console-list-group + .wb-console-list-group { border-top: 1px solid color-mix(in srgb, var(--wb-line) 60%, transparent); }
+.wb-console-list-group.is-drop { background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+.wb-console-list-item {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  outline: none;
+}
+.wb-console-list-item:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-console-list-group.is-active .wb-console-list-item { color: var(--text-main); }
+.wb-console-list-group.is-active .wb-console-list-item.is-focused { background: var(--wb-selected); }
+.wb-console-list-item:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-color); }
+.wb-console-list-glyph { width: 8px; color: var(--text-muted); opacity: 0.6; font-family: var(--font-mono); }
+.wb-console-list-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.wb-console-list-item input {
+  min-width: 0;
+  flex: 1;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--accent-color);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface-2);
+  color: var(--text-main);
+  font: inherit;
+  outline: none;
+}
+.wb-menu button svg, .wb-menu button img { vertical-align: -2px; margin-right: 6px; }
+.wb-menu button:disabled { opacity: 0.4; cursor: default; }
+
+.wb-console-pane.is-document { height: 100%; border: 0; border-radius: 0; }
+
+/* ─── Консоль: свёрнутые панели и список значками ─── */
+
+.wb-console-gap { display: none; }
+.wb-console-collapse { margin-left: -4px; }
+.wb-console-pane.is-collapsed { flex: 0 0 auto !important; }
+.wb-console-pane.is-collapsed > .wb-console-pane-body { display: none; }
+.wb-console-column.is-all-collapsed { flex: 0 0 auto !important; }
+/* Повёрнутая группа: строка, где всё свёрнуто, — заголовки делят ширину поровну. */
+.wb-console-panes.is-column > .wb-console-column.is-all-collapsed > .wb-console-pane.is-collapsed { flex: 1 1 0 !important; }
+
+/* Полоска свёрнутой панели — вертикальная вкладка на всю высоту, а не карточка по размеру текста. */
+.wb-console-pane.is-strip { width: 28px; border-color: var(--wb-line); box-shadow: none; }
+.wb-console-panes.is-row > .wb-console-column.is-all-collapsed > .wb-console-pane.is-strip { flex: 1 1 0 !important; min-height: 0; }
+.wb-console-pane-strip {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  overflow: hidden;
+  background: var(--wb-surface);
+  cursor: pointer;
+}
+.wb-console-pane-strip:hover { background: var(--wb-hover); }
+.wb-console-pane-strip > img,
+.wb-console-pane-strip > svg,
+.wb-console-pane-strip > .agent-avatar { flex: none; }
+.wb-console-pane-strip .wb-dot { flex: none; width: 5px; height: 5px; box-shadow: none; }
+.wb-console-strip-title {
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.wb-console-pane-strip:hover .wb-console-strip-title { color: var(--text-main); }
+
+.wb-console-list-head { display: flex; justify-content: flex-end; padding: 0 4px 2px; }
+.wb-console-list.is-compact { overflow-x: hidden; }
+.wb-console-list.is-compact .wb-console-list-head { justify-content: center; padding: 0 0 2px; }
+.wb-console-list.is-compact .wb-console-list-item { position: relative; justify-content: center; height: 28px; padding: 0; }
+.wb-console-list.is-compact .wb-console-list-item .wb-dot { position: absolute; right: 7px; bottom: 5px; width: 5px; height: 5px; box-shadow: none; }
+
+/* ─── Просмотр локальных картинок ─── */
+
+/* flex, а не сетка с фиксированным числом строк: баннер ошибки рисуется не всегда, и область картинки
+   попадала в строку «по содержимому» — высота 32px, масштаб «вписать» считался нулевым. */
+.wb-image-doc { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.wb-image-doc > * { flex: none; }
+.wb-image-doc > .wb-image-stage { flex: 1 1 0; }
+.wb-image-doc > .wb-meta-strip { padding-inline: 16px; }
+.wb-image-zoom { min-width: 42px; color: var(--text-muted); font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums; }
+.wb-image-stage { min-height: 0; overflow: auto; cursor: grab; user-select: none; }
+.wb-image-stage.is-panning { cursor: grabbing; }
+.wb-image-canvas { display: grid; place-items: center; }
+.wb-image-canvas img { max-width: none; display: block; box-shadow: 0 0 0 1px var(--wb-line); }
+.wb-image-stage.is-dark { background: #0b0c0e; }
+.wb-image-stage.is-light { background: #f4f5f2; }
+.wb-image-stage.is-checker,
+.wb-image-swatch.is-checker {
+  background-color: #1a1c1f;
+  background-image:
+    linear-gradient(45deg, #24272b 25%, transparent 25%),
+    linear-gradient(-45deg, #24272b 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #24272b 75%),
+    linear-gradient(-45deg, transparent 75%, #24272b 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.wb-image-swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--wb-line); border-radius: 2px; vertical-align: -2px; }
+.wb-image-swatch.is-checker { background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0; }
+.wb-image-swatch.is-dark { background: #0b0c0e; }
+.wb-image-swatch.is-light { background: #f4f5f2; }

@@ -280,7 +280,9 @@ server.registerTool(
   "create_inbox_item",
   {
     title: "Create MBOX agent inbox item",
-    description: "Write a notice, proposal, human decision request, or agent handoff into the agent inbox. For synapse handoffs, set to='Codex' or to='Claude' so the addressed agent can be woken.",
+    description: "Write a notice, proposal, human decision request, or agent handoff into the agent inbox. For synapse handoffs, set to='Codex' or to='Claude' so the addressed agent can be woken. " +
+      "For a post draft with swipeable variant cards (skill \"Обучение на контенте\" / post_builder UI), fill post_builder " +
+      "instead of cramming all variants into body as plain text.",
     inputSchema: {
       project: z.string().default("MBOX"),
       title: z.string(),
@@ -289,15 +291,23 @@ server.registerTool(
       priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
       requires_human: z.boolean().default(false),
       to: z.string().default(""),
+      re: z.string().optional().describe("ID of the inbox item this is a reply to, if any"),
+      post_builder: z.array(z.object({
+        key: z.string(),
+        label: z.string(),
+        options: z.array(z.string()).min(1),
+      })).optional().describe("Post draft parts (title/hook/body/CTA etc.), each with 2-3 variant options — renders as swipeable pick-a-piece cards."),
       props: z.record(z.any()).default({}),
     },
   },
-  async ({ project, title, body, item_type, priority, requires_human, to, props }) => {
+  async ({ project, title, body, item_type, priority, requires_human, to, re, post_builder, props }) => {
     const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
     const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
     const itemProps = {
       ...(props && typeof props === "object" ? props : {}),
       ...(to ? { to } : {}),
+      ...(re ? { re } : {}),
+      ...(post_builder && post_builder.length ? { post_builder: { parts: post_builder } } : {}),
     };
     const data = await mboxFetch("/api/mbox/agent/inbox", {
       method: "POST",
@@ -965,6 +975,139 @@ async function ping(event) {
     console.error(`MBOX presence ping failed: ${error.message}`);
   }
 }
+
+// --- Локальные папки (MBOX Desktop) ----------------------------------------------------------
+// Файлы на компьютере владельца. Операции идут через MBOX: приложение на компьютере выполняет их,
+// а каждая запись попадает в историю версий с именем агента — откатить можно из интерфейса.
+
+async function resolveWorkspace(workspace) {
+  const { workspaces } = await mboxFetch("/api/mbox/workspaces");
+  const key = String(workspace || "").trim().toLowerCase();
+  const match = key
+    ? workspaces.find((row) => row.id === key || row.name.toLowerCase() === key)
+    : workspaces.length === 1 ? workspaces[0] : null;
+  if (!match) throw new Error(`Не понял, какая папка. Есть: ${workspaces.map((row) => `#${row.id} ${row.name}`).join(", ") || "ни одной — подключите в MBOX Desktop"}`);
+  return match;
+}
+
+async function workspaceOp(workspace, op, path, extra = {}) {
+  const target = await resolveWorkspace(workspace);
+  const response = await fetch(`${baseUrl}/api/mbox/workspaces/${target.id}/ops`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie, "x-mbox-agent": encodeURIComponent(agentName) },
+    body: JSON.stringify({ op, path, ...extra }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.op?.status !== "done") throw new Error(data.error || data.op?.error || `MBOX ${response.status}`);
+  return { workspace: target, result: data.op.result || {} };
+}
+
+const workspaceArg = z.string().default("").describe("Workspace name or id from workspace_list (may be omitted when there is only one)");
+
+function textResult(text) {
+  return withPush({ content: [{ type: "text", text }] });
+}
+
+server.registerTool(
+  "workspace_list",
+  {
+    title: "List local MBOX workspaces",
+    description: "Local folders connected in MBOX Desktop on the owner's computers: device, online state, whether agents may write, and a git summary (branch, changed files, recent commits). Call first for anything about local files or git.",
+    inputSchema: {},
+  },
+  async () => {
+    const { workspaces } = await mboxFetch("/api/mbox/workspaces");
+    return textResult(JSON.stringify(workspaces.map((row) => ({
+      id: row.id, name: row.name, device: row.device_name, online: row.online, agent_write: row.agent_write,
+      git: row.git?.isRepo ? { branch: row.git.branch, upstream: row.git.upstream, ahead: row.git.ahead, behind: row.git.behind, changes_total: row.git.changesTotal, changes: (row.git.changes || []).slice(0, 30), commits: (row.git.commits || []).slice(0, 8) } : null,
+    })), null, 2));
+  },
+);
+
+server.registerTool(
+  "workspace_list_dir",
+  {
+    title: "List a directory in a local workspace",
+    description: "Entries of a directory inside a local workspace. Path is relative to the workspace root; empty means root.",
+    inputSchema: { workspace: workspaceArg, path: z.string().default("") },
+  },
+  async ({ workspace, path }) => {
+    const { result } = await workspaceOp(workspace, "list", path);
+    return textResult((result.entries || []).map((entry) => `${entry.type === "dir" ? "dir " : "file"} ${entry.path}${entry.type === "file" ? ` ${entry.size}b` : ""}`).join("\n") || "(empty)");
+  },
+);
+
+server.registerTool(
+  "workspace_find_files",
+  {
+    title: "Find files in a local workspace",
+    description: "Find files whose relative path contains the query (case-insensitive).",
+    inputSchema: { workspace: workspaceArg, query: z.string() },
+  },
+  async ({ workspace, query }) => {
+    const { result } = await workspaceOp(workspace, "find", query);
+    return textResult((result.paths || []).join("\n") || "(nothing found)");
+  },
+);
+
+server.registerTool(
+  "workspace_read_file",
+  {
+    title: "Read a file from a local workspace",
+    description: "Read a text file (md, txt, code) from a local workspace.",
+    inputSchema: { workspace: workspaceArg, path: z.string() },
+  },
+  async ({ workspace, path }) => {
+    const { result } = await workspaceOp(workspace, "read", path);
+    if (result.binary) return textResult("Binary file — not readable as text.");
+    if (result.tooLarge) return textResult(`File too large (${result.size} bytes).`);
+    return textResult(String(result.content ?? ""));
+  },
+);
+
+server.registerTool(
+  "workspace_write_file",
+  {
+    title: "Write a file in a local workspace (versioned)",
+    description: "Write the FULL content of a text file in a local workspace (creates it if missing). The previous content is kept in MBOX version history under your agent name, so the owner can compare and roll back. Prefer this over editing the same files directly on disk when working on MBOX workspace documents.",
+    inputSchema: { workspace: workspaceArg, path: z.string(), content: z.string(), message: z.string().default("").describe("Short note: what changed and why") },
+  },
+  async ({ workspace, path, content, message }) => {
+    const { workspace: target, result } = await workspaceOp(workspace, "write", path, { content, message });
+    return textResult(`Wrote ${result.path} in «${target.name}» (${result.size} bytes). Previous version kept in MBOX history.`);
+  },
+);
+
+server.registerTool(
+  "workspace_file_history",
+  {
+    title: "Version history of a local file",
+    description: "Who changed a local workspace file and when (human in MBOX, agent, or change noticed on disk).",
+    inputSchema: { workspace: workspaceArg, path: z.string() },
+  },
+  async ({ workspace, path }) => {
+    const target = await resolveWorkspace(workspace);
+    const { versions } = await mboxFetch(`/api/mbox/workspaces/${target.id}/versions?path=${encodeURIComponent(path)}`);
+    return textResult(JSON.stringify(versions, null, 2));
+  },
+);
+
+server.registerTool(
+  "workspace_git",
+  {
+    title: "Git info for a local workspace",
+    description: "Without path: branch, ahead/behind, changed files and recent commits (as last reported by MBOX Desktop). With path: commits that touched that file.",
+    inputSchema: { workspace: workspaceArg, path: z.string().default("") },
+  },
+  async ({ workspace, path }) => {
+    if (!path) {
+      const target = await resolveWorkspace(workspace);
+      return textResult(JSON.stringify(target.git || {}, null, 2));
+    }
+    const { result } = await workspaceOp(workspace, "git_log", path);
+    return textResult(JSON.stringify(result.commits || [], null, 2));
+  },
+);
 
 await server.connect(new StdioServerTransport());
 

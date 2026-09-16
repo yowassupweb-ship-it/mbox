@@ -13,12 +13,19 @@ import {
 import { WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./skill-catalog.mjs";
+import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
+import { ensureNotesSchema, handleNotesApi } from "./notes.mjs";
+import { ensureStorageSchema, handleStorageApi } from "./storage.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const publicDir = path.join(root, "public");
 
 configureJarvis({ query, broadcastRealtime, rankMemories, recordMemoryAction });
+// Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
+ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
+ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
+ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 
 const port = Number(process.env.MBOX_PORT || process.env.PORT || 3000);
 const host = process.env.MBOX_HOST || "127.0.0.1";
@@ -1066,6 +1073,10 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
+
+  if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
+  if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all })) return;
+  if (await handleStorageApi({ req, res, url, query, readBody, sendJson, allowed: scope.all, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
     return sendJson(res, 200, { structure: agentStructure });
@@ -2505,12 +2516,16 @@ async function handleApiWithContext(req, res, url) {
   }
   if (inboxMatch && req.method === "PATCH") {
     const body = await readBody(req);
+    // if_status — атомарный захват: наблюдатели одного агента на двух машинах (или установленный
+    // MBOX Desktop и тестовый) видят одно и то же open-сообщение, и оба отвечали. Второй получает 409.
+    const ifStatus = String(body.if_status || "");
     const result = await query(
       `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
-       WHERE id = $5 RETURNING id::text`,
-      [String(body.status || ""), String(body.priority || ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1]],
+       WHERE id = $5 AND ($6 = '' OR status = $6) RETURNING id::text`,
+      [String(body.status || ""), String(body.priority || ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1], ifStatus],
     );
     if (result.rows[0]) broadcastChange(req, "update", "agent_inbox", `#${inboxMatch[1]}`);
+    if (!result.rows[0] && ifStatus) return sendJson(res, 409, { error: "status_changed" });
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
   }
 

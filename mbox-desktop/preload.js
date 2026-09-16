@@ -3,8 +3,29 @@ const fs = require("fs");
 const path = require("path");
 
 const desktopIconSrc = loadDesktopIconSrc();
+const argValue = (name) => (process.argv.find((item) => item.startsWith(`--${name}=`)) || "").slice(name.length + 3);
+const serverOrigin = argValue("mbox-server");
+const localUi = argValue("mbox-local-ui") === "1";
+
+// Встроенный интерфейс: при первом запуске забираем раскладку, вкладки и черновики, сохранённые
+// на старом адресе сайта, — до того, как скрипты страницы прочитают localStorage.
+if (localUi && location.protocol === "mbox:") {
+  try {
+    const entries = ipcRenderer.sendSync("mbox-desktop:take-storage-migration");
+    if (entries && typeof entries === "object") {
+      for (const [key, value] of Object.entries(entries)) {
+        if (typeof value === "string" && localStorage.getItem(key) === null) localStorage.setItem(key, value);
+      }
+    }
+  } catch {
+    // без переноса — просто чистое состояние
+  }
+}
 
 const desktopApi = {
+  // Адрес сервера: встроенный интерфейс живёт на mbox://app, а вебсокет и ссылки «поделиться» — на сервере.
+  serverOrigin,
+  localUi,
   status: () => ipcRenderer.invoke("mbox-desktop:status"),
   start: (name) => ipcRenderer.invoke("mbox-desktop:start", name),
   stop: (name) => ipcRenderer.invoke("mbox-desktop:stop", name),
@@ -26,6 +47,47 @@ const desktopApi = {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on("mbox-desktop:tool", listener);
     return () => ipcRenderer.removeListener("mbox-desktop:tool", listener);
+  },
+  // Встроенная консоль: процессы агентов и инструментов, которые запустило приложение.
+  restartAgent: (name) => ipcRenderer.invoke("mbox-desktop:restart-agent", name),
+  startSsh: (target, cols, rows) => ipcRenderer.invoke("mbox-desktop:ssh-start", target, cols, rows),
+  resizeSession: (id, cols, rows) => ipcRenderer.invoke("mbox-desktop:session-resize", id, cols, rows),
+  sessions: () => ipcRenderer.invoke("mbox-desktop:sessions"),
+  sendSessionInput: (id, input) => ipcRenderer.invoke("mbox-desktop:session-input", id, input),
+  stopSession: (id) => ipcRenderer.invoke("mbox-desktop:session-stop", id),
+  removeSession: (id) => ipcRenderer.invoke("mbox-desktop:session-remove", id),
+  onSession: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("mbox-desktop:session", listener);
+    return () => ipcRenderer.removeListener("mbox-desktop:session", listener);
+  },
+  // Локальные рабочие папки: ключ папки + путь внутри неё, абсолютные пути страница не передаёт.
+  workspace: {
+    info: () => ipcRenderer.invoke("mbox-desktop:ws-info"),
+    add: () => ipcRenderer.invoke("mbox-desktop:ws-add"),
+    remove: (key) => ipcRenderer.invoke("mbox-desktop:ws-remove", key),
+    list: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-list", key, rel),
+    read: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-read", key, rel),
+    readImage: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-read-image", key, rel),
+    write: (key, rel, content, expectedMtime) => ipcRenderer.invoke("mbox-desktop:ws-write", key, rel, content, expectedMtime),
+    create: (key, rel, type) => ipcRenderer.invoke("mbox-desktop:ws-create", key, rel, type),
+    rename: (key, rel, nextRel) => ipcRenderer.invoke("mbox-desktop:ws-rename", key, rel, nextRel),
+    trash: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-trash", key, rel),
+    find: (key, query) => ipcRenderer.invoke("mbox-desktop:ws-find", key, query),
+    reveal: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-reveal", key, rel),
+    transfer: (fromKey, fromRel, toKey, toDirRel, move) => ipcRenderer.invoke("mbox-desktop:ws-transfer", fromKey, fromRel, toKey, toDirRel, move),
+    pasteSystem: (key, toDirRel) => ipcRenderer.invoke("mbox-desktop:ws-paste-system", key, toDirRel),
+    copySystem: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-copy-system", key, rel),
+    openDefault: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-open-default", key, rel),
+    git: (key) => ipcRenderer.invoke("mbox-desktop:ws-git", key),
+    gitLog: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-git-log", key, rel),
+    gitDiff: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-git-diff", key, rel),
+    gitShow: (key, hash) => ipcRenderer.invoke("mbox-desktop:ws-git-show", key, hash),
+    onChange: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("mbox-desktop:workspace-change", listener);
+      return () => ipcRenderer.removeListener("mbox-desktop:workspace-change", listener);
+    }
   }
 };
 

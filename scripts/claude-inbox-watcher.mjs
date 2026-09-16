@@ -217,10 +217,10 @@ function report(item) {
 
 async function handleInboxItem(item) {
   console.log(`${logPrefix} handling #${item.id}`);
-  await patchInbox(item.id, {
-    status: "doing",
-    props: { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString() },
-  });
+  if (!(await claimInbox(item.id, { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString() }))) {
+    console.log(`${logPrefix} #${item.id} already taken by another watcher; skipping`);
+    return;
+  }
 
   const run = await createRun(item);
   const startedAt = Date.now();
@@ -245,7 +245,7 @@ async function handleInboxItem(item) {
     });
     await finishRun(run?.id, "done", answer, Date.now() - startedAt);
   } catch (error) {
-    const message = error.stack || error.message;
+    const message = error.cliFailure ? error.message : error.stack || error.message;
     await createInboxItem({
       title: `Claude не смог ответить на #${item.id}`,
       body: message,
@@ -258,6 +258,17 @@ async function handleInboxItem(item) {
       props: { ...(item.props || {}), handled_by: agentName, last_error: error.message },
     });
     await finishRun(run?.id, "failed", message, Date.now() - startedAt);
+  }
+}
+
+/** Захват сообщения: false, если его уже взял другой наблюдатель (сервер вернул 409 на if_status). */
+async function claimInbox(id, props) {
+  try {
+    await mboxFetch(`/api/mbox/agent/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "doing", if_status: "open", props }) });
+    return true;
+  } catch (error) {
+    if (/^MBOX 409/.test(error.message)) return false;
+    throw error;
   }
 }
 
@@ -356,7 +367,14 @@ async function runClaude(item) {
 
 function spawnCaptured(command, args, options, input = "") {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32" });
+    // windowsHide: наблюдатель сам работает без консоли, и без флага Windows открывала CLI агента
+    // в отдельном видимом окне. Вывод и так идёт в stdout — его показывает консоль MBOX Desktop.
+    // claude на Windows — это claude.cmd, его запускает только cmd.exe. Раньше здесь был shell: true с массивом
+    // аргументов, и node печатал DeprecationWarning DEP0190 в консоль агента на каждый ответ. Аргументы —
+    // наши флаги без пробелов (текст запроса идёт через stdin), поэтому склеивать их в строку безопасно.
+    const child = process.platform === "win32"
+      ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].join(" ")}"`], { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
+      : spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
     if (input) {
@@ -367,7 +385,23 @@ function spawnCaptured(command, args, options, input = "") {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve(stdout.trim());
-      else reject(new Error(`${command} exited with ${code}${stderr ? `\n${stderr}` : ""}`));
+      else reject(describeCliFailure(command, code, stdout, stderr));
     });
   });
 }
+
+/** Почему CLI агента упал — человеческим текстом. Claude и Codex пишут причину («You've hit your
+ * session limit», «usage limit») в stdout, а не в stderr, и в чат уходило пустое «exited with 1»
+ * со стеком node. Берём хвост обоих потоков без шумовых предупреждений node. */
+function describeCliFailure(command, code, stdout, stderr) {
+  const noise = /DeprecationWarning|--trace-deprecation|^\s*at\s/;
+  const lines = `${stderr}\n${stdout}`.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !noise.test(line));
+  const tail = lines.slice(-6).join("\n");
+  const name = String(command).split(/[\\/]/).pop();
+  const limit = lines.find((line) => /(usage|session|rate) limit|hit your .*limit|limit reached|quota/i.test(line));
+  const reason = limit ? `Исчерпан лимит подписки: ${limit}` : tail || "CLI не вывел причину";
+  const error = new Error(`${name} завершился с кодом ${code}. ${reason}`);
+  error.cliFailure = true;
+  return error;
+}
+

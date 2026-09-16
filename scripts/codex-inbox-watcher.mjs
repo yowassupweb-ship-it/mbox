@@ -28,7 +28,7 @@ const broadcastAliases = (config.MBOX_BROADCAST_ALIASES || "Всем,Все,All,
   .split(",")
   .map((alias) => alias.trim())
   .filter(Boolean);
-const codexCommand = config.CODEX_COMMAND || "codex";
+const codexCommand = resolveCodexCommand(config.CODEX_COMMAND || "codex");
 const codexModel = config.CODEX_WATCH_MODEL || "";
 const workdir = config.CODEX_WATCH_WORKDIR || root;
 const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 30);
@@ -46,6 +46,7 @@ process.on("SIGTERM", () => {
 
 await ping("session_start");
 console.log(`${logPrefix} watching ${baseUrl} project=${project} every ${pollMs}ms`);
+console.log(`${logPrefix} using Codex CLI: ${codexCommand}`);
 console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring messages before ${cutoffAt.toISOString()}`}`);
 
 while (!stopping) {
@@ -119,6 +120,50 @@ function requireValue(value, name) {
     process.exit(1);
   }
   return value;
+}
+
+function resolveCodexCommand(command) {
+  const explicit = String(command || "").trim();
+  if (!explicit || explicit.toLowerCase() === "codex") {
+    return findCodexExecutable() || "codex";
+  }
+  if (path.isAbsolute(explicit) || explicit.includes("\\") || explicit.includes("/")) {
+    return fs.existsSync(explicit) ? explicit : findCodexExecutable() || explicit;
+  }
+  return findOnPath(explicit) || findCodexExecutable() || explicit;
+}
+
+function findCodexExecutable() {
+  return findOnPath("codex") || findLatestVsCodeCodex() || findOnPath("codex.exe");
+}
+
+function findOnPath(command) {
+  const pathValue = process.env.PATH || process.env.Path || "";
+  const pathExt = process.platform === "win32"
+    ? (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";")
+    : [""];
+  const names = path.extname(command) ? [command] : pathExt.map((ext) => `${command}${ext.toLowerCase()}`);
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return "";
+}
+
+function findLatestVsCodeCodex() {
+  const extensionRoot = path.join(os.homedir(), ".vscode", "extensions");
+  try {
+    const candidates = fs.readdirSync(extensionRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("openai.chatgpt-"))
+      .map((entry) => path.join(extensionRoot, entry.name, "bin", "windows-x86_64", "codex.exe"))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort((a, b) => b.localeCompare(a));
+    return candidates[0] || "";
+  } catch {
+    return "";
+  }
 }
 
 async function login() {
@@ -201,10 +246,10 @@ function escapeRegExp(value) {
 
 async function handleInboxItem(item) {
   console.log(`${logPrefix} handling #${item.id}: ${item.title}`);
-  await patchInbox(item.id, {
-    status: "doing",
-    props: { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString() },
-  });
+  if (!(await claimInbox(item.id, { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString() }))) {
+    console.log(`${logPrefix} #${item.id} already taken by another watcher; skipping`);
+    return;
+  }
 
   const run = await createRun(item);
   const startedAt = Date.now();
@@ -229,7 +274,7 @@ async function handleInboxItem(item) {
     });
     await finishRun(run?.id, "done", answer, Date.now() - startedAt);
   } catch (error) {
-    const message = error.stack || error.message;
+    const message = error.cliFailure ? error.message : error.stack || error.message;
     await createInboxItem({
       title: `Codex не смог ответить на #${item.id}`,
       body: message,
@@ -242,6 +287,17 @@ async function handleInboxItem(item) {
       props: { ...(item.props || {}), handled_by: agentName, last_error: error.message },
     });
     await finishRun(run?.id, "failed", message, Date.now() - startedAt);
+  }
+}
+
+/** Захват сообщения: false, если его уже взял другой наблюдатель (сервер вернул 409 на if_status). */
+async function claimInbox(id, props) {
+  try {
+    await mboxFetch(`/api/mbox/agent/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "doing", if_status: "open", props }) });
+    return true;
+  } catch (error) {
+    if (/^MBOX 409/.test(error.message)) return false;
+    throw error;
   }
 }
 
@@ -358,7 +414,11 @@ function spawnChecked(command, args, options) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
-    child.stdout.on("data", (chunk) => process.stdout.write(chunk));
+    let stdout = "";
+    child.stdout.on("data", (chunk) => {
+      stdout = `${stdout}${chunk}`.slice(-8000);
+      process.stdout.write(chunk);
+    });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
       process.stderr.write(chunk);
@@ -366,7 +426,23 @@ function spawnChecked(command, args, options) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`${command} exited with ${code}${stderr ? `\n${stderr}` : ""}`));
+      else reject(describeCliFailure(command, code, stdout, stderr));
     });
   });
 }
+
+/** Почему CLI агента упал — человеческим текстом. Claude и Codex пишут причину («You've hit your
+ * session limit», «usage limit») в stdout, а не в stderr, и в чат уходило пустое «exited with 1»
+ * со стеком node. Берём хвост обоих потоков без шумовых предупреждений node. */
+function describeCliFailure(command, code, stdout, stderr) {
+  const noise = /DeprecationWarning|--trace-deprecation|^\s*at\s/;
+  const lines = `${stderr}\n${stdout}`.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !noise.test(line));
+  const tail = lines.slice(-6).join("\n");
+  const name = String(command).split(/[\\/]/).pop();
+  const limit = lines.find((line) => /(usage|session|rate) limit|hit your .*limit|limit reached|quota/i.test(line));
+  const reason = limit ? `Исчерпан лимит подписки: ${limit}` : tail || "CLI не вывел причину";
+  const error = new Error(`${name} завершился с кодом ${code}. ${reason}`);
+  error.cliFailure = true;
+  return error;
+}
+

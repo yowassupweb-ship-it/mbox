@@ -40,3 +40,6 @@ scripts/next_batch.json
 scripts/next_batch.sql
 scripts/push_digest_log.txt
 scripts/check_meta.txt
+
+# Встроенный интерфейс MBOX Desktop собирается scripts/build-desktop-ui.mjs
+mbox-desktop/ui/

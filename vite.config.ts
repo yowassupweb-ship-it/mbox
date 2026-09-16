@@ -10,6 +10,9 @@ import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg
 import { WebSocket, WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
+import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
+import { ensureNotesSchema, handleNotesApi } from "./server/notes.mjs";
+import { ensureStorageSchema, handleStorageApi } from "./server/storage.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, type TourSheetItem,
@@ -899,6 +902,19 @@ function mboxDevApi() {
     name: "mbox-dev-api",
     configureServer(server: ViteDevServer) {
       loadLocalEnv();
+      server.middlewares.use((req, res, next) => {
+        const rawUrl = req.url || "/";
+        if (!rawUrl.startsWith("/?") || !rawUrl.includes("tab=")) return next();
+        const url = new URL(rawUrl, "http://localhost");
+        const tab = url.searchParams.get("tab");
+        if (!tab) return next();
+        url.searchParams.set("tab", tab);
+        const nextUrl = `${url.pathname}${url.search}`;
+        if (nextUrl === rawUrl) return next();
+        res.statusCode = 302;
+        res.setHeader("location", nextUrl);
+        res.end();
+      });
       const realtimeClients = new Set<WebSocket>();
       configureJarvis({
         query: queryPostgres,
@@ -906,6 +922,9 @@ function mboxDevApi() {
         rankMemories,
         recordMemoryAction,
       });
+      ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
+      ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
+      ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
 
       realtimeServer.on("connection", (socket) => {
@@ -1000,7 +1019,19 @@ function mboxDevApi() {
             return sendJson(res, 200, { user: await currentUser(req) });
           }
 
-          if (!(await requireUser(req, res))) return;
+          const sessionUser = await requireUser(req, res);
+          if (!sessionUser) return;
+
+          if (await handleWorkspaceApi({
+            req, res, url, query: queryPostgres, readBody, sendJson,
+            actor: actor || await resolveRequestActor(req),
+            allowed: sessionUser.role === "owner",
+            broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload),
+          })) return;
+          const ownerOnly = sessionUser.role === "owner";
+          const devActor = actor || await resolveRequestActor(req);
+          if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: ownerOnly })) return;
+          if (await handleStorageApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
 
           if (url.pathname === "/api/mbox/agent/structure") {
             return sendJson(res, 200, { structure: agentStructure });
@@ -2307,12 +2338,14 @@ function mboxDevApi() {
           }
           if (inboxMatch && req.method === "PATCH") {
             const body = await readBody<Record<string, unknown>>(req);
+            const ifStatus = String(body.if_status ?? "");
             const result = await queryPostgres(
               `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
-               WHERE id = $5 RETURNING id::text`,
-              [String(body.status ?? ""), String(body.priority ?? ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1]],
+               WHERE id = $5 AND ($6 = '' OR status = $6) RETURNING id::text`,
+              [String(body.status ?? ""), String(body.priority ?? ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1], ifStatus],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
+            if (!result.rows[0] && ifStatus) return sendJson(res, 409, { error: "status_changed" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { inbox_item: result.rows[0] } : { error: "not_found" });
           }
 
@@ -2521,8 +2554,36 @@ function mboxDevApi() {
   };
 }
 
+/**
+ * Сборка пишет в public/ без очистки (там же лежат иконки), и каждый build оставлял прошлые
+ * index-*.js/css рядом с новыми — в public/assets копились мегабайты мёртвых бандлов (их уже раз
+ * вычищали руками, коммит 258c95c). После сборки убираем хешированные js/css/map, которых нет в новой.
+ */
+function pruneStaleBundles() {
+  const produced = new Set<string>();
+  let outDir = "";
+  return {
+    name: "mbox-prune-stale-bundles",
+    apply: "build" as const,
+    configResolved(config: { root: string; build: { outDir: string } }) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    generateBundle(_options: unknown, bundle: Record<string, unknown>) {
+      for (const fileName of Object.keys(bundle)) produced.add(path.basename(fileName));
+    },
+    closeBundle() {
+      const assets = path.join(outDir, "assets");
+      if (!produced.size || !fs.existsSync(assets)) return;
+      for (const name of fs.readdirSync(assets)) {
+        const hashed = /^[\w.-]+-[\w-]{8}\.(js|css)(\.map)?$/.test(name);
+        if (hashed && !produced.has(name)) fs.rmSync(path.join(assets, name), { force: true });
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), mboxDevApi()],
+  plugins: [react(), mboxDevApi(), pruneStaleBundles()],
   publicDir: false,
   server: { port: 5173 },
 });

@@ -102,6 +102,26 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
 12. **Отладка Джарвиса через MCP.** `list_inbox` (тексты и трейс инструментов), `get_inbox_item`
    (сообщение + ответы + ошибки), `get_jarvis_errors`. На сервере — фильтры `GET /agent/inbox`
    (`agent`, `item_type`, `q`, `before_id`, `limit`) и `GET /agent/inbox/:id`.
+13. **Локальные папки (MBOX Desktop).** Файлы живут на компьютере, сервер их не видит. Общий модуль
+   `server/workspaces.mjs` (подключён и в прод, и в `vite.config.ts`; таблицы создаёт сам при старте):
+   реестр `workspaces` (присылает приложение вместе с git-сводкой), очередь `workspace_ops` (Джарвис и
+   MCP-инструменты `workspace_*` ставят операцию, страница в Electron забирает её раз в 2 с через
+   `src/app/workbench/localWorkspace.ts` и выполняет через мост `window.mboxDesktop.workspace`) и история
+   `workspace_file_versions` (правки из MBOX, агентов и замеченные наблюдателем за диском). Мост принимает
+   только ключ папки + относительный путь; запись в `.git` и исполняемые файлы (.exe/.cmd/.ps1…) отклоняется
+   в `mbox-desktop/main.js`. Без запущенного приложения операции с файлами недоступны (`workspace_offline`).
+14. **Заметки и хранилище S3.** `server/notes.mjs` (таблица `notes`, `/api/mbox/notes`) и `server/storage.mjs`
+   (`storage_settings`, `/api/mbox/storage/*`) — общие модули прод/dev, таблицы создаются при старте, доступ только
+   владельцу. S3 — Yandex Object Storage с подписью SigV4 на `node:crypto` без SDK (сверена с эталонами AWS);
+   секрет ключа шифруется `pgp_sym_encrypt` тем же `MBOX_SECRET_KEY`. Загрузка идёт потоком через сервер
+   (`POST /storage/upload?key=`, до 512 МБ), скачивание — временной подписанной ссылкой.
+15. **MBOX Desktop несёт интерфейс в себе (с 0.1.12).** Окно грузит `mbox://app/` из `mbox-desktop/ui`
+   (собирает `scripts/build-desktop-ui.mjs`, входит в `npm run dist`), а не сайт: мост к диску, агентам и SSH
+   доступен только коду приложения. `/api/*` и `/downloads/*` главный процесс проксирует на `MBOX_URL` с cookie
+   сессии; вебсокет страница открывает прямо на сервер (`src/lib/serverOrigin.ts`), cookie к нему добавляет
+   `localUi.js`. Правка `src/` доходит до приложения только с новой версией (автообновление из
+   `public/downloads/latest.yml`). `MBOX_UI=remote` — старый режим загрузки сайта (удобно для HMR).
+   Изменения `mbox-desktop/main.js` требуют перезапуска приложения, перезагрузки страницы мало.
 
 ## Работа агента с MBOX
 
@@ -130,6 +150,10 @@ MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент
 `MBOX_DOMAIN`, проксирует на `mbox-ui:3000`) во внешней сети `mbox-net`. Postgres живёт вне этого
 compose — контейнер `mbox-postgres`. `scripts/server_metrics_collector.sh` крутится на хосте и
 раз в 5 секунд пишет `server_metrics` (хранит последние 720 записей).
+
+На сервере `/opt/mbox` — не git-клон (на 2026-09-17 `.git` там нет): деплой — распаковать `git archive` поверх
+(`.env`, `archivist.env`, `.jarvis-session` в архив не входят и не затираются), затем
+`docker compose -f docker-compose.production.yml build app && ... up -d app`.
 
 ## Безопасность — известные слабые места
 

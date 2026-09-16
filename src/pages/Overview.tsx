@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardCheck, HelpCircle, Sliders } from "lucide-react";
-import { AgentWorkBoard } from "../features/agents/AgentWorkBoard";
 import { NeedsAnswer } from "../features/agents/NeedsAnswer";
 import { ReviewQueue } from "../features/projects/ReviewQueue";
 import type { MboxData } from "../hooks/useMboxData";
@@ -47,7 +46,6 @@ export function Overview({ data, onOpenProject }: { data: MboxData; onOpenProjec
           <ProjectPills projects={data.projects.slice(0, 5)} onOpenProject={onOpenProject} />
         </Panel>
       </div>
-      <AgentWorkBoard agents={data.agents} runs={data.runs} inbox={data.inbox} decisions={data.decisions} />
     </>
   );
 }

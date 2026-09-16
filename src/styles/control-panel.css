@@ -250,6 +250,18 @@
   background: color-mix(in srgb, var(--accent-color) 5%, var(--container-bg));
 }
 
+.project-fact-card.is-clickable {
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, transform 0.14s ease;
+}
+
+.project-fact-card.is-clickable:hover,
+.project-fact-card.is-clickable:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--container-bg));
+  outline: none;
+}
+
 .project-fact-card b { font-size: var(--text-sm); }
 .project-fact-card p {
   margin: 0;
