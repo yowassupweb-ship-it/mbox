@@ -1,6 +1,7 @@
 import type { FolderTreeNode } from "../../components/FolderTree";
 import { fetchJson } from "../../lib/api";
 import type { Project } from "../../types";
+import { askText } from "../../ui/askText";
 
 export type TreeMenuState = {
   node: FolderTreeNode;
@@ -25,7 +26,7 @@ export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: 
   const canCreateTodo = node.type === "project";
 
   async function colorNode() {
-    const color = window.prompt("Цвет в формате #RRGGBB", node.color || "#2c2c2e");
+    const color = await askText({ title: "Цвет в формате #RRGGBB", value: node.color || "#2c2c2e" });
     if (!color) return;
     if (!/^#[0-9a-fA-F]{6}$/.test(color)) return window.alert("Нужен цвет вида #2c2c2e");
     await fetchJson(node.type === "project" ? `/api/mbox/projects/${node.id}` : `/api/mbox/folders/${node.id}`, {
@@ -38,7 +39,7 @@ export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: 
   }
 
   async function createFolder() {
-    const name = window.prompt("Название новой папки");
+    const name = await askText({ title: "Название новой папки", confirmLabel: "Создать" });
     if (!name?.trim()) return;
     await fetchJson("/api/mbox/folders", {
       method: "POST",
@@ -51,7 +52,7 @@ export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: 
 
   async function createTodo() {
     const project = projects.find((item) => item.id === node.id);
-    const title = window.prompt("Название todo");
+    const title = await askText({ title: "Название todo", confirmLabel: "Создать" });
     if (!project || !title?.trim()) return;
     await fetchJson("/api/mbox/todos", {
       method: "POST",

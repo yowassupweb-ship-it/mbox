@@ -383,7 +383,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       })}</div>
 
       <nav className="wb-activitybar" aria-label="Разделы">
-        <ActivityButton label="Проводник (Ctrl+Shift+E)" icon={`${MENU}/provodnik.png`} active={sidebarOpen && activity === "explorer"} onClick={() => showActivity("explorer")} />
+        <ActivityButton label="Проекты (Ctrl+Shift+E)" icon={`${MENU}/provodnik.png`} active={sidebarOpen && activity === "explorer"} onClick={() => showActivity("explorer")} />
         <ActivityButton label="Заметки (Ctrl+Alt+N — новая)" icon={`${MENU}/zametki.png`} active={sidebarOpen && activity === "notes"} onClick={() => showActivity("notes")} />
         <ActivityButton label="Папки (локальные файлы и git)" icon={`${MENU}/papki.png`} active={sidebarOpen && activity === "local"} onClick={() => showActivity("local")} />
         <ActivityButton label="Артефакты" icon={`${MENU}/artefakty.png`} active={sidebarOpen && activity === "files"} onClick={() => showActivity("files")} />
@@ -465,7 +465,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                 <img src="/assets/icons/icons/logo.png" width={72} height={72} alt="" />
                 <dl>
                   <dt>Поиск по памяти</dt><dd><kbd>Ctrl</kbd>+<kbd>K</kbd></dd>
-                  <dt>Проводник</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></dd>
+                  <dt>Проекты</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></dd>
                   <dt>Боковая панель</dt><dd><kbd>Ctrl</kbd>+<kbd>B</kbd></dd>
                   <dt>Нижняя панель</dt><dd><kbd>Ctrl</kbd>+<kbd>J</kbd></dd>
                   <dt>Закрыть вкладку</dt><dd><kbd>Alt</kbd>+<kbd>W</kbd></dd>

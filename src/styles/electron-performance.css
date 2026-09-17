@@ -44,3 +44,9 @@ html[data-mbox-desktop="true"] .wb-panel-pane,
 html[data-mbox-desktop="true"] .wb-console-pane-body {
   content-visibility: auto;
 }
+
+/* Исключение: бегущая полоса загрузки через сервер — единственный признак, что загрузка жива. */
+html[data-mbox-desktop="true"] .wb-upload.is-indeterminate i {
+  animation-duration: 1.4s !important;
+  animation-iteration-count: infinite !important;
+}

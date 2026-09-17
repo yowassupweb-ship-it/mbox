@@ -191,7 +191,10 @@ function createWindow() {
     minHeight: 640,
     title: "MBOX Desktop",
     icon: iconPath,
-    autoHideMenuBar: true,
+    // Не autoHideMenuBar: с ним Alt (в том числе Alt+Shift при смене раскладки) показывал меню окна —
+    // окно дёргалось, фокус уходил в меню и курсор пропадал из заметки. Меню скрыто насовсем ниже,
+    // его горячие клавиши (Ctrl+R, масштаб, DevTools) продолжают работать.
+    autoHideMenuBar: false,
     titleBarStyle: "hiddenInset",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -202,6 +205,7 @@ function createWindow() {
     }
   });
 
+  mainWindow.setMenuBarVisibility(false);
   if (saved.maximized) mainWindow.maximize();
   for (const event of ["resize", "move", "maximize", "unmaximize"]) mainWindow.on(event, saveWindowState);
   mainWindow.webContents.on("did-finish-load", () => mainWindow?.webContents.setZoomFactor(saved.zoom || 1));

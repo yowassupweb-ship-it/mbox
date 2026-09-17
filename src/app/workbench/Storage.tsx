@@ -3,10 +3,24 @@ import { ChevronRight, Download, ExternalLink, FolderPlus, Link2, RefreshCw, Set
 import { fetchJson } from "../../lib/api";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { usePersistentState } from "./tabs";
+import { askText } from "../../ui/askText";
 
 type StorageConfig = { configured: boolean; endpoint: string; region: string; bucket: string; access_key_id: string; has_secret: boolean };
 type Listing = { prefix: string; folders: string[]; objects: Array<{ key: string; size: number; last_modified: string }>; next_token: string | null };
-type Upload = { name: string; loaded: number; total: number; error?: string };
+type Upload = { name: string; loaded: number; total: number; error?: string; mode?: "direct" | "proxy"; startedAt?: number; done?: boolean };
+
+/** Статус строки загрузки: байты, скорость и сколько осталось; через сервер прогресса нет — честно пишем это. */
+function uploadLabel(item: Upload) {
+  if (item.error) return item.error;
+  if (item.done) return `загружено · ${formatBytes(item.total)}`;
+  const seconds = item.startedAt ? Math.max(1, Math.round((Date.now() - item.startedAt) / 1000)) : 0;
+  if (item.mode === "proxy") return `идёт через сервер · ${formatBytes(item.total)} · ${seconds} с`;
+  if (!item.startedAt) return `подготовка · ${formatBytes(item.total)}`;
+  const speed = item.loaded / seconds;
+  const left = speed > 0 ? Math.round((item.total - item.loaded) / speed) : 0;
+  const eta = left > 90 ? `${Math.round(left / 60)} мин` : `${left} с`;
+  return `${formatBytes(item.loaded)} из ${formatBytes(item.total)} · ${formatBytes(speed)}/с · осталось ${eta}`;
+}
 
 const ICONS = "/assets/icons/icons";
 
@@ -15,7 +29,46 @@ async function apiError(response: Response) {
   return (data as { error?: string }).error || `Ошибка ${response.status}`;
 }
 
-function uploadWithProgress(key: string, file: File, onProgress: (loaded: number) => void) {
+/** Прямая загрузка в бакет по подписанной ссылке — с настоящим прогрессом. null — прямой путь недоступен. */
+async function directUploadUrl(key: string) {
+  try {
+    const response = await fetch("/api/mbox/storage/upload-url", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key }) });
+    if (!response.ok) return null;
+    return ((await response.json()) as { url: string }).url;
+  } catch {
+    return null;
+  }
+}
+
+function putWithProgress(url: string, file: File, onProgress: (loaded: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    xhr.upload.onprogress = (event) => onProgress(event.loaded);
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Хранилище ответило ${xhr.status}`)));
+    xhr.onerror = () => reject(new Error("direct-network"));
+    xhr.send(file);
+  });
+}
+
+async function uploadWithProgress(key: string, file: File, onProgress: (loaded: number, mode: Upload["mode"]) => void) {
+  const url = await directUploadUrl(key);
+  if (url) {
+    let sent = 0;
+    try {
+      await putWithProgress(url, file, (loaded) => { sent = loaded; onProgress(loaded, "direct"); });
+      return;
+    } catch (error) {
+      // CORS или сеть до первого байта — пробуем через сервер; оборвалось на середине — это настоящая ошибка.
+      if (sent > 0 || !(error instanceof Error && error.message === "direct-network")) throw error;
+    }
+  }
+  onProgress(0, "proxy");
+  await proxyUpload(key, file, (loaded) => onProgress(loaded, "proxy"));
+}
+
+function proxyUpload(key: string, file: File, onProgress: (loaded: number) => void) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/mbox/storage/upload?key=${encodeURIComponent(key)}`);
@@ -42,6 +95,13 @@ export function StorageDocument() {
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [, setTick] = useState(0);
+  const uploading = uploads.some((item) => !item.done && !item.error);
+  useEffect(() => {
+    if (!uploading) return;
+    const timer = window.setInterval(() => setTick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [uploading]);
 
   useEffect(() => {
     fetchJson<{ config: StorageConfig }>("/api/mbox/storage/config").then(({ config: loaded }) => {
@@ -65,8 +125,8 @@ export function StorageDocument() {
     setUploads(list.map((file) => ({ name: file.name, loaded: 0, total: file.size })));
     for (const [index, file] of list.entries()) {
       try {
-        await uploadWithProgress(`${prefix}${file.name}`, file, (loaded) => setUploads((current) => current.map((item, position) => (position === index ? { ...item, loaded } : item))));
-        setUploads((current) => current.map((item, position) => (position === index ? { ...item, loaded: item.total } : item)));
+        await uploadWithProgress(`${prefix}${file.name}`, file, (loaded, mode) => setUploads((current) => current.map((item, position) => (position === index ? { ...item, loaded, mode, startedAt: item.startedAt ?? Date.now() } : item))));
+        setUploads((current) => current.map((item, position) => (position === index ? { ...item, loaded: item.total, done: true } : item)));
       } catch (cause) {
         setUploads((current) => current.map((item, position) => (position === index ? { ...item, error: cause instanceof Error ? cause.message : String(cause) } : item)));
       }
@@ -97,7 +157,7 @@ export function StorageDocument() {
   }
 
   async function createFolder() {
-    const name = window.prompt("Имя папки");
+    const name = await askText({ title: "Имя папки", confirmLabel: "Создать" });
     if (!name?.trim()) return;
     const response = await fetch("/api/mbox/storage/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: `${prefix}${name.trim()}` }) });
     if (!response.ok) setError(await apiError(response));
@@ -145,10 +205,10 @@ export function StorageDocument() {
       {uploads.length > 0 && (
         <div className="wb-uploads">
           {uploads.map((item, index) => (
-            <div key={index} className={item.error ? "wb-upload is-error" : "wb-upload"}>
+            <div key={index} className={["wb-upload", item.error ? "is-error" : "", item.mode === "proxy" && !item.done ? "is-indeterminate" : "", item.done ? "is-done" : ""].filter(Boolean).join(" ")}>
               <span>{item.name}</span>
               <i style={{ width: `${item.total ? Math.round((item.loaded / item.total) * 100) : 100}%` }} />
-              <em>{item.error ?? `${formatBytes(item.loaded)} из ${formatBytes(item.total)}`}</em>
+              <em>{uploadLabel(item)}</em>
             </div>
           ))}
         </div>

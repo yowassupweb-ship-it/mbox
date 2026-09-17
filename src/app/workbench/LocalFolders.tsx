@@ -5,6 +5,7 @@ import { IMAGE_FILE, gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspac
 import { usePersistentState, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
 import { onLocalReveal } from "./agentTabs";
+import { askText } from "../../ui/askText";
 
 const ICONS = "/assets/icons/icons";
 
@@ -150,11 +151,12 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     }, { rootKey: selection.rootKey, rel: dir });
   }
 
-  function rename(selection: Selection) {
+  async function rename(selection: Selection) {
     const entry = selection.entry;
     if (!entry || !bridge) return;
-    const name = window.prompt("Новое имя", entry.name);
-    if (!name?.trim() || name.trim() === entry.name) return setMenu(null);
+    setMenu(null);
+    const name = await askText({ title: entry.type === "dir" ? "Новое имя папки" : "Новое имя файла", value: entry.name, confirmLabel: "Переименовать", validate: (value) => (/[\\/:*?"<>|]/.test(value) ? "Нельзя использовать символы \\ / : * ? \" < > |" : "") });
+    if (!name?.trim() || name.trim() === entry.name) return;
     const parent = parentOf(entry.path);
     void act(async () => {
       const result = await bridge.rename(selection.rootKey, entry.path, parent ? `${parent}/${name.trim()}` : name.trim());
@@ -190,7 +192,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     else if (mod && event.code === "KeyX") { event.preventDefault(); copy(selected, true); }
     else if (mod && event.code === "KeyV") { event.preventDefault(); if (clip) paste(selected); else pasteFromWindows(selected); }
     else if (event.key === "Delete") { event.preventDefault(); trash(selected); }
-    else if (event.key === "F2") { event.preventDefault(); rename(selected); }
+    else if (event.key === "F2") { event.preventDefault(); void rename(selected); }
     else if (event.key === "Enter" && selected.entry?.type === "file") { event.preventDefault(); tabs.open(localFileKey(selected.rootKey, selected.entry.path), true); }
   }
 
@@ -198,8 +200,9 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     return rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
   }
 
-  function create(rootKey: string, dir: string, type: "file" | "dir") {
-    const name = window.prompt(type === "dir" ? "Имя новой папки" : "Имя нового файла", type === "dir" ? "" : "заметка.md");
+  async function create(rootKey: string, dir: string, type: "file" | "dir") {
+    setMenu(null);
+    const name = await askText({ title: type === "dir" ? "Имя новой папки" : "Имя нового файла", value: type === "dir" ? "" : "заметка.md", confirmLabel: "Создать", validate: (value) => (/[\\/:*?"<>|]/.test(value) ? "Нельзя использовать символы \\ / : * ? \" < > |" : "") });
     if (!name?.trim() || !bridge) return;
     const rel = dir ? `${dir}/${name.trim()}` : name.trim();
     void act(async () => {

@@ -219,7 +219,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
   return (
     <div className="wb-view">
       <header className="wb-view-head">
-        <span>Проводник</span>
+        <span>Проекты</span>
         <div className="wb-view-actions">
           <button type="button" className={showDone ? "is-on" : undefined} onClick={() => setShowDone((value) => !value)} title={showDone ? "Скрыть готовые todo" : "Показать готовые todo"}>
             <img src={`${ICONS}/галочка.png`} width={13} height={13} alt="" />

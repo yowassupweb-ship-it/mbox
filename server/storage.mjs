@@ -132,6 +132,33 @@ async function s3(config, { method, key = "", query = {}, headers = {}, body, pa
   return fetch(`${url.origin}${path}${qs ? `?${qs}` : ""}`, { method, headers: signed.headers, body, duplex: body ? "half" : undefined });
 }
 
+// Прямая загрузка из браузера в бакет по подписанной ссылке: так виден настоящий прогресс (в MBOX Desktop
+// запрос через /api идёт обработчиком протокола приложения без событий прогресса — 300 МБ висели на «0 B»)
+// и файл не проходит через сервер. Для этого у бакета должно быть CORS-правило на PUT — добавляем своё один
+// раз, не трогая существующие правила.
+const corsReady = new Set();
+const MBOX_CORS_RULE = "<CORSRule><ID>mbox-direct-upload</ID><AllowedOrigin>*</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule>";
+
+async function ensureUploadCors(config) {
+  if (corsReady.has(config.bucket)) return;
+  const current = await s3(config, { method: "GET", query: { cors: "" } });
+  const xml = current.ok ? await current.text() : "";
+  if (xml.includes("mbox-direct-upload")) { corsReady.add(config.bucket); return; }
+  if (!current.ok && current.status !== 404) throw new Error(`CORS бакета: ${await s3Error(current)}`);
+  const body = xml.includes("</CORSConfiguration>")
+    ? xml.replace("</CORSConfiguration>", `${MBOX_CORS_RULE}</CORSConfiguration>`)
+    : `<?xml version="1.0" encoding="UTF-8"?><CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">${MBOX_CORS_RULE}</CORSConfiguration>`;
+  const response = await s3(config, {
+    method: "PUT",
+    query: { cors: "" },
+    headers: { "content-type": "application/xml", "content-md5": createHash("md5").update(body).digest("base64") },
+    body,
+    payloadHash: sha256Hex(body),
+  });
+  if (!response.ok) throw new Error(`CORS бакета: ${await s3Error(response)}`);
+  corsReady.add(config.bucket);
+}
+
 function xmlValues(xml, tag) {
   return [...xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g"))].map((match) => match[1]);
 }
@@ -222,6 +249,20 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
     }
     if (pathname === "/api/mbox/storage/objects" && req.method === "GET") {
       sendJson(res, 200, await listObjects(config, url.searchParams.get("prefix") || "", url.searchParams.get("token") || ""));
+      return true;
+    }
+    if (pathname === "/api/mbox/storage/upload-url" && req.method === "POST") {
+      const body = await readBody(req);
+      const key = cleanKey(body.key);
+      if (!key || key.endsWith("/")) { sendJson(res, 400, { error: "Нужно имя файла" }); return true; }
+      try {
+        await ensureUploadCors(config);
+      } catch (error) {
+        sendJson(res, 409, { error: error.message, fallback: "proxy" });
+        return true;
+      }
+      const upload = presignUrl({ method: "PUT", endpoint: config.endpoint, path: objectPath(config, key), accessKeyId: config.access_key_id, secretAccessKey: config.secret_access_key, region: config.region, expires: 6 * 3600 });
+      sendJson(res, 200, { url: upload, key });
       return true;
     }
     if (pathname === "/api/mbox/storage/upload" && req.method === "POST") {

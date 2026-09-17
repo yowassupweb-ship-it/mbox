@@ -11,6 +11,7 @@ import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { Company, DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
+import { askText } from "../ui/askText";
 
 const ICONS = "/assets/icons/icons";
 
@@ -212,7 +213,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
   }
 
   async function createFolder(presetName?: string) {
-    const name = presetName || window.prompt("Название новой папки проекта");
+    const name = presetName || await askText({ title: "Название новой папки проекта", confirmLabel: "Создать" });
     if (!name?.trim()) return;
     await fetchJson("/api/mbox/folders", {
       method: "POST",
