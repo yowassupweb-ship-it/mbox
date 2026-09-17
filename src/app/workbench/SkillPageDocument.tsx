@@ -8,7 +8,7 @@ import { usePersistentState, type TabsApi } from "./tabs";
 
 const HUMAN = "Человек";
 
-type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:files"; id: number; path?: string; content?: string; message?: string };
+type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:write-files" | "mbox:files" | "mbox:email-check"; id: number; path?: string; content?: string; message?: string; html?: string; files?: Array<{ path: string; content: string; message?: string }> };
 
 /**
  * Страница из пакета навыка на сервере (skills/<навык>/<файл>): HTML-форма или markdown. Открывает её агент
@@ -18,7 +18,8 @@ type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:files"; id: number;
  * который вставляется в страницу:
  *   mbox.send(text) — отправить результат в чат MBOX агенту, открывшему вкладку;
  *   mbox.close()    — закрыть вкладку;
- *   mbox.read(path), mbox.write(path, content, message), mbox.files() — файлы своего навыка на сервере (с историей версий);
+ *   mbox.read(path), mbox.write(path, content, message), mbox.writeFiles(files, message), mbox.files() — файлы своего навыка на сервере (с историей версий);
+ *   mbox.emailCheck(html) — внешняя проверка готового HTML через Email Checker на сервере MBOX;
  *   localStorage    — работает (в песочнице его нет): хранится у MBOX, черновик формы переживает закрытие.
  */
 export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { skill: string; file: string; tabKey: string; tabs: TabsApi; projectId?: string }) {
@@ -72,7 +73,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
       if (data?.type === "mbox:send" && typeof data.text === "string" && data.text.trim()) {
         void sendToChat(data.text.trim());
       }
-      if (data?.type === "mbox:read" || data?.type === "mbox:write" || data?.type === "mbox:files") void answer(data as BridgeCall);
+      if (data?.type === "mbox:read" || data?.type === "mbox:write" || data?.type === "mbox:write-files" || data?.type === "mbox:files" || data?.type === "mbox:email-check") void answer(data as BridgeCall);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -83,9 +84,29 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
     const reply = (payload: { ok: boolean; result?: unknown; error?: string }) => frameRef.current?.contentWindow?.postMessage({ type: "mbox:reply", id: call.id, ...payload }, "*");
     const base = `/api/mbox/agent/skills/packages/${encodeURIComponent(skill)}`;
     try {
+      if (call.type === "mbox:email-check") {
+        const data = await fetchJson<{ check: unknown }>("/api/mbox/email/check", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ html: String(call.html || "") }),
+        });
+        reply({ ok: true, result: data.check });
+        return;
+      }
       if (call.type === "mbox:files") {
         const data = await fetchJson<{ package: { files: Array<{ path: string; size: number; edited?: boolean }> } }>(base);
         reply({ ok: true, result: data.package.files.map(({ path, size, edited }) => ({ path, size, edited: Boolean(edited) })) });
+        return;
+      }
+      if (call.type === "mbox:write-files") {
+        const files = Array.isArray(call.files) ? call.files.map((entry) => ({ path: String(entry.path || ""), content: String(entry.content ?? ""), message: String(entry.message || "") })) : [];
+        files.forEach((entry) => selfWrites.current.set(entry.path, Date.now()));
+        const result = await fetchJson(`${base}/files`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ files, message: String(call.message || `Страница ${file}`) }),
+        });
+        reply({ ok: true, result });
         return;
       }
       const path = String(call.path || "");
@@ -182,6 +203,8 @@ send:function(text){parent.postMessage({type:"mbox:send",text:String(text)},"*")
 close:function(){parent.postMessage({type:"mbox:close"},"*");},
 read:function(path){return call("mbox:read",{path:String(path)});},
 write:function(path,content,message){return call("mbox:write",{path:String(path),content:String(content),message:String(message||"")});},
+writeFiles:function(files,message){return call("mbox:write-files",{files:Array.isArray(files)?files:[],message:String(message||"")});},
+emailCheck:function(html){return call("mbox:email-check",{html:String(html)});},
 files:function(){return call("mbox:files",{});}};
 })();</script>`;
   const head = html.match(/<head[^>]*>/i);

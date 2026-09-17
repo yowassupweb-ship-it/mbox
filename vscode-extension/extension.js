@@ -127,6 +127,35 @@ class MboxClient {
   artifacts() { return this.request("/api/mbox/artifacts"); }
   skills() { return this.request("/api/mbox/agent/skills"); }
 
+  async readSkillFile(skill, file) {
+    const data = await this.request(`/api/mbox/agent/skills/packages/${encodeURIComponent(skill)}?file=${encodeURIComponent(file)}`);
+    return data.content;
+  }
+
+  async skillFiles(skill) {
+    const data = await this.request(`/api/mbox/agent/skills/packages/${encodeURIComponent(skill)}`);
+    return data.package?.files || [];
+  }
+
+  writeSkillFile(skill, file, content, message = "") {
+    return this.request(`/api/mbox/agent/skills/packages/${encodeURIComponent(skill)}/files?file=${encodeURIComponent(file)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content, message })
+    });
+  }
+
+  writeSkillFiles(skill, files, message = "") {
+    return this.request(`/api/mbox/agent/skills/packages/${encodeURIComponent(skill)}/files`, {
+      method: "PUT",
+      body: JSON.stringify({ files, message })
+    });
+  }
+
+  async emailCheck(html) {
+    const data = await this.request("/api/mbox/email/check", { method: "POST", body: JSON.stringify({ html }) });
+    return data.check;
+  }
+
   async workspaceSnapshot() {
     const [context, projects, artifacts, skills] = await Promise.all([
       this.contextSnapshot(), this.projects(), this.artifacts(), this.skills()
@@ -1226,6 +1255,23 @@ function nonce() {
   return value;
 }
 
+function withSkillBridge(html) {
+  const bridge = `<script>(function(){
+const vscode=acquireVsCodeApi();let seq=0;const waiting={};
+function call(type,payload){return new Promise(function(resolve,reject){const id=++seq;waiting[id]={resolve,reject};vscode.postMessage(Object.assign({type,id},payload));});}
+window.addEventListener('message',function(event){const data=event.data;if(!data||data.type!=='mbox:reply'||!waiting[data.id])return;const entry=waiting[data.id];delete waiting[data.id];data.ok?entry.resolve(data.result):entry.reject(new Error(data.error||'MBOX'));});
+window.mbox={embedded:true,skill:'email-campaign',
+send:function(text){vscode.postMessage({type:'mbox:send',text:String(text)});},
+read:function(path){return call('mbox:read',{path:String(path)});},
+write:function(path,content,message){return call('mbox:write',{path:String(path),content:String(content),message:String(message||'')});},
+writeFiles:function(files,message){return call('mbox:write-files',{files:Array.isArray(files)?files:[],message:String(message||'')});},
+emailCheck:function(content){return call('mbox:email-check',{html:String(content)});},
+files:function(){return call('mbox:files',{});}};
+})();<\/script>`;
+  const head = html.match(/<head[^>]*>/i);
+  return head ? html.replace(head[0], `${head[0]}${bridge}`) : `${bridge}${html}`;
+}
+
 async function activate(context) {
   const client = new MboxClient(context);
   const output = vscode.window.createOutputChannel("MBOX: респондеры");
@@ -1268,6 +1314,7 @@ async function activate(context) {
   }
 
   let consolePanel = null;
+  let emailPanel = null;
 
   async function refresh(silent = false) {
     try {
@@ -1344,6 +1391,34 @@ async function activate(context) {
     });
   }
 
+  async function openEmailLibrary() {
+    if (emailPanel) {
+      emailPanel.reveal(vscode.ViewColumn.Beside);
+      return;
+    }
+    const source = await client.readSkillFile("email-campaign", "library.html");
+    emailPanel = vscode.window.createWebviewPanel("mbox.emailLibrary", "Конструктор писем MBOX", vscode.ViewColumn.Beside, { enableScripts: true });
+    emailPanel.webview.html = withSkillBridge(source);
+    emailPanel.onDidDispose(() => { emailPanel = null; });
+    emailPanel.webview.onDidReceiveMessage(async (message) => {
+      const reply = (payload) => emailPanel?.webview.postMessage({ type: "mbox:reply", id: message.id, ...payload });
+      try {
+        if (message.type === "mbox:send") {
+          await client.createInboxMessage(String(message.text || ""), "Джарвис");
+          vscode.window.setStatusBarMessage("Задание отправлено агенту MBOX", 3000);
+          return;
+        }
+        if (message.type === "mbox:read") reply({ ok: true, result: await client.readSkillFile("email-campaign", String(message.path || "")) });
+        else if (message.type === "mbox:files") reply({ ok: true, result: (await client.skillFiles("email-campaign")).map(({ path, size, edited }) => ({ path, size, edited: Boolean(edited) })) });
+        else if (message.type === "mbox:write") reply({ ok: true, result: await client.writeSkillFile("email-campaign", String(message.path || ""), String(message.content ?? ""), String(message.message || "")) });
+        else if (message.type === "mbox:write-files") reply({ ok: true, result: await client.writeSkillFiles("email-campaign", Array.isArray(message.files) ? message.files : [], String(message.message || "")) });
+        else if (message.type === "mbox:email-check") reply({ ok: true, result: await client.emailCheck(String(message.html || "")) });
+      } catch (error) {
+        reply({ ok: false, error: error.message });
+      }
+    });
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand("mbox.configure", async () => {
       if (await promptConnection(client)) await refresh();
@@ -1364,7 +1439,8 @@ async function activate(context) {
       await refresh(true);
     }),
     vscode.commands.registerCommand("mbox.openEmailLibrary", async () => {
-      await vscode.env.openExternal(vscode.Uri.parse(`${client.config.url}/email-library.html`));
+      try { await openEmailLibrary(); }
+      catch (error) { vscode.window.showErrorMessage(`MBOX: не удалось открыть конструктор писем — ${error.message}`); }
     }),
     vscode.commands.registerCommand("mbox.nextTask", async () => {
       try {

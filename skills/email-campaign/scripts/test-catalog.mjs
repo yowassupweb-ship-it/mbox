@@ -64,6 +64,23 @@ if (existsSync(registryPath)) {
 }
 if (!(manifest.templates || []).length) failures.push('В manifest нет шаблонов.');
 
+try {
+  const sandbox = {};
+  new Script(readFileSync(resolve(root, 'components', 'render.js'), 'utf8'), { filename: 'components/render.js' }).runInNewContext(sandbox);
+  const component = { id: 'C999', fields: [{ key: 'title', label: 'Заголовок', type: 'text' }, { key: 'url', label: 'Ссылка', type: 'url' }] };
+  const template = '<tr em="block"><td><a href="{{url|url}}">{{title}}</a></td></tr>';
+  const formatted = sandbox.LetterKit.renderComponent(component, template, { title: 'Текст', url: 'https://example.com' }, 1, { title: { fontSize: 28, color: '#172B25', bold: true } });
+  if (!formatted.html.includes('font-size:28px;color:#172b25;font-weight:700')) failures.push('Renderer не применил безопасное форматирование текстового поля.');
+  if (formatted.html.includes('data-mbox-')) failures.push('Готовый HTML содержит служебные атрибуты редактора.');
+  if (!formatted.html.includes('href="https://example.com"')) failures.push('Renderer повредил URL при форматировании текста.');
+  const editable = sandbox.LetterKit.renderComponent(component, template, { title: 'Текст', url: 'https://example.com' }, 1, {}, { editable: true, itemIndex: 0 });
+  if (!editable.html.includes('data-mbox-item="0"') || !editable.html.includes('data-mbox-field="title"')) failures.push('Renderer не разметил текст для интерактивного предпросмотра.');
+  const unsafe = sandbox.LetterKit.normalizeFormat({ fontSize: 500, color: 'red', bold: 'yes' });
+  if (unsafe.fontSize || unsafe.color || unsafe.bold) failures.push('Renderer принял небезопасное форматирование.');
+} catch (error) {
+  failures.push(`Renderer не прошёл тесты форматирования: ${error.message}`);
+}
+
 if (failures.length) {
   failures.forEach((failure) => console.error(`ERROR ${failure}`));
   process.exit(1);

@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Компоненты писем — Вокруг света</title>
+  <title>Конструктор письма — Вокруг света</title>
   <style>
-    /* Стиль MBOX (токены рабочего места). Страница живёт во вкладке MBOX: каталог навыков → «Запустить»,
-       или агент открывает её через MCP open_tab skill-file:email-campaign/library.html.
-       Данные — components/registry.json, components/C###.html, components/shells/<шаблон>.html
-       (создаёт scripts/extract-components.mjs, дополняет эта страница и агенты). */
+    /* Конструктор письма под управлением агента. Страница во вкладке MBOX (каталог навыков → «Запустить»
+       или MCP open_tab skill-file:email-campaign/library.html). Письмо — letters/<id>.json: бриф → состав из
+       компонентов C### с полями → проверка. Сборку делает components/render.js — тот же код, что у агента
+       (scripts/letter.mjs), поэтому предпросмотр здесь совпадает с готовым HTML. */
     :root {
       color-scheme: dark;
       --bg: #08090a; --surface: #0c0d0f; --surface-2: #101114; --surface-3: #15171b;
@@ -29,491 +29,786 @@
     [hidden] { display: none !important; }
 
     .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-    .top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-    .title { display: grid; }
+    .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
     .eyebrow { color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
-    h1 { margin: 3px 0 0; font-size: 16px; font-weight: 600; }
+    .letter-pick { display: flex; align-items: center; gap: 6px; }
+    .letter-pick select { max-width: 320px; }
     .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
-    .tabs button { padding: 5px 14px; border: 0; background: none; color: var(--text-2); }
+    .tabs button { padding: 5px 12px; border: 0; background: none; color: var(--text-2); }
     .tabs button + button { border-left: 1px solid var(--line); }
     .tabs button.on { background: var(--selected); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
-    .tabs b { margin-left: 6px; color: var(--text-muted); font: 600 11px var(--font-mono); }
+    .tabs b { margin-left: 5px; color: var(--text-muted); font: 600 11px var(--font-mono); }
     .fill { flex: 1; }
     .status { color: var(--text-muted); font-size: 12px; }
-    .status.ok { color: var(--ok); }
-    .status.err { color: var(--danger); }
+    .status.ok { color: var(--ok); } .status.err { color: var(--danger); }
+    .badge { padding: 1px 7px; border-radius: var(--radius-sm); font: 600 11px/18px var(--font-mono); background: rgba(255,255,255,.06); color: var(--text-2); white-space: nowrap; }
+    .badge.brief { color: var(--text-2); } .badge.proposed { color: var(--accent); background: var(--selected); }
+    .badge.checked { color: var(--ok); background: rgba(53,199,89,.12); } .badge.needs-fix { color: var(--warn); background: rgba(255,176,0,.12); }
 
     .view { min-height: 0; overflow: auto; }
-    .toolbar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); }
     input, textarea, select { min-height: 28px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); outline: none; }
     textarea { resize: vertical; line-height: 1.45; }
     input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--surface-3); }
     input::placeholder, textarea::placeholder { color: var(--text-muted); }
-    .search { width: 260px; }
-    .btn { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--text); font-size: 12px; white-space: nowrap; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--text); font-size: 12px; white-space: nowrap; }
     .btn:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); }
     .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
     .btn.primary:hover:not(:disabled) { background: #5ff0e8; }
     .btn.ghost { border-color: transparent; color: var(--text-2); }
+    .btn.small { min-height: 22px; padding: 0 6px; }
     .btn:disabled { opacity: .4; cursor: default; }
-    .num { color: var(--accent); font: 700 13px/1 var(--font-mono); letter-spacing: .02em; }
+    .num { color: var(--accent); font: 700 13px/1 var(--font-mono); }
     .chip { padding: 1px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); font-size: 11px; white-space: nowrap; }
     .muted { color: var(--text-muted); }
-
-    /* ── Компоненты ── */
-    .list { display: grid; gap: 14px; max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
-    .card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; }
-    .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-    .card-head .name { flex: 1; min-width: 160px; font-weight: 500; }
-    .card-ask { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-    .card-ask textarea { flex: 1; min-height: 52px; }
-    .preview { padding: 10px; background: #fff; }
-    .preview iframe { display: block; width: 100%; max-width: 660px; margin: 0 auto; border: 0; background: #fff; }
-    .card.flash { box-shadow: 0 0 0 2px var(--accent); }
-    .new { max-width: 760px; margin: 14px auto 0; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); }
-    .new h2, .side h2 { margin: 0 0 10px; color: var(--text-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-    .field { display: grid; gap: 4px; }
+    h2 { margin: 0 0 8px; color: var(--text-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+    .panel { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); padding: 14px; }
+    .panel + .panel { margin-top: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .grid .wide { grid-column: 1 / -1; }
+    .field { display: grid; gap: 4px; min-width: 0; }
     .field label { color: var(--text-2); font-size: 12px; }
-    .new textarea { width: 100%; min-height: 140px; margin-top: 8px; font: 12px/1.5 var(--font-mono); }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .field label span { color: var(--text-muted); }
+    .field input, .field textarea, .field select { width: 100%; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    .notice { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--selected); }
+    .notice.warn { border-color: rgba(255,176,0,.35); background: rgba(255,176,0,.08); }
+    .notice ul { margin: 6px 0 0; padding-left: 18px; }
+    .empty { padding: 28px 12px; color: var(--text-muted); text-align: center; }
 
-    /* ── Сборка ── */
-    .build { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); height: 100%; min-height: 0; }
-    .side { min-height: 0; overflow: auto; padding: 14px; border-right: 1px solid var(--line); }
-    .side .field + .field { margin-top: 8px; }
-    .side input, .side textarea, .side select { width: 100%; }
-    .adder { display: flex; gap: 6px; margin: 12px 0; }
-    .adder input { flex: 1; font-family: var(--font-mono); text-transform: uppercase; }
-    .items { display: grid; gap: 8px; }
+    /* Бриф */
+    .page { max-width: 900px; margin: 0 auto; padding: 16px 16px 60px; }
+    .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .type { padding: 9px 11px; border: 1px solid var(--line); border-left: 2px solid transparent; border-radius: var(--radius-sm); background: var(--surface); text-align: left; }
+    .type small { display: block; color: var(--text-muted); font-size: 11px; }
+    .type.on { border-left-color: var(--accent); background: var(--selected); }
+    .tour { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+    .tour + .tour { margin-top: 8px; }
+    .tour-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .tour-head .num { flex: 1; }
+
+    /* Сборка */
+    .build { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); height: 100%; min-height: 0; }
+    .side { min-height: 0; overflow: auto; padding: 12px; border-right: 1px solid var(--line); }
     .item { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
-    .item-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+    .item + .item { margin-top: 6px; }
+    .item.err { border-color: rgba(255,77,94,.45); }
+    .item-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; }
     .item-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .item-head .btn { min-height: 22px; padding: 0 6px; }
-    .item-body { display: grid; gap: 6px; padding: 8px; border-top: 1px solid var(--line); }
-    .item-body .group { color: var(--text-muted); font: 600 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
-    .item-body textarea { min-height: 44px; }
-    .changed { border-color: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
-    .empty { padding: 24px 8px; color: var(--text-muted); text-align: center; }
+    .item-body { display: grid; gap: 8px; padding: 8px; border-top: 1px solid var(--line); }
+    .adder { display: flex; gap: 6px; margin-top: 10px; }
+    .adder select { flex: 1; min-width: 0; }
+    .errors { margin: 8px 0 0; padding: 8px 10px 8px 26px; border: 1px solid rgba(255,77,94,.35); border-radius: var(--radius-sm); background: rgba(255,77,94,.07); color: #ffb3bb; font-size: 12px; }
     .stage { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
-    .stage .toolbar { position: static; }
-    .stage-body { min-height: 0; overflow: auto; padding: 14px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
-    .stage iframe { display: block; width: 100%; max-width: 720px; height: 100%; min-height: 600px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+    .stage-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    .editor-hint { color: var(--text-muted); font-size: 11px; }
+    .formatbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; padding-top: 8px; border-top: 1px solid var(--line); }
+    .formatbar .field-name { max-width: 240px; overflow: hidden; color: var(--text-2); font: 600 11px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    .formatbar label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11px; }
+    .formatbar input[type="number"] { width: 62px; min-height: 26px; }
+    .formatbar input[type="color"] { width: 34px; min-height: 26px; padding: 2px; }
+    .formatbar .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--selected); color: var(--accent); }
+    .stage-body { min-height: 0; overflow: auto; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
+    .stage iframe { display: block; width: 100%; max-width: 720px; height: 100%; min-height: 640px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
     .stage.mobile iframe { max-width: 390px; }
+
+    /* Компоненты */
+    .cards { display: grid; gap: 12px; }
+    .card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; }
+    .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; }
+    .card-head .name { flex: 1; min-width: 180px; font-weight: 500; }
+    .card-info { padding: 0 10px 8px; color: var(--text-2); font-size: 12px; }
+    .card-info code { color: var(--text-muted); font: 11px var(--font-mono); }
+    .preview { padding: 10px; background: #fff6ed; }
+    .preview iframe { display: block; width: 100%; max-width: 660px; margin: 0 auto; border: 0; background: #fff6ed; }
+    .ask { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }
+    .ask textarea { flex: 1; min-height: 48px; }
+    .code { width: 100%; min-height: 200px; font: 12px/1.5 var(--font-mono); }
+    table.schema { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.schema th, table.schema td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+    table.schema input, table.schema select { width: 100%; min-height: 24px; }
+
+    /* Проверка */
+    .check-list { margin: 0; padding: 0; list-style: none; }
+    .check-list li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .check-list li:last-child { border-bottom: 0; }
+    .sev { display: inline-block; min-width: 64px; margin-right: 6px; font: 600 11px var(--font-mono); }
+    .sev.error { color: var(--danger); } .sev.warn { color: var(--warn); } .sev.ok { color: var(--ok); } .sev.info { color: var(--text-muted); }
+    .ctx { display: block; margin-top: 2px; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: rgba(238, 244, 241, .16); }
-    @media (max-width: 900px) { .build { grid-template-columns: 1fr; height: auto; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid2 { grid-template-columns: 1fr; } .search { width: 100%; } }
+    @media (max-width: 900px) { .build { grid-template-columns: 1fr; height: auto; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid, .types { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="top">
-      <div class="title"><span class="eyebrow">Вокруг света · email-campaign</span><h1>Компоненты писем</h1></div>
+      <span class="eyebrow">email-campaign</span>
+      <div class="letter-pick">
+        <select id="letter-select" aria-label="Письмо"></select>
+        <button class="btn small" type="button" id="letter-new">+ Письмо</button>
+      </div>
+      <span class="badge" id="letter-status"></span>
       <div class="tabs" role="tablist">
-        <button type="button" data-tab="components" class="on" role="tab">Компоненты<b id="count-components">0</b></button>
-        <button type="button" data-tab="build" role="tab">Сборка письма<b id="count-build">0</b></button>
+        <button type="button" data-tab="brief" role="tab">Бриф</button>
+        <button type="button" data-tab="build" role="tab">Сборка<b id="count-items">0</b></button>
+        <button type="button" data-tab="components" role="tab">Компоненты<b id="count-components">0</b></button>
+        <button type="button" data-tab="check" role="tab">Проверка<b id="count-check"></b></button>
       </div>
       <span class="fill"></span>
       <span class="status" id="status">Загрузка…</span>
     </header>
 
-    <!-- Вкладка 1: все компоненты с уникальными номерами -->
-    <main class="view" id="view-components">
-      <div class="toolbar">
-        <input class="search" id="search" type="search" placeholder="Номер или текст: C008, Карелия, футер">
-        <select id="filter-category"><option value="">Все категории</option></select>
-        <select id="filter-source"><option value="">Все письма</option></select>
-        <span class="muted" id="shown"></span>
-        <span class="fill"></span>
-        <button class="btn primary" type="button" id="toggle-new">+ Новый компонент</button>
+    <!-- 1. Бриф -->
+    <main class="view" id="view-brief" hidden>
+      <div class="page">
+        <div class="panel">
+          <h2>Формат</h2>
+          <div class="types" id="brief-types"></div>
+        </div>
+        <div class="panel">
+          <h2>Смысл письма</h2>
+          <div class="grid">
+            <div class="field"><label for="b-subject">Тема письма</label><input id="b-subject" data-brief="subject" placeholder="Последние места на ноябрьские выходные"></div>
+            <div class="field"><label for="b-preheader">Прехедер <span>строка рядом с темой</span></label><input id="b-preheader" data-brief="preheader" placeholder="Пять коротких поездок по России"></div>
+            <div class="field wide"><label for="b-title">Заголовок в письме <span>если отличается от темы</span></label><input id="b-title" data-brief="title"></div>
+            <div class="field wide"><label for="b-message">Главная мысль <span>пустая строка — новый абзац, **так** — жирный</span></label><textarea id="b-message" data-brief="message" rows="4" placeholder="Что важно сказать и почему сейчас?"></textarea></div>
+            <div class="field"><label for="b-cta">Главная кнопка</label><input id="b-cta" data-brief="cta" placeholder="Смотреть все туры"></div>
+            <div class="field"><label for="b-cta-url">Ссылка кнопки</label><input id="b-cta-url" data-brief="cta_url" placeholder="https://vs-travel.ru/…"></div>
+            <div class="field"><label for="b-promo">Промокод <span>если есть</span></label><input id="b-promo" data-brief="promo_code"></div>
+            <div class="field"><label for="b-section">Заголовок подборки <span>необязательно</span></label><input id="b-section" data-brief="section_title" placeholder="Туры подборки"></div>
+            <div class="field"><label for="b-campaign">UTM-кампания</label><input id="b-campaign" data-brief="utm_campaign" placeholder="november-weekends-2026"></div>
+            <div class="field"><label for="b-content">utm_content <span>идентификатор выпуска, ddmmyy</span></label><input id="b-content" data-brief="utm_content" placeholder="151126"></div>
+            <div class="field wide"><label for="b-extra">Пожелания агенту <span>какие блоки нужны или не нужны, тон, ограничения</span></label><textarea id="b-extra" data-brief="extra" rows="3"></textarea></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Туры</h2>
+          <div id="brief-tours"></div>
+          <div class="actions"><button class="btn" type="button" id="tour-add">+ Тур</button></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="button" id="ask-propose">Агенту: предложить блоки, собрать и проверить</button>
+          <button class="btn" type="button" id="draft-recipe" title="Состав по правилам — сразу, без агента">Черновик по правилам</button>
+          <span class="muted">Бриф сохраняется сам.</span>
+        </div>
       </div>
-      <section class="new" id="new" hidden>
-        <h2>Новый компонент · получит номер <span class="num" id="new-number">C—</span></h2>
-        <div class="grid2">
-          <div class="field"><label for="new-name">Название</label><input id="new-name" placeholder="Карточка тура: фото сверху"></div>
-          <div class="field"><label for="new-category">Категория</label><input id="new-category" list="categories" placeholder="Карточка тура"></div>
-          <div class="field"><label for="new-source">Стили какого письма</label><select id="new-source"></select></div>
-        </div>
-        <datalist id="categories"></datalist>
-        <textarea id="new-html" spellcheck="false" placeholder="HTML блока: строка &lt;tr em=&quot;block&quot;&gt;…&lt;/tr&gt; из UniSender или любой фрагмент — он будет обёрнут в строку таблицы"></textarea>
-        <div class="row">
-          <button class="btn primary" type="button" id="new-save">Сохранить в коллекцию</button>
-          <button class="btn" type="button" id="new-agent">Отдать агенту — пусть доведёт</button>
-          <button class="btn ghost" type="button" id="new-cancel">Отмена</button>
-          <span class="muted" id="new-hint"></span>
-        </div>
-        <div class="preview" id="new-preview" hidden><iframe title="Предпросмотр нового компонента"></iframe></div>
-      </section>
-      <div class="list" id="list"></div>
     </main>
 
-    <!-- Вкладка 2: сборка письма из компонентов с заменой текста, ссылок и картинок -->
+    <!-- 2. Сборка -->
     <main class="view" id="view-build" hidden>
       <div class="build">
         <aside class="side">
-          <h2>Письмо</h2>
-          <div class="field"><label for="shell">Оболочка и стили</label><select id="shell"></select></div>
-          <div class="field"><label for="subject">Тема письма</label><input id="subject" placeholder="Осень в Карелии: последние места"></div>
-          <div class="field"><label for="preheader">Прехедер</label><input id="preheader" placeholder="Короткая строка рядом с темой"></div>
-          <div class="adder">
-            <input id="add-number" placeholder="C008" aria-label="Номер компонента">
-            <button class="btn" type="button" id="add-button">Добавить</button>
-            <button class="btn ghost" type="button" id="add-template" title="Взять все компоненты шаблона по порядку">Как в шаблоне</button>
+          <div id="proposal"></div>
+          <div class="panel">
+            <h2>Письмо</h2>
+            <div class="grid">
+              <div class="field wide"><label for="l-subject">Тема</label><input id="l-subject" data-letter="subject"></div>
+              <div class="field wide"><label for="l-preheader">Прехедер</label><input id="l-preheader" data-letter="preheader"></div>
+              <div class="field"><label for="l-campaign">utm_campaign</label><input id="l-campaign" data-utm="campaign"></div>
+              <div class="field"><label for="l-content">utm_content</label><input id="l-content" data-utm="content"></div>
+            </div>
           </div>
-          <div class="items" id="items"></div>
+          <div class="panel">
+            <h2>Состав <span id="items-count"></span></h2>
+            <div id="items"></div>
+            <div class="adder"><select id="add-component" aria-label="Компонент"></select><button class="btn" type="button" id="add-button">Добавить</button></div>
+            <ul class="errors" id="render-errors" hidden></ul>
+          </div>
         </aside>
         <section class="stage" id="stage">
-          <div class="toolbar">
-            <button class="btn primary" type="button" id="send-build">Отправить агенту: собрать и проверить</button>
-            <button class="btn" type="button" id="copy-build">Копировать HTML</button>
-            <button class="btn" type="button" id="download-build">Скачать .html</button>
+          <div class="stage-bar">
+            <button class="btn primary" type="button" id="check-now">Проверить Email Checker</button>
+            <button class="btn" type="button" id="ask-check">Агенту: проверить и исправить</button>
+            <button class="btn" type="button" id="copy-html">Копировать HTML</button>
+            <button class="btn" type="button" id="download-html">Скачать .html</button>
             <span class="fill"></span>
+            <span class="editor-hint" id="editor-hint">Дважды нажмите на текст письма, чтобы изменить его</span>
             <button class="btn ghost" type="button" id="toggle-mobile">Телефон</button>
-            <button class="btn ghost" type="button" id="clear-build">Очистить</button>
+            <div class="formatbar" id="text-tools" role="toolbar" aria-label="Форматирование текста" hidden>
+              <span class="field-name" id="text-field"></span>
+              <button class="btn small" type="button" id="format-bold" aria-pressed="false">Жирный</button>
+              <label for="format-size">Размер <input id="format-size" type="number" min="8" max="72" step="1" inputmode="numeric" placeholder="авто"></label>
+              <label for="format-color">Цвет <input id="format-color" type="color" value="#172b25"></label>
+              <button class="btn small ghost" type="button" id="format-reset">Сбросить оформление</button>
+            </div>
           </div>
-          <div class="stage-body"><iframe id="letter" title="Письмо целиком"></iframe></div>
+          <div class="stage-body"><iframe id="letter-frame" title="Письмо"></iframe></div>
         </section>
       </div>
+    </main>
+
+    <!-- 3. Компоненты -->
+    <main class="view" id="view-components" hidden>
+      <div class="page">
+        <div class="actions" style="margin-top:0; margin-bottom:12px">
+          <input id="c-search" type="search" placeholder="Номер или название: 7, карточка, подвал" style="flex:1">
+          <button class="btn primary" type="button" id="c-new-toggle">+ Новый компонент</button>
+        </div>
+        <section class="panel" id="c-new" hidden>
+          <h2>Новый компонент · номер <span class="num" id="c-new-number"></span></h2>
+          <div class="grid">
+            <div class="field"><label for="c-name">Название</label><input id="c-name" placeholder="Карточка тура: фото сверху"></div>
+            <div class="field"><label for="c-category">Категория</label><input id="c-category" list="c-categories" placeholder="Туры"></div>
+            <div class="field"><label for="c-type">Тип <span>для рецептов, латиницей</span></label><input id="c-type" placeholder="tour-card-top"></div>
+            <div class="field"><label for="c-description">Когда ставить</label><input id="c-description"></div>
+          </div>
+          <datalist id="c-categories"></datalist>
+          <div class="field" style="margin-top:10px"><label for="c-html">HTML: одна или несколько строк &lt;tr em="block"&gt;, поля — {{ключ}}, {{ключ|text}}, {{ключ|url}}</label><textarea class="code" id="c-html" spellcheck="false"></textarea></div>
+          <div id="c-schema"></div>
+          <div class="actions">
+            <button class="btn primary" type="button" id="c-save">Сохранить компонент</button>
+            <button class="btn" type="button" id="c-agent">Отдать агенту — пусть доведёт</button>
+            <button class="btn ghost" type="button" id="c-cancel">Отмена</button>
+          </div>
+          <div class="preview" id="c-preview" hidden><iframe title="Предпросмотр нового компонента"></iframe></div>
+        </section>
+        <div class="cards" id="cards"></div>
+      </div>
+    </main>
+
+    <!-- 4. Проверка -->
+    <main class="view" id="view-check" hidden>
+      <div class="page" id="check"></div>
     </main>
   </div>
 
   <script>
-    // ── Доступ к файлам навыка ─────────────────────────────────────────────────────────────
-    // Внутри MBOX — window.mbox (чтение и запись в пакет навыка на сервере, с историей версий).
-    // Открыта отдельно (локальный сервер из папки навыка) — чтение через fetch, запись недоступна.
+    'use strict';
+    // ── Файлы навыка ──────────────────────────────────────────────────────────────────
     const bridge = window.mbox && window.mbox.read ? window.mbox : null;
     const readFile = (path) => bridge ? bridge.read(path) : fetch(path).then((r) => { if (!r.ok) throw new Error(path); return r.text(); });
-    const canWrite = Boolean(bridge && bridge.write);
-    const MARK = '<!--MBOX:COMPONENTS-->';
-    const STORE = 'email-campaign-build';
-
-    const state = { registry: null, manifest: null, html: {}, shells: {}, tab: 'components', build: { shell: '', subject: '', preheader: '', items: [] }, mobile: false };
-    const $ = (selector) => document.querySelector(selector);
+    const writeFile = (path, content, message) => bridge && bridge.write ? bridge.write(path, content, message) : Promise.reject(new Error('Сохранять можно только во вкладке MBOX'));
+    const writeFiles = (files, message) => bridge?.writeFiles ? bridge.writeFiles(files, message) : Promise.all(files.map((file) => writeFile(file.path, file.content, file.message || message)));
+    const $ = (selector, rootEl = document) => rootEl.querySelector(selector);
     const esc = (text) => String(text ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
-    const idNum = (id) => Number(String(id).replace(/\D/g, '')) || 0;
-    const formatId = (n) => `C${String(n).padStart(3, '0')}`;
-    const normalizeId = (value) => { const n = idNum(value); return n ? formatId(n) : ''; };
+    const pad = (n) => `C${String(n).padStart(3, '0')}`;
+    const UI = 'email-letter-ui';
+    const TYPES = [
+      { value: 'подборка', title: 'Подборка', hint: 'Несколько туров одной темы' },
+      { value: 'одна акция', title: 'Одна акция', hint: 'Один главный переход' },
+      { value: 'дайджест', title: 'Дайджест', hint: 'Много туров парами' },
+    ];
 
-    function setStatus(text, tone = '') { const el = $('#status'); el.textContent = text; el.className = `status ${tone}`; }
+    const state = { kit: null, K: null, letters: [], letter: null, tab: 'brief', open: {}, mobile: false, activeField: null };
+    const ui = (() => { try { return JSON.parse(localStorage.getItem(UI) || '{}'); } catch { return {}; } })();
+    const saveUi = () => { try { localStorage.setItem(UI, JSON.stringify(ui)); } catch { /* без хранилища */ } };
+    const setStatus = (text, tone = '') => { const el = $('#status'); el.textContent = text; el.className = `status ${tone}`; };
 
-    try { const saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved && Array.isArray(saved.items)) state.build = { ...state.build, ...saved }; } catch { /* без черновика */ }
-    const saveBuild = () => { try { localStorage.setItem(STORE, JSON.stringify(state.build)); } catch { /* без хранилища */ } };
-
-    async function load() {
-      state.registry = JSON.parse(await readFile('components/registry.json'));
-      state.manifest = JSON.parse(await readFile('templates/manifest.json'));
-      const templates = state.manifest.templates || [];
-      await Promise.all(templates.filter((t) => t.shell).map(async (t) => { state.shells[t.id] = await readFile(t.shell).catch(() => ''); }));
-      await Promise.all(state.registry.components.map(async (c) => { state.html[c.id] = await readFile(c.file).catch(() => ''); }));
-      if (!state.build.shell || !state.shells[state.build.shell]) state.build.shell = templates.find((t) => state.shells[t.id])?.id || '';
-      setStatus(`${state.registry.components.length} компонентов${canWrite ? '' : ' · только просмотр'}`);
-      renderFilters();
-      renderList();
-      renderBuild();
+    async function loadKit() {
+      const registry = JSON.parse(await readFile('components/registry.json'));
+      new Function(await readFile(registry.renderer || 'components/render.js'))();
+      const templates = {};
+      await Promise.all(registry.components.map(async (c) => { templates[c.id] = await readFile(c.file); }));
+      const shell = await readFile(registry.shell || 'components/shell.html');
+      state.K = window.LetterKit;
+      state.kit = { registry, templates, shell };
     }
 
-    // ── Вкладки ───────────────────────────────────────────────────────────────────────────
+    async function loadLetters() {
+      let ids = ['example'];
+      if (bridge && bridge.files) ids = (await bridge.files()).map((f) => f.path).filter((p) => /^letters\/[^/]+\.json$/.test(p)).map((p) => p.slice(8, -5));
+      const letters = await Promise.all(ids.map(async (id) => { try { return JSON.parse(await readFile(`letters/${id}.json`)); } catch { return null; } }));
+      state.letters = letters.filter(Boolean).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+    }
+
+    // ── Письмо: выбор, создание, автосохранение ─────────────────────────────────────────
+    function renderLetterPicker() {
+      $('#letter-select').innerHTML = state.letters.map((l) => `<option value="${esc(l.id)}">${esc(l.brief?.subject || l.letter?.subject || l.id)} · ${esc(l.id)}</option>`).join('') || '<option value="">Писем нет</option>';
+      if (state.letter) $('#letter-select').value = state.letter.id;
+      const status = state.letter?.status || '';
+      const labels = { brief: 'бриф', proposed: 'состав предложен', 'local-checked': 'локальная проверка', 'external-checked': 'Email Checker пройден', checked: 'проверено', 'needs-fix': 'нужны исправления' };
+      $('#letter-status').textContent = labels[status] || status;
+      $('#letter-status').className = `badge ${status}`;
+    }
+    $('#letter-select').addEventListener('change', () => selectLetter($('#letter-select').value));
+    $('#letter-new').addEventListener('click', async () => {
+      const slug = prompt('Короткое имя письма латиницей (станет именем файла)', `${new Date().toISOString().slice(0, 10)}-campaign`);
+      if (!slug) return;
+      const id = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+      if (!id || state.letters.some((l) => l.id === id)) { setStatus('Такое письмо уже есть или имя пустое', 'err'); return; }
+      const letter = state.K.newLetter(id);
+      state.letters.unshift(letter);
+      state.letter = letter;
+      await saveNow('Новое письмо');
+      ui.letter = id; ui.tab = 'brief'; saveUi();
+      renderAll();
+      showTab('brief');
+    });
+    function selectLetter(id) {
+      state.letter = state.letters.find((l) => l.id === id) || state.letters[0] || null;
+      ui.letter = state.letter?.id; saveUi();
+      state.open = {};
+      renderAll();
+    }
+
+    let saveTimer = 0;
+    function changed() {
+      if (!state.letter) return;
+      state.letter.updated_at = new Date().toISOString();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveNow(), 1200);
+      setStatus('Изменения сохраняются…');
+    }
+    async function saveNow(message = 'Правка письма на странице') {
+      if (!state.letter) return;
+      clearTimeout(saveTimer);
+      try {
+        await writeFile(`letters/${state.letter.id}.json`, `${JSON.stringify(state.letter, null, 2)}\n`, message);
+        setStatus('Сохранено', 'ok');
+      } catch (error) { setStatus(`Не сохранилось: ${error.message}`, 'err'); }
+    }
+
+    function sendAgent(text) {
+      if (window.mbox && window.mbox.send) { window.mbox.send(text); setStatus('Задание отправлено агенту в чат MBOX', 'ok'); }
+      else { navigator.clipboard?.writeText(text); setStatus('Не в MBOX: задание скопировано — вставьте его в чат агента', 'ok'); }
+    }
+
+    // ── Вкладки ─────────────────────────────────────────────────────────────────────────
     document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => showTab(button.dataset.tab)));
     function showTab(tab) {
-      state.tab = tab;
+      state.tab = tab; ui.tab = tab; saveUi();
       document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('on', button.dataset.tab === tab));
-      $('#view-components').hidden = tab !== 'components';
-      $('#view-build').hidden = tab !== 'build';
+      ['brief', 'build', 'components', 'check'].forEach((name) => { $(`#view-${name}`).hidden = name !== tab; });
       if (tab === 'build') renderPreview();
     }
 
-    // ── Предпросмотр в iframe ───────────────────────────────────────────────────────────
-    const shellFor = (sourceId) => state.shells[sourceId] || Object.values(state.shells)[0] || `<!doctype html><html><head></head><body><table width="100%" style="max-width:660px;margin:auto">${MARK}</table></body></html>`;
-    const docFor = (component, html) => shellFor(component.source).replace(MARK, html);
-    // Предпросмотр сам сообщает свою высоту: в песочнице MBOX страница не может заглянуть внутрь iframe.
-    // Скрипт есть только в предпросмотре — в копируемый и отправляемый HTML он не попадает.
+    function renderAll() {
+      renderLetterPicker();
+      renderBrief();
+      renderBuild();
+      renderComponents();
+      renderCheck();
+    }
+
+    // ── 1. Бриф ─────────────────────────────────────────────────────────────────────────
+    const briefOf = () => { const l = state.letter; if (!l) return null; l.brief = l.brief || {}; l.brief.tours = l.brief.tours || []; return l.brief; };
+    function renderBrief() {
+      const brief = briefOf();
+      $('#view-brief .page').style.opacity = brief ? '' : '.4';
+      if (!brief) return;
+      $('#brief-types').innerHTML = TYPES.map((t) => `<button type="button" class="type ${brief.type === t.value ? 'on' : ''}" data-type="${esc(t.value)}">${esc(t.title)}<small>${esc(t.hint)}</small></button>`).join('');
+      document.querySelectorAll('#brief-types [data-type]').forEach((button) => button.addEventListener('click', () => { brief.type = button.dataset.type; changed(); renderBrief(); }));
+      document.querySelectorAll('[data-brief]').forEach((input) => { input.value = brief[input.dataset.brief] ?? ''; });
+      renderTours();
+    }
+    document.querySelectorAll('[data-brief]').forEach((input) => input.addEventListener('input', () => { const brief = briefOf(); if (!brief) return; brief[input.dataset.brief] = input.value; changed(); }));
+    const TOUR_FIELDS = [['name', 'Название', true], ['route', 'Маршрут', true], ['dates', 'Даты и длительность'], ['price', 'Цена'], ['url', 'Ссылка тура', true], ['image', 'Картинка (https)', true], ['alt', 'Alt картинки', true], ['cta', 'Текст кнопки']];
+    function renderTours() {
+      const brief = briefOf();
+      const box = $('#brief-tours');
+      if (!brief.tours.length) { box.innerHTML = '<div class="muted">Туров нет. Для акции без карточек это нормально.</div>'; return; }
+      box.replaceChildren(...brief.tours.map((tour, index) => {
+        const el = document.createElement('div');
+        el.className = 'tour';
+        el.innerHTML = `<div class="tour-head"><span class="num">Тур ${index + 1}</span><button class="btn small ghost" type="button" data-act="up" ${index ? '' : 'disabled'}>↑</button><button class="btn small ghost" type="button" data-act="del">Удалить</button></div>
+          <div class="grid">${TOUR_FIELDS.map(([key, label, wide]) => `<div class="field ${key === 'name' || key === 'route' || key === 'url' || key === 'image' ? 'wide' : ''}"><label>${esc(label)}</label><input data-tour="${key}" value="${esc(tour[key] || '')}"></div>`).join('')}</div>`;
+        el.querySelectorAll('[data-tour]').forEach((input) => input.addEventListener('input', () => { tour[input.dataset.tour] = input.value; changed(); }));
+        el.querySelector('[data-act="del"]').addEventListener('click', () => { brief.tours.splice(index, 1); changed(); renderTours(); });
+        el.querySelector('[data-act="up"]').addEventListener('click', () => { brief.tours.splice(index - 1, 0, brief.tours.splice(index, 1)[0]); changed(); renderTours(); });
+        return el;
+      }));
+    }
+    $('#tour-add').addEventListener('click', () => { const brief = briefOf(); if (!brief) return; brief.tours.push({}); changed(); renderTours(); });
+
+    $('#draft-recipe').addEventListener('click', () => {
+      const l = state.letter; if (!l) return;
+      if ((l.letter?.items || []).length && !confirm('Заменить текущий состав черновиком по правилам?')) return;
+      const brief = briefOf();
+      const draft = state.K.proposeFromBrief(brief, state.kit.registry);
+      l.letter = { subject: brief.subject || '', preheader: brief.preheader || '', utm: { campaign: brief.utm_campaign || '', content: brief.utm_content || '' }, items: draft.items };
+      l.proposal = { by: 'правила', at: new Date().toISOString(), notes: draft.notes.join(' '), questions: draft.missing.map((m) => `Нужно: ${m}`) };
+      l.status = 'proposed';
+      saveNow('Черновик состава по правилам');
+      renderAll();
+      showTab('build');
+    });
+    $('#ask-propose').addEventListener('click', async () => {
+      const l = state.letter; if (!l) return;
+      await saveNow('Бриф перед отправкой агенту');
+      sendAgent([
+        `Навык email-campaign, письмо letters/${l.id}.json — бриф заполнен в конструкторе.`,
+        '1. Предложи состав: `node scripts/letter.mjs propose ' + l.id + ' --write`, затем поправь состав и поля по смыслу брифа и пожеланиям (edit_skill_file в letters/' + l.id + '.json: letter.items, letter.subject/preheader/utm). В proposal.notes коротко объясни выбор блоков, в proposal.questions — чего не хватает.',
+        '2. Собери и проверь: `node scripts/letter.mjs build ' + l.id + '` (strict preflight + Email Checker).',
+        '3. Исправь актуальные ошибки (поля письма или компонент), повтори build, запиши что исправил в check.fixed и что осталось на решение — в check.remaining.',
+        'Факты (цены, даты, ссылки) не выдумывай — спроси.',
+      ].join('\n'));
+    });
+
+    // ── 2. Сборка ───────────────────────────────────────────────────────────────────────
+    const componentOf = (id) => state.K.componentById(state.kit.registry, id);
+    function renderBuild() {
+      const l = state.letter;
+      const body = l ? (l.letter = l.letter || { subject: '', preheader: '', utm: {}, items: [] }) : null;
+      $('#count-items').textContent = body ? body.items.length : 0;
+      if (!body) { $('#items').innerHTML = '<div class="empty">Выберите или создайте письмо</div>'; return; }
+      body.utm = body.utm || {};
+      document.querySelectorAll('[data-letter]').forEach((input) => { input.value = body[input.dataset.letter] ?? ''; });
+      document.querySelectorAll('[data-utm]').forEach((input) => { input.value = body.utm[input.dataset.utm] ?? ''; });
+      const p = l.proposal;
+      $('#proposal').innerHTML = p ? `<div class="notice ${(p.questions || []).length ? 'warn' : ''}"><b>Предложение · ${esc(p.by || 'агент')}</b> <span class="muted">${esc(String(p.at || '').slice(0, 16).replace('T', ' '))}</span><div>${esc(p.notes || '')}</div>${(p.questions || []).length ? `<ul>${p.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}</div>` : '';
+      $('#items-count').textContent = `· ${body.items.length}`;
+      $('#add-component').innerHTML = state.kit.registry.components.map((c) => `<option value="${c.id}">${c.id} · ${esc(c.name)}</option>`).join('');
+      const items = $('#items');
+      if (!body.items.length) items.innerHTML = '<div class="empty">Пусто. Заполните бриф и попросите агента предложить блоки, возьмите черновик по правилам или добавьте компоненты ниже.</div>';
+      else items.replaceChildren(...body.items.map((item, index) => itemEditor(body, item, index)));
+      renderPreview();
+    }
+    document.querySelectorAll('[data-letter]').forEach((input) => input.addEventListener('input', () => { if (!state.letter) return; state.letter.letter[input.dataset.letter] = input.value; changed(); schedulePreview(); }));
+    document.querySelectorAll('[data-utm]').forEach((input) => input.addEventListener('input', () => { if (!state.letter) return; state.letter.letter.utm[input.dataset.utm] = input.value; changed(); schedulePreview(); }));
+
+    function itemEditor(body, item, index) {
+      const component = componentOf(item.component);
+      const el = document.createElement('div');
+      el.className = 'item';
+      const key = `${index}:${item.component}`;
+      const open = Boolean(state.open[key]);
+      el.innerHTML = `<div class="item-head"><span class="num">${esc(item.component)}</span><span class="name">${esc(component ? component.name : 'нет в реестре')}</span>
+        <button class="btn small ghost" type="button" data-act="up" ${index ? '' : 'disabled'} title="Выше">↑</button><button class="btn small ghost" type="button" data-act="down" ${index < body.items.length - 1 ? '' : 'disabled'} title="Ниже">↓</button>
+        <button class="btn small ghost" type="button" data-act="open" title="Поля">${open ? '▾' : '▸'}</button><button class="btn small ghost" type="button" data-act="del" title="Убрать">✕</button></div>`;
+      const act = (name, fn) => el.querySelector(`[data-act="${name}"]`).addEventListener('click', fn);
+      act('up', () => { body.items.splice(index - 1, 0, body.items.splice(index, 1)[0]); changed(); renderBuild(); });
+      act('down', () => { body.items.splice(index + 1, 0, body.items.splice(index, 1)[0]); changed(); renderBuild(); });
+      act('del', () => { body.items.splice(index, 1); changed(); renderBuild(); });
+      act('open', () => { state.open[key] = !open; renderBuild(); });
+      if (component && open) {
+        const fields = document.createElement('div');
+        fields.className = 'item-body';
+        item.fields = item.fields || {};
+        if (!component.fields.length) fields.innerHTML = '<div class="muted">Полей нет — блок одинаков во всех письмах.</div>';
+        component.fields.forEach((field) => {
+          const wrap = document.createElement('div');
+          wrap.className = 'field';
+          const multiline = field.type === 'multiline';
+          wrap.innerHTML = `<label>${esc(field.label || field.key)}${field.required ? '' : ' <span>необязательно</span>'}</label>`;
+          const input = document.createElement(multiline ? 'textarea' : 'input');
+          if (multiline) input.rows = 3;
+          input.value = item.fields[field.key] ?? '';
+          input.placeholder = field.default ? String(field.default).split('\n')[0] : '';
+          input.addEventListener('input', () => { if (input.value === '') delete item.fields[field.key]; else item.fields[field.key] = input.value; changed(); schedulePreview(); });
+          wrap.append(input);
+          fields.append(wrap);
+        });
+        el.append(fields);
+      }
+      return el;
+    }
+    $('#add-button').addEventListener('click', () => {
+      const l = state.letter; if (!l) return;
+      const id = $('#add-component').value;
+      l.letter.items.push({ component: id, fields: {} });
+      state.open[`${l.letter.items.length - 1}:${id}`] = true;
+      changed();
+      renderBuild();
+    });
+
+    function renderResult(editable = false) { return state.letter ? state.K.renderLetter(state.letter, state.kit, editable ? { editable: true } : undefined) : { html: '', errors: [], warnings: [] }; }
+    const EDITOR_BRIDGE = `<style>
+      [data-mbox-field]{cursor:text}
+      [data-mbox-field]:hover,[data-mbox-field]:focus{outline:1px dashed Highlight;outline-offset:3px}
+      [data-mbox-field][contenteditable="true"]{outline:2px solid Highlight;outline-offset:3px;white-space:pre-wrap}
+    </style><script>(function(){
+      var active=null,original='';
+      function send(type,el,value){parent.postMessage({type:type,item:Number(el.getAttribute('data-mbox-item')),field:el.getAttribute('data-mbox-field'),value:value,multiline:el.getAttribute('data-mbox-multiline')==='true'},'*');}
+      function begin(el){if(!el||active===el)return; if(active)active.blur(); active=el;original=el.getAttribute('data-mbox-value')||'';el.textContent=original;el.contentEditable='true';el.focus();var range=document.createRange();range.selectNodeContents(el);var selection=getSelection();selection.removeAllRanges();selection.addRange(range);send('letter:field-select',el,original);}
+      document.addEventListener('dblclick',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el)return;event.preventDefault();begin(el);});
+      document.addEventListener('keydown',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el)return;if(event.key==='Escape'){event.preventDefault();el.textContent=original;el.blur();}else if(event.key==='Enter'&&el.getAttribute('data-mbox-multiline')!=='true'){event.preventDefault();el.blur();}});
+      document.addEventListener('blur',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el||el!==active)return;var value=(el.innerText||'').replace(/\\r/g,'').replace(/\\u00a0/g,' ');el.contentEditable='false';active=null;send('letter:field-commit',el,value);},true);
+    })();<\/script>`;
+    let previewTimer = 0;
+    const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 300); };
+    function renderPreview() {
+      if (!state.letter) return;
+      const result = renderResult(true);
+      const list = $('#render-errors');
+      list.hidden = !result.errors.length;
+      list.innerHTML = result.errors.map((e) => `<li>${esc(e)}</li>`).join('');
+      document.querySelectorAll('#items .item').forEach((el, index) => el.classList.toggle('err', result.errors.some((e) => e.includes(`(позиция ${index + 1})`))));
+      if (state.tab !== 'build') return;
+      const frame = $('#letter-frame');
+      let scroll = 0;
+      try { scroll = frame.contentWindow.scrollY; } catch { /* другой origin */ }
+      frame.onload = () => { try { frame.contentWindow.scrollTo(0, scroll); } catch { /* другой origin */ } };
+      frame.srcdoc = result.html.replace(/<\/body>/i, `${EDITOR_BRIDGE}</body>`);
+    }
+    function activeTextContext() {
+      const active = state.activeField;
+      const item = active && state.letter?.letter?.items?.[active.item];
+      const component = item && componentOf(item.component);
+      const field = component?.fields?.find((entry) => entry.key === active.field);
+      return item && field ? { active, item, component, field } : null;
+    }
+    function syncTextTools() {
+      const context = activeTextContext();
+      $('#text-tools').hidden = !context;
+      $('#editor-hint').hidden = Boolean(context);
+      if (!context) return;
+      const format = state.K.normalizeFormat(context.item.formats?.[context.field.key]);
+      $('#text-field').textContent = `${context.component.id} · ${context.field.label || context.field.key}`;
+      $('#format-bold').setAttribute('aria-pressed', format.bold ? 'true' : 'false');
+      $('#format-size').value = format.fontSize || '';
+      $('#format-color').value = format.color || '#172b25';
+    }
+    function updateActiveFormat(patch) {
+      const context = activeTextContext();
+      if (!context) return;
+      const formats = context.item.formats = context.item.formats || {};
+      const current = state.K.normalizeFormat(formats[context.field.key]);
+      const next = state.K.normalizeFormat({ ...current, ...patch });
+      if (!next.fontSize && !next.color && !next.bold) delete formats[context.field.key]; else formats[context.field.key] = next;
+      if (!Object.keys(formats).length) delete context.item.formats;
+      changed();
+      syncTextTools();
+      renderPreview();
+    }
+    window.addEventListener('message', (event) => {
+      const frame = $('#letter-frame');
+      if (event.source !== frame.contentWindow || !event.data || !/^letter:field-(select|commit)$/.test(event.data.type)) return;
+      const itemIndex = Number(event.data.item);
+      const item = state.letter?.letter?.items?.[itemIndex];
+      const component = item && componentOf(item.component);
+      const field = component?.fields?.find((entry) => entry.key === event.data.field);
+      if (!item || !field || !['text', 'multiline'].includes(field.type)) return;
+      state.activeField = { item: itemIndex, field: field.key };
+      syncTextTools();
+      if (event.data.type === 'letter:field-commit') {
+        item.fields = item.fields || {};
+        const value = String(event.data.value || '');
+        if (value === '') delete item.fields[field.key]; else item.fields[field.key] = value;
+        changed();
+        renderBuild();
+        setStatus('Текст изменён и сохраняется');
+      }
+    });
+    $('#format-bold').addEventListener('click', () => updateActiveFormat({ bold: $('#format-bold').getAttribute('aria-pressed') !== 'true' }));
+    $('#format-size').addEventListener('input', () => updateActiveFormat({ fontSize: $('#format-size').value ? Number($('#format-size').value) : null }));
+    $('#format-color').addEventListener('input', () => updateActiveFormat({ color: $('#format-color').value }));
+    $('#format-reset').addEventListener('click', () => updateActiveFormat({ fontSize: null, color: '', bold: false }));
+    $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; });
+    $('#copy-html').addEventListener('click', async () => { try { await navigator.clipboard.writeText(renderResult().html); setStatus('HTML скопирован', 'ok'); } catch { setStatus('Буфер недоступен — скачайте файл', 'err'); } });
+    $('#download-html').addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([renderResult().html], { type: 'text/html;charset=utf-8' }));
+      link.download = `${state.letter?.id || 'letter'}.html`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    });
+    async function checkNow() {
+      const l = state.letter;
+      if (!l) return;
+      if (!bridge?.emailCheck) { setStatus('Обновите MBOX: в этой версии нет прямой проверки Email Checker', 'err'); return; }
+      const button = $('#check-now');
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Проверяется…';
+      setStatus('Email Checker проверяет разметку, ссылки и текст…');
+      try {
+        await saveNow('Письмо перед внешней проверкой');
+        const rendered = renderResult();
+        const email = await bridge.emailCheck(rendered.html);
+        const externalBlocking = (email.links_failed || []).length + (email.validation?.errors || []).length + rendered.errors.length;
+        const previous = l.check || {};
+        l.check = {
+          ...previous,
+          at: new Date().toISOString(),
+          by: 'Email Checker',
+          ok: false,
+          external_ok: externalBlocking === 0,
+          external_status: 'checked',
+          render: { errors: rendered.errors, warnings: rendered.warnings },
+          preflight: { pending: true, errors: [], warnings: [] },
+          email_checker: email,
+          fixed: previous.fixed || [],
+          remaining: previous.remaining || [],
+        };
+        l.status = externalBlocking ? 'needs-fix' : 'external-checked';
+        await saveNow('Внешняя проверка Email Checker');
+        renderAll();
+        showTab('check');
+        setStatus(externalBlocking ? `Email Checker: найдено проблем — ${externalBlocking}` : 'Email Checker пройден', externalBlocking ? 'err' : 'ok');
+      } catch (error) {
+        setStatus(`Email Checker не завершил проверку: ${error.message}`, 'err');
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = 'Проверить Email Checker';
+      }
+    }
+    $('#check-now').addEventListener('click', checkNow);
+    $('#ask-check').addEventListener('click', async () => {
+      const l = state.letter; if (!l) return;
+      await saveNow('Состав перед проверкой');
+      sendAgent([
+        `Навык email-campaign, письмо letters/${l.id}.json — состав готов в конструкторе.`,
+        '1. `node scripts/letter.mjs build ' + l.id + '` — сборка, strict preflight и Email Checker.',
+        '2. Исправь актуальные ошибки: поля письма — edit_skill_file в letters/' + l.id + '.json, ошибка вёрстки блока — в его компоненте components/C###.html. Повтори build до чистого результата.',
+        '3. Замечания к тексту оцени по смыслу (склейку текста соседних блоков проверяльщик принимает за ошибки). Что исправил — в check.fixed, что оставил на решение — в check.remaining. Открой мне готовый HTML через open_tab (path:) и коротко отчитайся.',
+      ].join('\n'));
+    });
+
+    // ── 3. Компоненты ───────────────────────────────────────────────────────────────────
+    const PLACEHOLDER_IMG = 'https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq';
+    function sampleFields(component) {
+      const values = {};
+      (component.fields || []).forEach((field) => {
+        if (field.default) return;
+        values[field.key] = field.type === 'image' ? PLACEHOLDER_IMG : field.type === 'url' ? 'https://vs-travel.ru/' : field.label || field.key;
+      });
+      return values;
+    }
     const MEASURE = '<script>(function(){function h(){parent.postMessage({type:"lib:height",h:document.documentElement.scrollHeight},"*");}addEventListener("load",h);if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);setTimeout(h,300);})();<\/script>';
-    const measured = (doc) => /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, `${MEASURE}</body>`) : doc + MEASURE;
     const frames = new Set();
     window.addEventListener('message', (event) => {
       if (!event.data || event.data.type !== 'lib:height') return;
-      for (const frame of frames) if (!frame.isConnected) frames.delete(frame); else if (frame.contentWindow === event.source) frame.style.height = `${Math.max(60, Number(event.data.h) || 0)}px`;
+      for (const frame of frames) if (!frame.isConnected) frames.delete(frame); else if (frame.contentWindow === event.source) frame.style.height = `${Math.max(40, Number(event.data.h) || 0)}px`;
     });
-    function fitFrame(frame) { frames.add(frame); }
-
-    // ── Вкладка «Компоненты» ─────────────────────────────────────────────────────────────
-    function renderFilters() {
-      const categories = [...new Set(state.registry.components.map((c) => c.category).filter(Boolean))].sort();
-      const sources = state.manifest.templates || [];
-      $('#filter-category').innerHTML = '<option value="">Все категории</option>' + categories.map((c) => `<option>${esc(c)}</option>`).join('');
-      $('#filter-source').innerHTML = '<option value="">Все письма</option>' + sources.map((t) => `<option value="${esc(t.id)}">${esc(t.id)} · ${esc(t.name)}</option>`).join('');
-      $('#categories').innerHTML = categories.map((c) => `<option value="${esc(c)}">`).join('');
-      const shellOptions = sources.filter((t) => state.shells[t.id]).map((t) => `<option value="${esc(t.id)}">${esc(t.id)} · ${esc(t.name)}</option>`).join('');
-      $('#new-source').innerHTML = shellOptions;
-      $('#shell').innerHTML = shellOptions;
-      $('#shell').value = state.build.shell;
-      $('#count-components').textContent = state.registry.components.length;
+    function previewDoc(template, component) {
+      const rendered = state.K.renderComponent(component, template, sampleFields(component));
+      const shell = state.kit.shell.replace('{{subject}}', '').replace('{{preheader}}', '').replace(state.K.MARK, rendered.html);
+      return shell.replace(/<\/body>/i, `${MEASURE}</body>`);
     }
-
-    const textOf = (html) => html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-
-    function renderList() {
-      const needle = $('#search').value.trim().toLowerCase();
-      const category = $('#filter-category').value;
-      const source = $('#filter-source').value;
-      const exact = normalizeId(needle);
-      const shown = state.registry.components.filter((c) => (!category || c.category === category) && (!source || c.source === source)
-        && (!needle || (/^c?\d{1,3}$/i.test(needle) ? c.id === exact : `${c.id} ${c.name} ${c.category} ${textOf(state.html[c.id] || '')}`.toLowerCase().includes(needle))));
-      $('#shown').textContent = `${shown.length} из ${state.registry.components.length}`;
-      const list = $('#list');
-      list.replaceChildren(...shown.map((component) => {
+    function renderComponents() {
+      const registry = state.kit.registry;
+      $('#count-components').textContent = registry.components.length;
+      $('#c-categories').innerHTML = [...new Set(registry.components.map((c) => c.category))].map((c) => `<option value="${esc(c)}">`).join('');
+      const needle = $('#c-search').value.trim().toLowerCase();
+      const exact = /^c?\d{1,3}$/.test(needle) ? pad(Number(needle.replace(/\D/g, ''))) : '';
+      const shown = registry.components.filter((c) => !needle || (exact ? c.id === exact : `${c.id} ${c.name} ${c.category} ${c.type} ${c.description}`.toLowerCase().includes(needle)));
+      $('#cards').replaceChildren(...shown.map((component) => {
         const card = document.createElement('article');
         card.className = 'card';
-        card.id = `card-${component.id}`;
-        card.innerHTML = `<div class="card-head"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span><span class="chip">${esc(component.category || 'без категории')}</span><span class="chip">${esc(component.source)}</span>
-          <button class="btn primary" type="button" data-act="add">+ В сборку</button><button class="btn" type="button" data-act="copy">HTML</button><button class="btn" type="button" data-act="ask">Агенту</button></div>
-          <div class="card-ask" hidden><textarea placeholder="Что поменять в ${component.id}? Например: вариант без фото, кнопка короче"></textarea><button class="btn primary" type="button" data-act="ask-send">Отправить</button></div>
-          <div class="preview"><iframe loading="lazy" title="${component.id} ${esc(component.name)}"></iframe></div>`;
-        const frame = card.querySelector('iframe');
-        fitFrame(frame);
-        frame.srcdoc = measured(docFor(component, state.html[component.id] || ''));
-        card.querySelector('[data-act="add"]').addEventListener('click', () => { addItem(component.id); setStatus(`${component.id} добавлен в сборку`, 'ok'); });
-        card.querySelector('[data-act="copy"]').addEventListener('click', () => copyText(state.html[component.id] || '', `HTML ${component.id} скопирован`));
-        card.querySelector('[data-act="ask"]').addEventListener('click', () => { const ask = card.querySelector('.card-ask'); ask.hidden = !ask.hidden; if (!ask.hidden) ask.querySelector('textarea').focus(); });
-        card.querySelector('[data-act="ask-send"]').addEventListener('click', () => {
-          const request = card.querySelector('.card-ask textarea').value.trim();
-          if (!request) return;
-          sendAgent(`Навык email-campaign, компонент ${component.id} «${component.name}» (${component.file}): ${request}\nПравку делай edit_skill_file в этом файле, номер компонента не меняй. Новый вариант — новым компонентом со следующим номером (components/registry.json).`);
-          card.querySelector('.card-ask textarea').value = '';
-          card.querySelector('.card-ask').hidden = true;
+        card.innerHTML = `<div class="card-head"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span><span class="chip">${esc(component.category)}</span><span class="chip">${esc(component.type)}</span>
+          <button class="btn primary small" type="button" data-act="add">+ В письмо</button><button class="btn small" type="button" data-act="ask">Агенту</button></div>
+          <div class="card-info">${esc(component.description || '')}${component.fields.length ? `<br><code>${component.fields.map((f) => `${f.key}${f.required ? '*' : ''}`).join(' · ')}</code>` : ''}</div>
+          <div class="preview"><iframe loading="lazy" title="${component.id}"></iframe></div>
+          <div class="ask" hidden><textarea placeholder="Что изменить в ${component.id}?"></textarea><button class="btn primary" type="button" data-act="ask-send">Отправить</button></div>`;
+        const frame = $('iframe', card);
+        frames.add(frame);
+        frame.srcdoc = previewDoc(state.kit.templates[component.id], component);
+        $('[data-act="add"]', card).addEventListener('click', () => {
+          const l = state.letter; if (!l) { setStatus('Сначала выберите письмо', 'err'); return; }
+          l.letter.items.push({ component: component.id, fields: {} });
+          state.open[`${l.letter.items.length - 1}:${component.id}`] = true;
+          changed(); renderBuild(); setStatus(`${component.id} добавлен в письмо`, 'ok');
+        });
+        $('[data-act="ask"]', card).addEventListener('click', () => { const box = $('.ask', card); box.hidden = !box.hidden; });
+        $('[data-act="ask-send"]', card).addEventListener('click', () => {
+          const request = $('.ask textarea', card).value.trim(); if (!request) return;
+          sendAgent(`Навык email-campaign, компонент ${component.id} «${component.name}» (${component.file}, поля в components/registry.json): ${request}\nПравь edit_skill_file, номер не меняй; новые поля — {{ключ}} в шаблоне и описание в реестре. Проверь: node scripts/letter.mjs build example --no-remote.`);
+          $('.ask textarea', card).value = ''; $('.ask', card).hidden = true;
         });
         return card;
       }));
     }
-    ['#search', '#filter-category', '#filter-source'].forEach((selector) => $(selector).addEventListener('input', renderList));
+    $('#c-search').addEventListener('input', renderComponents);
 
-    // Новый компонент: номер = registry.next, файл components/C###.html, запись в реестр.
-    $('#toggle-new').addEventListener('click', () => { $('#new').hidden = !$('#new').hidden; $('#new-number').textContent = formatId(state.registry.next); $('#new-save').disabled = !canWrite; $('#new-hint').textContent = canWrite ? '' : 'Сохранять можно во вкладке MBOX; здесь — отдать агенту.'; });
-    $('#new-cancel').addEventListener('click', () => { $('#new').hidden = true; });
-    const wrapRow = (html) => /^\s*<tr[\s>]/i.test(html) ? html.trim() : `<tr em="block"><td align="center" style="padding: 0 40px;" class="em-mob-padding_left-20 em-mob-padding_right-20">${html.trim()}</td></tr>`;
-    function previewNew() {
-      const html = $('#new-html').value;
-      $('#new-preview').hidden = !html.trim();
-      if (!html.trim()) return;
-      const frame = $('#new-preview iframe');
-      if (!frame.dataset.fit) { fitFrame(frame); frame.dataset.fit = '1'; }
-      frame.srcdoc = measured(docFor({ source: $('#new-source').value }, wrapRow(html)));
-    }
-    ['#new-html', '#new-source'].forEach((selector) => $(selector).addEventListener('input', previewNew));
-    $('#new-save').addEventListener('click', async () => {
-      const html = $('#new-html').value.trim();
-      const name = $('#new-name').value.trim();
-      if (!html || !name) { setStatus('Нужны название и HTML', 'err'); return; }
-      try {
-        setStatus('Сохраняю…');
-        const registry = JSON.parse(await readFile('components/registry.json'));
-        const id = formatId(Math.max(registry.next || 1, ...registry.components.map((c) => idNum(c.id) + 1)));
-        const entry = { id, name, category: $('#new-category').value.trim() || 'Контент', source: $('#new-source').value, file: `components/${id}.html`, sha256: '' };
-        await bridge.write(entry.file, `${wrapRow(html)}\n`, `Новый компонент ${id}: ${name}`);
-        registry.components.push(entry);
-        registry.next = idNum(id) + 1;
-        await bridge.write('components/registry.json', `${JSON.stringify(registry, null, 2)}\n`, `Реестр: добавлен ${id}`);
-        state.registry = registry;
-        state.html[id] = wrapRow(html);
-        ['#new-html', '#new-name', '#new-category'].forEach((selector) => { $(selector).value = ''; });
-        $('#new').hidden = true;
-        $('#search').value = id;
-        renderFilters();
-        renderList();
-        setStatus(`${id} добавлен в коллекцию`, 'ok');
-      } catch (error) {
-        setStatus(`Не сохранилось: ${error.message}`, 'err');
-      }
-    });
-    $('#new-agent').addEventListener('click', () => {
-      const html = $('#new-html').value.trim();
-      if (!html) { setStatus('Вставьте HTML компонента', 'err'); return; }
-      sendAgent(`Добавь в коллекцию email-campaign новый компонент${$('#new-name').value.trim() ? ` «${$('#new-name').value.trim()}»` : ''} (категория: ${$('#new-category').value.trim() || 'определи сам'}, стили письма ${$('#new-source').value}). Номер — следующий свободный из components/registry.json (сейчас ${formatId(state.registry.next)}). Приведи к блоку <tr em="block"> по style-guide.md, сохрани write_skill_file в components/ и обнови реестр. HTML:\n\n${html}`);
-    });
-
-    // ── Вкладка «Сборка письма» ──────────────────────────────────────────────────────────
-    let uid = Date.now();
-    function addItem(id) {
-      if (!state.html[id]) { setStatus(`Компонента ${id} нет`, 'err'); return; }
-      state.build.items.push({ uid: String(uid++), id, edits: {}, open: true });
-      saveBuild();
-      renderBuild();
-    }
-    $('#add-button').addEventListener('click', () => { const id = normalizeId($('#add-number').value); if (id) { addItem(id); $('#add-number').value = ''; } });
-    $('#add-number').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); $('#add-button').click(); } });
-    $('#add-template').addEventListener('click', () => {
-      const template = (state.manifest.templates || []).find((t) => t.id === state.build.shell);
-      if (!template || !template.components) return;
-      if (state.build.items.length && !confirm('Заменить текущую сборку компонентами шаблона?')) return;
-      state.build.items = template.components.map((id) => ({ uid: String(uid++), id, edits: {}, open: false }));
-      saveBuild();
-      renderBuild();
-    });
-    ['#subject', '#preheader'].forEach((selector) => $(selector).addEventListener('input', () => { state.build[selector.slice(1)] = $(selector).value; saveBuild(); schedulePreview(); }));
-    $('#shell').addEventListener('change', () => { state.build.shell = $('#shell').value; saveBuild(); renderPreview(); });
-    $('#clear-build').addEventListener('click', () => { if (!state.build.items.length || confirm('Очистить сборку?')) { state.build.items = []; saveBuild(); renderBuild(); } });
-    $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; });
-
-    // Что можно заменить в компоненте: тексты, ссылки, картинки и их alt — по порядку в документе.
-    function parseRow(html) {
-      const doc = new DOMParser().parseFromString(`<!doctype html><html><body><table id="mbox-root">${html}</table></body></html>`, 'text/html');
-      const root = doc.getElementById('mbox-root');
-      const texts = [];
-      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (node.parentElement && /^(STYLE|SCRIPT)$/.test(node.parentElement.tagName)) continue;
-        if (node.nodeValue.replace(/[\s ͏‌]/g, '')) texts.push(node);
-      }
-      return { doc, root, texts, links: [...root.querySelectorAll('a[href]')], images: [...root.querySelectorAll('img')] };
-    }
-    function applyEdits(html, edits) {
-      if (!edits || !Object.keys(edits).length) return html;
-      const { root, texts, links, images } = parseRow(html);
-      texts.forEach((node, i) => { if (edits[`t${i}`] !== undefined) node.nodeValue = edits[`t${i}`]; });
-      links.forEach((a, i) => { if (edits[`h${i}`] !== undefined) a.setAttribute('href', edits[`h${i}`]); });
-      images.forEach((img, i) => { if (edits[`s${i}`] !== undefined) img.setAttribute('src', edits[`s${i}`]); if (edits[`a${i}`] !== undefined) img.setAttribute('alt', edits[`a${i}`]); });
-      const body = root.tBodies.length === 1 && !/^\s*<tbody/i.test(html) ? root.tBodies[0] : root;
-      return body.innerHTML;
-    }
-
-    function renderBuild() {
-      $('#count-build').textContent = state.build.items.length;
-      $('#subject').value = state.build.subject || '';
-      $('#preheader').value = state.build.preheader || '';
-      if (state.shells[state.build.shell]) $('#shell').value = state.build.shell;
-      const items = $('#items');
-      if (!state.build.items.length) {
-        items.innerHTML = '<div class="empty">Пусто. Добавьте компонент по номеру, кнопкой «+ В сборку» на вкладке «Компоненты» или «Как в шаблоне».</div>';
-        renderPreview();
-        return;
-      }
-      items.replaceChildren(...state.build.items.map((item, index) => {
-        const component = state.registry.components.find((c) => c.id === item.id) || { id: item.id, name: '?' };
-        const box = document.createElement('div');
-        box.className = 'item';
-        const edited = Object.keys(item.edits || {}).length;
-        box.innerHTML = `<div class="item-head"><span class="num">${item.id}</span><span class="name" title="${esc(component.name)}">${esc(component.name)}${edited ? ` <span class="chip">изменено: ${edited}</span>` : ''}</span>
-          <button class="btn ghost" type="button" data-act="up" title="Выше" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn ghost" type="button" data-act="down" title="Ниже" ${index === state.build.items.length - 1 ? 'disabled' : ''}>↓</button>
-          <button class="btn ghost" type="button" data-act="open" title="Заменить текст">${item.open ? '▾' : '▸'}</button><button class="btn ghost" type="button" data-act="remove" title="Убрать">✕</button></div>`;
-        const act = (name, fn) => box.querySelector(`[data-act="${name}"]`).addEventListener('click', fn);
-        act('up', () => move(index, -1));
-        act('down', () => move(index, 1));
-        act('remove', () => { state.build.items.splice(index, 1); saveBuild(); renderBuild(); });
-        act('open', () => { item.open = !item.open; saveBuild(); renderBuild(); });
-        if (item.open) box.append(editorFor(item));
-        return box;
+    // Новый компонент: поля из {{ключей}} шаблона, описание — в таблице, номер — registry.next.
+    const newSchema = {};
+    $('#c-new-toggle').addEventListener('click', () => { $('#c-new').hidden = !$('#c-new').hidden; $('#c-new-number').textContent = pad(state.kit.registry.next); });
+    $('#c-cancel').addEventListener('click', () => { $('#c-new').hidden = true; });
+    function renderSchema() {
+      const keys = state.K.templateFields($('#c-html').value);
+      $('#c-schema').innerHTML = keys.length ? `<table class="schema"><tr><th>Поле</th><th>Подпись</th><th>Тип</th><th>Обязательное</th><th>По умолчанию</th></tr>${keys.map((key) => {
+        const f = newSchema[key] = newSchema[key] || { key, label: key, type: /url|link|href/.test(key) ? 'url' : /image|img|src/.test(key) ? 'image' : /text|body/.test(key) ? 'multiline' : 'text', required: true, default: '' };
+        return `<tr><td><code>${esc(key)}</code></td><td><input data-s="${esc(key)}:label" value="${esc(f.label)}"></td><td><select data-s="${esc(key)}:type">${['text', 'multiline', 'url', 'image'].map((t) => `<option ${f.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></td><td><input type="checkbox" data-s="${esc(key)}:required" ${f.required ? 'checked' : ''}></td><td><input data-s="${esc(key)}:default" value="${esc(f.default)}"></td></tr>`;
+      }).join('')}</table>` : '<div class="muted">Полей нет — блок будет одинаковым во всех письмах.</div>';
+      document.querySelectorAll('[data-s]').forEach((input) => input.addEventListener('input', () => {
+        const [key, prop] = input.dataset.s.split(':');
+        newSchema[key][prop] = input.type === 'checkbox' ? input.checked : input.value;
+        previewNew();
       }));
-      renderPreview();
+      previewNew();
     }
-
-    function move(index, delta) {
-      const items = state.build.items;
-      const [item] = items.splice(index, 1);
-      items.splice(index + delta, 0, item);
-      saveBuild();
-      renderBuild();
+    function newComponent() {
+      const keys = state.K.templateFields($('#c-html').value);
+      return { id: pad(state.kit.registry.next), type: $('#c-type').value.trim() || 'custom', block: '', name: $('#c-name').value.trim(), category: $('#c-category').value.trim() || 'Разное', description: $('#c-description').value.trim(), fields: keys.map((key) => { const f = { ...newSchema[key] }; if (!f.default) delete f.default; return f; }), file: `components/${pad(state.kit.registry.next)}.html` };
     }
-
-    function editorFor(item) {
-      const body = document.createElement('div');
-      body.className = 'item-body';
-      const { texts, links, images } = parseRow(state.html[item.id] || '');
-      item.edits = item.edits || {};
-      const field = (key, original, multiline) => {
-        const input = document.createElement(multiline ? 'textarea' : 'input');
-        input.value = item.edits[key] ?? original;
-        input.placeholder = original;
-        input.title = `Было: ${original}`;
-        input.classList.toggle('changed', item.edits[key] !== undefined);
-        input.addEventListener('input', () => {
-          if (input.value === original) delete item.edits[key]; else item.edits[key] = input.value;
-          input.classList.toggle('changed', item.edits[key] !== undefined);
-          saveBuild();
-          schedulePreview();
-        });
-        return input;
-      };
-      const group = (title) => Object.assign(document.createElement('div'), { className: 'group', textContent: title });
-      if (texts.length) { body.append(group('Текст')); texts.forEach((node, i) => { const value = node.nodeValue.replace(/\s+/g, ' ').trim(); body.append(field(`t${i}`, value, value.length > 60)); }); }
-      if (links.length) { body.append(group('Ссылки')); links.forEach((a, i) => body.append(field(`h${i}`, a.getAttribute('href') || '', false))); }
-      if (images.length) { body.append(group('Картинки')); images.forEach((img, i) => { body.append(field(`s${i}`, img.getAttribute('src') || '', false)); body.append(field(`a${i}`, img.getAttribute('alt') || '', false)); }); }
-      if (!texts.length && !links.length && !images.length) body.append(Object.assign(document.createElement('div'), { className: 'muted', textContent: 'Заменять нечего — служебный блок.' }));
-      return body;
+    function previewNew() {
+      const html = $('#c-html').value.trim();
+      $('#c-preview').hidden = !html;
+      if (!html) return;
+      const frame = $('#c-preview iframe');
+      frames.add(frame);
+      frame.srcdoc = previewDoc(html, newComponent());
     }
-
-    function letterHtml() {
-      let html = shellFor(state.build.shell);
-      const rows = state.build.items.map((item) => applyEdits(state.html[item.id] || '', item.edits));
-      // Стили писем-источников, отличных от оболочки, — чтобы их компоненты выглядели как у себя.
-      const extraSources = [...new Set(state.build.items.map((item) => state.registry.components.find((c) => c.id === item.id)?.source).filter((s) => s && s !== state.build.shell))];
-      const extraStyles = extraSources.map((s) => (state.shells[s] || '').match(/<style[\s\S]*?<\/style>/gi)?.join('\n') || '').join('\n');
-      if (extraStyles) html = html.replace(/<\/head>/i, `${extraStyles}\n</head>`);
-      if (state.build.subject) html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${esc(state.build.subject)}</title>`);
-      if (state.build.preheader) html = html.replace(/(<div class="preheader"[^>]*>)[\s\S]*?(<vk-snippet-end)/i, `$1${esc(state.build.preheader)} $2`);
-      return html.replace(MARK, rows.join('\n'));
-    }
-
-    let previewTimer = 0;
-    const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 250); };
-    function renderPreview() {
-      if (state.tab !== 'build' || !state.registry) return;
-      const frame = $('#letter');
-      const scroll = (() => { try { return frame.contentWindow.scrollY; } catch { return 0; } })();
-      frame.onload = () => { try { frame.contentWindow.scrollTo(0, scroll); } catch { /* другой origin */ } };
-      frame.srcdoc = letterHtml();
-    }
-
-    function buildSpec() {
-      const lines = [
-        'Навык email-campaign: собери письмо из компонентов коллекции (components/registry.json) — порядок и замены ниже.',
-        `Оболочка: components/shells/${state.build.shell}.html.`,
-        `Тема: ${state.build.subject || 'не указана — предложи'}. Прехедер: ${state.build.preheader || 'не указан — предложи'}.`,
-        'Компоненты по порядку:',
-      ];
-      state.build.items.forEach((item, index) => {
-        const { texts, links, images } = parseRow(state.html[item.id] || '');
-        const name = state.registry.components.find((c) => c.id === item.id)?.name || '';
-        const changes = Object.entries(item.edits || {}).map(([key, value]) => {
-          const i = Number(key.slice(1));
-          const before = key[0] === 't' ? texts[i]?.nodeValue.replace(/\s+/g, ' ').trim() : key[0] === 'h' ? links[i]?.getAttribute('href') : key[0] === 's' ? images[i]?.getAttribute('src') : images[i]?.getAttribute('alt');
-          const what = { t: 'текст', h: 'ссылка', s: 'картинка', a: 'alt' }[key[0]];
-          return `   - ${what}: «${before}» → «${value}»`;
-        });
-        lines.push(`${index + 1}. ${item.id} ${name}${changes.length ? '' : ' — без изменений'}`, ...changes);
-      });
-      lines.push('Сохрани в Desktop/Mbox/mail-skill/ready/, прогони repair и strict preflight, открой мне результат через open_tab и напиши отчёт.');
-      return lines.join('\n');
-    }
-
-    $('#send-build').addEventListener('click', () => {
-      if (!state.build.items.length) { setStatus('Сборка пустая', 'err'); return; }
-      sendAgent(buildSpec());
+    $('#c-html').addEventListener('input', renderSchema);
+    $('#c-save').addEventListener('click', async () => {
+      const html = $('#c-html').value.trim();
+      const component = newComponent();
+      if (!html || !component.name) { setStatus('Нужны название и HTML', 'err'); return; }
+      if (!/<tr\b[^>]*em\s*=\s*["']block["']/i.test(html)) { setStatus('Нужна строка <tr em="block"> — или отдайте HTML агенту', 'err'); return; }
+      try {
+        const registry = JSON.parse(await readFile('components/registry.json'));
+        const number = Math.max(registry.next || 1, ...registry.components.map((c) => Number(c.id.slice(1)) + 1));
+        component.id = pad(number); component.file = `components/${component.id}.html`;
+        registry.components.push(component);
+        registry.next = number + 1;
+        await writeFiles([
+          { path: component.file, content: `${html}\n`, message: `Новый компонент ${component.id}: ${component.name}` },
+          { path: 'components/registry.json', content: `${JSON.stringify(registry, null, 2)}\n`, message: `Реестр: добавлен ${component.id}` },
+        ], `Облачный компонент ${component.id}: шаблон и реестр`);
+        state.kit.registry = registry;
+        state.kit.templates[component.id] = html;
+        $('#c-new').hidden = true;
+        ['#c-html', '#c-name', '#c-category', '#c-type', '#c-description'].forEach((s) => { $(s).value = ''; });
+        $('#c-search').value = component.id;
+        renderComponents(); renderBuild();
+        setStatus(`${component.id} добавлен в облачную библиотеку`, 'ok');
+      } catch (error) { setStatus(`Не сохранилось: ${error.message}`, 'err'); }
     });
-    $('#copy-build').addEventListener('click', () => copyText(letterHtml(), 'HTML письма скопирован'));
-    $('#download-build').addEventListener('click', () => {
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(new Blob([letterHtml()], { type: 'text/html;charset=utf-8' }));
-      link.download = `${new Date().toISOString().slice(0, 10)}-letter.html`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    $('#c-agent').addEventListener('click', () => {
+      const html = $('#c-html').value.trim();
+      if (!html) { setStatus('Вставьте HTML', 'err'); return; }
+      sendAgent(`Добавь в конструктор email-campaign новый компонент${$('#c-name').value.trim() ? ` «${$('#c-name').value.trim()}»` : ''} (категория: ${$('#c-category').value.trim() || 'определи'}; когда ставить: ${$('#c-description').value.trim() || 'определи'}). Номер — components/registry.json next (сейчас ${pad(state.kit.registry.next)}). Приведи к строкам <tr em="block"> в стиле components/shell.html и style-guide.md, изменяемое вынеси в поля {{ключ}} с описанием в реестре, сохрани write_skill_file и проверь node scripts/letter.mjs build example --no-remote. HTML:\n\n${html}`);
     });
 
-    // ── Общее ────────────────────────────────────────────────────────────────────────────
-    async function copyText(text, done) {
-      try { await navigator.clipboard.writeText(text); setStatus(done, 'ok'); }
-      catch {
-        const area = Object.assign(document.createElement('textarea'), { value: text });
-        document.body.append(area); area.select(); document.execCommand('copy'); area.remove();
-        setStatus(done, 'ok');
+    // ── 4. Проверка ─────────────────────────────────────────────────────────────────────
+    function renderCheck() {
+      const box = $('#check');
+      const l = state.letter;
+      const c = l && l.check;
+      $('#count-check').textContent = c ? (c.ok ? '✓' : '!') : '';
+      if (!l) { box.innerHTML = '<div class="empty">Выберите письмо</div>'; return; }
+      const local = renderResult();
+      const rows = (items, sev) => (items || []).map((item) => `<li><span class="sev ${sev}">${sev === 'error' ? 'ошибка' : sev === 'warn' ? 'внимание' : sev === 'ok' ? 'исправлено' : 'заметка'}</span>${esc(typeof item === 'string' ? item : item.detail || item.message || item.url || JSON.stringify(item))}${item && item.context ? `<span class="ctx">${esc(item.context)}${item.suggestions && item.suggestions.length ? ` → ${esc(item.suggestions.join(' / '))}` : ''}</span>` : ''}${item && item.status ? `<span class="ctx">HTTP ${esc(item.status)} ${esc(item.note || '')}</span>` : ''}</li>`).join('');
+      const section = (title, html) => html ? `<div class="panel"><h2>${title}</h2><ul class="check-list">${html}</ul></div>` : '';
+      const e = c && c.email_checker;
+      const headline = c?.ok ? 'Полная проверка пройдена' : c?.external_ok && c?.preflight?.pending ? 'Email Checker пройден, preflight ещё не запускался' : c ? 'Есть блокирующие ошибки' : '';
+      box.innerHTML = `
+        <div class="notice ${c && !c.ok ? 'warn' : ''}">${c
+          ? `<b>${headline}</b> · проверил ${esc(c.by || 'агент')} ${esc(String(c.at || '').slice(0, 16).replace('T', ' '))}<br><span class="muted">${esc(c.email_checker?.provider || '')}${c.html_path ? ` · ${esc(c.html_path)}` : ''}</span>`
+          : 'Письмо ещё не проверялось. Email Checker можно запустить здесь; полный цикл с preflight и исправлениями выполняет агент.'}</div>
+        <div class="actions" style="margin:0 0 12px"><button class="btn primary" type="button" id="recheck-now">Проверить Email Checker сейчас</button><button class="btn" type="button" id="recheck">Агенту: preflight, исправления и повторная проверка</button><span class="muted">Сейчас в конструкторе: ${local.errors.length ? `${local.errors.length} незаполненных или неверных полей` : 'все обязательные поля заполнены'}</span></div>
+        ${section('Исправлено агентом', rows(c && c.fixed, 'ok'))}
+        ${section('Осталось на решение', rows(c && c.remaining, 'warn'))}
+        ${section('Сборка', rows(local.errors, 'error') + rows(local.warnings, 'warn'))}
+        ${c?.preflight?.pending ? section('Preflight', '<li><span class="sev warn">ожидает</span>Запустите проверку агентом — он проверит ограничения UniSender, исправит ошибки и повторит Email Checker.</li>') : ''}
+        ${section('Preflight', c ? rows(c.preflight?.errors, 'error') + rows(c.preflight?.warnings, 'warn') : '')}
+        ${e && e.failed ? section('Email Checker', `<li><span class="sev warn">внимание</span>недоступен: ${esc(e.failed)}</li>`) : ''}
+        ${e && !e.failed ? section('Email Checker · ссылки', rows(e.links_failed, 'error') + rows((e.links_auth || []).map((url) => `${url} — страница за логином, это нормально`), 'info') + `<li><span class="sev info">итого</span>ссылок ${esc(e.summary?.totalLinks)}, с UTM ${esc(e.summary?.linksWithUtm)}, картинок без alt ${esc(e.summary?.imagesWithoutAlt)}</li>`) : ''}
+        ${e && !e.failed ? section('Email Checker · вёрстка', rows(e.validation?.errors, 'error') + rows(e.validation?.warnings, 'warn')) : ''}
+        ${e && !e.failed ? section('Email Checker · текст (оценивает агент)', rows(e.text_issues, 'info')) : ''}`;
+      $('#recheck-now').addEventListener('click', checkNow);
+      $('#recheck').addEventListener('click', () => $('#ask-check').click());
+    }
+
+    // ── Старт ───────────────────────────────────────────────────────────────────────────
+    (async () => {
+      try {
+        await loadKit();
+        await loadLetters();
+        if (!state.letters.length && bridge && bridge.write) {
+          const first = state.K.newLetter(`${new Date().toISOString().slice(0, 10)}-letter`);
+          state.letters.push(first);
+        }
+        state.letter = state.letters.find((l) => l.id === ui.letter) || state.letters[0] || null;
+        renderAll();
+        showTab(ui.tab || (state.letter && state.letter.letter && state.letter.letter.items.length ? 'build' : 'brief'));
+        setStatus(`${state.kit.registry.components.length} компонентов · ${state.letters.length} писем${bridge ? '' : ' · только просмотр'}`);
+      } catch (error) {
+        setStatus(`Не загрузилось: ${error.message}`, 'err');
       }
-    }
-    function sendAgent(text) {
-      if (window.mbox && window.mbox.send) { window.mbox.send(text); setStatus('Отправлено агенту в чат MBOX', 'ok'); }
-      else copyText(text, 'Не в MBOX: задание скопировано — вставьте его в чат агента');
-    }
-
-    load().catch((error) => setStatus(`Не загрузилось: ${error.message}. Откройте страницу во вкладке MBOX.`, 'err'));
+    })();
   </script>
 </body>
 </html>

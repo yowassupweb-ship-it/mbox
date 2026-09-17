@@ -14,6 +14,7 @@ import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.m
 import { ensureNotesSchema, handleNotesApi } from "./server/notes.mjs";
 import { ensureStorageSchema, handleStorageApi } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
+import { handleEmailCheckerApi } from "./server/email-checker.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
@@ -1036,6 +1037,7 @@ function mboxDevApi() {
           const devActor = actor || await resolveRequestActor(req);
           if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: ownerOnly })) return;
           if (await handleStorageApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+          if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
 
           if (url.pathname === "/api/mbox/agent/structure") {
             return sendJson(res, 200, { structure: agentStructure });

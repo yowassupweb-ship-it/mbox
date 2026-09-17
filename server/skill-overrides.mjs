@@ -84,6 +84,44 @@ async function writeFile(query, skillsRoot, { id, path, content, author, message
   return { status: 200, body: { saved: true, version_id: row.rows[0].id, sha256: nextSha, created_at: row.rows[0].created_at }, changed: true };
 }
 
+async function writeFiles(query, skillsRoot, { id, files, author, message }) {
+  if (!isSkillId(id)) return { status: 400, body: { error: "bad_skill_id" } };
+  if (!Array.isArray(files) || !files.length || files.length > 50) return { status: 400, body: { error: "files_required" } };
+  const paths = files.map((file) => String(file?.path || ""));
+  if (paths.some((path) => !isSkillFilePath(path))) return { status: 400, body: { error: "bad_skill_path" } };
+  if (new Set(paths).size !== paths.length) return { status: 400, body: { error: "duplicate_skill_path" } };
+  const current = await mergedPackage(query, skillsRoot, id);
+  if (!current && !paths.includes("SKILL.md")) return { status: 404, body: { error: "skill_not_found", hint: "Новый навык начинается с SKILL.md" } };
+  const rows = files.map((file) => {
+    const path = String(file.path);
+    const buffer = Buffer.from(String(file.content ?? ""), "utf8");
+    const existing = current?.files.find((entry) => entry.path === path);
+    return {
+      path,
+      content: buffer.toString("utf8"),
+      sha256: sha256(buffer),
+      base_sha256: existing?.sha256 ?? "",
+      message: String(file.message || message || "").slice(0, 500),
+      size: buffer.length,
+      unchanged: existing?.sha256 === sha256(buffer),
+    };
+  });
+  if (rows.some((row) => row.size > MAX_FILE_BYTES)) return { status: 413, body: { error: "file_too_large" } };
+  const changed = rows.filter((row) => !row.unchanged);
+  if (!changed.length) return { status: 200, body: { unchanged: true, files: rows.map((row) => ({ path: row.path, sha256: row.sha256 })) } };
+  const inserted = await query(
+    `WITH source AS (
+       SELECT * FROM jsonb_to_recordset($1::jsonb)
+       AS item(path text, content text, sha256 text, base_sha256 text, message text)
+     )
+     INSERT INTO skill_file_versions (skill_id, path, content, sha256, base_sha256, author, message)
+     SELECT $2, path, content, sha256, base_sha256, $3, message FROM source
+     RETURNING id::text, path, sha256, created_at::text`,
+    [JSON.stringify(changed.map(({ path, content, sha256: hash, base_sha256, message: rowMessage }) => ({ path, content, sha256: hash, base_sha256, message: rowMessage }))), id, String(author || "")],
+  );
+  return { status: 200, body: { saved: true, files: inserted.rows }, changed: inserted.rows.map((row) => row.path) };
+}
+
 /**
  * Ручки пакетов навыков, общие для прода и dev:
  *   GET  /api/mbox/agent/skills/packages                         — список (с правками)
@@ -120,8 +158,11 @@ export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot,
 
   if (action === "/files" && (req.method === "PUT" || req.method === "POST")) {
     const body = await readBody(req);
-    const result = await writeFile(query, skillsRoot, { id, path: file || body.path, content: body.content, author: actor, message: body.message });
-    if (result.changed) onChange?.({ skill: id, path: file || body.path, actor });
+    const result = Array.isArray(body.files)
+      ? await writeFiles(query, skillsRoot, { id, files: body.files, author: actor, message: body.message })
+      : await writeFile(query, skillsRoot, { id, path: file || body.path, content: body.content, author: actor, message: body.message });
+    if (Array.isArray(result.changed)) result.changed.forEach((path) => onChange?.({ skill: id, path, actor }));
+    else if (result.changed) onChange?.({ skill: id, path: file || body.path, actor });
     sendJson(res, result.status, result.body);
     return true;
   }

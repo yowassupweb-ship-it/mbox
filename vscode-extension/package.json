@@ -2,7 +2,7 @@
   "name": "mbox-vscode",
   "displayName": "MBOX",
   "description": "Проекты, задачи, память и работа агентов MBOX прямо в VS Code.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "mbox",
   "private": true,
   "icon": "resources/mbox.png",

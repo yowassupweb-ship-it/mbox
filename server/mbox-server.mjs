@@ -17,6 +17,7 @@ import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi } from "./notes.mjs";
 import { ensureStorageSchema, handleStorageApi } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
+import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -875,7 +876,8 @@ function sendForbidden(res) {
 function memberRouteAllowed(pathname) {
   return pathname === "/api/mbox/auth/me"
     || pathname === "/api/mbox/agent/skills"
-    || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+)?$/.test(pathname)
+    || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history))?)?$/.test(pathname)
+    || pathname === "/api/mbox/email/check"
     || pathname === "/api/mbox/ui/open"
     || pathname === "/api/mbox/projects"
     || pathname === "/api/mbox/memories"
@@ -1078,6 +1080,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all })) return;
   if (await handleStorageApi({ req, res, url, query, readBody, sendJson, allowed: scope.all, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+  if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
     return sendJson(res, 200, { structure: agentStructure });

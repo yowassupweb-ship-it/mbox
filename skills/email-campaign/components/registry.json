@@ -1,230 +1,513 @@
 {
-  "version": 1,
-  "next": 29,
+  "version": 2,
+  "next": 16,
+  "shell": "components/shell.html",
+  "renderer": "components/render.js",
   "components": [
     {
       "id": "C001",
-      "name": "Логотип",
-      "category": "Шапка",
-      "source": "vs-001",
-      "file": "components/C001.html",
-      "sha256": "004b70cec710d08e8e3d4d8462802bfccbc5f2cbd14f04b625961ed10618e36a"
+      "type": "header",
+      "block": "B02",
+      "name": "Шапка: логотип и меню",
+      "category": "Шапка и подвал",
+      "description": "Логотип и четыре кнопки разделов. Ставится первым в каждое письмо.",
+      "fields": [
+        {
+          "key": "logo_url",
+          "label": "Ссылка логотипа",
+          "type": "url",
+          "default": "https://vs-travel.ru/"
+        },
+        {
+          "key": "m1_label",
+          "label": "Меню 1",
+          "type": "text",
+          "default": "На 1 день"
+        },
+        {
+          "key": "m1_url",
+          "label": "Меню 1: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/odnodnevnye/"
+        },
+        {
+          "key": "m2_label",
+          "label": "Меню 2",
+          "type": "text",
+          "default": "Туры по России"
+        },
+        {
+          "key": "m2_url",
+          "label": "Меню 2: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/tury-po-rossii"
+        },
+        {
+          "key": "m3_label",
+          "label": "Меню 3",
+          "type": "text",
+          "default": "Зарубежье"
+        },
+        {
+          "key": "m3_url",
+          "label": "Меню 3: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/tury-zarubezh"
+        },
+        {
+          "key": "m4_label",
+          "label": "Меню 4",
+          "type": "text",
+          "default": "Личный кабинет"
+        },
+        {
+          "key": "m4_url",
+          "label": "Меню 4: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/lk/profile"
+        }
+      ],
+      "file": "components/C001.html"
     },
     {
       "id": "C002",
-      "name": "Меню навигации",
-      "category": "Навигация",
-      "source": "vs-001",
-      "file": "components/C002.html",
-      "sha256": "8703144caa79ae14c606b413e64bb52d3eca1befe3b0fbd627d5b727ee39db79"
+      "type": "title",
+      "block": "B03",
+      "name": "Заголовок письма",
+      "category": "Текст",
+      "description": "Крупный оранжевый заголовок под шапкой.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Заголовок",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "file": "components/C002.html"
     },
     {
       "id": "C003",
-      "name": "Заголовок",
-      "category": "Заголовок",
-      "source": "vs-001",
-      "file": "components/C003.html",
-      "sha256": "2f491c45c398a667df716232855229b91d70233b81f896bb7ee9ebf1211f265f"
+      "type": "text",
+      "block": "B03",
+      "name": "Текст",
+      "category": "Текст",
+      "description": "Абзацы по центру. Пустая строка — новый абзац, **так** — жирный.",
+      "fields": [
+        {
+          "key": "text",
+          "label": "Текст",
+          "type": "multiline",
+          "required": true
+        }
+      ],
+      "file": "components/C003.html"
     },
     {
       "id": "C004",
-      "name": "Текст",
-      "category": "Текст",
-      "source": "vs-001",
-      "file": "components/C004.html",
-      "sha256": "c51a39ad6158242f52685645fc3968f8c13e516edea472eaa1b6eea7ccfe5ae7"
+      "type": "primary-cta",
+      "block": "B04",
+      "name": "Главная кнопка",
+      "category": "Кнопки",
+      "description": "Одна крупная кнопка главного перехода.",
+      "fields": [
+        {
+          "key": "label",
+          "label": "Текст кнопки",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "url",
+          "label": "Ссылка",
+          "type": "url",
+          "required": true
+        }
+      ],
+      "file": "components/C004.html"
     },
     {
       "id": "C005",
-      "name": "Блок \"Мы теперь в Maкс\"",
-      "category": "Мессенджер",
-      "source": "vs-001",
-      "file": "components/C005.html",
-      "sha256": "b6aa639f5e8d4aac08cc4a1b17ece6408bed33f9f99f6f016cf82ef596845b24"
+      "type": "divider",
+      "block": "B05",
+      "name": "Разделитель",
+      "category": "Служебные",
+      "description": "Тонкая линия между крупными разделами.",
+      "fields": [],
+      "file": "components/C005.html"
     },
     {
       "id": "C006",
-      "name": "Разделитель",
-      "category": "Разделители и изображения",
-      "source": "vs-001",
-      "file": "components/C006.html",
-      "sha256": "e16dd0006a1c5aab9d0a27168f32551f6b3f6b53d52a9939ae6be33748b24ff0"
+      "type": "section-title",
+      "block": "B06",
+      "name": "Заголовок подборки",
+      "category": "Текст",
+      "description": "Оранжевый заголовок перед группой карточек.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Заголовок подборки",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "file": "components/C006.html"
     },
     {
       "id": "C007",
-      "name": "Новинки с выгодой до 12%",
-      "category": "Контент",
-      "source": "vs-001",
-      "file": "components/C007.html",
-      "sha256": "ea225501f91eafd2dc2a2d496d82670154ff3f7884bd85fdaaf4e3201d88b199"
+      "type": "tour-card-left",
+      "block": "B07",
+      "name": "Карточка тура: фото слева",
+      "category": "Туры",
+      "description": "Фото слева, текст и кнопка справа. В подборке чередуется с C008.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Название тура",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "route",
+          "label": "Маршрут",
+          "type": "text"
+        },
+        {
+          "key": "meta",
+          "label": "Даты, длительность, цена",
+          "type": "text"
+        },
+        {
+          "key": "cta",
+          "label": "Текст кнопки",
+          "type": "text",
+          "default": "Узнать подробнее"
+        },
+        {
+          "key": "url",
+          "label": "Ссылка тура",
+          "type": "url",
+          "required": true
+        },
+        {
+          "key": "image",
+          "label": "Картинка (https)",
+          "type": "image",
+          "required": true
+        },
+        {
+          "key": "alt",
+          "label": "Alt картинки",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "file": "components/C007.html"
     },
     {
       "id": "C008",
-      "name": "Ситцевые узоры на Золотом кольце Киржач",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C008.html",
-      "sha256": "7aeed086927a5585f69fe21f2ce1ea132bd3f088efba20b285d3e446834e13a6"
+      "type": "tour-card-right",
+      "block": "B08",
+      "name": "Карточка тура: фото справа",
+      "category": "Туры",
+      "description": "Текст слева на светлом фоне, фото справа.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Название тура",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "route",
+          "label": "Маршрут",
+          "type": "text"
+        },
+        {
+          "key": "meta",
+          "label": "Даты, длительность, цена",
+          "type": "text"
+        },
+        {
+          "key": "cta",
+          "label": "Текст кнопки",
+          "type": "text",
+          "default": "Узнать подробнее"
+        },
+        {
+          "key": "url",
+          "label": "Ссылка тура",
+          "type": "url",
+          "required": true
+        },
+        {
+          "key": "image",
+          "label": "Картинка (https)",
+          "type": "image",
+          "required": true
+        },
+        {
+          "key": "alt",
+          "label": "Alt картинки",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "file": "components/C008.html"
     },
     {
       "id": "C009",
-      "name": "Симфония русского творчества Рязань – Спас-Клепики",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C009.html",
-      "sha256": "79e0a725d3d3c2ca779a7ecc67c8a5a7b0356fbd366b51132f8b94e1386fda10"
+      "type": "tour-pair",
+      "block": "B07",
+      "name": "Два тура в ряд",
+      "category": "Туры",
+      "description": "Компактные карточки парой — для дайджестов и длинных подборок. На телефоне встают друг под друга.",
+      "fields": [
+        {
+          "key": "a_title",
+          "label": "Левый тур: название",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "a_meta",
+          "label": "Левый тур: маршрут, даты, цена",
+          "type": "text"
+        },
+        {
+          "key": "a_url",
+          "label": "Левый тур: ссылка",
+          "type": "url",
+          "required": true
+        },
+        {
+          "key": "a_image",
+          "label": "Левый тур: картинка (https)",
+          "type": "image",
+          "required": true
+        },
+        {
+          "key": "a_alt",
+          "label": "Левый тур: alt",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "b_title",
+          "label": "Правый тур: название",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "b_meta",
+          "label": "Правый тур: маршрут, даты, цена",
+          "type": "text"
+        },
+        {
+          "key": "b_url",
+          "label": "Правый тур: ссылка",
+          "type": "url",
+          "required": true
+        },
+        {
+          "key": "b_image",
+          "label": "Правый тур: картинка (https)",
+          "type": "image",
+          "required": true
+        },
+        {
+          "key": "b_alt",
+          "label": "Правый тур: alt",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "file": "components/C009.html"
     },
     {
       "id": "C010",
-      "name": "Истории петербургских предместий Санкт-Петербург – Гатчина",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C010.html",
-      "sha256": "3f9ca38b73e9f764f4be507c35d5c5cbbfd5c591d04a9ec4504db5999817dc1b"
+      "type": "catalog-banner",
+      "block": "B09",
+      "name": "Баннер каталога",
+      "category": "Баннеры",
+      "description": "Большая картинка и оранжевая плашка с кнопкой — финальный призыв.",
+      "fields": [
+        {
+          "key": "image",
+          "label": "Картинка (https)",
+          "type": "image",
+          "default": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=66iw1m6pxdwzzod84bcbqiwsjaqpbdw8mdmj1aqnt6eh5tgntpfjo68qqqoznx4hdqsist1bwemyd8z7chwe3wx7ekh"
+        },
+        {
+          "key": "alt",
+          "label": "Alt картинки",
+          "type": "text",
+          "default": "Каталог туров «Вокруг света»"
+        },
+        {
+          "key": "title",
+          "label": "Заголовок",
+          "type": "text",
+          "default": "Полный каталог туров"
+        },
+        {
+          "key": "text",
+          "label": "Текст",
+          "type": "multiline",
+          "default": "Поездки на выходные и длинные маршруты по всей России"
+        },
+        {
+          "key": "cta",
+          "label": "Текст кнопки",
+          "type": "text",
+          "default": "Перейти в каталог"
+        },
+        {
+          "key": "url",
+          "label": "Ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/podbor-tura/"
+        }
+      ],
+      "file": "components/C010.html"
     },
     {
       "id": "C011",
-      "name": "Заповедное зодчество Онежских берегов Подпорожье –",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C011.html",
-      "sha256": "c2bf8600a4105916f6d5cd3b355902fcadc8e0b29b5cd3aed410233618b9c577"
+      "type": "promo-code",
+      "block": "B03",
+      "name": "Промокод",
+      "category": "Акции",
+      "description": "Плашка с промокодом и тем, как им воспользоваться.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Заголовок",
+          "type": "text",
+          "default": "Как получить скидку?"
+        },
+        {
+          "key": "code",
+          "label": "Промокод",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "how",
+          "label": "Как применить",
+          "type": "multiline",
+          "default": "Укажите промокод при оплате на vs-travel.ru\n\nИли назовите его менеджеру по телефону +7 (495) 741-49-41"
+        }
+      ],
+      "file": "components/C011.html"
     },
     {
       "id": "C012",
-      "name": "Голоса веков и ямщицкие песни Санкт-Петербург",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C012.html",
-      "sha256": "b9819a6629e163890f244ab216712674db41f5bf2a9add3ad9c9d38e08cb1596"
+      "type": "messenger-promo",
+      "block": "B10",
+      "name": "Подписка на канал в Max",
+      "category": "Баннеры",
+      "description": "Оранжевая плашка с кнопкой подписки. Только если нужна по брифу.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Заголовок",
+          "type": "text",
+          "default": "Мы есть в Max"
+        },
+        {
+          "key": "text",
+          "label": "Текст",
+          "type": "multiline",
+          "default": "Оставайтесь на связи с «Вокруг света» и узнавайте о выгодных предложениях первыми"
+        },
+        {
+          "key": "cta",
+          "label": "Текст кнопки",
+          "type": "text",
+          "default": "Подписаться на канал"
+        },
+        {
+          "key": "url",
+          "label": "Ссылка",
+          "type": "url",
+          "default": "https://max.ru/id7708596369_biz"
+        }
+      ],
+      "file": "components/C012.html"
     },
     {
       "id": "C013",
-      "name": "Стальное кружево Русского Севера Череповец –",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C013.html",
-      "sha256": "ddd9ac3f43e4b93c75cbb05cce262dc9df81eae957799ab47887e2b751d97eb5"
+      "type": "bottom-nav",
+      "block": "B11",
+      "name": "Нижнее меню",
+      "category": "Шапка и подвал",
+      "description": "Три крупные кнопки разделов перед подвалом. Только если нужны по брифу.",
+      "fields": [
+        {
+          "key": "n1_label",
+          "label": "Кнопка 1",
+          "type": "text",
+          "default": "Новинки"
+        },
+        {
+          "key": "n1_url",
+          "label": "Кнопка 1: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/podbor-tura?TopFilter_is_novelty=1&TopFilter_russia=1"
+        },
+        {
+          "key": "n2_label",
+          "label": "Кнопка 2",
+          "type": "text",
+          "default": "Туры от Вокруг света"
+        },
+        {
+          "key": "n2_url",
+          "label": "Кнопка 2: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/podbor-tura?TopFilter_tota=1&TopFilter_russia=1"
+        },
+        {
+          "key": "n3_label",
+          "label": "Кнопка 3",
+          "type": "text",
+          "default": "На 1 день"
+        },
+        {
+          "key": "n3_url",
+          "label": "Кнопка 3: ссылка",
+          "type": "url",
+          "default": "https://vs-travel.ru/odnodnevnye/"
+        }
+      ],
+      "file": "components/C013.html"
     },
     {
       "id": "C014",
-      "name": "Родина дымковской сказки Киров – Музей",
-      "category": "Карточка тура",
-      "source": "vs-001",
-      "file": "components/C014.html",
-      "sha256": "72346e4ed0e4d06d712ba5418d297b54c5761e41555e551e8f64334386c21a2d"
+      "type": "footer",
+      "block": "B12",
+      "name": "Подвал: контакты и соцсети",
+      "category": "Шапка и подвал",
+      "description": "Серый подвал целиком: адрес, РТО, почта, телефон и соцсети. Ставится последним в каждое письмо.",
+      "fields": [],
+      "file": "components/C014.html"
     },
     {
       "id": "C015",
-      "name": "Разделитель",
-      "category": "Разделители и изображения",
-      "source": "vs-001",
-      "file": "components/C015.html",
-      "sha256": "2a164383e38d019082237b381008c19c356bc3af3f953f1281f1cee9ae165ef9"
-    },
-    {
-      "id": "C016",
-      "name": "Полный каталог туров С зимними поездками",
-      "category": "Баннер",
-      "source": "vs-001",
-      "file": "components/C016.html",
-      "sha256": "21c4cbc836140756b2b03c2008f00d37e0e4f1da2ab8585e7a258db463897371"
-    },
-    {
-      "id": "C017",
-      "name": "Разделитель",
-      "category": "Разделители и изображения",
-      "source": "vs-001",
-      "file": "components/C017.html",
-      "sha256": "c45d1c8b68d857b328152a22b37cce1ce9cccc45505f82fcb76757d4bc7166a2"
-    },
-    {
-      "id": "C018",
-      "name": "Мы есть в Maкс Оставайтесь на",
-      "category": "Мессенджер",
-      "source": "vs-001",
-      "file": "components/C018.html",
-      "sha256": "7aff6f1e218fdef3fecacbc3e1227b33e9f524befe049fecfe339357b9455160"
-    },
-    {
-      "id": "C019",
-      "name": "Нижнее меню (Авторские экскурсии, Беларусь, Речные круизы)",
-      "category": "Навигация",
-      "source": "vs-001",
-      "file": "components/C019.html",
-      "sha256": "aac5924253c999400bca3cbfa18128065209506b22b94599cee978ea541abf70"
-    },
-    {
-      "id": "C020",
-      "name": "Футер",
-      "category": "Подвал",
-      "source": "vs-001",
-      "file": "components/C020.html",
-      "sha256": "e6a18c9a2639809439aee4a0edec8848c60acd8f7b2784fe34b0bfbda44ebf2e"
-    },
-    {
-      "id": "C021",
-      "name": "Изображение",
-      "category": "Шапка",
-      "source": "vs-002",
-      "file": "components/C021.html",
-      "sha256": "7c22636d6ae2cee41a1142265d171bfd25f52f43f61254d63a237f45d45c356b"
-    },
-    {
-      "id": "C022",
-      "name": "На 1 день Туры по России",
-      "category": "Навигация",
-      "source": "vs-002",
-      "file": "components/C022.html",
-      "sha256": "d5958b485628efc4246aa1db5720a6792801fc11468832008e2c3607ca20a317"
-    },
-    {
-      "id": "C023",
-      "name": "Отступ",
-      "category": "Разделители и изображения",
-      "source": "vs-002",
-      "file": "components/C023.html",
-      "sha256": "e1613cbe3bcd6a50680bbb5aa9b6290712438ee8b429337ac300a6a7c55efe6c"
-    },
-    {
-      "id": "C024",
-      "name": "Изображение",
-      "category": "Разделители и изображения",
-      "source": "vs-002",
-      "file": "components/C024.html",
-      "sha256": "2ef8bed9ef179ab3d49ef83867d97f914366672f7512ecff20bbbd3ca7fb7b71"
-    },
-    {
-      "id": "C025",
-      "name": "Как получить скидку? Промокод: MFPMART •",
-      "category": "Акция",
-      "source": "vs-002",
-      "file": "components/C025.html",
-      "sha256": "7569c4cf9eb9278726389b06f8ec147995bf9985d612bd9a0808325f3a0072d0"
-    },
-    {
-      "id": "C026",
-      "name": "7 марта Приют искусств и вдохновенья",
-      "category": "Карточка тура",
-      "source": "vs-002",
-      "file": "components/C026.html",
-      "sha256": "4518468132959dece4cb06b213ce7e59e3028e077c433087cbbeed4283daec75"
-    },
-    {
-      "id": "C027",
-      "name": "На 1 день Хиты Новинки",
-      "category": "Контент",
-      "source": "vs-002",
-      "file": "components/C027.html",
-      "sha256": "56be00ca3b33bea486b4c1cc8918de99b3c4fd9568b3780d0a4e500b24db5937"
-    },
-    {
-      "id": "C028",
-      "name": "г. Москва, ул. Авиамоторная, д. 12,",
-      "category": "Подвал",
-      "source": "vs-002",
-      "file": "components/C028.html",
-      "sha256": "91f532a8d7bb850aae01d202897c8dcf8145e968fcc42a34034316be67616d87"
+      "type": "subheading",
+      "block": "B06",
+      "name": "Подзаголовок раздела",
+      "category": "Текст",
+      "description": "Небольшой тёмный подзаголовок — дата или тема внутри подборки.",
+      "fields": [
+        {
+          "key": "title",
+          "label": "Подзаголовок",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "file": "components/C015.html"
     }
   ]
 }

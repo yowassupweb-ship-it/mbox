@@ -1,0 +1,26 @@
+{
+  "id": "example",
+  "version": 1,
+  "status": "brief",
+  "updated_at": "2026-09-17T00:00:00.000Z",
+  "brief": {
+    "type": "подборка",
+    "subject": "Зимние выходные по Золотому кольцу",
+    "preheader": "Три коротких маршрута на январские каникулы",
+    "title": "Зима по Золотому кольцу",
+    "message": "Собрали короткие поездки, чтобы провести каникулы в старинных городах.\n\n**Места ограничены** — бронируйте заранее.",
+    "cta": "Все зимние туры",
+    "cta_url": "https://vs-travel.ru/podbor-tura/novogodnie-kanikuly",
+    "promo_code": "",
+    "utm_campaign": "winter-golden-ring",
+    "utm_content": "170926",
+    "extra": "Пример письма для проверки конструктора.",
+    "tours": [
+      { "name": "Ситцевые узоры на Золотом кольце", "route": "Киржач – Юрьев-Польский – Суздаль – Владимир", "dates": "3 дня · 2 ночи · 3–5 января", "price": "", "url": "https://vs-travel.ru/tour?id=2885", "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq", "alt": "Киржач зимой", "cta": "" },
+      { "name": "Симфония русского творчества", "route": "Рязань – Спас-Клепики – Гусь-Хрустальный", "dates": "2 дня · 1 ночь · 5–6 января", "price": "", "url": "https://vs-travel.ru/tour?id=2898", "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6wid9njssudnmyd84bcbqiwsjacrdtpkodtb5fbjynwg98b5qjmtqskkcgozxfd95674tc9udqurym1bajw635wz75awan9qp55kj51g9hzitm3k5ro6y", "alt": "Рязань", "cta": "" }
+    ]
+  },
+  "letter": { "subject": "", "preheader": "", "utm": { "campaign": "", "content": "" }, "items": [] },
+  "proposal": null,
+  "check": null
+}

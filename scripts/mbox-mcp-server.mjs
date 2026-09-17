@@ -1173,6 +1173,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  "write_skill_files",
+  {
+    title: "Write several MBOX skill files atomically",
+    description: "Create or replace several text files of one MBOX skill in one versioned server operation. Use this for a new email component together with components/registry.json so the cloud catalog cannot be left half-written.",
+    inputSchema: {
+      id: z.string(),
+      files: z.array(z.object({ path: z.string(), content: z.string(), message: z.string().optional() })).min(1).max(50),
+      message: z.string().default(""),
+    },
+  },
+  async ({ id, files, message }) => {
+    const result = await mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}/files`, {
+      method: "PUT",
+      body: JSON.stringify({ files, message }),
+    });
+    return textResult(result.unchanged ? "No changes." : `Saved ${result.files?.length || files.length} files in ${id}. Live now.`);
+  },
+);
+
+server.registerTool(
   "open_tab",
   {
     title: "Open a tab in the owner's MBOX interface",
