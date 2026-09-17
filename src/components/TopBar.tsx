@@ -72,7 +72,7 @@ declare global {
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.18.exe";
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.19.exe";
 
 function detectDesktopShell() {
   if (typeof window === "undefined") return false;
