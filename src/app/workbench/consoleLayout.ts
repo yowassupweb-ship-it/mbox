@@ -25,6 +25,15 @@ const newId = (prefix: string) => `${prefix}~${Date.now().toString(36)}${(seq++)
 
 export const isChatPane = (id: string) => id === CHAT || id.startsWith(`${CHAT}~`);
 
+/** С кем можно вести отдельный чат. Сообщения в нём уходят этому агенту без @ (props.to). */
+export const CHAT_PEERS = ["Джарвис", "Claude", "Codex"];
+
+/** Чат с одним агентом — панель chat~<агент>~<id>; общий чат — chat или chat~<id>. */
+export function chatPeer(id: string) {
+  const parts = id.split("~");
+  return parts.length === 3 && parts[0] === CHAT ? parts[1] : "";
+}
+
 function emptyGroup(pane: string = CHAT, layout: Layout = "row"): ConsoleGroup {
   return { id: newId("g"), layout, columns: [[pane]], colSizes: [1], paneSizes: [[1]] };
 }
@@ -420,7 +429,7 @@ export const consoleLayout = {
     return group.columns[pos.c][pos.i + step] ?? null;
   },
 
-  newChatId: () => newId(CHAT),
+  newChatId: (peer = "") => newId(peer ? `${CHAT}~${peer}` : CHAT),
 };
 
 /** Сочетания консоли, как в VS Code. true — событие обработано. Терминал отдаёт их сюда, не съедая. */

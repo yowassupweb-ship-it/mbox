@@ -1,7 +1,7 @@
 import { Fragment, Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Columns2, List, MessagesSquare, PanelTop, Play, Plus, RotateCcw, Rows2, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
-import { CHAT, MAX_PANES_PER_GROUP, consoleLayout, findPane, isChatPane, isConsoleShortcut, useConsoleLayout, type ConsoleGroup, type DropZone } from "./consoleLayout";
+import { CHAT, CHAT_PEERS, MAX_PANES_PER_GROUP, chatPeer, consoleLayout, findPane, isChatPane, isConsoleShortcut, useConsoleLayout, type ConsoleGroup, type DropZone } from "./consoleLayout";
 import { onSessionReveal, useDesktopSessions, type Session } from "./desktopSessions";
 import type { TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
@@ -15,15 +15,19 @@ export const TERMINAL_TAB = "term:";
 type ChatRenderer = (paneId: string) => ReactNode;
 type PaneProps = { renderChat: ChatRenderer; agentGoals: Record<string, string>; agentsOnline: Record<string, boolean>; tabs: TabsApi };
 type MenuState = { pane: string; x: number; y: number } | null;
+/** Значение пункта «Чат с агентом» в выпадающем списке панели, пока такой панели ещё нет. */
+const PEER_OPTION = "peer:";
 
 export function paneTitle(paneId: string, session: Session | undefined, labels: Record<string, string>) {
   if (labels[paneId]) return labels[paneId];
+  if (chatPeer(paneId)) return `Чат с ${chatPeer(paneId)}`;
   if (isChatPane(paneId)) return "Чат агентов";
   if (paneId.startsWith("agent:")) return paneId.slice(6);
   return session?.title ?? paneId.replace(/^ssh:/, "SSH · ").replace(/^tool:/, "");
 }
 
 function PaneIcon({ paneId, session }: { paneId: string; session?: Session }) {
+  if (chatPeer(paneId)) return <AgentAvatar name={chatPeer(paneId)} size={16} />;
   if (isChatPane(paneId)) return <MessagesSquare size={13} className="wb-console-pane-icon" />;
   if (paneId.startsWith("agent:")) return <AgentAvatar name={paneId.slice(6)} status={session?.status ?? "stopped"} live={session?.status === "running"} size={16} />;
   if (paneId.startsWith("ssh:")) return <img className="wb-console-pane-icon" src="/assets/icons/icons/ssh.png" width={14} height={14} alt="" draggable={false} />;
@@ -549,6 +553,11 @@ export function ConsoleArea({ renderChat, onReveal, agentGoals = {}, agentsOnlin
       {addMenu && (
         <WbMenu x={addMenu.x} y={addMenu.y} onClose={() => setAddMenu(null)}>
           <button type="button" role="menuitem" onClick={() => { consoleLayout.newGroup(); setAddMenu(null); }}><MessagesSquare size={13} /> Чат агентов</button>
+          {CHAT_PEERS.map((peer) => (
+            <button key={peer} type="button" role="menuitem" onClick={() => { consoleLayout.newGroup(consoleLayout.newChatId(peer)); setAddMenu(null); }}>
+              <AgentAvatar name={peer} size={14} /> Чат с {peer}
+            </button>
+          ))}
           {desktop.sessions.filter((session) => !allPanes.includes(session.id)).map((session) => (
             <button key={session.id} type="button" role="menuitem" onClick={() => { if (inEditor(session.id)) tabs.close(`${TERMINAL_TAB}${session.id}`); consoleLayout.newGroup(session.id); setAddMenu(null); }}>
               <PaneIcon paneId={session.id} session={session} /> {paneTitle(session.id, session, state.labels)}{session.status === "running" ? "" : " · завершён"}
@@ -594,13 +603,17 @@ function PaneHeader({ paneId, props, labels, draggable, onMenu, actions, collaps
             <select
               value={paneId}
               onChange={(event) => {
-                const next = event.target.value === CHAT ? consoleLayout.newChatId() : event.target.value;
+                const value = event.target.value;
+                const next = value === CHAT ? consoleLayout.newChatId() : value.startsWith(PEER_OPTION) ? consoleLayout.newChatId(value.slice(PEER_OPTION.length)) : value;
                 if (shownElsewhere(next)) tabs.close(`${TERMINAL_TAB}${next}`);
                 consoleLayout.replace(paneId, next);
               }}
               aria-label="Что показать в панели"
             >
-              <option value={isChatPane(paneId) ? paneId : CHAT}>Чат агентов</option>
+              <option value={isChatPane(paneId) && !chatPeer(paneId) ? paneId : CHAT}>Чат агентов</option>
+              {CHAT_PEERS.map((peer) => (
+                <option key={peer} value={chatPeer(paneId) === peer ? paneId : `${PEER_OPTION}${peer}`}>Чат с {peer}</option>
+              ))}
               {desktop.sessions.map((item) => (
                 <option key={item.id} value={item.id}>{item.status === "running" ? "● " : "○ "}{item.title}</option>
               ))}

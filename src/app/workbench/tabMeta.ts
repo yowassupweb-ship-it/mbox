@@ -1,7 +1,7 @@
 import { projectEntityKinds, type ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fileIcon, fileKind } from "./Files";
-import { consoleLabel, isChatPane } from "./consoleLayout";
+import { chatPeer, consoleLabel, isChatPane } from "./consoleLayout";
 import { noteTitle } from "./Notes";
 
 const MENU = "/assets/icons/bottom-menu";
@@ -74,7 +74,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     }
     case "term": {
       const pane = key.slice(5);
-      const title = consoleLabel(pane) || (isChatPane(pane) ? "Чат агентов" : pane.startsWith("agent:") ? pane.slice(6) : pane.startsWith("ssh:") ? `SSH · ${pane.slice(4)}` : pane.replace(/^tool:/, ""));
+      const title = consoleLabel(pane) || (chatPeer(pane) ? `Чат с ${chatPeer(pane)}` : isChatPane(pane) ? "Чат агентов" : pane.startsWith("agent:") ? pane.slice(6) : pane.startsWith("ssh:") ? `SSH · ${pane.slice(4)}` : pane.replace(/^tool:/, ""));
       return { title, hint: "Терминал в редакторе — вернуть в консоль можно кнопкой в заголовке", icon: pane.startsWith("ssh:") ? `${ICONS}/ssh.png` : `${MENU}/konsol.png` };
     }
     default:

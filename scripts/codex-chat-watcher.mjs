@@ -403,9 +403,11 @@ async function recentConversationContext(item) {
 function formatContextLine(entry) {
   const at = entry.created_at ? new Date(entry.created_at).toISOString().slice(11, 19) : "--:--:--";
   const actor = entry.agent_name || "unknown";
+  const to = entry.props?.to ? ` -> ${entry.props.to}` : "";
+  const re = entry.props?.re || entry.props?.in_reply_to ? `, reply to #${entry.props.re || entry.props.in_reply_to}` : "";
   const text = String(entry.body || entry.title || "").replace(/\s+/g, " ").trim();
   const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
-  return `[${at}] ${actor} (${entry.item_type} #${entry.id}): ${clipped}`;
+  return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}${re}): ${clipped}`;
 }
 
 async function runCodex(item) {
@@ -424,6 +426,8 @@ async function runCodex(item) {
     conversationContext,
     "",
     `Chat item id: ${item.id}`,
+    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id, текст есть в контексте выше.
+    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to} — read that message in the context above and answer in its thread.`] : []),
     `From: ${item.agent_name || "unknown"}`,
     `Title: ${item.title || ""}`,
     `Body:\n${item.body || ""}`,

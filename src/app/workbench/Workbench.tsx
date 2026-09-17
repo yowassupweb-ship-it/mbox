@@ -16,7 +16,7 @@ import { Overview } from "../../pages/Overview";
 import type { Project, Todo } from "../../types";
 import { SkillDocument, ToolDocument } from "./CatalogDocuments";
 import { ConsoleArea, ConsolePaneDocument, PANE_MIME, TERMINAL_TAB } from "./ConsoleArea";
-import { consoleLayout } from "./consoleLayout";
+import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { LocalImageDocument } from "./LocalImageDocument";
@@ -304,7 +304,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "file":
         return <FileDocument fileId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
       case "term":
-        return <ConsolePaneDocument paneId={key.slice(TERMINAL_TAB.length)} tabs={tabs} agentGoals={agentGoals} agentsOnline={agentsOnline} renderChat={() => renderChat(tabs.active === key)} onReveal={() => toggleConsole(true)} />;
+        return <ConsolePaneDocument paneId={key.slice(TERMINAL_TAB.length)} tabs={tabs} agentGoals={agentGoals} agentsOnline={agentsOnline} renderChat={(paneId) => renderChat(tabs.active === key, paneId)} onReveal={() => toggleConsole(true)} />;
       case "memory":
         return <MemoryDocument memoryId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onTitle={onTitle} onDirty={onDirty} />;
       default:
@@ -327,8 +327,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   };
 
   const consoleVisible = consoleDock === "right" ? rightOpen : panelOpen && panelTab === "console";
-  const renderChat = (visible: boolean) => (
-    <AgentChat embedded visible={visible} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
+  const renderChat = (visible: boolean, paneId: string) => (
+    <AgentChat embedded visible={visible} peer={chatPeer(paneId)} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
   );
   const chat = (
     <ConsoleArea
@@ -336,7 +336,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       agentGoals={agentGoals}
       agentsOnline={agentsOnline}
       tabs={tabs}
-      renderChat={() => renderChat(consoleVisible)}
+      renderChat={(paneId) => renderChat(consoleVisible, paneId)}
     />
   );
 

@@ -222,6 +222,8 @@ function isAddressedToMe(item) {
   // такое упоминание ловилось как новая задача мне -> ответ тоже упоминал "Claude" -> самовос-
   // производящаяся цепочка ("Ответ: Claude ответил на #788: Ответ: Claude не смог ответить на
   // #783..."). Только явное @-упоминание или прямой адресат (to/target/agent) считается вызовом.
+  // Адресовано другому (props.to или чат с конкретным агентом) — не отвечаем: 17.09 на «@Codex тут?» ответил Claude.
+  if (String(to || "").trim()) return false;
   if (!includeUnaddressed) return false;
   return ["Человек", "Human", "User"].includes(item.agent_name) || item.item_type === "question";
 }
@@ -353,9 +355,10 @@ function formatContextLine(entry) {
   const at = entry.created_at ? new Date(entry.created_at).toISOString().slice(11, 19) : "--:--:--";
   const actor = entry.agent_name || "unknown";
   const to = entry.props?.to ? ` -> ${entry.props.to}` : "";
+  const re = entry.props?.re || entry.props?.in_reply_to ? `, reply to #${entry.props.re || entry.props.in_reply_to}` : "";
   const text = String([entry.title, entry.body].filter(Boolean).join(" — ")).replace(/\s+/g, " ").trim();
   const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
-  return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}): ${clipped}`;
+  return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}${re}): ${clipped}`;
 }
 
 async function runClaude(item) {
@@ -378,6 +381,8 @@ async function runClaude(item) {
     conversationContext,
     "",
     `Inbox id: ${item.id}`,
+    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id, текст есть в контексте выше.
+    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to} — read that message in the context above and answer in its thread.`] : []),
     `From: ${item.agent_name || "unknown"}`,
     `Title: ${item.title || ""}`,
     `Body:\n${item.body || ""}`,

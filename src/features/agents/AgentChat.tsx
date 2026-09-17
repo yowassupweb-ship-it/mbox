@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AtSign, ChevronRight, DollarSign, Hash, Slash, Terminal, Wrench, X } from "lucide-react";
+import { AtSign, ChevronRight, CornerDownRight, DollarSign, Hash, Reply, SendHorizontal, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -165,6 +165,27 @@ const HUMAN = "Человек";
 const READ_KEY = "mbox.chat.readAt";
 const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_response", "chat"]);
 
+/** На какое сообщение отвечает запись: кнопка «Ответить» пишет props.re, наблюдатели агентов — in_reply_to. */
+function repliedId(item: AgentInboxItem) {
+  return String(item.props?.re ?? item.props?.in_reply_to ?? "");
+}
+
+function snippet(text: string, max = 140) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/**
+ * Разговор с одним агентом: сообщения человека ему (props.to или ведущее @Имя) и ответы этого агента
+ * человеку. Реплики агента, адресованные другому агенту, сюда не попадают.
+ */
+function belongsToPeer(item: AgentInboxItem, peer: string) {
+  const name = peer.toLowerCase();
+  const to = String(item.props?.to ?? "").toLowerCase();
+  if (item.agent_name === HUMAN) return to ? to === name : parseMention(item.body || item.title).toLowerCase() === name;
+  return item.agent_name.toLowerCase() === name && (!to || to === name || to === HUMAN.toLowerCase());
+}
+
 /**
  * Что агент делает прямо сейчас. Считается из живых сессий и присутствия, а не выдумывается.
  * Живой = по сессии стучит heartbeat; брошенный running не выдаётся за работу (см. lib/agents).
@@ -181,7 +202,9 @@ function agentState(agent: AgentActivity, runs: AgentRun[]) {
   return { key: "offline", label: "отключён", detail: formatSince(agent.last_seen) };
 }
 
-const THINKING_FRAMES = [1, 2, 3, 4, 5].map((n) => `/assets/icons/ai-thinking-spinner/${n}.png`);
+const coarsePointer = () => window.matchMedia?.("(pointer: coarse)").matches ?? false;
+
+const THINKING_FRAMES =[1, 2, 3, 4, 5].map((n) => `/assets/icons/ai-thinking-spinner/${n}.png`);
 
 /** Живой спиннер вместо статичного "думает…" — кадры лежат в public/assets/icons/ai-thinking-spinner. */
 function ThinkingSpinner() {
@@ -275,7 +298,12 @@ type LogLine = {
   highlights?: string[];
   actions?: MessageAction[];
   postBuilder?: PostPart[];
+  /** id записи инбокса — есть только у настоящих сообщений, на них можно ответить. */
+  inboxId?: string;
+  replyTo?: ReplyTarget;
 };
+
+type ReplyTarget = { id: string; actor: string; text: string };
 
 /** props.actions — структурированный выбор (варианты поста, да/нет-развилки), которые todo #203
  * просил показывать кнопками, а не заставлять печатать текст вручную. Валидируем форму на входе:
@@ -506,7 +534,7 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
   );
 }
 
-export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false }: {
+export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false, peer = "" }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
@@ -518,6 +546,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   /** Встроена в нижнюю панель рабочего места: без своей кнопки, пристыковки и ресайза. */
   embedded?: boolean;
   visible?: boolean;
+  /** Чат с одним агентом: видна только переписка с ним, сообщения уходят ему без @. Пусто — общий чат. */
+  peer?: string;
 }) {
   const [openState, setOpen] = useState(false);
   const open = embedded ? visible : openState;
@@ -526,7 +556,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return stored > 0 ? stored : Math.round(window.innerWidth / 3);
   });
   const resizingRef = useRef(false);
-  const [text, setText] = useDraft("chat:input", "");
+  // У каждого разговора свой черновик: недописанное Claude не должно всплыть в чате с Codex.
+  const [text, setText] = useDraft(peer ? `chat:input:${peer}` : "chat:input", "");
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [cursor, setCursor] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
@@ -600,9 +632,13 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   }
 
   const conversation = useMemo(
-    () => [...inbox].filter((item) => CONVERSATION.has(item.item_type)).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(-80),
-    [inbox],
+    () => [...inbox]
+      .filter((item) => CONVERSATION.has(item.item_type) && (!peer || belongsToPeer(item, peer)))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .slice(-80),
+    [inbox, peer],
   );
+  const inboxById = useMemo(() => new Map(inbox.map((item) => [String(item.id), item])), [inbox]);
 
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
   const stillPending = pending.filter((item) => item.failed || !arrived.has(item.body.trim()));
@@ -666,7 +702,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     fetchJson(`/api/mbox/agent/inbox/${id}/cancel`, { method: "POST" }).catch(() => {});
   }, [awaitingJarvisId]);
 
-  const states = useMemo(() => agents.map((agent) => ({ agent, state: agentState(agent, runs) })), [agents, runs]);
+  const states = useMemo(
+    () => agents.filter((agent) => !peer || agent.name.toLowerCase() === peer.toLowerCase()).map((agent) => ({ agent, state: agentState(agent, runs) })),
+    [agents, runs, peer],
+  );
   const working = states.filter((entry) => entry.state.key === "working");
   // "N агентов на связи: имена" — раньше жило в шапке страницы и дублировало этот же ростер под
   // другим текстом. Состав разговора — дело консоли, не глобальной шапки.
@@ -759,6 +798,11 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         : undefined,
       actions: parseActions(item.props?.actions),
       postBuilder: parsePostBuilder(item.props?.post_builder),
+      inboxId: String(item.id),
+      replyTo: (() => {
+        const original = inboxById.get(repliedId(item));
+        return original ? { id: String(original.id), actor: original.agent_name, text: original.body || original.title } : undefined;
+      })(),
     }));
     const fromPending: LogLine[] = stillPending.map((item) => ({
       id: item.id,
@@ -769,7 +813,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       pending: item.failed ? "failed" : item.sent ? "sent" : "sending",
     }));
     return [...fromConversation, ...fromPending, ...localLines].sort((a, b) => a.at.localeCompare(b.at));
-  }, [conversation, stillPending, localLines]);
+  }, [conversation, stillPending, localLines, inboxById]);
 
   // Чат прилипает к низу, как в мессенджере. Прокрутка только на новое сообщение не спасала: если лог в
   // этот момент был скрыт (другая группа консоли, свёрнутая панель, неактивная вкладка), браузер её
@@ -885,13 +929,20 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     }
 
     const body = raw;
-    const mentionTarget = parseMention(raw);
+    const replying = overrideText === undefined ? replyTo : null;
+    if (replying) setReplyTo(null);
+    // Адресат: явное @Имя, иначе собеседник этого чата, иначе автор сообщения, на которое отвечаем.
+    const mentionTarget = parseMention(raw) || peer || (replying && replying.actor !== HUMAN ? replying.actor : "");
     const localId = `local-${Date.now()}`;
     setPending((current) => [...current, { id: localId, body, sent: false }]);
 
     try {
       const messageProps: Record<string, unknown> = {};
       if (mentionTarget) messageProps.to = mentionTarget;
+      if (replying) {
+        messageProps.re = replying.id;
+        messageProps.in_reply_to = replying.id;
+      }
       if (currentProjectName) messageProps.current_project_name = currentProjectName;
       const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
         method: "POST",
@@ -923,6 +974,33 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     }
   }
 
+  /** Перенос строки вставляем сами, а не полагаемся на поведение браузера по умолчанию: так он одинаково
+   * работает в браузере и в MBOX Desktop, где часть сочетаний перехватывает рабочее место. */
+  function insertNewline(el: HTMLTextAreaElement) {
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const next = `${el.value.slice(0, start)}\n${el.value.slice(end)}`;
+    setText(next);
+    setCursor(start + 1);
+    requestAnimationFrame(() => composerRef.current?.setSelectionRange(start + 1, start + 1));
+  }
+
+  function startReply(line: LogLine) {
+    if (!line.inboxId) return;
+    setReplyTo({ id: line.inboxId, actor: line.actor, text: line.text });
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  /** Клик по цитате — к исходному сообщению, с короткой подсветкой. */
+  function jumpTo(id: string) {
+    const target = scrollRef.current?.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(id)}"]`);
+    if (!target) return;
+    stickToBottomRef.current = false;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.add("is-flash");
+    window.setTimeout(() => target.classList.remove("is-flash"), 1600);
+  }
+
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestions.length) {
       if (event.key === "ArrowDown") { event.preventDefault(); setHighlight((h) => (h + 1) % suggestions.length); return; }
@@ -934,7 +1012,20 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if (event.key === "Tab") { event.preventDefault(); acceptSuggestion(suggestions[highlight].value); return; }
       if (event.key === "Escape") { event.preventDefault(); setDismissedKey(tokenKey); return; }
     }
-    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); return; }
+    if (event.key === "Escape" && replyTo) { event.preventDefault(); setReplyTo(null); return; }
+    // Enter — отправить, Shift+Enter (и Alt+Enter) — новая строка, Ctrl/Cmd+Enter — отправить всегда.
+    // На сенсорном экране Enter переносит строку: отправка кнопкой, иначе многострочное не написать.
+    // Во время набора через IME Enter подтверждает слово, а не отправляет.
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      if (event.ctrlKey || event.metaKey) { event.preventDefault(); void send(); return; }
+      if (event.shiftKey || event.altKey) {
+        event.preventDefault();
+        insertNewline(event.currentTarget);
+        return;
+      }
+      if (!coarsePointer()) { event.preventDefault(); void send(); return; }
+      return;
+    }
     // История команд — только когда курсор ещё не гуляет по многострочному тексту, иначе
     // стрелки должны просто двигать курсор внутри composer'а, как в любом текстовом поле.
     const target = event.currentTarget;
@@ -978,23 +1069,30 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           {/* Действия, требующие решения человека (requires_human) — раньше жили только на
               Обзоре, в консоли их не было видно вовсе, приходилось ждать, пока агент сам
               не подвиснет с вопросом в логе. Тот же компонент, что на Обзоре — не дублируем логику. */}
-          <div className="console-needs-answer">
-            <NeedsAnswer inbox={inbox} onSaved={onSaved} />
-          </div>
+          {/* Вопросы, ждущие решения человека, — общие для всех, показываем в общем чате, а не в каждом личном. */}
+          {!peer && (
+            <div className="console-needs-answer">
+              <NeedsAnswer inbox={inbox} onSaved={onSaved} />
+            </div>
+          )}
 
           <div className="console-log" ref={scrollRef} data-scroll-memory="off">
             {lines.length === 0 && (
-              <div className="console-log-line sys"><span className="console-log-text">mbox консоль готова. /help — список команд.</span></div>
+              <div className="console-log-line sys">
+                <span className="console-log-text">{peer ? `Чат с ${peer}: сообщения уходят только ему, @ писать не нужно.` : "mbox консоль готова. /help — список команд."}</span>
+              </div>
             )}
-            {lines.map((line) => {
+            {lines.map((line, index) => {
               const day = line.at.slice(0, 10);
               const showDay = day !== lastDay;
               lastDay = day;
               const time = new Date(line.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              // Цитата нужна, когда исходное сообщение не стоит прямо над ответом, — иначе она лишь повторяет строку выше.
+              const quote = line.replyTo && lines[index - 1]?.inboxId !== line.replyTo.id ? line.replyTo : null;
               return (
                 <div key={line.id}>
                   {showDay && <div className="console-log-sep">{day}</div>}
-                  <div className={`console-log-line ${line.kind}${line.pending === "failed" ? " failed" : ""}`}>
+                  <div className={`console-log-line ${line.kind}${line.pending === "failed" ? " failed" : ""}`} data-inbox-id={line.inboxId}>
                     <span className="console-log-head">
                       <span className="console-log-time">{time}</span>
                       {line.kind === "in" && <AgentAvatar name={line.actor} size={16} />}
@@ -1002,7 +1100,19 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "ты" : line.actor}
                         <ChevronRight size={11} />
                       </span>
+                      {line.inboxId && (
+                        <button type="button" className="console-reply-btn" onClick={() => startReply(line)} title="Ответить на это сообщение">
+                          <Reply size={12} /> ответить
+                        </button>
+                      )}
                     </span>
+                    {quote && (
+                      <button type="button" className="console-quote" onClick={() => jumpTo(quote.id)} title="Показать исходное сообщение">
+                        <CornerDownRight size={11} />
+                        <b>{quote.actor === HUMAN ? "ты" : quote.actor}</b>
+                        <span>{snippet(quote.text)}</span>
+                      </button>
+                    )}
                     <span className="console-log-text">
                       {renderMarkdownLite(line.text)}
                       {line.pending === "sending" && <em className="console-log-status"> отправляется…</em>}
@@ -1087,8 +1197,17 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 })}
               </div>
             )}
+            {replyTo && (
+              <div className="console-reply-bar">
+                <CornerDownRight size={12} />
+                <span>
+                  Ответ <b>{replyTo.actor === HUMAN ? "себе" : replyTo.actor}</b>: {snippet(replyTo.text, 180)}
+                </span>
+                <button type="button" onClick={() => setReplyTo(null)} aria-label="Отменить ответ" title="Отменить ответ (Esc)"><X size={12} /></button>
+              </div>
+            )}
             <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-              <span className="console-prompt">{liveMention && `@${liveMention}`}<img src="/assets/icons/icons/галочка.png" width={13} height={13} alt="" /></span>
+              <span className="console-prompt">{liveMention ? `@${liveMention}` : peer ? `@${peer}` : ""}<img src="/assets/icons/icons/галочка.png" width={13} height={13} alt="" /></span>
               <textarea
                 ref={composerRef}
                 value={text}
@@ -1096,13 +1215,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 onClick={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyDown={onKeyDown}
-                placeholder="/команда, @агент; $проект; #артефакт"
+                placeholder={peer ? `Сообщение для ${peer} · Shift+Enter — новая строка` : "/команда, @агент; $проект; #артефакт · Shift+Enter — новая строка"}
                 spellCheck={false}
                 autoComplete="off"
                 autoCapitalize="off"
                 autoCorrect="off"
                 rows={1}
               />
+              <button type="submit" className="console-send-btn" disabled={!text.trim()} aria-label="Отправить" title="Отправить (Enter)">
+                <SendHorizontal size={15} />
+              </button>
             </form>
           </div>
         </div>
