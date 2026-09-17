@@ -1864,7 +1864,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-note-editor::placeholder { color: var(--text-muted); }
-.wb-save-state { margin-left: 8px; color: var(--text-muted); }
+.wb-save-state { display: inline-block; min-width: 92px; margin-left: 8px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .wb-save-state.is-error { color: var(--state-danger); }
 .wb-save-state.is-saving,
 .wb-save-state.is-pending { color: var(--state-warn); }
@@ -2433,7 +2433,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .ask-actions button.is-primary { border-color: var(--accent-color, #29e0d6); background: var(--accent-color, #29e0d6); color: #031312; font-weight: 600; }
 
 /* ─── Панель markdown (MarkdownToolbar) и новые элементы просмотра ─── */
-.wb-md-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 1px; min-width: 0; }
+/* Панель не переносится на вторую строку: иначе шапка меняла высоту при каждом «сохраняю… / сохранено» и текст прыгал. */
+.wb-md-toolbar { display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: 1px; min-width: 0; overflow: hidden; }
+.wb-md-toolbar > * { flex: none; }
 .wb-md-toolbar button { position: relative; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--text-2); cursor: pointer; }
 .wb-md-toolbar button:hover { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
 .wb-md-toolbar button b { position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent-color); color: #031312; font-size: 9px; line-height: 14px; }
@@ -2450,8 +2452,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-memory-body hr { margin: 12px 0; border: 0; border-top: 1px solid var(--wb-line); }
 
 /* Заметка как на iPhone: первая строка — крупный заголовок и в правке, и в просмотре. */
-.wb-note-edit { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 860px; min-height: 100%; }
+/* Прокручивается только текст: раньше поле имело min-height: 100% под заголовком, и при наборе двигались два
+   скролла сразу (контейнер и поле) — заметка дёргалась вместе с курсором. */
+.wb-note-edit { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 860px; min-height: 0; }
 .wb-note-title { width: 100%; padding: 22px 28px 4px; border: 0; outline: none; background: transparent; color: var(--text-main); font: inherit; font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
 .wb-note-title::placeholder { color: var(--text-muted); }
-.wb-note-edit .wb-note-editor { max-width: none; padding-top: 6px; }
+.wb-note-edit .wb-note-editor { flex: 1; min-height: 0; max-width: none; padding-top: 6px; overflow: auto; }
+.wb-note-title { flex: none; }
 .wb-memory-body h1.wb-note-title-view { margin: 0 0 10px; color: var(--text-main); font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
