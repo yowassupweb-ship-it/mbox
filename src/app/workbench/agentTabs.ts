@@ -7,7 +7,7 @@ import type { TabsApi } from "./tabs";
  * готовую папку после переписывания маршрута, созданный артефакт.
  */
 export type OpenTabEvent = {
-  kind: "skill-file" | "skill-blocks" | "path" | "url" | "tab";
+  kind: "skill-file" | "path" | "url" | "tab";
   actor: string;
   reply_to: string;
   title: string;
@@ -23,7 +23,6 @@ export type OpenTabResult = { text: string; tone: "ok" | "warn" };
 
 /** Вкладка страницы навыка: skillpage:<навык>:<файл>. Кому уходит отправленное из формы — отдельно, по ключу. */
 export const skillPageKey = (skill: string, file: string) => `skillpage:${skill}:${file}`;
-export const skillBlocksKey = (skill: string) => `skillblocks:${skill}`;
 
 const REPLY_KEY = "mbox.skillpage.replyTo";
 
@@ -86,7 +85,7 @@ export function skillPageEvent(target: string, title: string): OpenTabEvent | nu
   const file = target.match(/^skill-file:([a-z0-9][a-z0-9-]*)\/(.+)$/);
   if (file) return { kind: "skill-file", skill: file[1], file: file[2], title, note: "", actor: "", reply_to: "Claude" };
   const blocks = target.match(/^skill-blocks:([a-z0-9][a-z0-9-]*)$/);
-  if (blocks) return { kind: "skill-blocks", skill: blocks[1], title, note: "", actor: "", reply_to: "Claude" };
+  if (blocks) return { kind: "skill-file", skill: blocks[1], file: "library.html", title, note: "", actor: "", reply_to: "Claude" };
   return null;
 }
 
@@ -98,12 +97,6 @@ export async function applyOpenTab(event: OpenTabEvent, tabs: TabsApi, showFolde
       rememberReplyTo(key, event.reply_to || event.actor);
       tabs.open(key, true);
       return { text: event.title || event.file, tone: "ok" };
-    }
-    case "skill-blocks": {
-      if (!event.skill) return { text: "Агент не указал навык", tone: "warn" };
-      rememberReplyTo(skillBlocksKey(event.skill), event.reply_to || event.actor);
-      tabs.open(skillBlocksKey(event.skill), true);
-      return { text: event.title || "коллекцию блоков", tone: "ok" };
     }
     case "path":
       return event.path ? openLocalPath(event.path, tabs, showFolders) : { text: "Агент не указал путь", tone: "warn" };

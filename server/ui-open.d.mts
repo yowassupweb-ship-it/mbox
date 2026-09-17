@@ -1,6 +1,6 @@
 // Типы для импорта server/ui-open.mjs из vite.config.ts.
 export type OpenTabEvent = {
-  kind: "skill-file" | "skill-blocks" | "path" | "url" | "tab";
+  kind: "skill-file" | "path" | "url" | "tab";
   title: string;
   note: string;
   actor: string;

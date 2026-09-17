@@ -4,7 +4,7 @@
 //
 // target:
 //   skill-file:<навык>/<файл>  — HTML-форма или .md из пакета навыка на сервере (skills/<навык>/<файл>)
-//   skill-blocks:<навык>       — коллекция блоков писем навыка (templates/manifest.json) с живым предпросмотром
+//   skill-blocks:<навык>       — то же, что skill-file:<навык>/library.html: компоненты писем и сборка
 //   path:<абсолютный путь>     — файл или папка на компьютере владельца (только MBOX Desktop, внутри подключённых папок)
 //   url:https://…              — внешняя страница, открывается в браузере
 //   file:<id>, memory:<id>, note:<id>, todo:<id>, todos:<projectId>, … — любая вкладка рабочего места по её адресу
@@ -28,7 +28,7 @@ export function parseOpenRequest(body, actor) {
     return { event: { ...base, kind: "skill-file", skill: skill[1], file: skill[2] } };
   }
   const blocks = target.match(/^skill-blocks:([a-z0-9][a-z0-9-]*)$/);
-  if (blocks) return { event: { ...base, kind: "skill-blocks", skill: blocks[1] } };
+  if (blocks) return { event: { ...base, kind: "skill-file", skill: blocks[1], file: "library.html" } };
   if (target.startsWith("path:")) {
     const path = target.slice(5).trim();
     if (!/^([a-zA-Z]:[\\/]|\/|~)/.test(path)) return { error: "path_must_be_absolute" };

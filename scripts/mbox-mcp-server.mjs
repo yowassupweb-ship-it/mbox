@@ -1180,7 +1180,7 @@ server.registerTool(
       "Open a tab in the MBOX workspace the owner has open right now (MBOX Desktop, browser, phone) — use it as a step of a skill scenario instead of asking the human to find something.",
       "target forms:",
       "- skill-file:<skill>/<file.html|.md> — a form or document from a server skill package, e.g. skill-file:email-campaign/brief-builder.html. A form's «send to agent» button posts its result into the MBOX chat addressed to you (reply_to).",
-      "- skill-blocks:<skill> — the block collection of an email skill: every real block of its letters (templates/manifest.json) with a live preview.",
+      "- skill-file:email-campaign/library.html — email components: every component with its unique number C### and a live preview (tab 1), assembling a letter from components with text/link/image replacement (tab 2). Alias: skill-blocks:email-campaign.",
       "- path:<absolute path> — a file or folder on the owner's computer (MBOX Desktop only, inside a folder connected in «Папки»): a folder is revealed in the sidebar, a file opens as a tab. Use it to show finished results, e.g. the output folder of a skill.",
       "- url:https://… — external page, opens in the browser.",
       "- a workspace tab address: file:<artifact id>, memory:<id>, note:<id>, todo:<id>, todos:<project id>.",

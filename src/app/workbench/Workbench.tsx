@@ -40,7 +40,6 @@ import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsA
 import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent } from "./agentTabs";
 import { SkillPageDocument } from "./SkillPageDocument";
-import { SkillBlocksDocument } from "./SkillBlocksDocument";
 
 const MENU = "/assets/icons/bottom-menu";
 
@@ -325,7 +324,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "skill":
         return <SkillDocument skillId={first} tabs={tabs} />;
       case "skillblocks":
-        return <SkillBlocksDocument skill={first} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
+        return <SkillPageDocument skill={first} file="library.html" tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
       case "skillpage":
         return <SkillPageDocument skill={first} file={rest} tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
       case "tool":

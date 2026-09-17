@@ -1,13 +1,519 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Библиотека писем — Вокруг света</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Компоненты писем — Вокруг света</title>
   <style>
-    :root{--ink:#2a2a2a;--muted:#777;--paper:#fff;--canvas:#fff6ed;--accent:#ff732d;--line:#ffe8d8;--r:20px}*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--ink);font:16px/1.45 Inter,Arial,sans-serif}.wrap{max-width:1100px;margin:auto;padding:40px 20px 64px}h1,h2{font-family:Rubik,Arial,sans-serif;margin:0}h1{font-size:32px}p{color:var(--muted)}.note{padding:14px 16px;background:#fff8f4;border:1px solid var(--line);border-radius:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:16px}.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:20px}.id{display:inline-block;background:#2a2a2a;color:#fff;border-radius:999px;padding:3px 8px;font:12px Rubik,Arial}.kind{color:var(--accent);font-size:13px;margin-top:12px}.blocks{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}.block{border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px;background:#fff8f4}a{color:#b64c18;font-weight:600}section{margin-top:34px}
+    /* Стиль MBOX (токены рабочего места). Страница живёт во вкладке MBOX: каталог навыков → «Запустить»,
+       или агент открывает её через MCP open_tab skill-file:email-campaign/library.html.
+       Данные — components/registry.json, components/C###.html, components/shells/<шаблон>.html
+       (создаёт scripts/extract-components.mjs, дополняет эта страница и агенты). */
+    :root {
+      color-scheme: dark;
+      --bg: #08090a; --surface: #0c0d0f; --surface-2: #101114; --surface-3: #15171b;
+      --line: rgba(133, 245, 219, .12); --line-strong: rgba(133, 245, 219, .24); --hover: rgba(133, 245, 219, .06); --selected: rgba(41, 224, 214, .13);
+      --accent: #29e0d6; --accent-ink: #04201e;
+      --text: #eef4f1; --text-2: rgba(238, 244, 241, .7); --text-muted: rgba(238, 244, 241, .44);
+      --ok: #35c759; --warn: #ffb000; --danger: #ff4d5e;
+      --radius-sm: 4px; --radius-md: 8px;
+      --font-sans: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+
+    .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    .top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .title { display: grid; }
+    .eyebrow { color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 3px 0 0; font-size: 16px; font-weight: 600; }
+    .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+    .tabs button { padding: 5px 14px; border: 0; background: none; color: var(--text-2); }
+    .tabs button + button { border-left: 1px solid var(--line); }
+    .tabs button.on { background: var(--selected); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+    .tabs b { margin-left: 6px; color: var(--text-muted); font: 600 11px var(--font-mono); }
+    .fill { flex: 1; }
+    .status { color: var(--text-muted); font-size: 12px; }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--danger); }
+
+    .view { min-height: 0; overflow: auto; }
+    .toolbar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); }
+    input, textarea, select { min-height: 28px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); outline: none; }
+    textarea { resize: vertical; line-height: 1.45; }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--surface-3); }
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
+    .search { width: 260px; }
+    .btn { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--text); font-size: 12px; white-space: nowrap; }
+    .btn:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); }
+    .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+    .btn.primary:hover:not(:disabled) { background: #5ff0e8; }
+    .btn.ghost { border-color: transparent; color: var(--text-2); }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .num { color: var(--accent); font: 700 13px/1 var(--font-mono); letter-spacing: .02em; }
+    .chip { padding: 1px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); font-size: 11px; white-space: nowrap; }
+    .muted { color: var(--text-muted); }
+
+    /* ── Компоненты ── */
+    .list { display: grid; gap: 14px; max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+    .card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; }
+    .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    .card-head .name { flex: 1; min-width: 160px; font-weight: 500; }
+    .card-ask { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    .card-ask textarea { flex: 1; min-height: 52px; }
+    .preview { padding: 10px; background: #fff; }
+    .preview iframe { display: block; width: 100%; max-width: 660px; margin: 0 auto; border: 0; background: #fff; }
+    .card.flash { box-shadow: 0 0 0 2px var(--accent); }
+    .new { max-width: 760px; margin: 14px auto 0; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); }
+    .new h2, .side h2 { margin: 0 0 10px; color: var(--text-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .field { display: grid; gap: 4px; }
+    .field label { color: var(--text-2); font-size: 12px; }
+    .new textarea { width: 100%; min-height: 140px; margin-top: 8px; font: 12px/1.5 var(--font-mono); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+
+    /* ── Сборка ── */
+    .build { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); height: 100%; min-height: 0; }
+    .side { min-height: 0; overflow: auto; padding: 14px; border-right: 1px solid var(--line); }
+    .side .field + .field { margin-top: 8px; }
+    .side input, .side textarea, .side select { width: 100%; }
+    .adder { display: flex; gap: 6px; margin: 12px 0; }
+    .adder input { flex: 1; font-family: var(--font-mono); text-transform: uppercase; }
+    .items { display: grid; gap: 8px; }
+    .item { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+    .item-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+    .item-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .item-head .btn { min-height: 22px; padding: 0 6px; }
+    .item-body { display: grid; gap: 6px; padding: 8px; border-top: 1px solid var(--line); }
+    .item-body .group { color: var(--text-muted); font: 600 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
+    .item-body textarea { min-height: 44px; }
+    .changed { border-color: color-mix(in srgb, var(--accent) 55%, transparent) !important; }
+    .empty { padding: 24px 8px; color: var(--text-muted); text-align: center; }
+    .stage { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+    .stage .toolbar { position: static; }
+    .stage-body { min-height: 0; overflow: auto; padding: 14px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
+    .stage iframe { display: block; width: 100%; max-width: 720px; height: 100%; min-height: 600px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+    .stage.mobile iframe { max-width: 390px; }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: rgba(238, 244, 241, .16); }
+    @media (max-width: 900px) { .build { grid-template-columns: 1fr; height: auto; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid2 { grid-template-columns: 1fr; } .search { width: 100%; } }
   </style>
 </head>
-<body><main class="wrap"><h1>Библиотека писем</h1><p>«Вокруг света» · UniSender-ready</p><p class="note">Номера блоков — общий язык для редактора и AI. Шапка и подвал общие; остальные блоки выбираются только по брифу и реальному референсу.</p><section><h2>Шаблоны по категориям</h2><div id="templates" class="grid"></div></section><section><h2>Коллекция блоков</h2><div id="blocks" class="grid"></div></section></main><script>
-fetch('./templates/manifest.json').then(r=>r.json()).then(data=>{const byKey=new Map(data.blocks.map(b=>[b.key,b]));const templates=document.querySelector('#templates');const blocks=document.querySelector('#blocks');data.templates.forEach(t=>{const c=document.createElement('article');c.className='card';c.innerHTML=`<span class="id">${t.id}</span><div class="kind">${t.category}</div><h3>${t.name}</h3><p>${t.description}</p><div class="blocks">${t.blocks.map(k=>`<span class="block">${byKey.get(k)?.id||k}</span>`).join('')}</div><p><a href="${t.source}">Открыть референс</a></p>`;templates.append(c)});data.blocks.forEach(b=>{const c=document.createElement('article');c.className='card';c.innerHTML=`<span class="id">${b.id}</span><div class="kind">${b.category}</div><h3>${b.name}</h3><p><code>${b.key}</code></p>`;blocks.append(c)})}).catch(()=>document.body.insertAdjacentHTML('beforeend','<p>Не удалось загрузить manifest.json. Откройте страницу через локальный сервер.</p>'));
-</script></body></html>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="title"><span class="eyebrow">Вокруг света · email-campaign</span><h1>Компоненты писем</h1></div>
+      <div class="tabs" role="tablist">
+        <button type="button" data-tab="components" class="on" role="tab">Компоненты<b id="count-components">0</b></button>
+        <button type="button" data-tab="build" role="tab">Сборка письма<b id="count-build">0</b></button>
+      </div>
+      <span class="fill"></span>
+      <span class="status" id="status">Загрузка…</span>
+    </header>
+
+    <!-- Вкладка 1: все компоненты с уникальными номерами -->
+    <main class="view" id="view-components">
+      <div class="toolbar">
+        <input class="search" id="search" type="search" placeholder="Номер или текст: C008, Карелия, футер">
+        <select id="filter-category"><option value="">Все категории</option></select>
+        <select id="filter-source"><option value="">Все письма</option></select>
+        <span class="muted" id="shown"></span>
+        <span class="fill"></span>
+        <button class="btn primary" type="button" id="toggle-new">+ Новый компонент</button>
+      </div>
+      <section class="new" id="new" hidden>
+        <h2>Новый компонент · получит номер <span class="num" id="new-number">C—</span></h2>
+        <div class="grid2">
+          <div class="field"><label for="new-name">Название</label><input id="new-name" placeholder="Карточка тура: фото сверху"></div>
+          <div class="field"><label for="new-category">Категория</label><input id="new-category" list="categories" placeholder="Карточка тура"></div>
+          <div class="field"><label for="new-source">Стили какого письма</label><select id="new-source"></select></div>
+        </div>
+        <datalist id="categories"></datalist>
+        <textarea id="new-html" spellcheck="false" placeholder="HTML блока: строка &lt;tr em=&quot;block&quot;&gt;…&lt;/tr&gt; из UniSender или любой фрагмент — он будет обёрнут в строку таблицы"></textarea>
+        <div class="row">
+          <button class="btn primary" type="button" id="new-save">Сохранить в коллекцию</button>
+          <button class="btn" type="button" id="new-agent">Отдать агенту — пусть доведёт</button>
+          <button class="btn ghost" type="button" id="new-cancel">Отмена</button>
+          <span class="muted" id="new-hint"></span>
+        </div>
+        <div class="preview" id="new-preview" hidden><iframe title="Предпросмотр нового компонента"></iframe></div>
+      </section>
+      <div class="list" id="list"></div>
+    </main>
+
+    <!-- Вкладка 2: сборка письма из компонентов с заменой текста, ссылок и картинок -->
+    <main class="view" id="view-build" hidden>
+      <div class="build">
+        <aside class="side">
+          <h2>Письмо</h2>
+          <div class="field"><label for="shell">Оболочка и стили</label><select id="shell"></select></div>
+          <div class="field"><label for="subject">Тема письма</label><input id="subject" placeholder="Осень в Карелии: последние места"></div>
+          <div class="field"><label for="preheader">Прехедер</label><input id="preheader" placeholder="Короткая строка рядом с темой"></div>
+          <div class="adder">
+            <input id="add-number" placeholder="C008" aria-label="Номер компонента">
+            <button class="btn" type="button" id="add-button">Добавить</button>
+            <button class="btn ghost" type="button" id="add-template" title="Взять все компоненты шаблона по порядку">Как в шаблоне</button>
+          </div>
+          <div class="items" id="items"></div>
+        </aside>
+        <section class="stage" id="stage">
+          <div class="toolbar">
+            <button class="btn primary" type="button" id="send-build">Отправить агенту: собрать и проверить</button>
+            <button class="btn" type="button" id="copy-build">Копировать HTML</button>
+            <button class="btn" type="button" id="download-build">Скачать .html</button>
+            <span class="fill"></span>
+            <button class="btn ghost" type="button" id="toggle-mobile">Телефон</button>
+            <button class="btn ghost" type="button" id="clear-build">Очистить</button>
+          </div>
+          <div class="stage-body"><iframe id="letter" title="Письмо целиком"></iframe></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ── Доступ к файлам навыка ─────────────────────────────────────────────────────────────
+    // Внутри MBOX — window.mbox (чтение и запись в пакет навыка на сервере, с историей версий).
+    // Открыта отдельно (локальный сервер из папки навыка) — чтение через fetch, запись недоступна.
+    const bridge = window.mbox && window.mbox.read ? window.mbox : null;
+    const readFile = (path) => bridge ? bridge.read(path) : fetch(path).then((r) => { if (!r.ok) throw new Error(path); return r.text(); });
+    const canWrite = Boolean(bridge && bridge.write);
+    const MARK = '<!--MBOX:COMPONENTS-->';
+    const STORE = 'email-campaign-build';
+
+    const state = { registry: null, manifest: null, html: {}, shells: {}, tab: 'components', build: { shell: '', subject: '', preheader: '', items: [] }, mobile: false };
+    const $ = (selector) => document.querySelector(selector);
+    const esc = (text) => String(text ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const idNum = (id) => Number(String(id).replace(/\D/g, '')) || 0;
+    const formatId = (n) => `C${String(n).padStart(3, '0')}`;
+    const normalizeId = (value) => { const n = idNum(value); return n ? formatId(n) : ''; };
+
+    function setStatus(text, tone = '') { const el = $('#status'); el.textContent = text; el.className = `status ${tone}`; }
+
+    try { const saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved && Array.isArray(saved.items)) state.build = { ...state.build, ...saved }; } catch { /* без черновика */ }
+    const saveBuild = () => { try { localStorage.setItem(STORE, JSON.stringify(state.build)); } catch { /* без хранилища */ } };
+
+    async function load() {
+      state.registry = JSON.parse(await readFile('components/registry.json'));
+      state.manifest = JSON.parse(await readFile('templates/manifest.json'));
+      const templates = state.manifest.templates || [];
+      await Promise.all(templates.filter((t) => t.shell).map(async (t) => { state.shells[t.id] = await readFile(t.shell).catch(() => ''); }));
+      await Promise.all(state.registry.components.map(async (c) => { state.html[c.id] = await readFile(c.file).catch(() => ''); }));
+      if (!state.build.shell || !state.shells[state.build.shell]) state.build.shell = templates.find((t) => state.shells[t.id])?.id || '';
+      setStatus(`${state.registry.components.length} компонентов${canWrite ? '' : ' · только просмотр'}`);
+      renderFilters();
+      renderList();
+      renderBuild();
+    }
+
+    // ── Вкладки ───────────────────────────────────────────────────────────────────────────
+    document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => showTab(button.dataset.tab)));
+    function showTab(tab) {
+      state.tab = tab;
+      document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('on', button.dataset.tab === tab));
+      $('#view-components').hidden = tab !== 'components';
+      $('#view-build').hidden = tab !== 'build';
+      if (tab === 'build') renderPreview();
+    }
+
+    // ── Предпросмотр в iframe ───────────────────────────────────────────────────────────
+    const shellFor = (sourceId) => state.shells[sourceId] || Object.values(state.shells)[0] || `<!doctype html><html><head></head><body><table width="100%" style="max-width:660px;margin:auto">${MARK}</table></body></html>`;
+    const docFor = (component, html) => shellFor(component.source).replace(MARK, html);
+    // Предпросмотр сам сообщает свою высоту: в песочнице MBOX страница не может заглянуть внутрь iframe.
+    // Скрипт есть только в предпросмотре — в копируемый и отправляемый HTML он не попадает.
+    const MEASURE = '<script>(function(){function h(){parent.postMessage({type:"lib:height",h:document.documentElement.scrollHeight},"*");}addEventListener("load",h);if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);setTimeout(h,300);})();<\/script>';
+    const measured = (doc) => /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, `${MEASURE}</body>`) : doc + MEASURE;
+    const frames = new Set();
+    window.addEventListener('message', (event) => {
+      if (!event.data || event.data.type !== 'lib:height') return;
+      for (const frame of frames) if (!frame.isConnected) frames.delete(frame); else if (frame.contentWindow === event.source) frame.style.height = `${Math.max(60, Number(event.data.h) || 0)}px`;
+    });
+    function fitFrame(frame) { frames.add(frame); }
+
+    // ── Вкладка «Компоненты» ─────────────────────────────────────────────────────────────
+    function renderFilters() {
+      const categories = [...new Set(state.registry.components.map((c) => c.category).filter(Boolean))].sort();
+      const sources = state.manifest.templates || [];
+      $('#filter-category').innerHTML = '<option value="">Все категории</option>' + categories.map((c) => `<option>${esc(c)}</option>`).join('');
+      $('#filter-source').innerHTML = '<option value="">Все письма</option>' + sources.map((t) => `<option value="${esc(t.id)}">${esc(t.id)} · ${esc(t.name)}</option>`).join('');
+      $('#categories').innerHTML = categories.map((c) => `<option value="${esc(c)}">`).join('');
+      const shellOptions = sources.filter((t) => state.shells[t.id]).map((t) => `<option value="${esc(t.id)}">${esc(t.id)} · ${esc(t.name)}</option>`).join('');
+      $('#new-source').innerHTML = shellOptions;
+      $('#shell').innerHTML = shellOptions;
+      $('#shell').value = state.build.shell;
+      $('#count-components').textContent = state.registry.components.length;
+    }
+
+    const textOf = (html) => html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+
+    function renderList() {
+      const needle = $('#search').value.trim().toLowerCase();
+      const category = $('#filter-category').value;
+      const source = $('#filter-source').value;
+      const exact = normalizeId(needle);
+      const shown = state.registry.components.filter((c) => (!category || c.category === category) && (!source || c.source === source)
+        && (!needle || (/^c?\d{1,3}$/i.test(needle) ? c.id === exact : `${c.id} ${c.name} ${c.category} ${textOf(state.html[c.id] || '')}`.toLowerCase().includes(needle))));
+      $('#shown').textContent = `${shown.length} из ${state.registry.components.length}`;
+      const list = $('#list');
+      list.replaceChildren(...shown.map((component) => {
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.id = `card-${component.id}`;
+        card.innerHTML = `<div class="card-head"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span><span class="chip">${esc(component.category || 'без категории')}</span><span class="chip">${esc(component.source)}</span>
+          <button class="btn primary" type="button" data-act="add">+ В сборку</button><button class="btn" type="button" data-act="copy">HTML</button><button class="btn" type="button" data-act="ask">Агенту</button></div>
+          <div class="card-ask" hidden><textarea placeholder="Что поменять в ${component.id}? Например: вариант без фото, кнопка короче"></textarea><button class="btn primary" type="button" data-act="ask-send">Отправить</button></div>
+          <div class="preview"><iframe loading="lazy" title="${component.id} ${esc(component.name)}"></iframe></div>`;
+        const frame = card.querySelector('iframe');
+        fitFrame(frame);
+        frame.srcdoc = measured(docFor(component, state.html[component.id] || ''));
+        card.querySelector('[data-act="add"]').addEventListener('click', () => { addItem(component.id); setStatus(`${component.id} добавлен в сборку`, 'ok'); });
+        card.querySelector('[data-act="copy"]').addEventListener('click', () => copyText(state.html[component.id] || '', `HTML ${component.id} скопирован`));
+        card.querySelector('[data-act="ask"]').addEventListener('click', () => { const ask = card.querySelector('.card-ask'); ask.hidden = !ask.hidden; if (!ask.hidden) ask.querySelector('textarea').focus(); });
+        card.querySelector('[data-act="ask-send"]').addEventListener('click', () => {
+          const request = card.querySelector('.card-ask textarea').value.trim();
+          if (!request) return;
+          sendAgent(`Навык email-campaign, компонент ${component.id} «${component.name}» (${component.file}): ${request}\nПравку делай edit_skill_file в этом файле, номер компонента не меняй. Новый вариант — новым компонентом со следующим номером (components/registry.json).`);
+          card.querySelector('.card-ask textarea').value = '';
+          card.querySelector('.card-ask').hidden = true;
+        });
+        return card;
+      }));
+    }
+    ['#search', '#filter-category', '#filter-source'].forEach((selector) => $(selector).addEventListener('input', renderList));
+
+    // Новый компонент: номер = registry.next, файл components/C###.html, запись в реестр.
+    $('#toggle-new').addEventListener('click', () => { $('#new').hidden = !$('#new').hidden; $('#new-number').textContent = formatId(state.registry.next); $('#new-save').disabled = !canWrite; $('#new-hint').textContent = canWrite ? '' : 'Сохранять можно во вкладке MBOX; здесь — отдать агенту.'; });
+    $('#new-cancel').addEventListener('click', () => { $('#new').hidden = true; });
+    const wrapRow = (html) => /^\s*<tr[\s>]/i.test(html) ? html.trim() : `<tr em="block"><td align="center" style="padding: 0 40px;" class="em-mob-padding_left-20 em-mob-padding_right-20">${html.trim()}</td></tr>`;
+    function previewNew() {
+      const html = $('#new-html').value;
+      $('#new-preview').hidden = !html.trim();
+      if (!html.trim()) return;
+      const frame = $('#new-preview iframe');
+      if (!frame.dataset.fit) { fitFrame(frame); frame.dataset.fit = '1'; }
+      frame.srcdoc = measured(docFor({ source: $('#new-source').value }, wrapRow(html)));
+    }
+    ['#new-html', '#new-source'].forEach((selector) => $(selector).addEventListener('input', previewNew));
+    $('#new-save').addEventListener('click', async () => {
+      const html = $('#new-html').value.trim();
+      const name = $('#new-name').value.trim();
+      if (!html || !name) { setStatus('Нужны название и HTML', 'err'); return; }
+      try {
+        setStatus('Сохраняю…');
+        const registry = JSON.parse(await readFile('components/registry.json'));
+        const id = formatId(Math.max(registry.next || 1, ...registry.components.map((c) => idNum(c.id) + 1)));
+        const entry = { id, name, category: $('#new-category').value.trim() || 'Контент', source: $('#new-source').value, file: `components/${id}.html`, sha256: '' };
+        await bridge.write(entry.file, `${wrapRow(html)}\n`, `Новый компонент ${id}: ${name}`);
+        registry.components.push(entry);
+        registry.next = idNum(id) + 1;
+        await bridge.write('components/registry.json', `${JSON.stringify(registry, null, 2)}\n`, `Реестр: добавлен ${id}`);
+        state.registry = registry;
+        state.html[id] = wrapRow(html);
+        ['#new-html', '#new-name', '#new-category'].forEach((selector) => { $(selector).value = ''; });
+        $('#new').hidden = true;
+        $('#search').value = id;
+        renderFilters();
+        renderList();
+        setStatus(`${id} добавлен в коллекцию`, 'ok');
+      } catch (error) {
+        setStatus(`Не сохранилось: ${error.message}`, 'err');
+      }
+    });
+    $('#new-agent').addEventListener('click', () => {
+      const html = $('#new-html').value.trim();
+      if (!html) { setStatus('Вставьте HTML компонента', 'err'); return; }
+      sendAgent(`Добавь в коллекцию email-campaign новый компонент${$('#new-name').value.trim() ? ` «${$('#new-name').value.trim()}»` : ''} (категория: ${$('#new-category').value.trim() || 'определи сам'}, стили письма ${$('#new-source').value}). Номер — следующий свободный из components/registry.json (сейчас ${formatId(state.registry.next)}). Приведи к блоку <tr em="block"> по style-guide.md, сохрани write_skill_file в components/ и обнови реестр. HTML:\n\n${html}`);
+    });
+
+    // ── Вкладка «Сборка письма» ──────────────────────────────────────────────────────────
+    let uid = Date.now();
+    function addItem(id) {
+      if (!state.html[id]) { setStatus(`Компонента ${id} нет`, 'err'); return; }
+      state.build.items.push({ uid: String(uid++), id, edits: {}, open: true });
+      saveBuild();
+      renderBuild();
+    }
+    $('#add-button').addEventListener('click', () => { const id = normalizeId($('#add-number').value); if (id) { addItem(id); $('#add-number').value = ''; } });
+    $('#add-number').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); $('#add-button').click(); } });
+    $('#add-template').addEventListener('click', () => {
+      const template = (state.manifest.templates || []).find((t) => t.id === state.build.shell);
+      if (!template || !template.components) return;
+      if (state.build.items.length && !confirm('Заменить текущую сборку компонентами шаблона?')) return;
+      state.build.items = template.components.map((id) => ({ uid: String(uid++), id, edits: {}, open: false }));
+      saveBuild();
+      renderBuild();
+    });
+    ['#subject', '#preheader'].forEach((selector) => $(selector).addEventListener('input', () => { state.build[selector.slice(1)] = $(selector).value; saveBuild(); schedulePreview(); }));
+    $('#shell').addEventListener('change', () => { state.build.shell = $('#shell').value; saveBuild(); renderPreview(); });
+    $('#clear-build').addEventListener('click', () => { if (!state.build.items.length || confirm('Очистить сборку?')) { state.build.items = []; saveBuild(); renderBuild(); } });
+    $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; });
+
+    // Что можно заменить в компоненте: тексты, ссылки, картинки и их alt — по порядку в документе.
+    function parseRow(html) {
+      const doc = new DOMParser().parseFromString(`<!doctype html><html><body><table id="mbox-root">${html}</table></body></html>`, 'text/html');
+      const root = doc.getElementById('mbox-root');
+      const texts = [];
+      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.parentElement && /^(STYLE|SCRIPT)$/.test(node.parentElement.tagName)) continue;
+        if (node.nodeValue.replace(/[\s ͏‌]/g, '')) texts.push(node);
+      }
+      return { doc, root, texts, links: [...root.querySelectorAll('a[href]')], images: [...root.querySelectorAll('img')] };
+    }
+    function applyEdits(html, edits) {
+      if (!edits || !Object.keys(edits).length) return html;
+      const { root, texts, links, images } = parseRow(html);
+      texts.forEach((node, i) => { if (edits[`t${i}`] !== undefined) node.nodeValue = edits[`t${i}`]; });
+      links.forEach((a, i) => { if (edits[`h${i}`] !== undefined) a.setAttribute('href', edits[`h${i}`]); });
+      images.forEach((img, i) => { if (edits[`s${i}`] !== undefined) img.setAttribute('src', edits[`s${i}`]); if (edits[`a${i}`] !== undefined) img.setAttribute('alt', edits[`a${i}`]); });
+      const body = root.tBodies.length === 1 && !/^\s*<tbody/i.test(html) ? root.tBodies[0] : root;
+      return body.innerHTML;
+    }
+
+    function renderBuild() {
+      $('#count-build').textContent = state.build.items.length;
+      $('#subject').value = state.build.subject || '';
+      $('#preheader').value = state.build.preheader || '';
+      if (state.shells[state.build.shell]) $('#shell').value = state.build.shell;
+      const items = $('#items');
+      if (!state.build.items.length) {
+        items.innerHTML = '<div class="empty">Пусто. Добавьте компонент по номеру, кнопкой «+ В сборку» на вкладке «Компоненты» или «Как в шаблоне».</div>';
+        renderPreview();
+        return;
+      }
+      items.replaceChildren(...state.build.items.map((item, index) => {
+        const component = state.registry.components.find((c) => c.id === item.id) || { id: item.id, name: '?' };
+        const box = document.createElement('div');
+        box.className = 'item';
+        const edited = Object.keys(item.edits || {}).length;
+        box.innerHTML = `<div class="item-head"><span class="num">${item.id}</span><span class="name" title="${esc(component.name)}">${esc(component.name)}${edited ? ` <span class="chip">изменено: ${edited}</span>` : ''}</span>
+          <button class="btn ghost" type="button" data-act="up" title="Выше" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn ghost" type="button" data-act="down" title="Ниже" ${index === state.build.items.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="btn ghost" type="button" data-act="open" title="Заменить текст">${item.open ? '▾' : '▸'}</button><button class="btn ghost" type="button" data-act="remove" title="Убрать">✕</button></div>`;
+        const act = (name, fn) => box.querySelector(`[data-act="${name}"]`).addEventListener('click', fn);
+        act('up', () => move(index, -1));
+        act('down', () => move(index, 1));
+        act('remove', () => { state.build.items.splice(index, 1); saveBuild(); renderBuild(); });
+        act('open', () => { item.open = !item.open; saveBuild(); renderBuild(); });
+        if (item.open) box.append(editorFor(item));
+        return box;
+      }));
+      renderPreview();
+    }
+
+    function move(index, delta) {
+      const items = state.build.items;
+      const [item] = items.splice(index, 1);
+      items.splice(index + delta, 0, item);
+      saveBuild();
+      renderBuild();
+    }
+
+    function editorFor(item) {
+      const body = document.createElement('div');
+      body.className = 'item-body';
+      const { texts, links, images } = parseRow(state.html[item.id] || '');
+      item.edits = item.edits || {};
+      const field = (key, original, multiline) => {
+        const input = document.createElement(multiline ? 'textarea' : 'input');
+        input.value = item.edits[key] ?? original;
+        input.placeholder = original;
+        input.title = `Было: ${original}`;
+        input.classList.toggle('changed', item.edits[key] !== undefined);
+        input.addEventListener('input', () => {
+          if (input.value === original) delete item.edits[key]; else item.edits[key] = input.value;
+          input.classList.toggle('changed', item.edits[key] !== undefined);
+          saveBuild();
+          schedulePreview();
+        });
+        return input;
+      };
+      const group = (title) => Object.assign(document.createElement('div'), { className: 'group', textContent: title });
+      if (texts.length) { body.append(group('Текст')); texts.forEach((node, i) => { const value = node.nodeValue.replace(/\s+/g, ' ').trim(); body.append(field(`t${i}`, value, value.length > 60)); }); }
+      if (links.length) { body.append(group('Ссылки')); links.forEach((a, i) => body.append(field(`h${i}`, a.getAttribute('href') || '', false))); }
+      if (images.length) { body.append(group('Картинки')); images.forEach((img, i) => { body.append(field(`s${i}`, img.getAttribute('src') || '', false)); body.append(field(`a${i}`, img.getAttribute('alt') || '', false)); }); }
+      if (!texts.length && !links.length && !images.length) body.append(Object.assign(document.createElement('div'), { className: 'muted', textContent: 'Заменять нечего — служебный блок.' }));
+      return body;
+    }
+
+    function letterHtml() {
+      let html = shellFor(state.build.shell);
+      const rows = state.build.items.map((item) => applyEdits(state.html[item.id] || '', item.edits));
+      // Стили писем-источников, отличных от оболочки, — чтобы их компоненты выглядели как у себя.
+      const extraSources = [...new Set(state.build.items.map((item) => state.registry.components.find((c) => c.id === item.id)?.source).filter((s) => s && s !== state.build.shell))];
+      const extraStyles = extraSources.map((s) => (state.shells[s] || '').match(/<style[\s\S]*?<\/style>/gi)?.join('\n') || '').join('\n');
+      if (extraStyles) html = html.replace(/<\/head>/i, `${extraStyles}\n</head>`);
+      if (state.build.subject) html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${esc(state.build.subject)}</title>`);
+      if (state.build.preheader) html = html.replace(/(<div class="preheader"[^>]*>)[\s\S]*?(<vk-snippet-end)/i, `$1${esc(state.build.preheader)} $2`);
+      return html.replace(MARK, rows.join('\n'));
+    }
+
+    let previewTimer = 0;
+    const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 250); };
+    function renderPreview() {
+      if (state.tab !== 'build' || !state.registry) return;
+      const frame = $('#letter');
+      const scroll = (() => { try { return frame.contentWindow.scrollY; } catch { return 0; } })();
+      frame.onload = () => { try { frame.contentWindow.scrollTo(0, scroll); } catch { /* другой origin */ } };
+      frame.srcdoc = letterHtml();
+    }
+
+    function buildSpec() {
+      const lines = [
+        'Навык email-campaign: собери письмо из компонентов коллекции (components/registry.json) — порядок и замены ниже.',
+        `Оболочка: components/shells/${state.build.shell}.html.`,
+        `Тема: ${state.build.subject || 'не указана — предложи'}. Прехедер: ${state.build.preheader || 'не указан — предложи'}.`,
+        'Компоненты по порядку:',
+      ];
+      state.build.items.forEach((item, index) => {
+        const { texts, links, images } = parseRow(state.html[item.id] || '');
+        const name = state.registry.components.find((c) => c.id === item.id)?.name || '';
+        const changes = Object.entries(item.edits || {}).map(([key, value]) => {
+          const i = Number(key.slice(1));
+          const before = key[0] === 't' ? texts[i]?.nodeValue.replace(/\s+/g, ' ').trim() : key[0] === 'h' ? links[i]?.getAttribute('href') : key[0] === 's' ? images[i]?.getAttribute('src') : images[i]?.getAttribute('alt');
+          const what = { t: 'текст', h: 'ссылка', s: 'картинка', a: 'alt' }[key[0]];
+          return `   - ${what}: «${before}» → «${value}»`;
+        });
+        lines.push(`${index + 1}. ${item.id} ${name}${changes.length ? '' : ' — без изменений'}`, ...changes);
+      });
+      lines.push('Сохрани в Desktop/Mbox/mail-skill/ready/, прогони repair и strict preflight, открой мне результат через open_tab и напиши отчёт.');
+      return lines.join('\n');
+    }
+
+    $('#send-build').addEventListener('click', () => {
+      if (!state.build.items.length) { setStatus('Сборка пустая', 'err'); return; }
+      sendAgent(buildSpec());
+    });
+    $('#copy-build').addEventListener('click', () => copyText(letterHtml(), 'HTML письма скопирован'));
+    $('#download-build').addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([letterHtml()], { type: 'text/html;charset=utf-8' }));
+      link.download = `${new Date().toISOString().slice(0, 10)}-letter.html`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    });
+
+    // ── Общее ────────────────────────────────────────────────────────────────────────────
+    async function copyText(text, done) {
+      try { await navigator.clipboard.writeText(text); setStatus(done, 'ok'); }
+      catch {
+        const area = Object.assign(document.createElement('textarea'), { value: text });
+        document.body.append(area); area.select(); document.execCommand('copy'); area.remove();
+        setStatus(done, 'ok');
+      }
+    }
+    function sendAgent(text) {
+      if (window.mbox && window.mbox.send) { window.mbox.send(text); setStatus('Отправлено агенту в чат MBOX', 'ok'); }
+      else copyText(text, 'Не в MBOX: задание скопировано — вставьте его в чат агента');
+    }
+
+    load().catch((error) => setStatus(`Не загрузилось: ${error.message}. Откройте страницу во вкладке MBOX.`, 'err'));
+  </script>
+</body>
+</html>

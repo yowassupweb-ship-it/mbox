@@ -42,6 +42,26 @@ for (const template of manifest.templates || []) {
 }
 
 if (blockIds.size !== 12) failures.push(`Ожидалось 12 блоков B01–B12, найдено: ${blockIds.size}`);
+
+// Компоненты: уникальные номера C###, файлы на месте, next больше любого номера, шаблоны ссылаются на известные.
+const registryPath = resolve(root, 'components', 'registry.json');
+let componentCount = 0;
+if (existsSync(registryPath)) {
+  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  const componentIds = new Set();
+  for (const component of registry.components || []) {
+    if (!/^C\d{3,}$/.test(component.id)) failures.push(`Некорректный номер компонента: ${component.id}`);
+    if (componentIds.has(component.id)) failures.push(`Повтор номера компонента: ${component.id}`);
+    componentIds.add(component.id);
+    if (!existsSync(resolve(root, component.file))) failures.push(`${component.id}: нет файла ${component.file}`);
+    if (Number(component.id.slice(1)) >= (registry.next || 0)) failures.push(`registry.next (${registry.next}) не больше номера ${component.id}`);
+  }
+  for (const template of manifest.templates || []) {
+    for (const id of template.components || []) if (!componentIds.has(id)) failures.push(`${template.id} ссылается на неизвестный компонент ${id}`);
+    if (template.shell && !existsSync(resolve(root, template.shell))) failures.push(`${template.id}: нет оболочки ${template.shell}`);
+  }
+  componentCount = componentIds.size;
+}
 if (!(manifest.templates || []).length) failures.push('В manifest нет шаблонов.');
 
 if (failures.length) {
@@ -49,4 +69,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`catalog tests: ${manifest.templates.length} templates, ${blockIds.size} blocks, all references valid`);
+console.log(`catalog tests: ${manifest.templates.length} templates, ${blockIds.size} blocks, ${componentCount} components, all references valid`);

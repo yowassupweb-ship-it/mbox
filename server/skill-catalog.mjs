@@ -16,7 +16,7 @@ export const SKILL_CATALOG = [
     location: "Сервер MBOX: skills/email-campaign · ставится в ~/.claude/skills и ~/.codex/skills",
     pages: [
       { title: "Бриф рассылки", target: "skill-file:email-campaign/brief-builder.html" },
-      { title: "Коллекция блоков", target: "skill-blocks:email-campaign" },
+      { title: "Компоненты и сборка", target: "skill-file:email-campaign/library.html" },
     ],
   },
   {
