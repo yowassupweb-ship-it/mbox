@@ -1,0 +1,28 @@
+{
+  "id": "agency-letter-reference",
+  "version": 2,
+  "status": "template",
+  "brief": {
+    "type": "письмо для агентств",
+    "subject": "Новые туры для агентств",
+    "preheader": "Подборка программ и условия бронирования"
+  },
+  "letter": {
+    "subject": "Новые туры для агентств",
+    "preheader": "Подборка программ и условия бронирования",
+    "utm": {"campaign": "agency-news", "content": "reference"},
+    "items": [
+      {"component": "C001", "fields": {}},
+      {"component": "C003", "fields": {"text": "Приветствуем, коллеги!\n\nПредставляем новые программы туроператора «Вокруг света»."}},
+      {"component": "C016", "fields": {}},
+      {"component": "C006", "fields": {"title": "Новые программы"}},
+      {"component": "C017", "fields": {}},
+      {"component": "C018", "fields": {}},
+      {"component": "C019", "fields": {}},
+      {"component": "C020", "fields": {}},
+      {"component": "C021", "fields": {}},
+      {"component": "C022", "fields": {}},
+      {"component": "C023", "fields": {}}
+    ]
+  }
+}

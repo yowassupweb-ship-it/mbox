@@ -16,6 +16,16 @@
       "source": "./письмо МФП.html",
       "description": "Промо-структура с крупной визуальной подачей.",
       "blocks": ["shell", "header-nav", "intro", "primary-cta", "catalog-banner", "footer"]
+    },
+    {
+      "id": "vs-003",
+      "name": "Письмо для агентств",
+      "category": "Для агентств",
+      "source": "./templates/agency-letter.json",
+      "shell": "components/shell.html",
+      "description": "Агентские уведомления, зеркальные карточки туров, инструкция, контакты и специальный футер.",
+      "blocks": ["shell", "header-nav", "intro", "section-title", "tour-card-left", "tour-card-right", "primary-cta", "bottom-nav", "footer"],
+      "components": ["C001", "C003", "C006", "C016", "C017", "C018", "C019", "C020", "C021", "C022", "C023"]
     }
   ],
   "blocks": [

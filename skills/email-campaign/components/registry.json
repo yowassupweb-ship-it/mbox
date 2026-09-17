@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next": 16,
+  "next": 24,
   "shell": "components/shell.html",
   "renderer": "components/render.js",
   "components": [
@@ -508,6 +508,149 @@
         }
       ],
       "file": "components/C015.html"
+    },
+    {
+      "id": "C016",
+      "type": "agency-notice",
+      "block": "B03",
+      "name": "Уведомление для агентств",
+      "category": "Для агентств",
+      "description": "Светлая плашка с оранжевым акцентом для комиссии, дедлайна или другого важного условия.",
+      "fields": [
+        {"key":"title","label":"Акцент","type":"text","default":"Внимание!"},
+        {"key":"text","label":"Текст уведомления","type":"multiline","default":"На все новинки до 27 сентября действует раннее бронирование: **+5% к вашей базовой ставке** (комиссия до 20%)."}
+      ],
+      "file": "components/C016.html"
+    },
+    {
+      "id": "C017",
+      "type": "agency-tour-card-right",
+      "block": "B08",
+      "name": "Карточка для агентств: фото справа",
+      "category": "Для агентств",
+      "description": "Карточка из агентского письма: бейдж, маршрут, параметры, цена и кнопка; изображение справа.",
+      "fields": [
+        {"key":"badge","label":"Бейдж","type":"text","default":"НОВИНКА"},
+        {"key":"title","label":"Название тура","type":"text","default":"Голоса веков и ямщицкие песни","required":true},
+        {"key":"route","label":"Маршрут","type":"text","default":"Санкт-Петербург – Выборг – Выра – Кобрино – Суйда"},
+        {"key":"meta","label":"Длительность и транспорт","type":"text","default":"2 дня · 1 ночь · ЖД/Авиа"},
+        {"key":"price","label":"Цена","type":"text","default":"от 17 900 ₽"},
+        {"key":"cta","label":"Текст кнопки","type":"text","default":"Программа тура"},
+        {"key":"url","label":"Ссылка тура","type":"url","default":"https://vs-travel.ru/tour?id=2974","required":true},
+        {"key":"image","label":"Картинка (https)","type":"image","default":"https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6a5he36idw7yd6d84bcbqiwsjaqt5h783fta18p3jof6h5zswuzrfbr8dc73uzw8g","required":true},
+        {"key":"alt","label":"Alt картинки","type":"text","default":"Голоса веков и ямщицкие песни","required":true}
+      ],
+      "file": "components/C017.html"
+    },
+    {
+      "id": "C018",
+      "type": "agency-tour-card-left",
+      "block": "B07",
+      "name": "Карточка для агентств: фото слева",
+      "category": "Для агентств",
+      "description": "Зеркальная версия агентской карточки: изображение слева, текст справа; на мобильном изображение идёт первым.",
+      "fields": [
+        {"key":"badge","label":"Бейдж","type":"text","default":"НОВИНКА"},
+        {"key":"title","label":"Название тура","type":"text","default":"Голоса веков и ямщицкие песни","required":true},
+        {"key":"route","label":"Маршрут","type":"text","default":"Санкт-Петербург – Выборг – Выра – Кобрино – Суйда"},
+        {"key":"meta","label":"Длительность и транспорт","type":"text","default":"2 дня · 1 ночь · ЖД/Авиа"},
+        {"key":"price","label":"Цена","type":"text","default":"от 17 900 ₽"},
+        {"key":"cta","label":"Текст кнопки","type":"text","default":"Программа тура"},
+        {"key":"url","label":"Ссылка тура","type":"url","default":"https://vs-travel.ru/tour?id=2974","required":true},
+        {"key":"image","label":"Картинка (https)","type":"image","default":"https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6a5he36idw7yd6d84bcbqiwsjaqt5h783fta18p3jof6h5zswuzrfbr8dc73uzw8g","required":true},
+        {"key":"alt","label":"Alt картинки","type":"text","default":"Голоса веков и ямщицкие песни","required":true}
+      ],
+      "file": "components/C018.html"
+    },
+    {
+      "id": "C019",
+      "type": "agency-important",
+      "block": "B09",
+      "name": "Важно для агентств",
+      "category": "Для агентств",
+      "description": "Контрастная оранжевая плашка для условий бронирования и материалов партнёрам.",
+      "fields": [
+        {"key":"title","label":"Заголовок","type":"text","default":"Важно:"},
+        {"key":"text","label":"Текст","type":"multiline","default":"Повышенная комиссия действует до 27 сентября. Туры доступны для мгновенного бронирования за 15 минут в личном кабинете.\nМы подготовили фото-контент, который можно использовать на сайтах и в соцсетях."}
+      ],
+      "file": "components/C019.html"
+    },
+    {
+      "id": "C020",
+      "type": "agency-steps",
+      "block": "B03",
+      "name": "Три шага оформления тура",
+      "category": "Для агентств",
+      "description": "Вертикальная инструкция из трёх шагов с двумя редактируемыми ссылками.",
+      "fields": [
+        {"key":"title","label":"Заголовок","type":"text","default":"Как оформить тур за 3 шага"},
+        {"key":"step1_title","label":"Шаг 1: заголовок","type":"text","default":"Выберите тур на сайте"},
+        {"key":"step1_text","label":"Шаг 1: пояснение","type":"text","default":"Воспользуйтесь фильтрами по городу, датам и продолжительности."},
+        {"key":"step1_url","label":"Шаг 1: ссылка","type":"url","default":"https://vs-travel.ru/"},
+        {"key":"step2_title","label":"Шаг 2: заголовок","type":"text","default":"Оформите заявку в личном кабинете"},
+        {"key":"step2_text","label":"Шаг 2: пояснение","type":"text","default":"Заполните данные туристов — подтверждение придёт в течение 15 минут."},
+        {"key":"step2_url","label":"Шаг 2: ссылка","type":"url","default":"https://online.vs-travel.ru/login"},
+        {"key":"step3_title","label":"Шаг 3: заголовок","type":"text","default":"Получите документы и комиссию"},
+        {"key":"step3_text","label":"Шаг 3: пояснение","type":"text","default":"Ваучер, инструкция для туристов и агентское вознаграждение — всё в одном месте."}
+      ],
+      "file": "components/C020.html"
+    },
+    {
+      "id": "C021",
+      "type": "agency-help",
+      "block": "B04",
+      "name": "Помощь агентствам",
+      "category": "Для агентств",
+      "description": "Контактная CTA-плашка: телефон, почта и кнопка заключения договора.",
+      "fields": [
+        {"key":"title","label":"Заголовок","type":"text","default":"Мы рядом, чтобы помочь!"},
+        {"key":"phone","label":"Телефон","type":"text","default":"+7 (495) 419-17-09 (доб. 208)"},
+        {"key":"phone_url","label":"Телефонная ссылка","type":"url","default":"tel:+74954191709"},
+        {"key":"email","label":"Email","type":"text","default":"agent@vs-travel.ru"},
+        {"key":"cta","label":"Текст кнопки","type":"text","default":"Заключить договор"},
+        {"key":"url","label":"Ссылка кнопки","type":"url","default":"https://vs-travel.ru/agencies/"},
+        {"key":"thanks","label":"Подпись","type":"text","default":"Благодарим, что выбираете нас!"}
+      ],
+      "file": "components/C021.html"
+    },
+    {
+      "id": "C022",
+      "type": "agency-bottom-nav",
+      "block": "B11",
+      "name": "Нижнее меню для агентств",
+      "category": "Для агентств",
+      "description": "Три округлые ссылки на приоритетные направления агентского письма.",
+      "fields": [
+        {"key":"n1_label","label":"Кнопка 1","type":"text","default":"Беларусь"},
+        {"key":"n1_url","label":"Кнопка 1: ссылка","type":"url","default":"https://vs-travel.ru/podbor-tura/belarus"},
+        {"key":"n2_label","label":"Кнопка 2","type":"text","default":"Дагестан"},
+        {"key":"n2_url","label":"Кнопка 2: ссылка","type":"url","default":"https://vs-travel.ru/podbor-tura/?TopFilter_kuda=856-853-854"},
+        {"key":"n3_label","label":"Кнопка 3","type":"text","default":"На 1 день"},
+        {"key":"n3_url","label":"Кнопка 3: ссылка","type":"url","default":"https://vs-travel.ru/odnodnevnye/"}
+      ],
+      "file": "components/C022.html"
+    },
+    {
+      "id": "C023",
+      "type": "agency-footer",
+      "block": "B12",
+      "name": "Футер для агентств",
+      "category": "Шапка и подвал",
+      "description": "Агентские контакты, социальные сети и сервисная подпись одним готовым блоком.",
+      "fields": [
+        {"key":"address","label":"Адрес","type":"text","default":"г. Москва, ул. Авиамоторная, д. 12, офис 818"},
+        {"key":"maps_url","label":"Ссылка на карту","type":"url","default":"https://yandex.ru/maps/213/moscow/house/aviamotornaya_ulitsa_12/Z04YcQZlTEUAQFtvfXt0cn5rYg==/"},
+        {"key":"rto","label":"Номер РТО","type":"text","default":"РТО 001037"},
+        {"key":"email","label":"Email","type":"text","default":"agent@vs-travel.ru"},
+        {"key":"phone","label":"Телефон","type":"text","default":"+7 (495) 419-17-09 (доб. 208)"},
+        {"key":"phone_url","label":"Телефонная ссылка","type":"url","default":"tel:+74954191709"},
+        {"key":"telegram_url","label":"Telegram","type":"url","default":"https://t.me/+N441FqLI4vowYTRi"},
+        {"key":"vk_url","label":"VK","type":"url","default":"https://vk.me/vs_travel"},
+        {"key":"dzen_url","label":"Дзен","type":"url","default":"https://clck.ru/3LsNGB"},
+        {"key":"max_url","label":"Max","type":"url","default":"https://max.ru/id7708596369_biz"},
+        {"key":"service_text","label":"Сервисная подпись","type":"text","default":"Это сервисное письмо. Пожалуйста, не отвечайте на него. Для связи используйте e-mail:"}
+      ],
+      "file": "components/C023.html"
     }
   ]
 }
