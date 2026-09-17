@@ -1,6 +1,9 @@
 // Каталог навыков — единственный источник правды для /api/mbox/agent/skills.
 // Импортируют server/mbox-server.mjs (прод) и vite.config.ts (dev API), чтобы списки не расходились.
 // Навыки UX/UI лежат отдельно в ux-ui-skill-catalog.mjs и дописываются к этому списку в обоих серверах.
+//
+// pages — вкладки навыка в MBOX (цели как у MCP open_tab). Первая открывается кнопкой «Запустить» в каталоге;
+// агент по просьбе запустить навык открывает её же через open_tab. Так сценарий начинается с формы, а не с вопросов в чате.
 export const SKILL_CATALOG = [
   {
     id: "email-campaign",
@@ -11,6 +14,10 @@ export const SKILL_CATALOG = [
     input: "Бриф, выбранный шаблон и материалы выпуска",
     output: "Готовый HTML и отчёт предрелизной проверки",
     location: "Сервер MBOX: skills/email-campaign · ставится в ~/.claude/skills и ~/.codex/skills",
+    pages: [
+      { title: "Бриф рассылки", target: "skill-file:email-campaign/brief-builder.html" },
+      { title: "Коллекция блоков", target: "skill-blocks:email-campaign" },
+    ],
   },
   {
     id: "route-to-operator",
@@ -21,6 +28,9 @@ export const SKILL_CATALOG = [
     input: "Номера туров или ссылки newmanager.vs/tours/<номер>/edit",
     output: "HTML-страница на тур: день — блок с кнопкой «Копировать», история изменений",
     location: "Сервер MBOX: skills/route-to-operator · ставится в ~/.claude/skills и ~/.codex/skills",
+    pages: [
+      { title: "Запуск по номерам туров", target: "skill-file:route-to-operator/launch.html" },
+    ],
   },
   {
     id: "mbox-api",

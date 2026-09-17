@@ -1265,3 +1265,17 @@
 }
 .console-send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-color) 28%, transparent); }
 .console-send-btn:disabled { background: none; color: var(--text-muted); opacity: .5; cursor: default; }
+
+.console-log-pre {
+  margin: 4px 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .04);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  user-select: text;
+}

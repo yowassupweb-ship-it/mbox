@@ -38,6 +38,9 @@ import { SearchView } from "./SearchView";
 import { tabMeta } from "./tabMeta";
 import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
+import { applyOpenTab, type OpenTabEvent } from "./agentTabs";
+import { SkillPageDocument } from "./SkillPageDocument";
+import { SkillBlocksDocument } from "./SkillBlocksDocument";
 
 const MENU = "/assets/icons/bottom-menu";
 
@@ -166,6 +169,28 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     if (panelOpen && panelTab === tab) setPanelOpen(false);
     else { setPanelTab(tab); setPanelOpen(true); }
   }
+
+  // Агент открыл вкладку (MCP open_tab): показываем её и коротко говорим, кто и зачем.
+  const [agentNotice, setAgentNotice] = useState<{ text: string; tone: "ok" | "warn" } | null>(null);
+  const openTabHandler = useRef<(event: OpenTabEvent) => void>(() => undefined);
+  openTabHandler.current = (event) => {
+    void applyOpenTab(event, tabs, () => { setActivity("local"); setSidebarOpen(true); })
+      .then((result) => {
+        const who = event.actor || "Агент";
+        setAgentNotice({ tone: result.tone, text: result.tone === "ok" ? `${who} открыл ${result.text}${event.note ? ` — ${event.note}` : ""}` : result.text });
+      })
+      .catch((cause) => setAgentNotice({ tone: "warn", text: `Не открылось: ${cause instanceof Error ? cause.message : String(cause)}` }));
+  };
+  useEffect(() => {
+    const listener = (event: Event) => openTabHandler.current((event as CustomEvent<OpenTabEvent>).detail);
+    window.addEventListener("mbox:open-tab", listener);
+    return () => window.removeEventListener("mbox:open-tab", listener);
+  }, []);
+  useEffect(() => {
+    if (!agentNotice) return;
+    const timer = window.setTimeout(() => setAgentNotice(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [agentNotice]);
 
   function closeTab(key: string) {
     if (dirty[key] && !window.confirm("Во вкладке несохранённые правки. Закрыть?")) return;
@@ -298,7 +323,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "commit":
         return <CommitDocument rootKey={first} hash={rest} />;
       case "skill":
-        return <SkillDocument skillId={first} />;
+        return <SkillDocument skillId={first} tabs={tabs} />;
+      case "skillblocks":
+        return <SkillBlocksDocument skill={first} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
+      case "skillpage":
+        return <SkillPageDocument skill={first} file={rest} tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
       case "tool":
         return <ToolDocument toolId={first} />;
       case "file":
@@ -540,6 +569,12 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <button type="button" className="wb-status-item" onClick={() => dockConsole(consoleDock === "right" ? "bottom" : "right")} title={consoleDock === "right" ? "Консоль вниз" : "Консоль справа"}><PanelRight size={12} /></button>
         <span className="wb-status-item is-static">{user.username}</span>
       </footer>
+
+      {agentNotice && (
+        <div className={agentNotice.tone === "warn" ? "wb-agent-toast is-warn" : "wb-agent-toast"} role="status" onClick={() => setAgentNotice(null)}>
+          {agentNotice.text}
+        </div>
+      )}
 
       {tabMenu && (
         <WbMenu x={tabMenu.x} y={tabMenu.y} onClose={() => setTabMenu(null)}>

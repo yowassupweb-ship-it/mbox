@@ -18,6 +18,8 @@ export type AgentSkill = SkillUsage & {
   output: string;
   /** Путь к SKILL.md для навыков, которые живут вне MBOX (выполняют Claude и Codex). */
   location?: string;
+  /** Вкладки навыка в MBOX (цели как у MCP open_tab); первая — «Запустить». */
+  pages?: Array<{ title: string; target: string }>;
 };
 
 export type SkillServiceMode = SkillUsage & { id: string; name: string };

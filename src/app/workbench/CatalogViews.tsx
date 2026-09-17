@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { Play, RefreshCw, X } from "lucide-react";
+import { openSkillPage } from "./agentTabs";
 import { formatLastUsed, skillGroup, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { usePersistentState, type TabsApi } from "./tabs";
 
@@ -48,9 +49,10 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
               </button>
               {open && skills.map((skill) => {
                 const key = `skill:${skill.id}`;
+                const launch = skill.pages?.[0];
                 return (
+                  <div key={skill.id} className="wb-menu-item-row">
                   <button
-                    key={skill.id}
                     type="button"
                     className={tabs.active === key ? "wb-menu-item is-active" : "wb-menu-item"}
                     onClick={() => tabs.open(key)}
@@ -62,6 +64,12 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
                       {skill.calls > 0 ? `${skill.calls} выз. · ${formatLastUsed(skill.last_used_at)}` : skill.owner.split("·")[0].trim()}
                     </span>
                   </button>
+                  {launch && (
+                    <button type="button" className="wb-menu-item-launch" onClick={() => openSkillPage(launch, tabs)} title={`Запустить: ${launch.title}`} aria-label={`Запустить ${skill.name}`}>
+                      <Play size={12} />
+                    </button>
+                  )}
+                  </div>
                 );
               })}
             </section>

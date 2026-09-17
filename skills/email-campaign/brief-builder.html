@@ -3,107 +3,122 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>Конструктор письма — Вокруг света</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="color-scheme" content="dark">
+  <title>Бриф рассылки — Вокруг света</title>
   <style>
+    /* Стиль MBOX: те же токены, что у рабочего места (src/styles/tokens.css, workbench.css). Форма живёт во
+       вкладке MBOX, поэтому выглядит как часть программы, а не как отдельный сайт. */
     :root {
-      --surface-page: #fff6ed;
-      --surface-card: #ffffff;
-      --surface-soft: #fff8f4;
-      --action-primary: #ff732d;
-      --action-primary-strong: #d95516;
-      --border-soft: #ffe8d8;
-      --text-primary: #2a2a2a;
-      --text-secondary: #464646;
-      --text-muted: #777777;
-      --text-error: #a63d18;
-      --radius-container: 35px;
-      --radius-card: 20px;
-      --radius-control: 14px;
-      --radius-pill: 999px;
-      --shadow-action: 0 3px 0 rgba(140, 40, 0, .4);
-      --shadow-card: 0 16px 40px rgba(117, 68, 33, .09);
-      --font-display: Rubik, Arial, sans-serif;
-      --font-body: Inter, Arial, sans-serif;
+      color-scheme: dark;
+      --bg: #08090a;
+      --surface: #0c0d0f;
+      --surface-2: #101114;
+      --surface-3: #15171b;
+      --line: rgba(133, 245, 219, .12);
+      --line-strong: rgba(133, 245, 219, .24);
+      --hover: rgba(133, 245, 219, .06);
+      --selected: rgba(41, 224, 214, .13);
+      --accent: #29e0d6;
+      --accent-ink: #04201e;
+      --text: #eef4f1;
+      --text-2: rgba(238, 244, 241, .7);
+      --text-muted: rgba(238, 244, 241, .44);
+      --ok: #35c759;
+      --warn: #ffb000;
+      --danger: #ff4d5e;
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --font-sans: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
     }
 
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--surface-page); color: var(--text-primary); font-family: var(--font-body); }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); }
     button, input, textarea, select { font: inherit; }
     button { cursor: pointer; }
-    button:disabled { cursor: not-allowed; opacity: .55; }
-    .shell { width: min(100% - 32px, 920px); margin: 32px auto 64px; }
-    .hero { padding: 30px 34px; border-radius: var(--radius-container); background: var(--surface-card); border: 1.5px solid var(--border-soft); box-shadow: var(--shadow-card); }
-    .eyebrow { margin: 0 0 10px; color: var(--action-primary); font: 700 12px/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; }
-    h1 { margin: 0; font: 700 clamp(28px, 5vw, 42px)/1.08 var(--font-display); letter-spacing: -.03em; }
-    .hero p { max-width: 640px; margin: 14px 0 0; color: var(--text-secondary); font-size: 15px; line-height: 1.55; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; margin-top: 20px; }
-    .form-card, .summary { border: 1.5px solid var(--border-soft); background: var(--surface-card); box-shadow: var(--shadow-card); }
-    .form-card { padding: 26px; border-radius: var(--radius-container); }
-    .summary { position: sticky; top: 20px; padding: 22px; border-radius: var(--radius-card); }
-    .section + .section { margin-top: 28px; padding-top: 26px; border-top: 2px solid var(--border-soft); }
-    h2 { margin: 0 0 6px; font: 700 20px/1.2 var(--font-display); }
-    .section-hint, .summary p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
-    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    code { padding: 1px 5px; border-radius: var(--radius-sm); background: rgba(255, 255, 255, .07); font: 12px var(--font-mono); }
+
+    .shell { width: min(100% - 32px, 980px); margin: 20px auto 48px; }
+    .hero { padding: 4px 2px 16px; border-bottom: 1px solid var(--line); }
+    .eyebrow { margin: 0 0 6px; color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+    .hero p { max-width: 680px; margin: 8px 0 0; color: var(--text-2); }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; margin-top: 16px; }
+    .form-card, .summary { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
+    .form-card { padding: 18px 20px; }
+    .summary { position: sticky; top: 12px; padding: 16px; }
+    .section + .section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+    h2 { margin: 0 0 4px; color: var(--text-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+    .section-hint, .summary p { margin: 0; color: var(--text-muted); font-size: 12px; }
+
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
     .field-grid.single { grid-template-columns: 1fr; }
-    .field { display: grid; gap: 7px; }
-    .field label, .legend { color: var(--text-secondary); font: 600 12px/1.3 var(--font-display); }
-    .field label span { color: var(--text-muted); font-family: var(--font-body); font-weight: 400; }
-    input, textarea, select { width: 100%; border: 1.5px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text-primary); outline: none; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
-    input, select { min-height: 44px; padding: 11px 12px; }
-    textarea { min-height: 98px; padding: 12px; resize: vertical; line-height: 1.5; }
-    input:hover, textarea:hover, select:hover { border-color: #ffb68e; background: #fffdfb; }
-    input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid rgba(255, 115, 45, .32); outline-offset: 2px; }
-    .invalid { border-color: var(--text-error) !important; box-shadow: 0 0 0 3px rgba(166, 61, 24, .12); }
-    .choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+    .field { display: grid; gap: 5px; }
+    .field label, .legend { color: var(--text-2); font-size: 12px; font-weight: 500; }
+    .field label span { color: var(--text-muted); font-weight: 400; }
+    input, textarea, select { width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); outline: none; transition: border-color .12s ease, background .12s ease; }
+    input, select { min-height: 32px; padding: 6px 9px; }
+    textarea { min-height: 80px; padding: 8px 9px; resize: vertical; }
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
+    input:hover, textarea:hover, select:hover { border-color: var(--line-strong); }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--surface-3); }
+    .invalid { border-color: var(--danger) !important; }
+
+    .choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
     .choice { position: relative; display: block; }
     .choice input { position: absolute; opacity: 0; pointer-events: none; }
-    .choice span { display: block; min-height: 82px; padding: 15px; border: 1.5px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-soft); color: var(--text-secondary); font: 600 14px/1.2 var(--font-display); transition: transform .16s ease, border-color .16s ease, background .16s ease; }
-    .choice small { display: block; margin-top: 7px; color: var(--text-muted); font: 400 11px/1.35 var(--font-body); }
-    .choice:hover span { transform: translateY(-1px); border-color: #ffb68e; }
-    .choice input:checked + span { border-color: var(--action-primary); background: #fff0e8; color: var(--action-primary-strong); box-shadow: var(--shadow-action); }
-    .choice input:focus-visible + span { outline: 3px solid rgba(255, 115, 45, .32); outline-offset: 2px; }
-    .toggle-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-    .toggle { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; padding: 0 14px; border: 1.5px solid var(--border-soft); border-radius: var(--radius-pill); background: var(--surface-soft); color: var(--text-secondary); font-size: 13px; }
-    .toggle input { width: 18px; height: 18px; accent-color: var(--action-primary); }
-    .trips { display: grid; gap: 12px; margin-top: 18px; }
-    .trip-card { padding: 18px; border: 1.5px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-soft); }
-    .trip-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-    .trip-top h3 { margin: 0; color: var(--action-primary-strong); font: 700 15px/1 var(--font-display); }
-    .trip-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .choice span { display: block; height: 100%; padding: 10px 12px; border: 1px solid var(--line); border-left: 2px solid transparent; border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-weight: 500; transition: background .12s ease, border-color .12s ease; }
+    .choice small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; font-weight: 400; }
+    .choice:hover span { background: var(--hover); }
+    .choice input:checked + span { border-color: var(--line-strong); border-left-color: var(--accent); background: var(--selected); }
+    .choice input:focus-visible + span, input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    .toggle-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-2); font-size: 12px; }
+    .toggle input { width: 14px; height: 14px; accent-color: var(--accent); }
+
+    .trips { display: grid; gap: 10px; margin-top: 12px; }
+    .trip-card { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+    .trip-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .trip-top h3 { margin: 0; color: var(--accent); font: 600 12px/1 var(--font-mono); }
+    .trip-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .trip-fields .wide { grid-column: 1 / -1; }
-    .button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: var(--radius-pill); padding: 0 18px; font: 700 13px/1 var(--font-display); transition: transform .16s ease, background .16s ease, color .16s ease; }
-    .button:hover:not(:disabled) { transform: translateY(-1px); }
-    .button:active:not(:disabled) { transform: translateY(1px); }
-    .button.primary { color: #fff; background: var(--action-primary); border-bottom: 3px solid rgba(140, 40, 0, .4); }
-    .button.primary:hover:not(:disabled) { background: var(--action-primary-strong); }
-    .button.secondary { color: var(--action-primary-strong); background: #fff; border-color: var(--border-soft); }
-    .button.danger { min-height: 34px; color: var(--text-error); background: transparent; border-color: transparent; padding-inline: 8px; }
-    .button.danger:hover:not(:disabled) { background: #fff0e8; }
-    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-    .summary h2 { font-size: 18px; }
-    .status { display: inline-flex; align-items: center; min-height: 28px; margin: 12px 0; padding: 0 10px; border-radius: var(--radius-pill); background: #fff0e8; color: var(--action-primary-strong); font: 600 12px/1 var(--font-display); }
-    .status.ready { background: #edf8ef; color: #236b33; }
-    .summary-list { display: grid; gap: 10px; margin: 18px 0 22px; padding: 0; list-style: none; }
-    .summary-list li { padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
-    .summary-list strong { display: block; margin-bottom: 3px; color: var(--text-primary); font: 600 12px/1.25 var(--font-display); }
-    .notice { display: none; margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-control); background: #fff0e8; color: var(--text-error); font-size: 13px; line-height: 1.45; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; transition: background .12s ease, border-color .12s ease, color .12s ease; }
+    .button.primary { background: var(--accent); color: var(--accent-ink); }
+    .button.primary:hover:not(:disabled) { background: #5ff0e8; }
+    .button.secondary { border-color: var(--line-strong); background: transparent; color: var(--text); }
+    .button.secondary:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+    .button.danger { min-height: 24px; padding: 0 8px; background: transparent; color: var(--text-muted); }
+    .button.danger:hover:not(:disabled) { background: rgba(255, 77, 94, .12); color: var(--danger); }
+    .summary .button { width: 100%; margin-top: 6px; }
+
+    .status { display: inline-flex; align-items: center; min-height: 22px; margin: 8px 0; padding: 0 8px; border-radius: var(--radius-sm); background: rgba(255, 176, 0, .12); color: var(--warn); font: 600 11px/1 var(--font-mono); }
+    .status.ready { background: rgba(53, 199, 89, .12); color: var(--ok); }
+    .summary-list { display: grid; gap: 8px; margin: 12px 0 14px; padding: 0; list-style: none; }
+    .summary-list li { padding-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--text-2); font-size: 12px; }
+    .summary-list strong { display: block; margin-bottom: 2px; color: var(--text-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+    .notice { display: none; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--selected); color: var(--text); font-size: 12px; }
     .notice.visible { display: block; }
-    .prompt-preview { width: 100%; min-height: 220px; margin-top: 18px; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
-    .footer-note { margin: 18px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
-    @media (max-width: 760px) { .shell { width: min(100% - 20px, 660px); margin-top: 10px; } .hero, .form-card { padding: 22px; border-radius: 25px; } .layout { grid-template-columns: 1fr; } .summary { position: static; order: -1; } .field-grid, .trip-fields, .choice-grid { grid-template-columns: 1fr; } .choice span { min-height: 0; } }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+    .prompt-preview { min-height: 200px; margin-top: 12px; color: var(--text-2); font: 12px/1.55 var(--font-mono); }
+    .footer-note { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: rgba(238, 244, 241, .16); }
+
+    @media (max-width: 760px) { .shell { width: min(100% - 20px, 660px); margin-top: 10px; } .layout { grid-template-columns: 1fr; } .summary { position: static; order: -1; } .field-grid, .trip-fields, .choice-grid { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; } }
   </style>
 </head>
 <body>
   <main class="shell">
     <header class="hero">
       <p class="eyebrow">Вокруг света</p>
-      <h1>Конструктор письма</h1>
-      <p>Заполните содержание — дизайн, блоки, HTML и проверку возьмёт на себя AI. Черновик хранится только в этом браузере.</p>
+      <h1>Бриф рассылки</h1>
+      <p>Заполните содержание — дизайн, блоки, HTML и проверку возьмёт на себя AI. Черновик сохраняется сам.</p>
     </header>
 
     <div class="layout">
@@ -147,7 +162,7 @@
           <p class="section-hint">Конструктор не отправляет письмо. Он готовит точную постановку для навыка <code>email-campaign</code>.</p>
           <textarea class="prompt-preview" id="prompt" readonly aria-label="Сгенерированное задание для AI"></textarea>
           <div class="notice" id="notice" role="alert"></div>
-          <div class="actions"><button class="button primary" type="button" id="copy">Скопировать задание</button><button class="button secondary" type="button" id="download">Скачать задание</button><button class="button secondary" type="button" id="clear">Очистить черновик</button></div>
+          <div class="actions"><button class="button primary" type="button" id="send" style="display:none">Отправить в чат MBOX</button><button class="button primary" type="button" id="copy">Скопировать задание</button><button class="button secondary" type="button" id="download">Скачать задание</button><button class="button secondary" type="button" id="clear">Очистить черновик</button></div>
           <p class="footer-note">После вставки задания в чат AI сам соберёт HTML, прогонит строгий preflight и Email Checker.</p>
         </section>
       </form>
@@ -157,6 +172,7 @@
         <div class="status" id="status">Нужны данные</div>
         <p id="summary-copy">Заполните смысл письма и ссылку. Карточки можно добавить позже.</p>
         <ul class="summary-list" id="summary-list"></ul>
+        <button class="button primary" type="button" id="summary-send" style="display:none">Отправить в чат MBOX</button>
         <button class="button primary" type="button" id="summary-copy-button">Скопировать задание</button>
       </aside>
     </div>
@@ -223,7 +239,7 @@
     const save = () => {
       const data = Object.fromEntries(new FormData(form).entries());
       data.type = selectedType(); data.trips = cardData();
-      localStorage.setItem(storageKey, JSON.stringify(data));
+      try { localStorage.setItem(storageKey, JSON.stringify(data)); } catch { /* черновик не сохранится */ }
     };
     const update = () => {
       const errors = missing();
@@ -264,13 +280,26 @@
     const showNotice = (message) => { notice.textContent = message; notice.classList.add('visible'); window.setTimeout(() => notice.classList.remove('visible'), 3500); };
     const copyPrompt = async () => { try { await navigator.clipboard.writeText(prompt.value); showNotice('Задание скопировано. Вставьте его в чат с AI.'); } catch { prompt.select(); document.execCommand('copy'); showNotice('Задание выделено для копирования.'); } };
     const downloadPrompt = () => { const blob = new Blob([prompt.value], { type: 'text/plain;charset=utf-8' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'brief-email-vs-travel.txt'; link.click(); URL.revokeObjectURL(link.href); };
-    const restore = () => { try { const data = JSON.parse(localStorage.getItem(storageKey) || 'null'); if (!data) return; Object.entries(data).forEach(([key, value]) => { const field = form.elements[key]; if (field && typeof value === 'string') field.value = value; }); [...form.querySelectorAll('input[name="type"]')].find((field) => field.value === data.type)?.click(); (data.trips || []).forEach(addTrip); } catch { localStorage.removeItem(storageKey); } };
+    const restore = () => { try { const data = JSON.parse(localStorage.getItem(storageKey) || 'null'); if (!data) return; Object.entries(data).forEach(([key, value]) => { const field = form.elements[key]; if (field && typeof value === 'string') field.value = value; }); [...form.querySelectorAll('input[name="type"]')].find((field) => field.value === data.type)?.click(); (data.trips || []).forEach(addTrip); } catch { try { localStorage.removeItem(storageKey); } catch { /* нет хранилища */ } } };
     form.addEventListener('input', update); form.addEventListener('change', update);
     document.querySelector('#add-trip').addEventListener('click', () => addTrip());
     document.querySelector('#copy').addEventListener('click', copyPrompt);
     document.querySelector('#summary-copy-button').addEventListener('click', copyPrompt);
     document.querySelector('#download').addEventListener('click', downloadPrompt);
-    document.querySelector('#clear').addEventListener('click', () => { if (!confirm('Очистить этот локальный черновик?')) return; form.reset(); trips.innerHTML = ''; localStorage.removeItem(storageKey); update(); });
+    document.querySelector('#clear').addEventListener('click', () => { if (!confirm('Очистить этот локальный черновик?')) return; form.reset(); trips.innerHTML = ''; try { localStorage.removeItem(storageKey); } catch { /* нет хранилища */ } update(); });
+    // Внутри MBOX (вкладку открыл агент, есть window.mbox) задание уходит прямо в чат тому, кто открыл форму.
+    const sendPrompt = () => {
+      if (!window.mbox) return;
+      if (missing().length && !confirm('Бриф неполный. Отправить как есть? AI уточнит недостающее.')) return;
+      window.mbox.send(prompt.value);
+      showNotice('Задание отправлено в чат MBOX — ответ придёт в консоли.');
+    };
+    if (window.mbox) {
+      ['#send', '#summary-send'].forEach((selector) => { const button = document.querySelector(selector); button.style.display = ''; button.addEventListener('click', sendPrompt); });
+      document.querySelector('#copy').classList.replace('primary', 'secondary');
+      document.querySelector('#summary-copy-button').style.display = 'none';
+      document.querySelector('.footer-note').textContent = 'После отправки AI в чате MBOX соберёт HTML, прогонит строгий preflight и Email Checker.';
+    }
     restore(); update();
   </script>
 </body>

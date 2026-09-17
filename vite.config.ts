@@ -13,7 +13,8 @@ import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi } from "./server/notes.mjs";
 import { ensureStorageSchema, handleStorageApi } from "./server/storage.mjs";
-import { listSkillPackages, readSkillFile, readSkillPackage } from "./server/skill-packages.mjs";
+import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
+import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, type TourSheetItem,
@@ -926,6 +927,7 @@ function mboxDevApi() {
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
+      ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
 
       realtimeServer.on("connection", (socket) => {
@@ -941,6 +943,7 @@ function mboxDevApi() {
           const user = await currentUser(req);
           if (!user) return socket.destroy();
           realtimeServer.handleUpgrade(req, socket, head, (ws) => {
+            tagSocketUser(ws, user);
             realtimeServer.emit("connection", ws, req);
           });
         } catch {
@@ -1146,20 +1149,20 @@ function mboxDevApi() {
             return sendJson(res, 200, { tools: TOOL_CATALOG });
           }
 
-          // Пакеты навыков — общий модуль server/skill-packages.mjs, та же логика, что у прода.
-          if (url.pathname === "/api/mbox/agent/skills/packages" && req.method === "GET") {
-            return sendJson(res, 200, { packages: listSkillPackages(path.resolve("skills")) });
+          // Агент открывает вкладку в интерфейсе владельца — общий модуль server/ui-open.mjs, как у прода.
+          if (url.pathname === "/api/mbox/ui/open" && req.method === "POST") {
+            const user = await currentUser(req);
+            if (!user) return sendJson(res, 401, { error: "unauthorized" });
+            const parsed = parseOpenRequest(await readBody(req), actorFromReq(req));
+            if (!parsed.event) return sendJson(res, 400, { error: parsed.error });
+            return sendJson(res, 200, { delivered: sendOpenTab(realtimeClients, user.id, parsed.event), event: parsed.event });
           }
-          const skillPackageMatch = url.pathname.match(/^\/api\/mbox\/agent\/skills\/packages\/([a-z0-9-]+)$/);
-          if (skillPackageMatch && req.method === "GET") {
-            const file = url.searchParams.get("file");
-            if (file) {
-              const content = readSkillFile(path.resolve("skills"), skillPackageMatch[1], file);
-              return content == null ? sendJson(res, 404, { error: "skill_file_not_found" }) : sendJson(res, 200, { id: skillPackageMatch[1], path: file, content });
-            }
-            const skillPackage = readSkillPackage(path.resolve("skills"), skillPackageMatch[1]);
-            return skillPackage ? sendJson(res, 200, { package: skillPackage }) : sendJson(res, 404, { error: "skill_not_found" });
-          }
+
+          // Пакеты навыков с правками агентов — общий модуль server/skill-overrides.mjs, как у прода.
+          if (await handleSkillPackagesApi({
+            req, res, url, query: queryPostgres, skillsRoot: path.resolve("skills"), actor: actorFromReq(req), sendJson, readBody,
+            onChange: (change: Record<string, unknown>) => broadcastRealtime(realtimeClients, "skill_file_changed", change),
+          })) return;
 
           // Каталог навыков — общий модуль server/skill-catalog.mjs, тот же, что у прода.
           if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {

@@ -2358,3 +2358,63 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-image-swatch.is-checker { background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0; }
 .wb-image-swatch.is-dark { background: #0b0c0e; }
 .wb-image-swatch.is-light { background: #f4f5f2; }
+
+/* Агент открыл вкладку (MCP open_tab) — короткое уведомление над строкой состояния. */
+.wb-agent-toast {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--wb-status) + 12px + env(safe-area-inset-bottom, 0px));
+  z-index: 150;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 9px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--wb-surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .5);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.wb-agent-toast.is-warn { border-color: color-mix(in srgb, var(--state-warn) 55%, transparent); }
+.wb-doc-notice { color: var(--accent-color); font-size: var(--text-sm); white-space: nowrap; }
+
+/* Таблицы в просмотре markdown (renderDocument): широкая таблица листается сама, а не раздвигает документ. */
+.wb-md-table { max-width: 100%; margin: 0.6em 0; overflow-x: auto; }
+.wb-md-table table { border-collapse: collapse; font-size: var(--text-sm); line-height: 1.5; }
+.wb-md-table th,
+.wb-md-table td { padding: 5px 10px; border: 1px solid var(--wb-line); text-align: left; vertical-align: top; }
+.wb-md-table th { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-bold); white-space: nowrap; }
+.wb-md-table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .02); }
+
+/* ─── Коллекция блоков писем навыка ─────────────────── */
+
+.wb-blocks { display: grid; gap: 14px; max-width: 760px; margin: 0 auto; padding: 16px 16px 48px; }
+.wb-blocks-filter { width: 200px; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.wb-blocks-filter:focus { border-color: var(--accent-color); outline: 0; }
+.wb-block-card { overflow: hidden; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
+.wb-block-card > header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px; border-bottom: 1px solid var(--wb-line); }
+.wb-block-id { flex: none; color: var(--accent-color); font-family: var(--font-mono); font-size: var(--text-sm); }
+.wb-block-name { flex: none; max-width: 40%; overflow: hidden; color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.wb-block-text { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-block-card > header button { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: 11.5px; cursor: pointer; }
+.wb-block-card > header button:hover,
+.wb-block-card > header button.is-on { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); color: var(--text-main); }
+.wb-block-ask { display: flex; gap: 8px; align-items: flex-end; padding: 8px 10px; border-bottom: 1px solid var(--wb-line); }
+.wb-block-ask textarea { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-sm); resize: vertical; }
+.wb-block-ask textarea:focus { border-color: var(--accent-color); outline: 0; }
+.wb-block-ask button { height: 28px; padding: 0 12px; border: 1px solid var(--accent-color); border-radius: var(--radius-sm); background: var(--accent-color); color: #031312; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.wb-block-ask button:disabled { opacity: .45; cursor: default; }
+.wb-block-preview { padding: 12px; background: #fff; }
+.wb-block-preview iframe { display: block; width: 660px; max-width: 100%; margin: 0 auto; border: 0; background: #fff; }
+@media (max-width: 720px) { .wb-block-text, .wb-blocks-filter { display: none; } }
+
+/* Запуск навыка: кнопки страниц на карточке и ▶ в списке навыков. */
+.wb-skill-launch { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.wb-skill-launch button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.wb-skill-launch button:hover { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); color: var(--text-main); }
+.wb-skill-launch button.is-primary { border-color: var(--accent-color); background: var(--accent-color); color: #031312; font-weight: var(--weight-medium); }
+.wb-menu-item-row { position: relative; }
+.wb-menu-item-row > .wb-menu-item { padding-right: 36px; }
+.wb-menu-item-launch { position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; transform: translateY(-50%); }
+.wb-menu-item-row:hover .wb-menu-item-launch { color: var(--accent-color); border-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+.wb-menu-item-launch:hover { background: var(--wb-selected); }

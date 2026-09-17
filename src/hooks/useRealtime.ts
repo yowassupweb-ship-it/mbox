@@ -80,6 +80,14 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
             scheduleReload("agent_presence");
             announce(`Агент ${message.agent || "Agent"} подключился`);
           }
+          // Агент просит открыть вкладку (POST /api/mbox/ui/open) — рабочее место ловит событие само.
+          if (message.type === "open_tab") {
+            window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: message }));
+          }
+          // Агент поправил файл навыка (MCP edit_skill_file) — открытые вкладки навыка перечитывают его.
+          if (message.type === "skill_file_changed") {
+            window.dispatchEvent(new CustomEvent("mbox:skill-file-changed", { detail: message }));
+          }
           if (message.type === "server_tick") {
             setPulse((value) => value + 1);
           }

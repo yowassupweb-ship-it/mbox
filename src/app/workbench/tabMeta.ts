@@ -51,6 +51,12 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       const name = path.split("/").pop() || path;
       return { title: name, hint: path, icon: /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg)$/i.test(name) ? `${ICONS}/figma.png` : /\.(md|mdx|markdown|txt|rst)$/i.test(name) ? `${ICONS}/документы.png` : `${MENU}/papki.png` };
     }
+    case "skillblocks":
+      return { title: "Коллекция блоков", hint: `Навык ${first} · блоки писем`, icon: `${MENU}/navyki.png` };
+    case "skillpage": {
+      const file = key.split(":").slice(2).join(":");
+      return { title: file.split("/").pop() || file, hint: `Навык ${first} · ${file}`, icon: `${MENU}/navyki.png` };
+    }
     case "gitdiff": {
       const path = key.split(":").slice(2).join(":");
       return { title: `± ${path.split("/").pop() || path}`, hint: `git diff · ${path}`, icon: `${MENU}/история.png` };

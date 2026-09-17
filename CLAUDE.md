@@ -146,7 +146,7 @@ MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент
 
 ## Навыки агентов
 
-Навыки Claude и Codex (`SKILL.md`, правила, шаблоны, скрипты) хранятся в `skills/` и выкатываются вместе с сервером — см. [skills/README.md](skills/README.md). Установленные копии в `~/.claude/skills` и `~/.codex/skills` ставит и перезаписывает `scripts/sync-skills.mjs` (наблюдатель Claude — сам, при старте и раз в час); правки — только в `skills/`, потом деплой. Каталог для страницы «Навыки» — `server/skill-catalog.mjs`.
+Навыки Claude и Codex (`SKILL.md`, правила, шаблоны, скрипты) хранятся в `skills/` и выкатываются вместе с сервером — см. [skills/README.md](skills/README.md). Установленные копии в `~/.claude/skills` и `~/.codex/skills` ставит и перезаписывает `scripts/sync-skills.mjs` (наблюдатель Claude — сам, при старте и раз в час); правки — только в `skills/`, потом деплой. Каталог для страницы «Навыки» — `server/skill-catalog.mjs` (`pages` — вкладки навыка, первая — «Запустить»). Агенты правят файлы навыков на лету (MCP `edit_skill_file`, база `skill_file_versions`, `server/skill-overrides.mjs`; в репозиторий — `npm run mbox:skills-pull`) и открывают вкладки в интерфейсе владельца (MCP `open_tab` → `POST /api/mbox/ui/open` → вебсокет только окнам этого пользователя, `server/ui-open.mjs`, `src/app/workbench/agentTabs.ts`).
 
 ## Деплой
 

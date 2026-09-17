@@ -35,6 +35,13 @@ function inline(text: string, key: string): ReactNode[] {
   });
 }
 
+const TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+/** Ячейки строки таблицы; \| внутри ячейки — буквальная черта, а не граница. */
+function tableCells(line: string) {
+  return line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "").split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
+
 /** Записи памяти в основном пишут агенты markdown'ом: заголовки, списки, блоки кода. Полноценный
  * парсер не нужен — только то, что реально встречается, чтобы текст не читался простынёй. */
 export function renderDocument(text: string): ReactNode {
@@ -47,6 +54,24 @@ export function renderDocument(text: string): ReactNode {
       i += 1;
       while (i < lines.length && !lines[i].trim().startsWith("```")) { code.push(lines[i]); i += 1; }
       blocks.push(<pre key={i}>{code.join("\n")}</pre>);
+      continue;
+    }
+    // Таблица: строка с | и под ней разделитель |---|:---:|. Раньше выводилась трубами как есть.
+    if (line.includes("|") && i + 1 < lines.length && lines[i + 1].includes("|") && TABLE_SEPARATOR.test(lines[i + 1])) {
+      const header = tableCells(line);
+      const align = tableCells(lines[i + 1]).map((cell) => (cell.startsWith(":") && cell.endsWith(":") ? "center" : cell.endsWith(":") ? "right" : undefined));
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) { rows.push(tableCells(lines[i])); i += 1; }
+      i -= 1;
+      blocks.push(
+        <div key={i} className="wb-md-table">
+          <table>
+            <thead><tr>{header.map((cell, c) => <th key={c} style={{ textAlign: align[c] }}>{inline(cell, `th${i}-${c}`)}</th>)}</tr></thead>
+            <tbody>{rows.map((row, r) => <tr key={r}>{header.map((_, c) => <td key={c} style={{ textAlign: align[c] }}>{inline(row[c] ?? "", `td${i}-${r}-${c}`)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>,
+      );
       continue;
     }
     const heading = line.match(/^(#{1,4})\s+(.*)$/);

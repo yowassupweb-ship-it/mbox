@@ -373,6 +373,8 @@ async function runClaude(item) {
     // MBOX — русскоязычный проект: владелец, Джарвис и вся консоль общаются по-русски. Без этой
     // строки ответ уходил на английском (нет другого языкового сигнала во всём промпте).
     "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
+    // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
+    "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
     // Навыки ставятся с сервера MBOX (refreshSkills); без явного списка Claude в -p режиме их не замечал.
     installedSkills.length
       ? `MBOX skills are installed from the MBOX server in ~/.claude/skills. If the request matches one, invoke it with the Skill tool and follow its SKILL.md exactly: ${installedSkills.map((skill) => `${skill.id} — ${skill.description}`).join(" | ")}`

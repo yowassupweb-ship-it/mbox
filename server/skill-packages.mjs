@@ -24,18 +24,36 @@ function frontmatter(text) {
   return { name: field("name"), description: field("description") };
 }
 
-// Пакет навыка: файлы с контрольными суммами и общий hash (меняется при любой правке). content — base64.
+export const isSkillId = (id) => SKILL_ID.test(String(id));
+
+/** Относительный путь внутри навыка: без выхода наверх, без скрытых файлов, без обратных слэшей. */
+export function isSkillFilePath(rel) {
+  const value = String(rel || "");
+  if (!value || value.length > 300 || value.includes("\\") || value.startsWith("/")) return false;
+  return value.split("/").every((part) => part && part !== ".." && !part.startsWith("."));
+}
+
+/** Пакет из готового набора файлов [{path, buffer, edited?}]: контрольные суммы, общий hash, имя из SKILL.md. */
+export function buildSkillPackage(id, entries, { withContent = true } = {}) {
+  const files = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).map((entry) => ({
+    path: entry.path,
+    size: entry.buffer.length,
+    sha256: sha256(entry.buffer),
+    ...(entry.edited ? { edited: true } : {}),
+    ...(withContent ? { content: entry.buffer.toString("base64") } : {}),
+  }));
+  const skillFile = entries.find((entry) => entry.path === "SKILL.md");
+  const { name, description } = frontmatter(skillFile ? skillFile.buffer.toString("utf8") : "");
+  return { id, name: name || id, description, hash: sha256(files.map((file) => `${file.path}\n${file.sha256}`).join("\n")), files };
+}
+
+// Пакет навыка из папки: файлы с контрольными суммами и общий hash (меняется при любой правке). content — base64.
 export function readSkillPackage(skillsRoot, id, { withContent = true } = {}) {
   if (!SKILL_ID.test(String(id))) return null;
   const dir = path.join(skillsRoot, id);
-  const skillFile = path.join(dir, "SKILL.md");
-  if (!fs.existsSync(skillFile)) return null;
-  const files = walk(dir).sort().map((rel) => {
-    const buffer = fs.readFileSync(path.join(dir, ...rel.split("/")));
-    return { path: rel, size: buffer.length, sha256: sha256(buffer), ...(withContent ? { content: buffer.toString("base64") } : {}) };
-  });
-  const { name, description } = frontmatter(fs.readFileSync(skillFile, "utf8"));
-  return { id, name: name || id, description, hash: sha256(files.map((file) => `${file.path}\n${file.sha256}`).join("\n")), files };
+  if (!fs.existsSync(path.join(dir, "SKILL.md"))) return null;
+  const entries = walk(dir).map((rel) => ({ path: rel, buffer: fs.readFileSync(path.join(dir, ...rel.split("/"))) }));
+  return buildSkillPackage(id, entries, { withContent });
 }
 
 export function listSkillPackages(skillsRoot) {

@@ -16,7 +16,8 @@ import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi } from "./notes.mjs";
 import { ensureStorageSchema, handleStorageApi } from "./storage.mjs";
-import { listSkillPackages, readSkillFile, readSkillPackage } from "./skill-packages.mjs";
+import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
+import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -875,6 +876,7 @@ function memberRouteAllowed(pathname) {
   return pathname === "/api/mbox/auth/me"
     || pathname === "/api/mbox/agent/skills"
     || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+)?$/.test(pathname)
+    || pathname === "/api/mbox/ui/open"
     || pathname === "/api/mbox/projects"
     || pathname === "/api/mbox/memories"
     || pathname === "/api/mbox/memories/search"
@@ -1109,21 +1111,21 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { tools: TOOL_CATALOG });
   }
 
-  // Пакеты навыков (skills/ в репозитории — источник правды): SKILL.md, правила, шаблоны, скрипты.
-  // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill читает файлы.
-  if (url.pathname === "/api/mbox/agent/skills/packages" && req.method === "GET") {
-    return sendJson(res, 200, { packages: listSkillPackages(path.join(root, "skills")) });
+  // Агент открывает вкладку в интерфейсе владельца (см. server/ui-open.mjs, MCP open_tab).
+  if (url.pathname === "/api/mbox/ui/open" && req.method === "POST") {
+    const user = await currentUser(req);
+    if (!user) return sendJson(res, 401, { error: "unauthorized" });
+    const parsed = parseOpenRequest(await readBody(req), actorFromReq(req));
+    if (parsed.error) return sendJson(res, 400, { error: parsed.error });
+    return sendJson(res, 200, { delivered: sendOpenTab(realtimeClients, user.id, parsed.event), event: parsed.event });
   }
-  const skillPackageMatch = url.pathname.match(/^\/api\/mbox\/agent\/skills\/packages\/([a-z0-9-]+)$/);
-  if (skillPackageMatch && req.method === "GET") {
-    const file = url.searchParams.get("file");
-    if (file) {
-      const content = readSkillFile(path.join(root, "skills"), skillPackageMatch[1], file);
-      return content == null ? sendJson(res, 404, { error: "skill_file_not_found" }) : sendJson(res, 200, { id: skillPackageMatch[1], path: file, content });
-    }
-    const skillPackage = readSkillPackage(path.join(root, "skills"), skillPackageMatch[1]);
-    return skillPackage ? sendJson(res, 200, { package: skillPackage }) : sendJson(res, 404, { error: "skill_not_found" });
-  }
+
+  // Пакеты навыков: skills/ в репозитории плюс правки агентов из базы (server/skill-overrides.mjs).
+  // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill/edit_skill_file.
+  if (await handleSkillPackagesApi({
+    req, res, url, query, skillsRoot: path.join(root, "skills"), actor: actorFromReq(req), sendJson, readBody,
+    onChange: (change) => broadcastRealtime("skill_file_changed", change),
+  })) return;
 
   if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {
     const usage = await query(
@@ -2860,6 +2862,7 @@ httpServer.on("upgrade", async (req, socket, head) => {
     const user = await currentUser(req);
     if (!user) return socket.destroy();
     realtimeServer.handleUpgrade(req, socket, head, (ws) => {
+      tagSocketUser(ws, user);
       realtimeServer.emit("connection", ws, req);
     });
   } catch {
@@ -2874,6 +2877,7 @@ setInterval(() => broadcastRealtime("server_tick"), 5000).unref();
 ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
 ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
+ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 
 httpServer.listen(port, host, () => {
   console.log(`MBOX listening on http://${host}:${port}`);

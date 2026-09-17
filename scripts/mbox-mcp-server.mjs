@@ -1136,6 +1136,71 @@ server.registerTool(
   },
 );
 
+async function putSkillFile(id, file, content, message) {
+  return mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}/files?file=${encodeURIComponent(file)}`, {
+    method: "PUT",
+    body: JSON.stringify({ content, message }),
+  });
+}
+
+server.registerTool(
+  "edit_skill_file",
+  {
+    title: "Edit an MBOX skill file in place",
+    description: "Replace one exact fragment in a skill file on the MBOX server (SKILL.md, a form .html, templates, rules). The change is live immediately — no commit or deploy: open MBOX tabs reload, get_skill and skill sync see it, previous versions are kept. old_text must occur exactly once (include surrounding lines to make it unique); read the file with get_skill first.",
+    inputSchema: { id: z.string(), file: z.string(), old_text: z.string(), new_text: z.string(), message: z.string().default("").describe("What changed and why") },
+  },
+  async ({ id, file, old_text, new_text, message }) => {
+    const { content } = await mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}?file=${encodeURIComponent(file)}`);
+    const count = old_text ? content.split(old_text).length - 1 : 0;
+    if (count !== 1) throw new Error(count ? `old_text occurs ${count} times — add surrounding lines to make it unique` : "old_text not found in the file — re-read it with get_skill");
+    const result = await putSkillFile(id, file, content.replace(old_text, () => new_text), message);
+    return textResult(result.unchanged ? "No change." : `Saved ${id}/${file} (version ${result.version_id}). Live now.`);
+  },
+);
+
+server.registerTool(
+  "write_skill_file",
+  {
+    title: "Write a whole MBOX skill file",
+    description: "Create or fully replace a text file of a skill on the MBOX server (a new form, template, reference, or a new skill starting from SKILL.md with name/description frontmatter). Live immediately, versioned. For small changes prefer edit_skill_file.",
+    inputSchema: { id: z.string(), file: z.string(), content: z.string(), message: z.string().default("") },
+  },
+  async ({ id, file, content, message }) => {
+    const result = await putSkillFile(id, file, content, message);
+    return textResult(result.unchanged ? "No change." : `Saved ${id}/${file} (version ${result.version_id}). Live now.`);
+  },
+);
+
+server.registerTool(
+  "open_tab",
+  {
+    title: "Open a tab in the owner's MBOX interface",
+    description: [
+      "Open a tab in the MBOX workspace the owner has open right now (MBOX Desktop, browser, phone) — use it as a step of a skill scenario instead of asking the human to find something.",
+      "target forms:",
+      "- skill-file:<skill>/<file.html|.md> — a form or document from a server skill package, e.g. skill-file:email-campaign/brief-builder.html. A form's «send to agent» button posts its result into the MBOX chat addressed to you (reply_to).",
+      "- skill-blocks:<skill> — the block collection of an email skill: every real block of its letters (templates/manifest.json) with a live preview.",
+      "- path:<absolute path> — a file or folder on the owner's computer (MBOX Desktop only, inside a folder connected in «Папки»): a folder is revealed in the sidebar, a file opens as a tab. Use it to show finished results, e.g. the output folder of a skill.",
+      "- url:https://… — external page, opens in the browser.",
+      "- a workspace tab address: file:<artifact id>, memory:<id>, note:<id>, todo:<id>, todos:<project id>.",
+      "Returns delivered = number of the owner's open windows that received it; 0 means MBOX is not open — tell the human where to find it instead.",
+    ].join("\n"),
+    inputSchema: {
+      target: z.string(),
+      title: z.string().default("").describe("Tab title (optional)"),
+      note: z.string().default("").describe("Short hint shown to the human when the tab opens"),
+      reply_to: z.string().default("").describe("Who receives what the human sends from a form; defaults to you"),
+    },
+  },
+  async ({ target, title, note, reply_to }) => {
+    const data = await mboxFetch("/api/mbox/ui/open", { method: "POST", body: JSON.stringify({ target, title, note, reply_to }) });
+    return textResult(data.delivered
+      ? `Opened in ${data.delivered} MBOX window(s): ${target}`
+      : `No open MBOX window for this user — nothing opened. Tell the human how to open it: ${target}`);
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

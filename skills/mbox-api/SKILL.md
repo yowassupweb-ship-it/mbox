@@ -49,7 +49,8 @@ curl -s -c "$COOKIE" -X POST "$BASE/api/mbox/auth/login" \
 | `GET /history` | последние 200 событий аудита |
 | `GET /server` | последняя метрика сервера |
 | `GET /agents` | статус подключённых агентов |
-| `WS /realtime` | `entity_changed`, `server_tick` каждые 5 сек |
+| `POST /ui/open` `{target, title?, note?, reply_to?}` | открыть вкладку в интерфейсе владельца: `skill-file:<навык>/<файл>`, `path:<абсолютный путь>`, `url:https://…`, `file:<id>`, `memory:<id>`, `todo:<id>`; ответ `delivered` — сколько окон получили (то же, что MCP `open_tab`) |
+| `WS /realtime` | `entity_changed`, `open_tab` (только окнам этого пользователя), `server_tick` каждые 5 сек |
 
 ## Правила
 

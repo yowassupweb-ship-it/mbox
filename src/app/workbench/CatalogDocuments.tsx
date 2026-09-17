@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, ExternalLink, FolderOpen, Play, Square } from "lucide-react";
+import { openSkillPage } from "./agentTabs";
+import type { TabsApi } from "./tabs";
 import type { LocalTool, ToolRunEvent } from "../../types";
 import { formatLastUsed, formatTokens, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { ToolIcon } from "./CatalogViews";
@@ -14,7 +16,7 @@ function useCopy() {
   return { copied, copy };
 }
 
-export function SkillDocument({ skillId }: { skillId: string }) {
+export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsApi }) {
   const { data, loading } = useSkillsCatalog();
   const { copied, copy } = useCopy();
   const skill = data.skills.find((item) => item.id === skillId);
@@ -26,6 +28,15 @@ export function SkillDocument({ skillId }: { skillId: string }) {
         <span className="wb-doc-crumbs">Навыки › {skill.owner}</span>
         <h1>{skill.name}</h1>
         <p>{skill.summary}</p>
+        {!!skill.pages?.length && (
+          <div className="wb-skill-launch">
+            {skill.pages.map((page, index) => (
+              <button key={page.target} type="button" className={index === 0 ? "is-primary" : undefined} onClick={() => openSkillPage(page, tabs)}>
+                {index === 0 && <Play size={13} />}{index === 0 ? `Запустить · ${page.title}` : page.title}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
       <div className="wb-stat-row">
         <div><b>{skill.calls}</b><span>вызовов</span></div>
@@ -48,12 +59,6 @@ export function SkillDocument({ skillId }: { skillId: string }) {
           <>
             <dt>SKILL.md</dt>
             <dd><code>{skill.location}</code> <button type="button" className="wb-inline-btn" onClick={() => copy(skill.location!, "location")}><Copy size={12} />{copied === "location" ? "скопировано" : ""}</button></dd>
-          </>
-        )}
-        {skill.id === "email-campaign" && (
-          <>
-            <dt>Библиотека</dt>
-            <dd><a href="/email-library.html" target="_blank" rel="noreferrer">Блоки писем <ExternalLink size={12} /></a></dd>
           </>
         )}
       </dl>

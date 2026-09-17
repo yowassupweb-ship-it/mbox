@@ -387,6 +387,8 @@ async function runCodex(item) {
     "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
     "Keep the final answer concise and directly useful.",
     "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
+    // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
+    "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
     "",
     conversationContext,
     "",

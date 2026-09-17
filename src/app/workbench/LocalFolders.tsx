@@ -4,6 +4,7 @@ import { formatSince } from "../../lib/format";
 import { IMAGE_FILE, gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspaceBridge, type DirEntry, type GitSummary, type WorkspaceRoot } from "./localWorkspace";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
+import { onLocalReveal } from "./agentTabs";
 
 const ICONS = "/assets/icons/icons";
 
@@ -86,6 +87,15 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [filter, ws.roots, bridge]);
+
+  // Агент показал папку (MCP open_tab path:…): раскрываем путь до неё и выделяем.
+  useEffect(() => onLocalReveal(({ rootKey, path }) => {
+    const parts = path ? path.split("/") : [];
+    const chain = [`${rootKey}:`, ...parts.map((_, index) => `${rootKey}:${parts.slice(0, index + 1).join("/")}`)];
+    setExpanded((current) => [...new Set([...current, ...chain])]);
+    setSelected(path ? { rootKey, entry: { name: parts[parts.length - 1], path, type: "dir", size: 0, mtime: 0 } } : { rootKey, entry: null });
+    for (const id of chain) { const [key, ...rest] = id.split(":"); void load(key, rest.join(":")); }
+  }), [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(rootKey: string, rel: string) {
     const id = `${rootKey}:${rel}`;

@@ -112,6 +112,15 @@ function renderMarkdownLite(text: string): ReactNode {
   const blocks: ReactNode[] = [];
   let i = 0;
   while (i < lines.length) {
+    // Блок кода ```…``` — раньше разбирался как инлайн-код, и от ограды оставались одиночные кавычки.
+    if (lines[i].trim().startsWith("```")) {
+      const code: string[] = [];
+      i += 1;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) { code.push(lines[i]); i += 1; }
+      i += 1;
+      blocks.push(<pre key={`pre-${blocks.length}`} className="console-log-pre">{code.join("\n")}</pre>);
+      continue;
+    }
     const isTableStart = lines[i].includes("|") && i + 1 < lines.length && TABLE_SEPARATOR_ROW.test(lines[i + 1]);
     if (isTableStart) {
       const header = splitTableRow(lines[i]);
