@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Конструктор письма — Вокруг света</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --surface-page: #fff6ed;
+      --surface-card: #ffffff;
+      --surface-soft: #fff8f4;
+      --action-primary: #ff732d;
+      --action-primary-strong: #d95516;
+      --border-soft: #ffe8d8;
+      --text-primary: #2a2a2a;
+      --text-secondary: #464646;
+      --text-muted: #777777;
+      --text-error: #a63d18;
+      --radius-container: 35px;
+      --radius-card: 20px;
+      --radius-control: 14px;
+      --radius-pill: 999px;
+      --shadow-action: 0 3px 0 rgba(140, 40, 0, .4);
+      --shadow-card: 0 16px 40px rgba(117, 68, 33, .09);
+      --font-display: Rubik, Arial, sans-serif;
+      --font-body: Inter, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--surface-page); color: var(--text-primary); font-family: var(--font-body); }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .shell { width: min(100% - 32px, 920px); margin: 32px auto 64px; }
+    .hero { padding: 30px 34px; border-radius: var(--radius-container); background: var(--surface-card); border: 1.5px solid var(--border-soft); box-shadow: var(--shadow-card); }
+    .eyebrow { margin: 0 0 10px; color: var(--action-primary); font: 700 12px/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0; font: 700 clamp(28px, 5vw, 42px)/1.08 var(--font-display); letter-spacing: -.03em; }
+    .hero p { max-width: 640px; margin: 14px 0 0; color: var(--text-secondary); font-size: 15px; line-height: 1.55; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; margin-top: 20px; }
+    .form-card, .summary { border: 1.5px solid var(--border-soft); background: var(--surface-card); box-shadow: var(--shadow-card); }
+    .form-card { padding: 26px; border-radius: var(--radius-container); }
+    .summary { position: sticky; top: 20px; padding: 22px; border-radius: var(--radius-card); }
+    .section + .section { margin-top: 28px; padding-top: 26px; border-top: 2px solid var(--border-soft); }
+    h2 { margin: 0 0 6px; font: 700 20px/1.2 var(--font-display); }
+    .section-hint, .summary p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .field-grid.single { grid-template-columns: 1fr; }
+    .field { display: grid; gap: 7px; }
+    .field label, .legend { color: var(--text-secondary); font: 600 12px/1.3 var(--font-display); }
+    .field label span { color: var(--text-muted); font-family: var(--font-body); font-weight: 400; }
+    input, textarea, select { width: 100%; border: 1.5px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-soft); color: var(--text-primary); outline: none; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+    input, select { min-height: 44px; padding: 11px 12px; }
+    textarea { min-height: 98px; padding: 12px; resize: vertical; line-height: 1.5; }
+    input:hover, textarea:hover, select:hover { border-color: #ffb68e; background: #fffdfb; }
+    input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid rgba(255, 115, 45, .32); outline-offset: 2px; }
+    .invalid { border-color: var(--text-error) !important; box-shadow: 0 0 0 3px rgba(166, 61, 24, .12); }
+    .choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+    .choice { position: relative; display: block; }
+    .choice input { position: absolute; opacity: 0; pointer-events: none; }
+    .choice span { display: block; min-height: 82px; padding: 15px; border: 1.5px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-soft); color: var(--text-secondary); font: 600 14px/1.2 var(--font-display); transition: transform .16s ease, border-color .16s ease, background .16s ease; }
+    .choice small { display: block; margin-top: 7px; color: var(--text-muted); font: 400 11px/1.35 var(--font-body); }
+    .choice:hover span { transform: translateY(-1px); border-color: #ffb68e; }
+    .choice input:checked + span { border-color: var(--action-primary); background: #fff0e8; color: var(--action-primary-strong); box-shadow: var(--shadow-action); }
+    .choice input:focus-visible + span { outline: 3px solid rgba(255, 115, 45, .32); outline-offset: 2px; }
+    .toggle-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .toggle { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; padding: 0 14px; border: 1.5px solid var(--border-soft); border-radius: var(--radius-pill); background: var(--surface-soft); color: var(--text-secondary); font-size: 13px; }
+    .toggle input { width: 18px; height: 18px; accent-color: var(--action-primary); }
+    .trips { display: grid; gap: 12px; margin-top: 18px; }
+    .trip-card { padding: 18px; border: 1.5px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-soft); }
+    .trip-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .trip-top h3 { margin: 0; color: var(--action-primary-strong); font: 700 15px/1 var(--font-display); }
+    .trip-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .trip-fields .wide { grid-column: 1 / -1; }
+    .button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: var(--radius-pill); padding: 0 18px; font: 700 13px/1 var(--font-display); transition: transform .16s ease, background .16s ease, color .16s ease; }
+    .button:hover:not(:disabled) { transform: translateY(-1px); }
+    .button:active:not(:disabled) { transform: translateY(1px); }
+    .button.primary { color: #fff; background: var(--action-primary); border-bottom: 3px solid rgba(140, 40, 0, .4); }
+    .button.primary:hover:not(:disabled) { background: var(--action-primary-strong); }
+    .button.secondary { color: var(--action-primary-strong); background: #fff; border-color: var(--border-soft); }
+    .button.danger { min-height: 34px; color: var(--text-error); background: transparent; border-color: transparent; padding-inline: 8px; }
+    .button.danger:hover:not(:disabled) { background: #fff0e8; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .summary h2 { font-size: 18px; }
+    .status { display: inline-flex; align-items: center; min-height: 28px; margin: 12px 0; padding: 0 10px; border-radius: var(--radius-pill); background: #fff0e8; color: var(--action-primary-strong); font: 600 12px/1 var(--font-display); }
+    .status.ready { background: #edf8ef; color: #236b33; }
+    .summary-list { display: grid; gap: 10px; margin: 18px 0 22px; padding: 0; list-style: none; }
+    .summary-list li { padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
+    .summary-list strong { display: block; margin-bottom: 3px; color: var(--text-primary); font: 600 12px/1.25 var(--font-display); }
+    .notice { display: none; margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-control); background: #fff0e8; color: var(--text-error); font-size: 13px; line-height: 1.45; }
+    .notice.visible { display: block; }
+    .prompt-preview { width: 100%; min-height: 220px; margin-top: 18px; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .footer-note { margin: 18px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+    @media (max-width: 760px) { .shell { width: min(100% - 20px, 660px); margin-top: 10px; } .hero, .form-card { padding: 22px; border-radius: 25px; } .layout { grid-template-columns: 1fr; } .summary { position: static; order: -1; } .field-grid, .trip-fields, .choice-grid { grid-template-columns: 1fr; } .choice span { min-height: 0; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">Вокруг света</p>
+      <h1>Конструктор письма</h1>
+      <p>Заполните содержание — дизайн, блоки, HTML и проверку возьмёт на себя AI. Черновик хранится только в этом браузере.</p>
+    </header>
+
+    <div class="layout">
+      <form class="form-card" id="brief-form" novalidate>
+        <section class="section" aria-labelledby="format-title">
+          <h2 id="format-title">Формат письма</h2>
+          <p class="section-hint">Выберите, как получатель будет читать письмо.</p>
+          <div class="choice-grid" role="radiogroup" aria-label="Тип письма">
+            <label class="choice"><input type="radio" name="type" value="подборка" checked><span>Подборка<small>Несколько туров одной темы</small></span></label>
+            <label class="choice"><input type="radio" name="type" value="одна акция"><span>Одна акция<small>Один главный переход</small></span></label>
+            <label class="choice"><input type="radio" name="type" value="дайджест"><span>Дайджест<small>Несколько самостоятельных тем</small></span></label>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="message-title">
+          <h2 id="message-title">Смысл письма</h2>
+          <p class="section-hint">Пишите как для коллеги — без технических терминов.</p>
+          <div class="field-grid">
+            <div class="field"><label for="subject">Тема письма</label><input id="subject" name="subject" autocomplete="off" placeholder="Например: Последние места на ноябрьские выходные"></div>
+            <div class="field"><label for="preheader">Прехедер <span>короткая строка рядом с темой</span></label><input id="preheader" name="preheader" autocomplete="off" placeholder="Пять коротких поездок по России"></div>
+          </div>
+          <div class="field-grid single"><div class="field"><label for="message">Главная мысль</label><textarea id="message" name="message" placeholder="Что важно сказать получателю и почему сейчас?"></textarea></div></div>
+          <div class="field-grid"><div class="field"><label for="cta">Главная кнопка</label><input id="cta" name="cta" autocomplete="off" placeholder="Смотреть все туры"></div><div class="field"><label for="cta-url">Ссылка главной кнопки</label><input id="cta-url" name="ctaUrl" inputmode="url" placeholder="https://vs-travel.ru/..." type="url"></div></div>
+        </section>
+
+        <section class="section" aria-labelledby="analytics-title">
+          <h2 id="analytics-title">Аналитика и дополнительные пожелания</h2>
+          <div class="field-grid"><div class="field"><label for="campaign">UTM-кампания</label><input id="campaign" name="campaign" autocomplete="off" placeholder="november-weekends-2026"></div><div class="field"><label for="content">Идентификатор выпуска <span>если уже есть</span></label><input id="content" name="content" autocomplete="off" placeholder="Например: 151026"></div></div>
+          <div class="field-grid single"><div class="field"><label for="extra-blocks">Дополнительные блоки <span>только если они нужны</span></label><textarea id="extra-blocks" name="extraBlocks" placeholder="Например: отзыв клиента, промокод, подборка речных круизов. Или: ничего дополнительного."></textarea></div></div>
+        </section>
+
+        <section class="section" aria-labelledby="trips-title">
+          <h2 id="trips-title">Туры и карточки</h2>
+          <p class="section-hint">Для одной акции карточки можно не добавлять. Для подборки и дайджеста добавьте все известные туры.</p>
+          <div class="trips" id="trips"></div>
+          <div class="actions"><button class="button secondary" type="button" id="add-trip">Добавить тур</button></div>
+        </section>
+
+        <section class="section" aria-labelledby="result-title">
+          <h2 id="result-title">Задание для AI</h2>
+          <p class="section-hint">Конструктор не отправляет письмо. Он готовит точную постановку для навыка <code>email-campaign</code>.</p>
+          <textarea class="prompt-preview" id="prompt" readonly aria-label="Сгенерированное задание для AI"></textarea>
+          <div class="notice" id="notice" role="alert"></div>
+          <div class="actions"><button class="button primary" type="button" id="copy">Скопировать задание</button><button class="button secondary" type="button" id="download">Скачать задание</button><button class="button secondary" type="button" id="clear">Очистить черновик</button></div>
+          <p class="footer-note">После вставки задания в чат AI сам соберёт HTML, прогонит строгий preflight и Email Checker.</p>
+        </section>
+      </form>
+
+      <aside class="summary" aria-live="polite">
+        <h2>Готовность брифа</h2>
+        <div class="status" id="status">Нужны данные</div>
+        <p id="summary-copy">Заполните смысл письма и ссылку. Карточки можно добавить позже.</p>
+        <ul class="summary-list" id="summary-list"></ul>
+        <button class="button primary" type="button" id="summary-copy-button">Скопировать задание</button>
+      </aside>
+    </div>
+  </main>
+
+  <template id="trip-template">
+    <fieldset class="trip-card">
+      <div class="trip-top"><h3>Тур <span class="trip-number"></span></h3><button class="button danger remove-trip" type="button">Удалить</button></div>
+      <div class="trip-fields">
+        <div class="field"><label>Название тура</label><input data-field="name" autocomplete="off" placeholder="Название"></div>
+        <div class="field"><label>Даты и длительность</label><input data-field="dates" autocomplete="off" placeholder="3 дня · 2 ночи · 4–6 ноября"></div>
+        <div class="field wide"><label>Маршрут</label><input data-field="route" autocomplete="off" placeholder="Москва — Суздаль — Владимир"></div>
+        <div class="field wide"><label>Ссылка тура</label><input data-field="url" type="url" inputmode="url" placeholder="https://vs-travel.ru/tour?id=..."></div>
+        <div class="field wide"><label>Ссылка на изображение</label><input data-field="image" type="url" inputmode="url" placeholder="https://..."></div>
+        <div class="field wide"><label>Alt изображения</label><input data-field="alt" autocomplete="off" placeholder="Например: Осенний Суздаль"></div>
+        <div class="field wide"><label>Текст кнопки <span>необязательно</span></label><input data-field="cardCta" autocomplete="off" placeholder="Узнать подробнее"></div>
+      </div>
+    </fieldset>
+  </template>
+
+  <script>
+    const storageKey = 'vs-email-brief-v1';
+    const form = document.querySelector('#brief-form');
+    const trips = document.querySelector('#trips');
+    const template = document.querySelector('#trip-template');
+    const prompt = document.querySelector('#prompt');
+    const notice = document.querySelector('#notice');
+    const status = document.querySelector('#status');
+    const summaryCopy = document.querySelector('#summary-copy');
+    const summaryList = document.querySelector('#summary-list');
+    const requiredBase = ['subject', 'message', 'cta', 'ctaUrl', 'campaign'];
+    let nextTripId = 1;
+
+    const read = (name) => form.elements[name]?.value.trim() || '';
+    const selectedType = () => form.querySelector('input[name="type"]:checked').value;
+    const cardData = () => [...trips.querySelectorAll('.trip-card')].map((card) => Object.fromEntries([...card.querySelectorAll('[data-field]')].map((field) => [field.dataset.field, field.value.trim()])));
+    const missing = () => {
+      const errors = requiredBase.filter((name) => !read(name));
+      const type = selectedType();
+      const cards = cardData();
+      if ((type === 'подборка' || type === 'дайджест') && !cards.length) errors.push('trips');
+      cards.forEach((card, index) => ['name', 'route', 'dates', 'url', 'image', 'alt'].forEach((key) => { if (!card[key]) errors.push(`trip-${index}-${key}`); }));
+      return errors;
+    };
+    const escapeText = (value) => value || 'не указано';
+    const buildPrompt = () => {
+      const cards = cardData();
+      const content = read('content') || 'не указан — предложи идентификатор выпуска в формате ddmmyy и запроси подтверждение';
+      const cardLines = cards.length ? cards.map((card, index) => `${index + 1}. ${escapeText(card.name)} | ${escapeText(card.route)} | ${escapeText(card.dates)} | ${escapeText(card.url)} | ${escapeText(card.image)} | ${escapeText(card.alt)} | CTA: ${card.cardCta || 'Узнать подробнее'}`).join('\n') : 'Карточки не нужны.';
+      return [
+        'Используй навык email-campaign для Вокруг света.',
+        `Тип: ${selectedType()}.`,
+        `Тема: ${escapeText(read('subject'))}.`,
+        `Прехедер: ${read('preheader') || 'не указан — предложи короткий вариант'}.`,
+        `Главная мысль: ${escapeText(read('message'))}.`,
+        `Главная CTA: ${escapeText(read('cta'))} — ${escapeText(read('ctaUrl'))}.`,
+        `UTM-кампания: ${escapeText(read('campaign'))}.`,
+        `utm_content: ${content}.`,
+        `Дополнительные блоки: ${read('extraBlocks') || 'не нужны; не добавляй блоки по умолчанию'}.`,
+        'Туры:', cardLines,
+        'Собери готовый HTML в mail-skill/ready, используй letter1.html и реальные блоки. Не придумывай отсутствующие факты. Перед передачей выполни strict preflight и проверку в Email Checker.'
+      ].join('\n');
+    };
+    const save = () => {
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.type = selectedType(); data.trips = cardData();
+      localStorage.setItem(storageKey, JSON.stringify(data));
+    };
+    const update = () => {
+      const errors = missing();
+      prompt.value = buildPrompt();
+      status.textContent = errors.length ? `Нужно заполнить: ${errors.length}` : 'Бриф готов';
+      status.classList.toggle('ready', !errors.length);
+      summaryCopy.textContent = errors.length ? 'AI уточнит недостающие данные перед сборкой.' : 'Все обязательные данные есть — можно передавать AI.';
+      const labels = { subject: 'тема', message: 'главная мысль', cta: 'главная кнопка', ctaUrl: 'ссылка кнопки', campaign: 'UTM-кампания', trips: 'минимум один тур' };
+      const summaryRows = errors.length
+        ? errors.slice(0, 6).map((error) => ['Нужно уточнить', labels[error] || 'данные карточки тура'])
+        : [['Формат', selectedType()], ['Туров', cardData().length || 'без карточек'], ['Кампания', read('campaign')]];
+      summaryList.replaceChildren(...summaryRows.map(([label, value]) => {
+        const item = document.createElement('li');
+        const strong = document.createElement('strong');
+        strong.textContent = label;
+        item.append(strong, document.createTextNode(String(value)));
+        return item;
+      }));
+      save();
+    };
+    const addTrip = (data = {}) => {
+      const fragment = template.content.cloneNode(true);
+      const card = fragment.querySelector('.trip-card');
+      const tripId = `trip-${nextTripId++}`;
+      card.querySelectorAll('[data-field]').forEach((field) => {
+        field.id = `${tripId}-${field.dataset.field}`;
+        field.previousElementSibling?.setAttribute('for', field.id);
+      });
+      Object.entries(data).forEach(([key, value]) => { const field = card.querySelector(`[data-field="${key}"]`); if (field) field.value = value; });
+      card.querySelector('.remove-trip').addEventListener('click', () => { card.remove(); renumber(); update(); });
+      card.querySelectorAll('input').forEach((field) => field.addEventListener('input', update));
+      trips.append(card); renumber(); update();
+    };
+    const renumber = () => trips.querySelectorAll('.trip-card').forEach((card, index) => {
+      card.querySelector('.trip-number').textContent = index + 1;
+      card.querySelector('.remove-trip').setAttribute('aria-label', `Удалить тур ${index + 1}`);
+    });
+    const showNotice = (message) => { notice.textContent = message; notice.classList.add('visible'); window.setTimeout(() => notice.classList.remove('visible'), 3500); };
+    const copyPrompt = async () => { try { await navigator.clipboard.writeText(prompt.value); showNotice('Задание скопировано. Вставьте его в чат с AI.'); } catch { prompt.select(); document.execCommand('copy'); showNotice('Задание выделено для копирования.'); } };
+    const downloadPrompt = () => { const blob = new Blob([prompt.value], { type: 'text/plain;charset=utf-8' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'brief-email-vs-travel.txt'; link.click(); URL.revokeObjectURL(link.href); };
+    const restore = () => { try { const data = JSON.parse(localStorage.getItem(storageKey) || 'null'); if (!data) return; Object.entries(data).forEach(([key, value]) => { const field = form.elements[key]; if (field && typeof value === 'string') field.value = value; }); [...form.querySelectorAll('input[name="type"]')].find((field) => field.value === data.type)?.click(); (data.trips || []).forEach(addTrip); } catch { localStorage.removeItem(storageKey); } };
+    form.addEventListener('input', update); form.addEventListener('change', update);
+    document.querySelector('#add-trip').addEventListener('click', () => addTrip());
+    document.querySelector('#copy').addEventListener('click', copyPrompt);
+    document.querySelector('#summary-copy-button').addEventListener('click', copyPrompt);
+    document.querySelector('#download').addEventListener('click', downloadPrompt);
+    document.querySelector('#clear').addEventListener('click', () => { if (!confirm('Очистить этот локальный черновик?')) return; form.reset(); trips.innerHTML = ''; localStorage.removeItem(storageKey); update(); });
+    restore(); update();
+  </script>
+</body>
+</html>

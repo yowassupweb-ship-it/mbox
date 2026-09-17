@@ -16,6 +16,7 @@ import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi } from "./notes.mjs";
 import { ensureStorageSchema, handleStorageApi } from "./storage.mjs";
+import { listSkillPackages, readSkillFile, readSkillPackage } from "./skill-packages.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -873,6 +874,7 @@ function sendForbidden(res) {
 function memberRouteAllowed(pathname) {
   return pathname === "/api/mbox/auth/me"
     || pathname === "/api/mbox/agent/skills"
+    || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+)?$/.test(pathname)
     || pathname === "/api/mbox/projects"
     || pathname === "/api/mbox/memories"
     || pathname === "/api/mbox/memories/search"
@@ -1105,6 +1107,22 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/tools" && req.method === "GET") {
     return sendJson(res, 200, { tools: TOOL_CATALOG });
+  }
+
+  // Пакеты навыков (skills/ в репозитории — источник правды): SKILL.md, правила, шаблоны, скрипты.
+  // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill читает файлы.
+  if (url.pathname === "/api/mbox/agent/skills/packages" && req.method === "GET") {
+    return sendJson(res, 200, { packages: listSkillPackages(path.join(root, "skills")) });
+  }
+  const skillPackageMatch = url.pathname.match(/^\/api\/mbox\/agent\/skills\/packages\/([a-z0-9-]+)$/);
+  if (skillPackageMatch && req.method === "GET") {
+    const file = url.searchParams.get("file");
+    if (file) {
+      const content = readSkillFile(path.join(root, "skills"), skillPackageMatch[1], file);
+      return content == null ? sendJson(res, 404, { error: "skill_file_not_found" }) : sendJson(res, 200, { id: skillPackageMatch[1], path: file, content });
+    }
+    const skillPackage = readSkillPackage(path.join(root, "skills"), skillPackageMatch[1]);
+    return skillPackage ? sendJson(res, 200, { package: skillPackage }) : sendJson(res, 404, { error: "skill_not_found" });
   }
 
   if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {

@@ -10,6 +10,7 @@ export const SKILL_CATALOG = [
     summary: "Собирает письмо из утверждённых шаблонов: сохраняет вёрстку, проверяет ссылки и UTM, не выдумывает недостающие данные.",
     input: "Бриф, выбранный шаблон и материалы выпуска",
     output: "Готовый HTML и отчёт предрелизной проверки",
+    location: "Сервер MBOX: skills/email-campaign · ставится в ~/.claude/skills и ~/.codex/skills",
   },
   {
     id: "route-to-operator",
@@ -19,7 +20,17 @@ export const SKILL_CATALOG = [
     summary: "По номерам туров берёт программу из менеджерской программы newmanager.vs и сжимает её для корпоративного сайта «Вокруг света»: маршрут вместо названия, самое интересное из оригинала — вперёд, без времени, цен, анонсов и выдумок. Скрипт сверяет факты с источником и собирает HTML, откуда каждый день копируется в менеджерку.",
     input: "Номера туров или ссылки newmanager.vs/tours/<номер>/edit",
     output: "HTML-страница на тур: день — блок с кнопкой «Копировать», история изменений",
-    location: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\route-operator-skill\\SKILL.md",
+    location: "Сервер MBOX: skills/route-to-operator · ставится в ~/.claude/skills и ~/.codex/skills",
+  },
+  {
+    id: "mbox-api",
+    name: "Прямой доступ к API MBOX",
+    owner: "Claude · Codex",
+    trigger: "mbox-api",
+    summary: "Ручки боевого API MBOX, которых нет в MCP-сервере mbox-prod: память, папки, артефакты, связи, секреты, метрики сервера, история.",
+    input: "Задача, для которой не хватает инструментов MCP",
+    output: "Запросы к /api/mbox с сессией агента и заголовком x-mbox-agent",
+    location: "Сервер MBOX: skills/mbox-api · ставится в ~/.claude/skills и ~/.codex/skills",
   },
   {
     id: "skill-webpage-summary",

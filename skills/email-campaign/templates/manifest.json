@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "vs-001",
+      "name": "Подборка туров",
+      "category": "Подборки",
+      "source": "./letter1.html",
+      "description": "Карточки туров с чередованием, CTA и фирменная оболочка.",
+      "blocks": ["shell", "header-nav", "intro", "section-title", "tour-card-left", "tour-card-right", "catalog-banner", "footer"]
+    },
+    {
+      "id": "vs-002",
+      "name": "Промо и спецпредложение",
+      "category": "Акции",
+      "source": "./письмо МФП.html",
+      "description": "Промо-структура с крупной визуальной подачей.",
+      "blocks": ["shell", "header-nav", "intro", "primary-cta", "catalog-banner", "footer"]
+    }
+  ],
+  "blocks": [
+    {"id":"B01","name":"Оболочка","key":"shell","category":"Служебные"},
+    {"id":"B02","name":"Шапка","key":"header-nav","category":"Общие"},
+    {"id":"B03","name":"Вводный текст","key":"intro","category":"Текст"},
+    {"id":"B04","name":"Главная кнопка","key":"primary-cta","category":"CTA"},
+    {"id":"B05","name":"Разделитель","key":"divider","category":"Служебные"},
+    {"id":"B06","name":"Заголовок секции","key":"section-title","category":"Текст"},
+    {"id":"B07","name":"Карточка тура: фото слева","key":"tour-card-left","category":"Туры"},
+    {"id":"B08","name":"Карточка тура: фото справа","key":"tour-card-right","category":"Туры"},
+    {"id":"B09","name":"Баннер каталога","key":"catalog-banner","category":"Промо"},
+    {"id":"B10","name":"Промо мессенджера","key":"messenger-promo","category":"Опциональные"},
+    {"id":"B11","name":"Нижнее меню","key":"bottom-nav","category":"Опциональные"},
+    {"id":"B12","name":"Подвал","key":"footer","category":"Общие"}
+  ]
+}

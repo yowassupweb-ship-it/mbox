@@ -37,6 +37,7 @@ import { MemoryDocument } from "./MemoryDocument";
 import { SearchView } from "./SearchView";
 import { tabMeta } from "./tabMeta";
 import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsApi } from "./tabs";
+import { WbMenu } from "./WbMenu";
 
 const MENU = "/assets/icons/bottom-menu";
 
@@ -541,14 +542,12 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       </footer>
 
       {tabMenu && (
-        <div className="wb-menu-scrim" onClick={() => setTabMenu(null)} onContextMenu={(event) => { event.preventDefault(); setTabMenu(null); }}>
-          <div className="wb-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onClick={(event) => event.stopPropagation()} role="menu">
-            <button type="button" role="menuitem" onClick={() => { closeTab(tabMenu.key); setTabMenu(null); }}>Закрыть</button>
-            <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}>Закрыть остальные</button>
-            <button type="button" role="menuitem" onClick={() => { tabs.pin(tabMenu.key); setTabMenu(null); }}>Закрепить</button>
-            <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}>Копировать ссылку</button>
-          </div>
-        </div>
+        <WbMenu x={tabMenu.x} y={tabMenu.y} onClose={() => setTabMenu(null)}>
+          <button type="button" role="menuitem" onClick={() => { closeTab(tabMenu.key); setTabMenu(null); }}>Закрыть</button>
+          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}>Закрыть остальные</button>
+          <button type="button" role="menuitem" onClick={() => { tabs.pin(tabMenu.key); setTabMenu(null); }}>Закрепить</button>
+          <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}>Копировать ссылку</button>
+        </WbMenu>
       )}
     </div>
   );

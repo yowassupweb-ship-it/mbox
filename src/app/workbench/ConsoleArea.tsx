@@ -4,6 +4,7 @@ import { AgentAvatar } from "../../components/AgentAvatar";
 import { CHAT, MAX_PANES_PER_GROUP, consoleLayout, findPane, isChatPane, isConsoleShortcut, useConsoleLayout, type ConsoleGroup, type DropZone } from "./consoleLayout";
 import { onSessionReveal, useDesktopSessions, type Session } from "./desktopSessions";
 import type { TabsApi } from "./tabs";
+import { WbMenu } from "./WbMenu";
 // xterm — треть всего бандла (~325 КБ), а нужен только в SSH-панели приложения: грузим по требованию.
 const TerminalView = lazy(() => import("./TerminalView").then((module) => ({ default: module.TerminalView })));
 
@@ -532,32 +533,28 @@ export function ConsoleArea({ renderChat, onReveal, agentGoals = {}, agentsOnlin
       </div>
 
       {menu && (
-        <div className="wb-menu-scrim" onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null); }}>
-          <div className="wb-menu" style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 300) }} onClick={(event) => event.stopPropagation()} role="menu">
-            <button type="button" role="menuitem" disabled={groupFull} onClick={() => { split(menuPane, "right"); setMenu(null); }}>Разделить вправо</button>
-            <button type="button" role="menuitem" disabled={groupFull} onClick={() => { split(menuPane, "down"); setMenu(null); }}>Разделить вниз</button>
-            <button type="button" role="menuitem" disabled={!menuPos || state.groups[menuPos.g].columns.flat().length < 2} onClick={() => { consoleLayout.unsplit(menuPane); setMenu(null); }}>Отделить в свою группу</button>
-            <button type="button" role="menuitem" onClick={() => { toggleCollapse(menuPane); setMenu(null); }}>{collapsed.has(menuPane) ? "Развернуть" : "Свернуть"}</button>
-            <button type="button" role="menuitem" onClick={() => { toEditor(menuPane); setMenu(null); }}>Переместить в редактор</button>
-            <button type="button" role="menuitem" onClick={() => { startRename(menuPane); setMenu(null); }}>Переименовать…</button>
-            {menuSession?.status === "running" && <button type="button" role="menuitem" onClick={() => { void desktop.stop(menuPane); setMenu(null); }}>Остановить процесс</button>}
-            <button type="button" role="menuitem" disabled={totalPanes < 2} onClick={() => { closePane(menuPane); setMenu(null); }}>Закрыть панель</button>
-            {menuPos && state.groups.length > 1 && <button type="button" role="menuitem" onClick={() => { consoleLayout.closeGroup(menuPos.g); setMenu(null); }}>Закрыть группу</button>}
-          </div>
-        </div>
+        <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <button type="button" role="menuitem" disabled={groupFull} onClick={() => { split(menuPane, "right"); setMenu(null); }}>Разделить вправо</button>
+          <button type="button" role="menuitem" disabled={groupFull} onClick={() => { split(menuPane, "down"); setMenu(null); }}>Разделить вниз</button>
+          <button type="button" role="menuitem" disabled={!menuPos || state.groups[menuPos.g].columns.flat().length < 2} onClick={() => { consoleLayout.unsplit(menuPane); setMenu(null); }}>Отделить в свою группу</button>
+          <button type="button" role="menuitem" onClick={() => { toggleCollapse(menuPane); setMenu(null); }}>{collapsed.has(menuPane) ? "Развернуть" : "Свернуть"}</button>
+          <button type="button" role="menuitem" onClick={() => { toEditor(menuPane); setMenu(null); }}>Переместить в редактор</button>
+          <button type="button" role="menuitem" onClick={() => { startRename(menuPane); setMenu(null); }}>Переименовать…</button>
+          {menuSession?.status === "running" && <button type="button" role="menuitem" onClick={() => { void desktop.stop(menuPane); setMenu(null); }}>Остановить процесс</button>}
+          <button type="button" role="menuitem" disabled={totalPanes < 2} onClick={() => { closePane(menuPane); setMenu(null); }}>Закрыть панель</button>
+          {menuPos && state.groups.length > 1 && <button type="button" role="menuitem" onClick={() => { consoleLayout.closeGroup(menuPos.g); setMenu(null); }}>Закрыть группу</button>}
+        </WbMenu>
       )}
 
       {addMenu && (
-        <div className="wb-menu-scrim" onClick={() => setAddMenu(null)} onContextMenu={(event) => { event.preventDefault(); setAddMenu(null); }}>
-          <div className="wb-menu" style={{ left: Math.min(addMenu.x, window.innerWidth - 260), top: addMenu.y }} onClick={(event) => event.stopPropagation()} role="menu">
-            <button type="button" role="menuitem" onClick={() => { consoleLayout.newGroup(); setAddMenu(null); }}><MessagesSquare size={13} /> Чат агентов</button>
-            {desktop.sessions.filter((session) => !allPanes.includes(session.id)).map((session) => (
-              <button key={session.id} type="button" role="menuitem" onClick={() => { if (inEditor(session.id)) tabs.close(`${TERMINAL_TAB}${session.id}`); consoleLayout.newGroup(session.id); setAddMenu(null); }}>
-                <PaneIcon paneId={session.id} session={session} /> {paneTitle(session.id, session, state.labels)}{session.status === "running" ? "" : " · завершён"}
-              </button>
-            ))}
-          </div>
-        </div>
+        <WbMenu x={addMenu.x} y={addMenu.y} onClose={() => setAddMenu(null)}>
+          <button type="button" role="menuitem" onClick={() => { consoleLayout.newGroup(); setAddMenu(null); }}><MessagesSquare size={13} /> Чат агентов</button>
+          {desktop.sessions.filter((session) => !allPanes.includes(session.id)).map((session) => (
+            <button key={session.id} type="button" role="menuitem" onClick={() => { if (inEditor(session.id)) tabs.close(`${TERMINAL_TAB}${session.id}`); consoleLayout.newGroup(session.id); setAddMenu(null); }}>
+              <PaneIcon paneId={session.id} session={session} /> {paneTitle(session.id, session, state.labels)}{session.status === "running" ? "" : " · завершён"}
+            </button>
+          ))}
+        </WbMenu>
       )}
     </div>
   );

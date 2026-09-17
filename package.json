@@ -18,6 +18,7 @@
     "mbox:codex-watch": "node scripts/codex-inbox-watcher.mjs",
     "mbox:codex-chat-watch": "node scripts/codex-chat-watcher.mjs",
     "mbox:claude-watch": "node scripts/claude-inbox-watcher.mjs",
+    "mbox:skills-sync": "node scripts/sync-skills.mjs",
     "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export",
     "smoke-test": "node scripts/smoke-test.mjs"
   },

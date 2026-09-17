@@ -1109,6 +1109,33 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  "list_skills",
+  {
+    title: "List MBOX skills",
+    description: "Skills stored on the MBOX server (skills/ in the repo): id, name, description, files. Before a task that matches a skill, read its SKILL.md with get_skill and follow it. To run a skill's scripts it must be installed locally: `node scripts/sync-skills.mjs` in the MBOX repo (the MBOX Claude watcher does it automatically into ~/.claude/skills).",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await mboxFetch("/api/mbox/agent/skills/packages");
+    const packages = (data.packages || []).map(({ id, name, description, hash, files }) => ({ id, name, description, hash, files: (files || []).map((file) => file.path) }));
+    return textResult(JSON.stringify(packages, null, 2));
+  },
+);
+
+server.registerTool(
+  "get_skill",
+  {
+    title: "Read MBOX skill file",
+    description: "Read one text file of an MBOX skill from the server. Default file is SKILL.md; then read the files it points to (e.g. rules.md). Paths are relative to the skill folder.",
+    inputSchema: { id: z.string(), file: z.string().default("SKILL.md") },
+  },
+  async ({ id, file }) => {
+    const data = await mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}?file=${encodeURIComponent(file)}`);
+    return textResult(data.content);
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

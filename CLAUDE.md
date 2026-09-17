@@ -144,6 +144,10 @@ MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент
 Лизинг задач: `claimed_by` / `claimed_until` / `heartbeat_at`. `claim` берёт задачу на 45 минут,
 повторный `claim` тем же агентом продлевает, чужой активный лиз даёт 409.
 
+## Навыки агентов
+
+Навыки Claude и Codex (`SKILL.md`, правила, шаблоны, скрипты) хранятся в `skills/` и выкатываются вместе с сервером — см. [skills/README.md](skills/README.md). Установленные копии в `~/.claude/skills` и `~/.codex/skills` ставит и перезаписывает `scripts/sync-skills.mjs` (наблюдатель Claude — сам, при старте и раз в час); правки — только в `skills/`, потом деплой. Каталог для страницы «Навыки» — `server/skill-catalog.mjs`.
+
 ## Деплой
 
 `docker-compose.production.yml`: `app` (Dockerfile.mbox, node 22, `npm start`) + `caddy` (TLS на

@@ -13,6 +13,7 @@ import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi } from "./server/notes.mjs";
 import { ensureStorageSchema, handleStorageApi } from "./server/storage.mjs";
+import { listSkillPackages, readSkillFile, readSkillPackage } from "./server/skill-packages.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, type TourSheetItem,
@@ -1143,6 +1144,21 @@ function mboxDevApi() {
           // Каталог инструментов — зеркало server/mbox-server.mjs, см. пояснение там же.
           if (url.pathname === "/api/mbox/tools" && req.method === "GET") {
             return sendJson(res, 200, { tools: TOOL_CATALOG });
+          }
+
+          // Пакеты навыков — общий модуль server/skill-packages.mjs, та же логика, что у прода.
+          if (url.pathname === "/api/mbox/agent/skills/packages" && req.method === "GET") {
+            return sendJson(res, 200, { packages: listSkillPackages(path.resolve("skills")) });
+          }
+          const skillPackageMatch = url.pathname.match(/^\/api\/mbox\/agent\/skills\/packages\/([a-z0-9-]+)$/);
+          if (skillPackageMatch && req.method === "GET") {
+            const file = url.searchParams.get("file");
+            if (file) {
+              const content = readSkillFile(path.resolve("skills"), skillPackageMatch[1], file);
+              return content == null ? sendJson(res, 404, { error: "skill_file_not_found" }) : sendJson(res, 200, { id: skillPackageMatch[1], path: file, content });
+            }
+            const skillPackage = readSkillPackage(path.resolve("skills"), skillPackageMatch[1]);
+            return skillPackage ? sendJson(res, 200, { package: skillPackage }) : sendJson(res, 404, { error: "skill_not_found" });
           }
 
           // Каталог навыков — общий модуль server/skill-catalog.mjs, тот же, что у прода.

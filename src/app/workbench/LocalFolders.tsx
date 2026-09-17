@@ -3,6 +3,7 @@ import { Bot, ChevronRight, FilePlus2, FolderPlus, GitBranch, RefreshCw, X } fro
 import { formatSince } from "../../lib/format";
 import { IMAGE_FILE, gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspaceBridge, type DirEntry, type GitSummary, type WorkspaceRoot } from "./localWorkspace";
 import { usePersistentState, type TabsApi } from "./tabs";
+import { WbMenu } from "./WbMenu";
 
 const ICONS = "/assets/icons/icons";
 
@@ -321,38 +322,36 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
         </section>
       )}
       {menu && bridge && (
-        <div className="wb-menu-scrim" onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null); }}>
-          <div className="wb-menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()} role="menu">
-            {(!menu.entry || menu.entry.type === "dir") && (
-              <>
-                <button type="button" onClick={() => { setMenu(null); create(menu.rootKey, menu.entry?.path ?? "", "file"); }}>Новый файл</button>
-                <button type="button" onClick={() => { setMenu(null); create(menu.rootKey, menu.entry?.path ?? "", "dir"); }}>Новая папка</button>
-              </>
-            )}
-            {menu.entry && (
-              <>
-                <div className="wb-menu-sep" />
-                <button type="button" onClick={() => { setMenu(null); copy({ rootKey: menu.rootKey, entry: menu.entry }, false); }}>Копировать<kbd>Ctrl+C</kbd></button>
-                <button type="button" onClick={() => { setMenu(null); copy({ rootKey: menu.rootKey, entry: menu.entry }, true); }}>Вырезать<kbd>Ctrl+X</kbd></button>
-              </>
-            )}
-            {clip && <button type="button" onClick={() => { setMenu(null); paste({ rootKey: menu.rootKey, entry: menu.entry }); }}>Вставить «{clip.name}»<kbd>Ctrl+V</kbd></button>}
-            <button type="button" onClick={() => { setMenu(null); pasteFromWindows({ rootKey: menu.rootKey, entry: menu.entry }); }}>Вставить из Проводника</button>
-            {menu.entry && (
-              <>
-                <div className="wb-menu-sep" />
-                {menu.entry.type === "file" && <button type="button" onClick={() => void act(() => bridge.openDefault(menu.rootKey, menu.entry!.path))}>Открыть в программе по умолчанию</button>}
-                <button type="button" onClick={() => void act(async () => { await bridge.copySystem(menu.rootKey, menu.entry!.path); setNotice("Файл в буфере — вставьте в Проводнике (Ctrl+V)"); })}>Копировать для Проводника</button>
-                <button type="button" onClick={() => { void navigator.clipboard?.writeText(menu.entry!.path); setMenu(null); }}>Копировать путь</button>
-                <div className="wb-menu-sep" />
-                <button type="button" onClick={() => { setMenu(null); rename({ rootKey: menu.rootKey, entry: menu.entry }); }}>Переименовать<kbd>F2</kbd></button>
-                <button type="button" className="is-danger" onClick={() => { setMenu(null); trash({ rootKey: menu.rootKey, entry: menu.entry }); }}>Удалить в корзину<kbd>Del</kbd></button>
-              </>
-            )}
-            <button type="button" onClick={() => void act(() => bridge.reveal(menu.rootKey, menu.entry?.path ?? ""))}>Показать в проводнике Windows</button>
-            {!menu.entry && <button type="button" onClick={() => { if (window.confirm("Отключить папку от MBOX? Файлы на диске останутся.")) void act(() => ws.remove(menu.rootKey)); else setMenu(null); }}>Отключить папку</button>}
-          </div>
-        </div>
+        <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          {(!menu.entry || menu.entry.type === "dir") && (
+            <>
+              <button type="button" onClick={() => { setMenu(null); create(menu.rootKey, menu.entry?.path ?? "", "file"); }}>Новый файл</button>
+              <button type="button" onClick={() => { setMenu(null); create(menu.rootKey, menu.entry?.path ?? "", "dir"); }}>Новая папка</button>
+            </>
+          )}
+          {menu.entry && (
+            <>
+              <div className="wb-menu-sep" />
+              <button type="button" onClick={() => { setMenu(null); copy({ rootKey: menu.rootKey, entry: menu.entry }, false); }}>Копировать<kbd>Ctrl+C</kbd></button>
+              <button type="button" onClick={() => { setMenu(null); copy({ rootKey: menu.rootKey, entry: menu.entry }, true); }}>Вырезать<kbd>Ctrl+X</kbd></button>
+            </>
+          )}
+          {clip && <button type="button" onClick={() => { setMenu(null); paste({ rootKey: menu.rootKey, entry: menu.entry }); }}>Вставить «{clip.name}»<kbd>Ctrl+V</kbd></button>}
+          <button type="button" onClick={() => { setMenu(null); pasteFromWindows({ rootKey: menu.rootKey, entry: menu.entry }); }}>Вставить из Проводника</button>
+          {menu.entry && (
+            <>
+              <div className="wb-menu-sep" />
+              {menu.entry.type === "file" && <button type="button" onClick={() => void act(() => bridge.openDefault(menu.rootKey, menu.entry!.path))}>Открыть в программе по умолчанию</button>}
+              <button type="button" onClick={() => void act(async () => { await bridge.copySystem(menu.rootKey, menu.entry!.path); setNotice("Файл в буфере — вставьте в Проводнике (Ctrl+V)"); })}>Копировать для Проводника</button>
+              <button type="button" onClick={() => { void navigator.clipboard?.writeText(menu.entry!.path); setMenu(null); }}>Копировать путь</button>
+              <div className="wb-menu-sep" />
+              <button type="button" onClick={() => { setMenu(null); rename({ rootKey: menu.rootKey, entry: menu.entry }); }}>Переименовать<kbd>F2</kbd></button>
+              <button type="button" className="is-danger" onClick={() => { setMenu(null); trash({ rootKey: menu.rootKey, entry: menu.entry }); }}>Удалить в корзину<kbd>Del</kbd></button>
+            </>
+          )}
+          <button type="button" onClick={() => void act(() => bridge.reveal(menu.rootKey, menu.entry?.path ?? ""))}>Показать в проводнике Windows</button>
+          {!menu.entry && <button type="button" onClick={() => { if (window.confirm("Отключить папку от MBOX? Файлы на диске останутся.")) void act(() => ws.remove(menu.rootKey)); else setMenu(null); }}>Отключить папку</button>}
+        </WbMenu>
       )}
     </div>
   );

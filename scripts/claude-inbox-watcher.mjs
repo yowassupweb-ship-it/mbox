@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncSkills } from "./sync-skills.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,12 +47,31 @@ process.on("SIGTERM", () => { stopping = true; releaseSingleInstanceLock(); });
 process.on("exit", releaseSingleInstanceLock);
 
 await ping("session_start");
+
+// Навыки хранятся на сервере MBOX; ставим их в ~/.claude/skills при старте и раз в час, чтобы `claude -p`
+// на этой машине видел актуальные SKILL.md, правила и скрипты. Ошибка синхронизации не останавливает наблюдатель.
+const skillSyncMs = Number(process.env.MBOX_SKILL_SYNC_MS || 60 * 60 * 1000);
+let installedSkills = [];
+let lastSkillSync = 0;
+async function refreshSkills() {
+  lastSkillSync = Date.now();
+  try {
+    const result = await syncSkills({ log: (message) => console.log(`${logPrefix} skills: ${message}`) });
+    installedSkills = result.packages;
+    const changed = result.results.filter((entry) => entry.action !== "актуален");
+    console.log(`${logPrefix} skills from ${result.from}: ${result.packages.map((skill) => skill.id).join(", ") || "none"}${changed.length ? ` (${changed.map((entry) => `${entry.id} ${entry.action}`).join("; ")})` : ""}`);
+  } catch (error) {
+    console.error(`${logPrefix} skills sync failed: ${error.message}`);
+  }
+}
+await refreshSkills();
 console.log(`${logPrefix} watching ${baseUrl} project=${project} every ${pollMs}ms`);
 console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring inbox before ${cutoffAt.toISOString()}`}`);
 
 while (!stopping) {
   try {
     await ping("heartbeat");
+    if (Date.now() - lastSkillSync > skillSyncMs) await refreshSkills();
     const items = await newInboxItems();
     for (const item of items) {
       seen.add(item.id);
@@ -350,6 +370,10 @@ async function runClaude(item) {
     // MBOX — русскоязычный проект: владелец, Джарвис и вся консоль общаются по-русски. Без этой
     // строки ответ уходил на английском (нет другого языкового сигнала во всём промпте).
     "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
+    // Навыки ставятся с сервера MBOX (refreshSkills); без явного списка Claude в -p режиме их не замечал.
+    installedSkills.length
+      ? `MBOX skills are installed from the MBOX server in ~/.claude/skills. If the request matches one, invoke it with the Skill tool and follow its SKILL.md exactly: ${installedSkills.map((skill) => `${skill.id} — ${skill.description}`).join(" | ")}`
+      : "",
     "",
     conversationContext,
     "",

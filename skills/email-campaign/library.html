@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Библиотека писем — Вокруг света</title>
+  <style>
+    :root{--ink:#2a2a2a;--muted:#777;--paper:#fff;--canvas:#fff6ed;--accent:#ff732d;--line:#ffe8d8;--r:20px}*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--ink);font:16px/1.45 Inter,Arial,sans-serif}.wrap{max-width:1100px;margin:auto;padding:40px 20px 64px}h1,h2{font-family:Rubik,Arial,sans-serif;margin:0}h1{font-size:32px}p{color:var(--muted)}.note{padding:14px 16px;background:#fff8f4;border:1px solid var(--line);border-radius:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:16px}.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:20px}.id{display:inline-block;background:#2a2a2a;color:#fff;border-radius:999px;padding:3px 8px;font:12px Rubik,Arial}.kind{color:var(--accent);font-size:13px;margin-top:12px}.blocks{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}.block{border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px;background:#fff8f4}a{color:#b64c18;font-weight:600}section{margin-top:34px}
+  </style>
+</head>
+<body><main class="wrap"><h1>Библиотека писем</h1><p>«Вокруг света» · UniSender-ready</p><p class="note">Номера блоков — общий язык для редактора и AI. Шапка и подвал общие; остальные блоки выбираются только по брифу и реальному референсу.</p><section><h2>Шаблоны по категориям</h2><div id="templates" class="grid"></div></section><section><h2>Коллекция блоков</h2><div id="blocks" class="grid"></div></section></main><script>
+fetch('./templates/manifest.json').then(r=>r.json()).then(data=>{const byKey=new Map(data.blocks.map(b=>[b.key,b]));const templates=document.querySelector('#templates');const blocks=document.querySelector('#blocks');data.templates.forEach(t=>{const c=document.createElement('article');c.className='card';c.innerHTML=`<span class="id">${t.id}</span><div class="kind">${t.category}</div><h3>${t.name}</h3><p>${t.description}</p><div class="blocks">${t.blocks.map(k=>`<span class="block">${byKey.get(k)?.id||k}</span>`).join('')}</div><p><a href="${t.source}">Открыть референс</a></p>`;templates.append(c)});data.blocks.forEach(b=>{const c=document.createElement('article');c.className='card';c.innerHTML=`<span class="id">${b.id}</span><div class="kind">${b.category}</div><h3>${b.name}</h3><p><code>${b.key}</code></p>`;blocks.append(c)})}).catch(()=>document.body.insertAdjacentHTML('beforeend','<p>Не удалось загрузить manifest.json. Откройте страницу через локальный сервер.</p>'));
+</script></body></html>
