@@ -8,6 +8,7 @@ import { todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel,
 import { orderTodos, positionBetween, todoPosition } from "../../lib/tree";
 import type { Project, Todo } from "../../types";
 import { Button, EmptyState, ErrorText, ManualForm, SaveButton, Select, TextArea, TextInput, type SaveState } from "../../ui";
+import { MarkdownText } from "../../app/workbench/MarkdownText";
 
 const statusOptions = Object.entries(todoStatusLabels).map(([value, label]) => ({ value, label }));
 const priorityOptions = Object.entries(todoPriorityLabels).map(([value, label]) => ({ value, label }));
@@ -213,7 +214,7 @@ function TodoCard({ todo, seenVersion, onOpen, onSaved }: { todo: Todo; seenVers
         </button>
       </div>
 
-      {todo.note && <p className="todo-note-card-body">{todo.note}</p>}
+      {todo.note && <MarkdownText className="todo-note-card-body" text={todo.note} clamp={12} />}
 
       <div className="todo-note-card-meta">
         <span className={`todo-chip status-${status}`}>{todoStatusLabel(status)}</span>

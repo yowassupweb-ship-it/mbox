@@ -88,8 +88,13 @@
     .tour-head .num { flex: 1; }
 
     /* Сборка */
-    .build { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); height: 100%; min-height: 0; }
-    .side { min-height: 0; overflow: auto; padding: 12px; border-right: 1px solid var(--line); }
+    .build { --side: 400px; display: grid; grid-template-columns: var(--side) 6px minmax(0, 1fr); height: 100%; min-height: 0; }
+    .build.side-collapsed { grid-template-columns: 0 6px minmax(0, 1fr); }
+    .build.side-collapsed .side { visibility: hidden; padding: 0; border: 0; }
+    .side-resizer { position: relative; cursor: col-resize; background: transparent; border-left: 1px solid var(--line); }
+    .side-resizer:hover, .side-resizer.dragging { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+    .build.side-collapsed .side-resizer { cursor: default; }
+    .side { min-width: 0; min-height: 0; overflow: auto; padding: 12px; }
     .item { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
     .item + .item { margin-top: 6px; }
     .item.err { border-color: rgba(255,77,94,.45); }
@@ -140,7 +145,7 @@
 
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: rgba(238, 244, 241, .16); }
-    @media (max-width: 900px) { .build { grid-template-columns: 1fr; height: auto; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid, .types { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .build, .build.side-collapsed { grid-template-columns: 1fr; height: auto; } .side-resizer { display: none; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid, .types { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -219,8 +224,10 @@
           </div>
           <div id="check"></div>
         </aside>
+        <div class="side-resizer" id="side-resizer" role="separator" aria-orientation="vertical" aria-label="Ширина панели письма" title="Потяните, чтобы изменить ширину. Двойной клик — свернуть или развернуть"></div>
         <section class="stage" id="stage">
           <div class="stage-bar">
+            <button class="btn ghost" type="button" id="toggle-side" title="Свернуть или развернуть панель письма">Скрыть панель</button>
             <button class="btn primary" type="button" id="check-now">Проверить Email Checker</button>
             <button class="btn" type="button" id="ask-check">Агенту: проверить и исправить</button>
             <button class="btn" type="button" id="copy-html">Копировать HTML</button>
@@ -585,6 +592,36 @@
     $('#format-size').addEventListener('input', () => updateActiveFormat({ fontSize: $('#format-size').value ? Number($('#format-size').value) : null }));
     $('#format-color').addEventListener('input', () => updateActiveFormat({ color: $('#format-color').value }));
     $('#format-reset').addEventListener('click', () => updateActiveFormat({ fontSize: null, color: '', bold: false }));
+    // Левая панель рассылки: ширина перетаскиванием (240–720 px), двойной клик или кнопка — свернуть. Запоминается.
+    (() => {
+      const build = document.querySelector('#view-mailing .build');
+      const resizer = $('#side-resizer');
+      const toggle = $('#toggle-side');
+      const KEY = 'email-letter-side';
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { saved = {}; }
+      const apply = () => {
+        build.style.setProperty('--side', `${Math.min(720, Math.max(240, saved.width || 400))}px`);
+        build.classList.toggle('side-collapsed', Boolean(saved.collapsed));
+        toggle.textContent = saved.collapsed ? 'Показать панель' : 'Скрыть панель';
+      };
+      const store = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch { /* без хранилища */ } };
+      const flip = () => { saved.collapsed = !saved.collapsed; store(); apply(); };
+      toggle.addEventListener('click', flip);
+      resizer.addEventListener('dblclick', flip);
+      resizer.addEventListener('pointerdown', (event) => {
+        if (saved.collapsed) return;
+        event.preventDefault();
+        resizer.setPointerCapture(event.pointerId);
+        resizer.classList.add('dragging');
+        const left = build.getBoundingClientRect().left;
+        const move = (moveEvent) => { saved.width = Math.round(moveEvent.clientX - left); apply(); };
+        const up = () => { resizer.classList.remove('dragging'); resizer.removeEventListener('pointermove', move); resizer.removeEventListener('pointerup', up); store(); };
+        resizer.addEventListener('pointermove', move);
+        resizer.addEventListener('pointerup', up);
+      });
+      apply();
+    })();
     $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; });
     $('#copy-html').addEventListener('click', async () => { try { await navigator.clipboard.writeText(renderResult().html); setStatus('HTML скопирован', 'ok'); } catch { setStatus('Буфер недоступен — скачайте файл', 'err'); } });
     $('#download-html').addEventListener('click', () => {

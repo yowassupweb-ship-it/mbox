@@ -8,6 +8,7 @@ import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { DecisionEntry, Memory, Project } from "../types";
 import { Button, EmptyState, ErrorText, Panel, SaveButton, Select, type SaveState, TextArea, TextInput } from "../ui";
+import { MarkdownText } from "../app/workbench/MarkdownText";
 
 type MemoryLink = {
   id: string;
@@ -290,7 +291,7 @@ function MemoryCardGrid({ memories, linksByMemory, onEdit, onOpen, editingId }: 
               </button>
             </div>
 
-            {memory.content && <p className="todo-note-card-body">{memory.content}</p>}
+            {memory.content && <MarkdownText className="todo-note-card-body" text={memory.content} clamp={12} />}
 
             <div className="todo-note-card-meta">
               <span className="todo-chip muted">#{memory.id}</span>

@@ -7,6 +7,7 @@ import type { FolderRow, Memory, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
 import { usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
+import { MarkdownText } from "../../app/workbench/MarkdownText";
 
 /**
  * Содержимое папки проекта.
@@ -119,7 +120,7 @@ function FolderNote({ memory, onOpen, onSaved }: { memory: Memory; onOpen: () =>
         <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(); }} aria-label="Открыть запись"><Pencil size={15} /></button>
         <button type="button" onClick={remove} aria-label="Удалить запись"><Trash2 size={15} /></button>
       </header>
-      {memory.content && <p>{memory.content}</p>}
+      {memory.content && <MarkdownText text={memory.content} clamp={14} />}
       <footer>
         {isPost
           ? <>

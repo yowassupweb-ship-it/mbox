@@ -9,6 +9,7 @@ import { RelationsPanel } from "./RelationsPanel";
 import { DataSourcesPanel } from "./DataSourcesPanel";
 import type { ProjectEntityKind } from "../tree/entityKinds";
 import { usePersistentState } from "../../app/workbench/tabs";
+import { MarkdownText } from "../../app/workbench/MarkdownText";
 
 /** Единая точка входа для постоянных сущностей проекта. */
 export function ProjectEntityView({ project, projects, memories, kind, onSaved, onOpenMemory }: { project: Project; projects: Project[]; memories: Memory[]; kind: ProjectEntityKind; onSaved: () => void; onOpenMemory?: (memoryId: string) => void }) {
@@ -270,7 +271,7 @@ export function DeployPanel({ project, onSaved }: { project: Project; onSaved: (
       {steps && (
         <div className="deploy-steps">
           <span className="fact-caption">Шаги из свойства deploy_steps</span>
-          <p>{steps}</p>
+          <MarkdownText text={steps} />
         </div>
       )}
 
@@ -436,7 +437,7 @@ export function MemoriesPanel({ project, memories, onOpenMemory }: { project: Pr
             title={onOpenMemory ? `Открыть запись #${memory.id}` : undefined}
           >
             <b>{memory.title}</b>
-            <p>{memory.content}</p>
+            <MarkdownText text={memory.content} clamp={3} />
             <time>{memory.entity_type} · {new Date(memory.updated_at).toLocaleDateString("ru-RU")}</time>
           </article>
         ))}

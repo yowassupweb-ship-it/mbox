@@ -4,6 +4,7 @@ import { fetchJson, saveEntity } from "../../lib/api";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import type { Memory } from "../../types";
 import { Button, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
+import { MarkdownText } from "../../app/workbench/MarkdownText";
 
 /**
  * Полноэкранная запись памяти — читать и править. Раньше записи можно было увидеть только куском
@@ -62,7 +63,7 @@ export function MemoryModal({ memory, onClose, onSaved }: { memory: Memory; onCl
           {editing ? (
             <TextArea label="Текст" value={content} onChange={(event) => { setContent(event.target.value); setState("idle"); }} rows={18} />
           ) : (
-            <p className="entity-modal-text">{memory.content || "Пусто"}</p>
+            memory.content ? <MarkdownText className="entity-modal-text" text={memory.content} /> : <p className="entity-modal-text">Пусто</p>
           )}
           {memory.tags.length > 0 && !editing && (
             <div className="muted">Теги: {memory.tags.join(", ")}</div>

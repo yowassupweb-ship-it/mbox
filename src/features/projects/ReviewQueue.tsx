@@ -4,6 +4,7 @@ import { saveEntity } from "../../lib/api";
 import { todoPriorityLabel } from "../../lib/labels";
 import type { Project, Todo } from "../../types";
 import { Button, EmptyState } from "../../ui";
+import { MarkdownText } from "../../app/workbench/MarkdownText";
 
 type Pending = Todo & { projectName: string };
 
@@ -50,7 +51,7 @@ export function ReviewQueue({ projects, onSaved }: { projects: Project[]; onSave
           <div className="review-item-body">
             <span className="muted">{todo.projectName} · {todoPriorityLabel(todo.priority)}</span>
             <strong>{todo.title}</strong>
-            {todo.note && <p>{todo.note}</p>}
+            {todo.note && <MarkdownText text={todo.note} clamp={8} />}
           </div>
           <div className="review-item-actions">
             <Button variant="ghost" icon={Check} onClick={() => decide(todo, "done", "")}>
