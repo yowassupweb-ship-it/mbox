@@ -470,7 +470,7 @@
   text-transform: none;
 }
 
-.env-value { resize: vertical; min-height: 38px; line-height: 1.4; }
+.env-value { resize: none; overflow: hidden; min-height: 38px; line-height: 1.4; }
 
 .env-row.is-duplicate .env-key { border-color: var(--state-danger); }
 

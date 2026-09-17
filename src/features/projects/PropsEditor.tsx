@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type TextareaHTMLAttributes } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { saveEntity } from "../../lib/api";
 import type { Project } from "../../types";
@@ -25,7 +25,31 @@ function toRows(props: Record<string, string>): Row[] {
 
 function fitTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
+  // scrollHeight без рамки: при border-box без неё последняя строка подрезалась бы на пару пикселей.
+  el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+}
+
+/** Поле значения растёт под текст целиком: при вводе, при новом значении с сервера и при смене ширины
+ * (перенос строк зависит от ширины; скрытая вкладка редактора получает размер только когда её показали).
+ * Раньше высота была в одну строку, и длинные значения обрезались. */
+function AutoTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    if (ref.current) fitTextarea(ref.current);
+  }, [props.value]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitTextarea(el);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return <textarea ref={ref} {...props} />;
 }
 
 /**
@@ -101,7 +125,7 @@ export function PropsEditor({ project, onSaved }: { project: Project; onSaved: (
                 placeholder="KEY"
                 spellCheck={false}
               />
-              <textarea
+              <AutoTextarea
                 className="env-value"
                 value={row.value}
                 onChange={(event) => update(row.id, { value: event.target.value })}
