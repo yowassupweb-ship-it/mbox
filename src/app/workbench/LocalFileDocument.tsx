@@ -7,6 +7,9 @@ import { renderDocument } from "./MemoryDocument";
 import { DocShell, DrawerToggle, useDrawer } from "./docLayout";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
+import { CodeEditor } from "./CodeEditor";
+import { languageOf } from "./codeHighlight";
+import { buildLocalPreview } from "./localPreview";
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 
@@ -108,6 +111,16 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   const setMode = isHtml ? setHtmlMode : setMdMode;
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Предпросмотр HTML со стилями, скриптами, шрифтами и картинками из соседних файлов (localPreview.ts).
+  const [previewHtml, setPreviewHtml] = useState("");
+  useEffect(() => {
+    if (!isHtml || mode !== "preview") return;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void buildLocalPreview(draft, rootKey, path, bridge).then((html) => { if (alive) setPreviewHtml(html); }).catch(() => { if (alive) setPreviewHtml(draft); });
+    }, 250);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [isHtml, mode, draft, rootKey, path, bridge]);
   const [conflict, setConflict] = useState(false);
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [commits, setCommits] = useState<GitCommit[]>([]);
@@ -303,15 +316,14 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
           {compare ? (diff ? <DiffLines lines={diff} /> : <p className="wb-empty">Файлы слишком большие для построчного сравнения.</p>) : <pre className="wb-version-text">{viewing.content}</pre>}
         </div>
       ) : mode === "preview" && isHtml ? (
-        // Предпросмотр показывает текущий черновик. Относительные картинки и стили из папки сюда не
-        // подтянутся: страница грузится с сервера и не видит файлы диска напрямую.
+        // Предпросмотр показывает текущий черновик; соседние стили, скрипты, шрифты и картинки подставлены.
         <div className={viewport === "mobile" ? "wb-html-preview is-mobile" : "wb-html-preview"}>
-          <iframe title={path} sandbox="allow-scripts" srcDoc={draft} />
+          <iframe title={path} sandbox="allow-scripts" srcDoc={previewHtml || draft} />
         </div>
       ) : mode === "preview" && isMarkdown ? (
         <div className="wb-reading"><div className="wb-memory-body" onDoubleClick={() => setMode("edit")}>{renderDocument(draft)}</div></div>
       ) : (
-        <textarea className="wb-code-editor" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onEditorKey} spellCheck={false} />
+        <CodeEditor value={draft} onChange={setDraft} language={languageOf(path)} onKeyDown={onEditorKey} />
       )}
       <div className="wb-doc-foot">{formatBytes(file.size)} · изменён {formatDateTime(new Date(file.mtime).toISOString())}</div>
     </DocShell>

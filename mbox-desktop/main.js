@@ -944,7 +944,9 @@ async function readWorkspaceFile(key, rel) {
 // дал бы ей доступ к диску мимо проверки корня. Здесь путь проходит тот же resolveInRoot, что и чтение текста.
 const IMAGE_TYPES = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
-  ".bmp": "image/bmp", ".ico": "image/x-icon", ".avif": "image/avif", ".svg": "image/svg+xml"
+  ".bmp": "image/bmp", ".ico": "image/x-icon", ".avif": "image/avif", ".svg": "image/svg+xml",
+  // Шрифты — для предпросмотра HTML: @font-face из соседней папки подставляется data-URL (src/app/workbench/localPreview.ts).
+  ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf", ".eot": "application/vnd.ms-fontobject"
 };
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 

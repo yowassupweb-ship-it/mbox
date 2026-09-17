@@ -8,9 +8,18 @@ import { MetaStrip } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
+import { CodeEditor } from "./CodeEditor";
+import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
 
 const ICONS = "/assets/icons/icons";
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+/** Язык подсветки артефакта: по расширению имени, иначе по виду содержимого. */
+function codeLanguage(kind: FileKind, name: string): CodeLanguage {
+  const byName = languageOf(name || "");
+  if (byName !== "plain") return byName;
+  return kind === "html" ? "html" : kind === "markdown" ? "markdown" : kind === "json" ? "json" : "plain";
+}
 
 export type FileKind = "html" | "markdown" | "json" | "code" | "text";
 
@@ -422,7 +431,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
             <div className="wb-reading"><div className="wb-memory-body" onDoubleClick={() => setMode("code")}>{renderDocument(draft.content)}</div></div>
           )
         ) : editing ? (
-          <textarea ref={textareaRef} className="wb-code-editor" value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} onKeyDown={onEditorKey} spellCheck={false} placeholder="Содержимое файла" autoFocus={!isNew} />
+          <CodeEditor textareaRef={textareaRef} value={draft.content} onChange={(content) => setDraft({ ...draft, content })} language={codeLanguage(kind, draft.name)} onKeyDown={onEditorKey} placeholder="Содержимое файла" autoFocus={!isNew} />
         ) : mode === "preview" && kind === "html" ? (
           <div className={viewport === "mobile" ? "wb-html-preview is-mobile" : "wb-html-preview"}>
             <iframe title={file?.name || "Предпросмотр"} sandbox="allow-scripts" srcDoc={file?.content} />
@@ -432,7 +441,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
         ) : file?.content ? (
           <div className="wb-code-view" onDoubleClick={startEdit}>
             <div className="wb-code-gutter" aria-hidden="true">{lines.map((_, index) => <span key={index}>{index + 1}</span>)}</div>
-            <pre>{shownContent}</pre>
+            <pre dangerouslySetInnerHTML={{ __html: highlightCode(shownContent, codeLanguage(kind, file.name)) }} />
           </div>
         ) : <div className="wb-doc-missing">Файл пустой. Двойной клик или «Править» — начать писать.</div>}
       </div>
