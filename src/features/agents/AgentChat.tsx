@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AtSign, ChevronRight, CornerDownRight, DollarSign, Hash, Reply, SendHorizontal, Slash, Terminal, Wrench, X } from "lucide-react";
+import { AtSign, CornerDownRight, DollarSign, FileText, Hash, Paperclip, Reply, SendHorizontal, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -8,6 +8,9 @@ import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
 import { usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
+import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
+import { serverOrigin } from "../../lib/serverOrigin";
+import { formatBytes } from "../../lib/format";
 
 const JARVIS_NAME = "Джарвис";
 
@@ -310,9 +313,56 @@ type LogLine = {
   /** id записи инбокса — есть только у настоящих сообщений, на них можно ответить. */
   inboxId?: string;
   replyTo?: ReplyTarget;
+  attachments?: Attachment[];
 };
 
 type ReplyTarget = { id: string; actor: string; text: string };
+
+/** Вложение сообщения: файл в S3 MBOX. В props.attachments — для интерфейса, в тексте — ссылками для агентов. */
+type Attachment = { name: string; key: string; size: number; type: string };
+type DraftAttachment = Attachment & { id: string; loaded: number; error?: string; done?: boolean };
+
+const ATTACHMENTS_MARK = "Вложения:";
+
+function parseAttachments(raw: unknown): Attachment[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({ name: String(item.name ?? ""), key: String(item.key ?? ""), size: Number(item.size) || 0, type: String(item.type ?? "") }))
+    .filter((item) => item.name && item.key);
+  return list.length ? list : undefined;
+}
+
+/** Текст сообщения без приписанного списка вложений: в чате они показываются карточками. */
+function withoutAttachmentList(text: string) {
+  const index = text.lastIndexOf(`\n\n${ATTACHMENTS_MARK}\n`);
+  if (index >= 0) return text.slice(0, index);
+  return text.startsWith(`${ATTACHMENTS_MARK}\n`) ? "" : text;
+}
+
+function attachmentsBlock(list: Attachment[]) {
+  return [ATTACHMENTS_MARK, ...list.map((file) => `- [${file.name}](${serverOrigin()}${storageFileUrl(file.key)}) · ${formatBytes(file.size)}`)].join("\n");
+}
+
+function AttachmentList({ files }: { files: Attachment[] }) {
+  return (
+    <span className="console-attachments">
+      {files.map((file) => {
+        const src = storageFileUrl(file.key);
+        const href = `${serverOrigin()}${src}`;
+        return file.type.startsWith("image/") ? (
+          <a key={file.key} className="console-attachment is-image" href={href} target="_blank" rel="noreferrer" title={file.name}>
+            <img src={src} alt={file.name} loading="lazy" />
+          </a>
+        ) : (
+          <a key={file.key} className="console-attachment" href={href} target="_blank" rel="noreferrer" title="Открыть файл">
+            <FileText size={14} /><span>{file.name}</span><em>{formatBytes(file.size)}</em>
+          </a>
+        );
+      })}
+    </span>
+  );
+}
 
 /** props.actions — структурированный выбор (варианты поста, да/нет-развилки), которые todo #203
  * просил показывать кнопками, а не заставлять печатать текст вручную. Валидируем форму на входе:
@@ -574,7 +624,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [history, setHistory] = usePersistentState<string[]>("mbox.chat.history", []);
   const [historyPos, setHistoryPos] = useState(-1);
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
-  const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean }>>([]);
+  const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean; attachments?: Attachment[] }>>([]);
+  const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
+  const [dragFiles, setDragFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadingFiles = drafts.some((file) => !file.done && !file.error);
+  const readyFiles = drafts.filter((file) => file.done);
   const [awaitingJarvisId, setAwaitingJarvisId] = useState<string | null>(null);
   const [awaitingJarvisSince, setAwaitingJarvisSince] = useState<number | null>(null);
   const [awaitingJarvisPhase, setAwaitingJarvisPhase] = useState<string | null>(null);
@@ -788,7 +843,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       id: `msg-${item.id}`,
       kind: item.agent_name === HUMAN ? "out" : "in",
       actor: item.agent_name,
-      text: item.body || item.title,
+      text: parseAttachments(item.props?.attachments) ? withoutAttachmentList(item.body || item.title) : item.body || item.title,
+      attachments: parseAttachments(item.props?.attachments),
       at: item.created_at,
       // Инструменты, реально вызванные при формировании ответа — бейджами под самим сообщением,
       // а не отдельной строкой лога, чтобы читалось как "приложено к", а не как что-то ещё.
@@ -817,7 +873,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       id: item.id,
       kind: "out",
       actor: "Ты",
-      text: item.body,
+      text: item.attachments ? withoutAttachmentList(item.body) : item.body,
+      attachments: item.attachments,
       at: new Date().toISOString(),
       pending: item.failed ? "failed" : item.sent ? "sent" : "sending",
     }));
@@ -925,25 +982,29 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // тем же путём, что и обычное сообщение, без похода через textarea/историю ввода.
   async function send(overrideText?: string) {
     const raw = (overrideText ?? text).trim();
-    if (!raw) return;
+    const files: Attachment[] = overrideText === undefined ? readyFiles.map(({ name, key, size, type }) => ({ name, key, size, type })) : [];
+    if (!raw && !files.length) return;
+    if (overrideText === undefined && uploadingFiles) return;
     if (overrideText === undefined) {
-      setHistory((current) => [...current, raw].slice(-100));
+      if (raw) setHistory((current) => [...current, raw].slice(-100));
       setHistoryPos(-1);
       setText("");
+      setDrafts([]);
     }
 
-    if (raw.startsWith("/")) {
+    if (raw.startsWith("/") && !files.length) {
       runCommand(raw);
       return;
     }
 
-    const body = raw;
+    // Файлы уходят и в props (карточки в чате), и ссылками в тексте — агенты читают текст.
+    const body = files.length ? [raw, attachmentsBlock(files)].filter(Boolean).join("\n\n") : raw;
     const replying = overrideText === undefined ? replyTo : null;
     if (replying) setReplyTo(null);
     // Адресат: явное @Имя, иначе собеседник этого чата, иначе автор сообщения, на которое отвечаем.
     const mentionTarget = parseMention(raw) || peer || (replying && replying.actor !== HUMAN ? replying.actor : "");
     const localId = `local-${Date.now()}`;
-    setPending((current) => [...current, { id: localId, body, sent: false }]);
+    setPending((current) => [...current, { id: localId, body, sent: false, attachments: files.length ? files : undefined }]);
 
     try {
       const messageProps: Record<string, unknown> = {};
@@ -953,6 +1014,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         messageProps.in_reply_to = replying.id;
       }
       if (currentProjectName) messageProps.current_project_name = currentProjectName;
+      if (files.length) messageProps.attachments = files;
       const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -960,7 +1022,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           project_id: projectId || null,
           agent_name: HUMAN,
           item_type: "question",
-          title: body.slice(0, 120),
+          title: (raw || files.map((file) => file.name).join(", ")).slice(0, 120),
           body,
           priority: "high",
           requires_human: false,
@@ -981,6 +1043,21 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     } catch {
       setPending((current) => current.map((item) => item.id === localId ? { ...item, failed: true } : item));
     }
+  }
+
+  async function attachFiles(list: File[]) {
+    const day = new Date().toISOString().slice(0, 10);
+    for (const file of list) {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const safe = (file.name || "файл").replace(/[^\p{L}\p{N}._-]+/gu, "-");
+      const key = `chat/${day}/${id}-${safe}`;
+      const draft: DraftAttachment = { id, name: file.name || safe, key, size: file.size, type: file.type || "application/octet-stream", loaded: 0 };
+      setDrafts((current) => [...current, draft]);
+      uploadToStorage(key, file, (loaded) => setDrafts((current) => current.map((item) => (item.id === id ? { ...item, loaded } : item))))
+        .then(() => setDrafts((current) => current.map((item) => (item.id === id ? { ...item, loaded: item.size, done: true } : item))))
+        .catch((error: unknown) => setDrafts((current) => current.map((item) => (item.id === id ? { ...item, error: error instanceof Error ? error.message : String(error) } : item))));
+    }
+    requestAnimationFrame(() => composerRef.current?.focus());
   }
 
   /** Перенос строки вставляем сами, а не полагаемся на поведение браузера по умолчанию: так он одинаково
@@ -1095,7 +1172,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               const day = line.at.slice(0, 10);
               const showDay = day !== lastDay;
               lastDay = day;
-              const time = new Date(line.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              const time = new Date(line.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
               // Цитата нужна, когда исходное сообщение не стоит прямо над ответом, — иначе она лишь повторяет строку выше.
               const quote = line.replyTo && lines[index - 1]?.inboxId !== line.replyTo.id ? line.replyTo : null;
               return (
@@ -1103,18 +1180,18 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                   {showDay && <div className="console-log-sep">{day}</div>}
                   <div className={`console-log-line ${line.kind}${line.pending === "failed" ? " failed" : ""}`} data-inbox-id={line.inboxId}>
                     <span className="console-log-head">
-                      <span className="console-log-time">{time}</span>
-                      {line.kind === "in" && <AgentAvatar name={line.actor} size={16} />}
+                      {line.kind === "in" && <AgentAvatar name={line.actor} size={18} />}
                       <span className="console-log-actor">
-                        {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "ты" : line.actor}
-                        <ChevronRight size={11} />
+                        {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "Вы" : line.actor}
                       </span>
+                      <span className="console-log-time" title={new Date(line.at).toLocaleString("ru-RU")}>{time}</span>
                       {line.inboxId && (
                         <button type="button" className="console-reply-btn" onClick={() => startReply(line)} title="Ответить на это сообщение">
                           <Reply size={12} /> ответить
                         </button>
                       )}
                     </span>
+                    <div className="console-bubble">
                     {quote && (
                       <button type="button" className="console-quote" onClick={() => jumpTo(quote.id)} title="Показать исходное сообщение">
                         <CornerDownRight size={11} />
@@ -1127,6 +1204,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                       {line.pending === "sending" && <em className="console-log-status"> отправляется…</em>}
                       {line.pending === "failed" && <em className="console-log-status failed"> не отправлено</em>}
                     </span>
+                    {!!line.attachments?.length && <AttachmentList files={line.attachments} />}
+                    </div>
                     {!!line.toolsUsed?.length && (
                       <span className="console-tools-used">
                         {line.toolsUsed.map((tool) => (
@@ -1215,7 +1294,30 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <button type="button" onClick={() => setReplyTo(null)} aria-label="Отменить ответ" title="Отменить ответ (Esc)"><X size={12} /></button>
               </div>
             )}
-            <form className="console-input-row" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+            {drafts.length > 0 && (
+              <div className="console-drafts">
+                {drafts.map((file) => (
+                  <span key={file.id} className={["console-draft", file.error ? "is-error" : "", file.done ? "is-done" : ""].filter(Boolean).join(" ")} title={file.error || file.name}>
+                    <i style={{ width: `${file.size ? Math.round((file.loaded / file.size) * 100) : 100}%` }} />
+                    <Paperclip size={11} />
+                    <span>{file.name}</span>
+                    <em>{file.error ? "не загрузилось" : file.done ? formatBytes(file.size) : `${Math.round((file.loaded / Math.max(1, file.size)) * 100)}%`}</em>
+                    <button type="button" onClick={() => setDrafts((current) => current.filter((item) => item.id !== file.id))} aria-label={`Убрать ${file.name}`}><X size={11} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <form
+              className={dragFiles ? "console-input-row is-drop" : "console-input-row"}
+              onSubmit={(event) => { event.preventDefault(); void send(); }}
+              onDragOver={(event) => { if ([...event.dataTransfer.types].includes("Files")) { event.preventDefault(); setDragFiles(true); } }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragFiles(false); }}
+              onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); setDragFiles(false); void attachFiles([...event.dataTransfer.files]); } }}
+            >
+              <button type="button" className="console-attach-btn" onClick={() => fileInputRef.current?.click()} aria-label="Приложить файл" title="Приложить файл — или вставьте из буфера, перетащите сюда">
+                <Paperclip size={15} />
+              </button>
+              <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void attachFiles([...(event.target.files ?? [])]); event.target.value = ""; }} />
               <span className="console-prompt">{liveMention ? `@${liveMention}` : peer ? `@${peer}` : ""}<img src="/assets/icons/icons/галочка.png" width={13} height={13} alt="" /></span>
               <textarea
                 ref={composerRef}
@@ -1224,6 +1326,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 onClick={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
                 onKeyDown={onKeyDown}
+                onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void attachFiles(files); } }}
                 placeholder={peer ? `Сообщение для ${peer} · Shift+Enter — новая строка` : "/команда, @агент; $проект; #артефакт · Shift+Enter — новая строка"}
                 spellCheck={false}
                 autoComplete="off"
@@ -1231,7 +1334,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 autoCorrect="off"
                 rows={1}
               />
-              <button type="submit" className="console-send-btn" disabled={!text.trim()} aria-label="Отправить" title="Отправить (Enter)">
+              <button type="submit" className="console-send-btn" disabled={(!text.trim() && !readyFiles.length) || uploadingFiles} aria-label="Отправить" title={uploadingFiles ? "Дождитесь загрузки файлов" : "Отправить (Enter)"}>
                 <SendHorizontal size={15} />
               </button>
             </form>

@@ -2448,3 +2448,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-memory-body p.is-done > span:last-child { color: var(--text-muted); text-decoration: line-through; }
 .wb-memory-body blockquote { margin: 4px 0; padding: 2px 0 2px 12px; border-left: 3px solid color-mix(in srgb, var(--accent-color) 45%, transparent); color: var(--text-2); white-space: pre-wrap; }
 .wb-memory-body hr { margin: 12px 0; border: 0; border-top: 1px solid var(--wb-line); }
+
+/* Заметка как на iPhone: первая строка — крупный заголовок и в правке, и в просмотре. */
+.wb-note-edit { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 860px; min-height: 100%; }
+.wb-note-title { width: 100%; padding: 22px 28px 4px; border: 0; outline: none; background: transparent; color: var(--text-main); font: inherit; font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
+.wb-note-title::placeholder { color: var(--text-muted); }
+.wb-note-edit .wb-note-editor { max-width: none; padding-top: 6px; }
+.wb-memory-body h1.wb-note-title-view { margin: 0 0 10px; color: var(--text-main); font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }

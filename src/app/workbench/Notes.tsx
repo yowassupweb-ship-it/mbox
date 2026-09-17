@@ -143,6 +143,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const savedRef = useRef("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const titleRef = useRef<HTMLInputElement | null>(null);
   const [imageError, setImageError] = useState("");
   const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
 
@@ -187,7 +188,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   useEffect(() => () => onDirty(tabKey, false), [tabKey, onDirty]);
 
   useEffect(() => {
-    if (visible && mode === "edit") textareaRef.current?.focus();
+    if (visible && mode === "edit") (content.split("\n")[0].trim() ? textareaRef.current : titleRef.current)?.focus();
   }, [visible, mode, note?.id]);
 
   useEffect(() => {
@@ -212,6 +213,57 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     notesStore.listeners.forEach((listener) => listener());
     onDirty(tabKey, false);
     tabs.close(tabKey);
+  }
+
+  // Как в «Заметках» iPhone: первая строка — крупный заголовок, остальное — текст. Хранится одной строкой.
+  const breakAt = content.indexOf("\n");
+  const titleText = breakAt < 0 ? content : content.slice(0, breakAt);
+  const bodyText = breakAt < 0 ? "" : content.slice(breakAt + 1);
+  const setParts = (title: string, body: string) => setContent(body ? `${title}\n${body}` : title);
+  const focusAt = (el: HTMLInputElement | HTMLTextAreaElement | null, position: number) => requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(position, position); });
+
+  function onTitleKey(event: React.KeyboardEvent<HTMLInputElement>) {
+    const el = event.currentTarget;
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      // Enter в заголовке переносит хвост заголовка в начало текста — как новая строка.
+      event.preventDefault();
+      const head = titleText.slice(0, el.selectionStart ?? titleText.length);
+      const tail = titleText.slice(el.selectionEnd ?? titleText.length);
+      setContent(`${head}\n${tail}${bodyText ? `${tail ? "\n" : ""}${bodyText}` : ""}`);
+      focusAt(textareaRef.current, 0);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusAt(textareaRef.current, 0);
+    }
+  }
+
+  function onBodyKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (markdownShortcut(event)) return;
+    const el = event.currentTarget;
+    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+    if (event.key === "Backspace" && atStart) {
+      // Backspace в самом начале текста подтягивает первую строку текста в заголовок.
+      event.preventDefault();
+      const firstBreak = bodyText.indexOf("\n");
+      const firstLine = firstBreak < 0 ? bodyText : bodyText.slice(0, firstBreak);
+      setParts(titleText + firstLine, firstBreak < 0 ? "" : bodyText.slice(firstBreak + 1));
+      focusAt(titleRef.current, titleText.length);
+    } else if (event.key === "ArrowUp" && !bodyText.slice(0, el.selectionStart).includes("\n")) {
+      event.preventDefault();
+      focusAt(titleRef.current, Math.min(el.selectionStart, titleText.length));
+    }
+  }
+
+  function onTitlePaste(event: React.ClipboardEvent<HTMLInputElement>) {
+    const text = event.clipboardData.getData("text");
+    if (!text.includes("\n")) return;
+    // Многострочная вставка в заголовок: первая строка — в заголовок, остальное — в начало текста.
+    event.preventDefault();
+    const el = event.currentTarget;
+    const head = titleText.slice(0, el.selectionStart ?? titleText.length) + text.slice(0, text.indexOf("\n"));
+    const rest = text.slice(text.indexOf("\n") + 1) + titleText.slice(el.selectionEnd ?? titleText.length);
+    setParts(head, [rest, bodyText].filter(Boolean).join("\n"));
+    focusAt(textareaRef.current, rest.length);
   }
 
   if (missing) return <div className="wb-doc-missing">Заметка не найдена — возможно, её удалили.</div>;
@@ -241,21 +293,39 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
       )}
     >
       {mode === "edit" ? (
-        <textarea
-          ref={textareaRef}
-          className="wb-note-editor"
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          onBlur={() => void save(content)}
-          onKeyDown={markdownShortcut}
-          onPaste={images.onPaste}
-          onDrop={images.onDrop}
-          placeholder={"Первая строка станет заголовком.\n\nПанель сверху или Ctrl+B, Ctrl+Shift+9 (чекбоксы)… Картинку можно вставить из буфера. Сохраняется само."}
-          spellCheck
-        />
+        <div className="wb-note-edit">
+          <input
+            ref={titleRef}
+            className="wb-note-title"
+            value={titleText}
+            onChange={(event) => setParts(event.target.value, bodyText)}
+            onKeyDown={onTitleKey}
+            onPaste={onTitlePaste}
+            onBlur={() => void save(content)}
+            placeholder="Заголовок"
+            spellCheck
+          />
+          <textarea
+            ref={textareaRef}
+            className="wb-note-editor"
+            value={bodyText}
+            onChange={(event) => setParts(titleText, event.target.value)}
+            onBlur={() => void save(content)}
+            onKeyDown={onBodyKey}
+            onPaste={images.onPaste}
+            onDrop={images.onDrop}
+            placeholder={"Текст заметки. Панель сверху или Ctrl+B, Ctrl+Shift+9 (чекбоксы)… Картинку можно вставить из буфера. Сохраняется само."}
+            spellCheck
+          />
+        </div>
       ) : (
         <article className="wb-reading" onDoubleClick={() => setMode("edit")}>
-          {content.trim() ? <div className="wb-memory-body">{renderDocument(content, { onToggleTask: (line) => setContent((current) => toggleTask(current, line)) })}</div> : <p className="wb-empty">Пустая заметка. Двойной клик — начать писать.</p>}
+          {content.trim() ? (
+            <div className="wb-memory-body">
+              {titleText.trim() && <h1 className="wb-note-title-view">{titleText.replace(/^#{1,6}\s+/, "")}</h1>}
+              {renderDocument(bodyText, { onToggleTask: (line) => setContent((current) => toggleTask(current, line + 1)) })}
+            </div>
+          ) : <p className="wb-empty">Пустая заметка. Двойной клик — начать писать.</p>}
         </article>
       )}
     </DocShell>

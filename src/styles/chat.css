@@ -1279,3 +1279,52 @@
   white-space: pre;
   user-select: text;
 }
+
+/* ─── Чат как мессенджер: вы — справа, агенты — слева; аватар и имя перед временем; вложения ─── */
+.console-log-line.in,
+.console-log-line.out { gap: 3px; padding: 6px 0; }
+.console-log-line.in { align-items: flex-start; }
+.console-log-line.out { align-items: flex-end; }
+.console-log-line.in .console-log-head,
+.console-log-line.out .console-log-head { gap: 6px; }
+.console-log-line.out .console-log-head { flex-direction: row-reverse; }
+.console-log-line.in .console-log-time,
+.console-log-line.out .console-log-time { min-width: 0; color: var(--text-muted); font-size: 11px; }
+.console-log-line.in .console-log-actor,
+.console-log-line.out .console-log-actor { font-size: 12.5px; }
+.console-bubble { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* Без пузырей (владелец: «пузыри не обязательно») — только стороны: вы справа, агенты слева. Текст внутри
+   блока выровнен по левому краю, чтобы многострочные ответы читались. */
+.console-log-line.in .console-bubble,
+.console-log-line.out .console-bubble { max-width: min(88%, 760px); }
+.console-log-line.out .console-bubble { padding-right: 10px; border-right: 2px solid color-mix(in srgb, var(--accent-color) 40%, transparent); padding-left: 0; }
+.console-log-line.out .console-reply-btn { margin-left: 0; margin-right: auto; }
+.console-log-line.in .console-tools-used,
+.console-log-line.in .console-highlights,
+.console-log-line.in .console-trace-details,
+.console-log-line.in .console-actions { max-width: min(88%, 760px); }
+.console-log-line.in.is-flash .console-bubble,
+.console-log-line.out.is-flash .console-bubble { background: color-mix(in srgb, var(--accent-color) 10%, transparent); }
+
+.console-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.console-attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; padding: 5px 9px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 8px; background: rgba(0, 0, 0, .2); color: var(--text-main); font-size: 12px; text-decoration: none; }
+.console-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-attachment em { flex: none; color: var(--text-muted); font-style: normal; font-size: 11px; }
+.console-attachment:hover { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
+.console-attachment.is-image { padding: 0; overflow: hidden; }
+.console-attachment.is-image img { display: block; max-width: 260px; max-height: 200px; object-fit: cover; }
+
+.console-drafts { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; border-top: 1px solid rgba(255, 255, 255, .06); background: #101012; }
+.console-draft { position: relative; display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 3px 4px 3px 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .1); border-radius: 6px; font-size: 11.5px; }
+.console-draft i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent-color) 16%, transparent); transition: width .2s ease; }
+.console-draft > * { position: relative; }
+.console-draft span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-draft em { flex: none; color: var(--text-muted); font-style: normal; }
+.console-draft.is-done i { background: none; }
+.console-draft.is-error { border-color: rgba(255, 77, 94, .45); }
+.console-draft.is-error em { color: var(--state-danger); }
+.console-draft button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-muted); cursor: pointer; }
+.console-draft button:hover { background: rgba(255, 255, 255, .08); color: var(--text-main); }
+.console-attach-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer; }
+.console-attach-btn:hover { background: rgba(255, 255, 255, .06); color: var(--text-main); }
+.console-input-row.is-drop { outline: 2px dashed color-mix(in srgb, var(--accent-color) 60%, transparent); outline-offset: -4px; }
