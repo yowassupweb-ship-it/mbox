@@ -504,22 +504,40 @@ function setupAutoUpdates() {
   autoUpdater.on("update-available", (info) => {
     const message = `Доступна версия ${info.version || ""}`.trim();
     updateStatus("available", message);
+    // Проверка теперь периодическая — сообщаем о каждой версии один раз, а не на каждой проверке.
+    if (announcedUpdateVersion === info.version) return;
+    announcedUpdateVersion = info.version;
     showUpdateNotice("info", "MBOX Desktop: найдено обновление", `${message}. Скачиваю в фоне.`);
   });
   autoUpdater.on("update-not-available", () => updateStatus("current", "Установлена свежая версия"));
   autoUpdater.on("download-progress", (progress) => updateStatus("downloading", `Скачиваю обновление ${Math.round(progress.percent || 0)}%`));
   autoUpdater.on("update-downloaded", (info) => {
     updateStatus("ready", `Обновление ${info.version || ""} готово к установке`.trim());
+    if (promptedUpdateVersion === info.version) return;
+    promptedUpdateVersion = info.version;
     showUpdateInstallPrompt(info);
   });
   autoUpdater.on("error", (error) => {
     updateStatus("error", `Обновление: ${error.message}`);
-    showUpdateNotice("error", "MBOX Desktop: обновление не проверилось", error.message);
+    // Фоновые проверки без сети не должны каждые полчаса открывать окно ошибки.
+    if (manualUpdateCheck) showUpdateNotice("error", "MBOX Desktop: обновление не проверилось", error.message);
   });
   if (app.isPackaged) {
+    // Раньше проверка была только при запуске: приложение, открытое весь день, новую версию не видело до перезапуска.
     setTimeout(() => checkForUpdates(false), 5000);
+    setInterval(() => checkForUpdates(false), UPDATE_CHECK_INTERVAL_MS);
+    app.on("browser-window-focus", () => {
+      if (Date.now() - lastUpdateCheckAt > UPDATE_FOCUS_CHECK_MS) checkForUpdates(false);
+    });
   }
 }
+
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+const UPDATE_FOCUS_CHECK_MS = 10 * 60 * 1000;
+let lastUpdateCheckAt = 0;
+let manualUpdateCheck = false;
+let announcedUpdateVersion = "";
+let promptedUpdateVersion = "";
 
 function showUpdateNotice(type, message, detail) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -555,6 +573,9 @@ async function checkForUpdates(manual) {
     if (manual) dialog.showMessageBox(mainWindow, { type: "info", message });
     return { ok: false, reason: "dev" };
   }
+  lastUpdateCheckAt = Date.now();
+  manualUpdateCheck = manual;
+  if (manual) promptedUpdateVersion = "";
   try {
     const result = await autoUpdater.checkForUpdates();
     return { ok: true, updateInfo: result?.updateInfo || null };
