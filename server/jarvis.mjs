@@ -1563,7 +1563,7 @@ async function findTelegramPostMemory(sourceId, messageId) {
 async function ensureTelegramPostsFolder(row) {
   const cached = row.props?.telegram_folder_id;
   if (cached) return cached;
-  const existing = await query("SELECT id::text FROM folders WHERE name = 'Посты' ORDER BY id LIMIT 1");
+  const existing = await query("SELECT id::text FROM folders WHERE name = 'Посты' ORDER BY folders.id LIMIT 1");
   const folderId = existing.rows[0]?.id
     || (await query("INSERT INTO folders(parent_id, name, entity_type, access_level) VALUES (NULL, 'Посты', 'memory', 'agents') RETURNING id::text")).rows[0].id;
   await query("UPDATE data_sources SET props = props || $1::jsonb WHERE id = $2", [JSON.stringify({ telegram_folder_id: folderId }), row.id]);

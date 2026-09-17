@@ -1,8 +1,8 @@
 {
   "id": "example",
   "version": 1,
-  "status": "brief",
-  "updated_at": "2026-09-17T00:00:00.000Z",
+  "status": "checked",
+  "updated_at": "2026-09-17T13:41:49.856Z",
   "brief": {
     "type": "подборка",
     "subject": "Зимние выходные по Золотому кольцу",
@@ -16,11 +16,183 @@
     "utm_content": "170926",
     "extra": "Пример письма для проверки конструктора.",
     "tours": [
-      { "name": "Ситцевые узоры на Золотом кольце", "route": "Киржач – Юрьев-Польский – Суздаль – Владимир", "dates": "3 дня · 2 ночи · 3–5 января", "price": "", "url": "https://vs-travel.ru/tour?id=2885", "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq", "alt": "Киржач зимой", "cta": "" },
-      { "name": "Симфония русского творчества", "route": "Рязань – Спас-Клепики – Гусь-Хрустальный", "dates": "2 дня · 1 ночь · 5–6 января", "price": "", "url": "https://vs-travel.ru/tour?id=2898", "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6wid9njssudnmyd84bcbqiwsjacrdtpkodtb5fbjynwg98b5qjmtqskkcgozxfd95674tc9udqurym1bajw635wz75awan9qp55kj51g9hzitm3k5ro6y", "alt": "Рязань", "cta": "" }
+      {
+        "name": "Ситцевые узоры на Золотом кольце",
+        "route": "Киржач – Юрьев-Польский – Суздаль – Владимир",
+        "dates": "3 дня · 2 ночи · 3–5 января",
+        "price": "",
+        "url": "https://vs-travel.ru/tour?id=2885",
+        "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq",
+        "alt": "Киржач зимой",
+        "cta": ""
+      },
+      {
+        "name": "Симфония русского творчества",
+        "route": "Рязань – Спас-Клепики – Гусь-Хрустальный",
+        "dates": "2 дня · 1 ночь · 5–6 января",
+        "price": "",
+        "url": "https://vs-travel.ru/tour?id=2898",
+        "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6wid9njssudnmyd84bcbqiwsjacrdtpkodtb5fbjynwg98b5qjmtqskkcgozxfd95674tc9udqurym1bajw635wz75awan9qp55kj51g9hzitm3k5ro6y",
+        "alt": "Рязань",
+        "cta": ""
+      }
     ]
   },
-  "letter": { "subject": "", "preheader": "", "utm": { "campaign": "", "content": "" }, "items": [] },
-  "proposal": null,
-  "check": null
+  "letter": {
+    "subject": "Зимние выходные по Золотому кольцу",
+    "preheader": "Три коротких маршрута на январские каникулы",
+    "utm": {
+      "campaign": "winter-golden-ring",
+      "content": "170926"
+    },
+    "items": [
+      {
+        "component": "C001",
+        "fields": {}
+      },
+      {
+        "component": "C002",
+        "fields": {
+          "title": "Зима по Золотому кольцу"
+        }
+      },
+      {
+        "component": "C003",
+        "fields": {
+          "text": "Собрали короткие поездки, чтобы провести каникулы в старинных городах.\n\n**Места ограничены** — бронируйте заранее."
+        }
+      },
+      {
+        "component": "C004",
+        "fields": {
+          "label": "Все зимние туры",
+          "url": "https://vs-travel.ru/podbor-tura/novogodnie-kanikuly"
+        }
+      },
+      {
+        "component": "C005",
+        "fields": {}
+      },
+      {
+        "component": "C006",
+        "fields": {
+          "title": "Выбранные маршруты"
+        }
+      },
+      {
+        "component": "C007",
+        "fields": {
+          "title": "Ситцевые узоры на Золотом кольце",
+          "route": "Киржач – Юрьев-Польский – Суздаль – Владимир",
+          "meta": "3 дня · 2 ночи · 3–5 января",
+          "cta": "Узнать подробнее",
+          "url": "https://vs-travel.ru/tour?id=2885",
+          "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq",
+          "alt": "Киржач зимой"
+        }
+      },
+      {
+        "component": "C008",
+        "fields": {
+          "title": "Симфония русского творчества",
+          "route": "Рязань – Спас-Клепики – Гусь-Хрустальный",
+          "meta": "2 дня · 1 ночь · 5–6 января",
+          "cta": "Узнать подробнее",
+          "url": "https://vs-travel.ru/tour?id=2898",
+          "image": "https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6wid9njssudnmyd84bcbqiwsjacrdtpkodtb5fbjynwg98b5qjmtqskkcgozxfd95674tc9udqurym1bajw635wz75awan9qp55kj51g9hzitm3k5ro6y",
+          "alt": "Рязань"
+        }
+      },
+      {
+        "component": "C005",
+        "fields": {}
+      },
+      {
+        "component": "C010",
+        "fields": {}
+      },
+      {
+        "component": "C014",
+        "fields": {}
+      }
+    ]
+  },
+  "proposal": {
+    "by": "Claude",
+    "at": "2026-09-17T13:41:19.130Z",
+    "notes": "Подборка: карточки туров чередуются (фото слева/справа), в конце баннер каталога.",
+    "questions": []
+  },
+  "check": {
+    "at": "2026-09-17T13:41:49.854Z",
+    "by": "Claude",
+    "ok": true,
+    "external_ok": true,
+    "external_status": "checked",
+    "html_path": "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\mail-skill\\ready\\example.html",
+    "render": {
+      "errors": [],
+      "warnings": []
+    },
+    "preflight": {
+      "errors": [],
+      "warnings": [],
+      "stats": {
+        "links": 16,
+        "images": 8,
+        "blocks": 12,
+        "atoms": 14
+      }
+    },
+    "email_checker": {
+      "summary": {
+        "totalLinks": 21,
+        "linksWithUtm": 14,
+        "totalImages": 8,
+        "imagesWithoutAlt": 0,
+        "errors": 0,
+        "warnings": 0
+      },
+      "validation": {
+        "errors": [],
+        "warnings": []
+      },
+      "links": {
+        "total": 10,
+        "ok": 9,
+        "failed": 1,
+        "skipped": 0
+      },
+      "links_failed": [],
+      "links_auth": [
+        "https://vs-travel.ru/lk/profile?utm_source=email&utm_medium=email&utm_campaign=winter-golden-ring&utm_content=170926"
+      ],
+      "text_issues": [
+        {
+          "type": "grammar",
+          "message": "Пропущена точка или слово ошибочно написано с прописной буквы.",
+          "context": "... Личный кабинет Зима по Золотому кольцу Собрали короткие поездки, чтобы провести канику...",
+          "suggestions": []
+        },
+        {
+          "type": "grammar",
+          "message": "Пропущена точка или слово ошибочно написано с прописной буквы.",
+          "context": "...одные и длинные маршруты по всей России Перейти в каталог г. Москва, ул. Авиамоторная, ...",
+          "suggestions": []
+        }
+      ],
+      "text_failed": ""
+    },
+    "fixed": [
+      "Состав письма был пуст (letter.items = []) — собрал по брифу рецептом LetterKit: C001 шапка, C002 заголовок, C003 текст, C004 кнопка, C005 разделитель, C006 подзаголовок, C007/C008 карточки туров, C005, C010 баннер каталога, C014 футер.",
+      "Заполнил поля письма из брифа: тема, прехедер, utm_campaign=winter-golden-ring, utm_content=170926 — это снимало 4 ошибки рендера и 2 ошибки strict preflight (нет блоков em=\"block\", нет ссылок).",
+      "Подзаголовок подборки C006: «Туры подборки» → «Выбранные маршруты» — убрал повтор слова «туры» сразу после кнопки «Все зимние туры» (замечание Email Checker)."
+    ],
+    "remaining": [
+      "Email Checker: «пропущена точка» на стыке шапки и заголовка («Личный кабинет Зима по Золотому кольцу») — склейка соседних блоков, в письме это разные блоки. Не правил.",
+      "Email Checker: «пропущена точка» на стыке баннера каталога и адреса в футере («Перейти в каталог г. Москва…») — та же склейка. Не правил.",
+      "В брифе нет цен и промокода — блоки с ценой не добавлял, ничего не придумывал.",
+      "Тема и прехедер взяты из брифа дословно — если нужен другой вариант, скажите."
+    ]
+  }
 }

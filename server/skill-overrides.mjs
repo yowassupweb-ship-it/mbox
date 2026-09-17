@@ -32,8 +32,8 @@ export async function ensureSkillOverridesSchema(query) {
 
 async function versionsOf(query, skillId) {
   const result = skillId
-    ? await query("SELECT id::text, skill_id, path, content, sha256, base_sha256, author, message, created_at::text FROM skill_file_versions WHERE skill_id = $1 ORDER BY id", [skillId])
-    : await query("SELECT id::text, skill_id, path, content, sha256, base_sha256, author, message, created_at::text FROM skill_file_versions ORDER BY id");
+    ? await query("SELECT id::text, skill_id, path, content, sha256, base_sha256, author, message, created_at::text FROM skill_file_versions WHERE skill_id = $1 ORDER BY skill_file_versions.id", [skillId])
+    : await query("SELECT id::text, skill_id, path, content, sha256, base_sha256, author, message, created_at::text FROM skill_file_versions ORDER BY skill_file_versions.id");
   return result.rows;
 }
 
@@ -170,7 +170,7 @@ export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot,
   if (action === "/history" && req.method === "GET") {
     if (!isSkillFilePath(file)) { sendJson(res, 400, { error: "bad_skill_path" }); return true; }
     const rows = await query(
-      "SELECT id::text, sha256, base_sha256, author, message, octet_length(content) AS size_bytes, created_at::text FROM skill_file_versions WHERE skill_id = $1 AND path = $2 ORDER BY id DESC LIMIT 50",
+      "SELECT id::text, sha256, base_sha256, author, message, octet_length(content) AS size_bytes, created_at::text FROM skill_file_versions WHERE skill_id = $1 AND path = $2 ORDER BY skill_file_versions.id DESC LIMIT 50",
       [id, file],
     );
     sendJson(res, 200, { versions: rows.rows });
