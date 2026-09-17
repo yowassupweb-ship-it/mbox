@@ -77,6 +77,7 @@
 
     /* Бриф */
     .page { max-width: 900px; margin: 0 auto; padding: 16px 16px 60px; }
+    .page.is-wide { max-width: 1440px; }
     .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     .type { padding: 9px 11px; border: 1px solid var(--line); border-left: 2px solid transparent; border-radius: var(--radius-sm); background: var(--surface); text-align: left; }
     .type small { display: block; color: var(--text-muted); font-size: 11px; }
@@ -112,7 +113,7 @@
     .stage.mobile iframe { max-width: 390px; }
 
     /* Компоненты */
-    .cards { display: grid; gap: 12px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
     .card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; }
     .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; }
     .card-head .name { flex: 1; min-width: 180px; font-weight: 500; }
@@ -120,6 +121,8 @@
     .card-info code { color: var(--text-muted); font: 11px var(--font-mono); }
     .preview { padding: 10px; background: #fff6ed; }
     .preview iframe { display: block; width: 100%; max-width: 660px; margin: 0 auto; border: 0; background: #fff6ed; }
+    .preview.is-scaled { position: relative; overflow: hidden; padding: 8px; }
+    .preview.is-scaled iframe { width: 700px; max-width: none; margin: 0; transform-origin: top left; }
     .ask { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }
     .ask textarea { flex: 1; min-height: 48px; }
     .code { width: 100%; min-height: 200px; font: 12px/1.5 var(--font-mono); }
@@ -240,7 +243,7 @@
 
     <!-- 2. Компоненты -->
     <main class="view" id="view-components" hidden>
-      <div class="page">
+      <div class="page is-wide">
         <div class="actions" style="margin-top:0; margin-bottom:12px">
           <input id="c-search" type="search" placeholder="Номер или название: 7, карточка, подвал" style="flex:1">
           <button class="btn primary" type="button" id="c-new-toggle">+ Новый компонент</button>
@@ -658,8 +661,19 @@
     const frames = new Set();
     window.addEventListener('message', (event) => {
       if (!event.data || event.data.type !== 'lib:height') return;
-      for (const frame of frames) if (!frame.isConnected) frames.delete(frame); else if (frame.contentWindow === event.source) frame.style.height = `${Math.max(40, Number(event.data.h) || 0)}px`;
+      for (const frame of frames) if (!frame.isConnected) frames.delete(frame); else if (frame.contentWindow === event.source) fitPreview(frame, Math.max(40, Number(event.data.h) || 0));
     });
+    // Компонент рисуется в ширине настольного письма (700 px: у 660 и уже срабатывает мобильная вёрстка) и уменьшается под карточку: блоки больше не
+    // выглядят крупно, а пропорции остаются как в письме.
+    function fitPreview(frame, height) {
+      frame.style.height = `${height}px`;
+      const box = frame.parentElement;
+      if (!box || !box.classList.contains('is-scaled')) return;
+      const scale = Math.min(1, (box.clientWidth - 16) / 700);
+      frame.style.transform = `scale(${scale})`;
+      box.style.height = `${Math.ceil(height * scale) + 16}px`;
+    }
+    window.addEventListener('resize', () => { for (const frame of frames) if (frame.isConnected && frame.style.height) fitPreview(frame, parseFloat(frame.style.height)); });
     function previewDoc(template, component) {
       const rendered = state.K.renderComponent(component, template, sampleFields(component));
       const shell = state.kit.shell.replace('{{subject}}', '').replace('{{preheader}}', '').replace(state.K.MARK, rendered.html);
@@ -678,7 +692,7 @@
         card.innerHTML = `<div class="card-head"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span><span class="chip">${esc(component.category)}</span><span class="chip">${esc(component.type)}</span>
           <button class="btn primary small" type="button" data-act="add">+ В письмо</button><button class="btn small" type="button" data-act="ask">Агенту</button></div>
           <div class="card-info">${esc(component.description || '')}${component.fields.length ? `<br><code>${component.fields.map((f) => `${f.key}${f.required ? '*' : ''}`).join(' · ')}</code>` : ''}</div>
-          <div class="preview"><iframe loading="lazy" title="${component.id}"></iframe></div>
+          <div class="preview is-scaled"><iframe loading="lazy" title="${component.id}"></iframe></div>
           <div class="ask" hidden><textarea placeholder="Что изменить в ${component.id}?"></textarea><button class="btn primary" type="button" data-act="ask-send">Отправить</button></div>`;
         const frame = $('iframe', card);
         frames.add(frame);

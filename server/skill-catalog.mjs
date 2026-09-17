@@ -15,8 +15,9 @@ export const SKILL_CATALOG = [
     output: "Готовый HTML и отчёт предрелизной проверки",
     location: "Сервер MBOX: skills/email-campaign · ставится в ~/.claude/skills и ~/.codex/skills",
     pages: [
-      { title: "Бриф рассылки", target: "skill-file:email-campaign/brief-builder.html" },
-      { title: "Компоненты и сборка", target: "skill-file:email-campaign/library.html" },
+      // Конструктор: бриф → состав из компонентов → правка в предпросмотре → проверка. Старая форма брифа — запасная.
+      { title: "Конструктор письма", target: "skill-file:email-campaign/library.html" },
+      { title: "Простая форма брифа", target: "skill-file:email-campaign/brief-builder.html" },
     ],
   },
   {
