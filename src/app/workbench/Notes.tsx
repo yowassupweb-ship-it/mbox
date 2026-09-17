@@ -7,6 +7,7 @@ import { DocShell } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
+import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
 
 export type Note = { id: string; title: string; content?: string; snippet?: string; pinned: boolean; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
 
@@ -142,6 +143,8 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const savedRef = useRef("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [imageError, setImageError] = useState("");
+  const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
 
   useEffect(() => {
     if (cached) { savedRef.current = cached.content ?? ""; return; }
@@ -220,7 +223,8 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     <DocShell
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)} <span className={`wb-save-state is-${state}`}>{stateLabel}</span></span>
+          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}</span>
+          {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
           <div className="wb-doc-actions">
             <select className="wb-bar-select" value={note.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} title="Проект">
               <option value="">без проекта</option>
@@ -243,12 +247,15 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
           value={content}
           onChange={(event) => setContent(event.target.value)}
           onBlur={() => void save(content)}
-          placeholder={"Первая строка станет заголовком.\n\nПиши как в блокноте: # заголовки, - списки, `код`, **жирный** — сохраняется само."}
+          onKeyDown={markdownShortcut}
+          onPaste={images.onPaste}
+          onDrop={images.onDrop}
+          placeholder={"Первая строка станет заголовком.\n\nПанель сверху или Ctrl+B, Ctrl+Shift+9 (чекбоксы)… Картинку можно вставить из буфера. Сохраняется само."}
           spellCheck
         />
       ) : (
         <article className="wb-reading" onDoubleClick={() => setMode("edit")}>
-          {content.trim() ? <div className="wb-memory-body">{renderDocument(content)}</div> : <p className="wb-empty">Пустая заметка. Двойной клик — начать писать.</p>}
+          {content.trim() ? <div className="wb-memory-body">{renderDocument(content, { onToggleTask: (line) => setContent((current) => toggleTask(current, line)) })}</div> : <p className="wb-empty">Пустая заметка. Двойной клик — начать писать.</p>}
         </article>
       )}
     </DocShell>

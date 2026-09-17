@@ -10,6 +10,7 @@ import { usePersistentState, type TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
 import { CodeEditor } from "./CodeEditor";
 import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
+import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 
 const ICONS = "/assets/icons/icons";
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -431,7 +432,10 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
             <div className="wb-reading"><div className="wb-memory-body" onDoubleClick={() => setMode("code")}>{renderDocument(draft.content)}</div></div>
           )
         ) : editing ? (
-          <CodeEditor textareaRef={textareaRef} value={draft.content} onChange={(content) => setDraft({ ...draft, content })} language={codeLanguage(kind, draft.name)} onKeyDown={onEditorKey} placeholder="Содержимое файла" autoFocus={!isNew} />
+          <>
+          {kind === "markdown" && <MarkdownToolbar targetRef={textareaRef} />}
+          <CodeEditor textareaRef={textareaRef} value={draft.content} onChange={(content) => setDraft({ ...draft, content })} language={codeLanguage(kind, draft.name)} onKeyDown={(event) => { if (kind === "markdown" && markdownShortcut(event)) return; onEditorKey(event); }} placeholder="Содержимое файла" autoFocus={!isNew} />
+          </>
         ) : mode === "preview" && kind === "html" ? (
           <div className={viewport === "mobile" ? "wb-html-preview is-mobile" : "wb-html-preview"}>
             <iframe title={file?.name || "Предпросмотр"} sandbox="allow-scripts" srcDoc={file?.content} />

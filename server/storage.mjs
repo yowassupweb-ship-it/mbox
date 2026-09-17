@@ -286,6 +286,16 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       sendJson(res, response.ok ? 200 : 502, response.ok ? { key } : { error: await s3Error(response) });
       return true;
     }
+    // Постоянная ссылка для картинок в заметках: ![](/api/mbox/storage/file?key=…) — каждый раз свежая
+    // подписанная ссылка на час, поэтому картинка в тексте не протухает.
+    if (pathname === "/api/mbox/storage/file" && req.method === "GET") {
+      const key = cleanKey(url.searchParams.get("key"));
+      if (!key || key.endsWith("/")) { sendJson(res, 400, { error: "Нужен ключ файла" }); return true; }
+      const location = presignUrl({ endpoint: config.endpoint, path: objectPath(config, key), accessKeyId: config.access_key_id, secretAccessKey: config.secret_access_key, region: config.region, expires: 3600 });
+      res.writeHead(302, { location, "cache-control": "private, max-age=3000" });
+      res.end();
+      return true;
+    }
     if (pathname === "/api/mbox/storage/link" && req.method === "GET") {
       const key = cleanKey(url.searchParams.get("key"));
       const expires = Math.min(Math.max(Number(url.searchParams.get("expires") || 3600), 60), 7 * 24 * 3600);

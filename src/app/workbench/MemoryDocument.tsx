@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link2, Pencil, Save, Trash2, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
@@ -7,6 +7,7 @@ import type { Memory } from "../../types";
 import { DocShell, DrawerToggle, MetaStrip, useDrawer } from "./docLayout";
 import type { TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
+import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 
 type MemoryRecord = Memory & { project_name?: string | null; todo_id?: string | null };
 type MemoryLink = { id: string; from_memory_id: string; from_title: string; to_memory_id: string; to_title: string; link_type: string };
@@ -27,11 +28,25 @@ function draftOf(memory: MemoryRecord): Draft {
   };
 }
 
+const INLINE = /(!\[[^\]]*\]\([^)\s]+\)|\[[^\]]+\]\([^)\s]+\)|`[^`]+`|\*\*[^*]+\*\*|~~[^~]+~~|(?<![\w*])\*[^*\s][^*]*\*(?![\w*])|(?<!\w)_[^_\s][^_]*_(?!\w))/g;
+
+/** Ссылка из markdown: только http(s), mailto, tel и адреса самого MBOX — javascript: и прочее не пускаем. */
+function safeHref(url: string) {
+  return /^(https?:|mailto:|tel:|\/api\/mbox\/)/i.test(url) ? url : undefined;
+}
+
 function inline(text: string, key: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean).map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**")) return <b key={`${key}-${index}`}>{part.slice(2, -2)}</b>;
-    if (part.startsWith("`") && part.endsWith("`")) return <code key={`${key}-${index}`}>{part.slice(1, -1)}</code>;
-    return <Fragment key={`${key}-${index}`}>{part}</Fragment>;
+  return text.split(INLINE).filter(Boolean).map((part, index) => {
+    const id = `${key}-${index}`;
+    const image = part.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    if (image) return safeHref(image[2]) ? <img key={id} className="md-image" src={image[2]} alt={image[1]} loading="lazy" /> : <Fragment key={id}>{part}</Fragment>;
+    const link = part.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+    if (link) return safeHref(link[2]) ? <a key={id} href={link[2]} target="_blank" rel="noreferrer">{inline(link[1], id)}</a> : <Fragment key={id}>{part}</Fragment>;
+    if (part.startsWith("**") && part.endsWith("**")) return <b key={id}>{inline(part.slice(2, -2), id)}</b>;
+    if (part.startsWith("~~") && part.endsWith("~~")) return <s key={id}>{inline(part.slice(2, -2), id)}</s>;
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={id}>{part.slice(1, -1)}</code>;
+    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) return <em key={id}>{inline(part.slice(1, -1), id)}</em>;
+    return <Fragment key={id}>{part}</Fragment>;
   });
 }
 
@@ -44,7 +59,7 @@ function tableCells(line: string) {
 
 /** Записи памяти в основном пишут агенты markdown'ом: заголовки, списки, блоки кода. Полноценный
  * парсер не нужен — только то, что реально встречается, чтобы текст не читался простынёй. */
-export function renderDocument(text: string): ReactNode {
+export function renderDocument(text: string, options: { onToggleTask?: (lineIndex: number) => void } = {}): ReactNode {
   const lines = text.split("\n");
   const blocks: ReactNode[] = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -74,9 +89,24 @@ export function renderDocument(text: string): ReactNode {
       );
       continue;
     }
-    const heading = line.match(/^(#{1,4})\s+(.*)$/);
-    if (heading) { blocks.push(<h4 key={i} className={`level-${heading[1].length}`}>{inline(heading[2], `h${i}`)}</h4>); continue; }
-    const listItem = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) { blocks.push(<h4 key={i} className={`level-${Math.min(heading[1].length, 4)}`}>{inline(heading[2], `h${i}`)}</h4>); continue; }
+    // Чекбокс «- [ ] дело»: в просмотре кликается, если документ разрешает (заметки).
+    const task = line.match(/^(\s*)[-*+]\s+\[([ xX])\]\s?(.*)$/);
+    if (task) {
+      const done = task[2].trim() !== "";
+      const lineIndex = i;
+      blocks.push(
+        <p key={i} className={done ? "is-list is-task is-done" : "is-list is-task"} style={{ ["--indent" as string]: Math.floor(task[1].length / 2) }}>
+          <span><input type="checkbox" checked={done} disabled={!options.onToggleTask} onChange={() => options.onToggleTask?.(lineIndex)} onDoubleClick={(event) => event.stopPropagation()} /></span>
+          <span>{inline(task[3], `t${i}`)}</span>
+        </p>,
+      );
+      continue;
+    }
+    if (/^\s*>/.test(line)) { blocks.push(<blockquote key={i}>{inline(line.replace(/^\s*>\s?/, ""), `q${i}`)}</blockquote>); continue; }
+    if (/^\s*(?:-{3,}|\*{3,})\s*$/.test(line)) { blocks.push(<hr key={i} />); continue; }
+    const listItem = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
     if (listItem) { blocks.push(<p key={i} className="is-list" style={{ ["--indent" as string]: Math.floor(listItem[1].length / 2) }}><span>{/\d/.test(listItem[2]) ? listItem[2] : "•"}</span><span>{inline(listItem[3], `l${i}`)}</span></p>); continue; }
     blocks.push(line.trim() ? <p key={i}>{inline(line, `p${i}`)}</p> : <div key={i} className="is-gap" />);
   }
@@ -103,6 +133,7 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
   const [links, setLinks] = useState<MemoryLink[]>([]);
   const [similar, setSimilar] = useState<Similar[]>([]);
   const [drawerOpen, setDrawerOpen] = useDrawer("mbox.doc.memory.related");
+  const contentRef = useRef<HTMLTextAreaElement | null>(null);
 
   const dirty = useMemo(() => {
     if (!editing) return false;
@@ -298,7 +329,10 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
             </select>
             <input value={draft.tags} onChange={(event) => setDraft({ ...draft, tags: event.target.value })} placeholder="теги через запятую" title="Теги" />
           </div>
-          <textarea value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="Текст записи. Поддерживаются # заголовки, - списки, `код` и **жирный**." spellCheck={false} />
+          <>
+            <MarkdownToolbar targetRef={contentRef} />
+            <textarea ref={contentRef} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} onKeyDown={markdownShortcut} placeholder="Текст записи — markdown: панель сверху, Ctrl+B, Ctrl+Shift+9 (чекбоксы)." spellCheck={false} />
+          </>
         </div>
       ) : memory && (
         <article className="wb-reading">

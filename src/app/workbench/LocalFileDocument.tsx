@@ -10,6 +10,7 @@ import { hasDraft, useDraft } from "./uiMemory";
 import { CodeEditor } from "./CodeEditor";
 import { languageOf } from "./codeHighlight";
 import { buildLocalPreview } from "./localPreview";
+import { MarkdownToolbar, markdownShortcut, toggleTask } from "./MarkdownToolbar";
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 
@@ -113,6 +114,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   const [saving, setSaving] = useState(false);
   // Предпросмотр HTML со стилями, скриптами, шрифтами и картинками из соседних файлов (localPreview.ts).
   const [previewHtml, setPreviewHtml] = useState("");
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     if (!isHtml || mode !== "preview") return;
     let alive = true;
@@ -237,6 +239,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
       toolbar={(
         <>
           <span className="wb-doc-crumbs">{rootName(rootKey)} › {path.split("/").join(" › ")}{letter && <span className={`wb-git-letter is-${letter}`}>{letter}</span>}{dirty && <b className="wb-dirty-mark"> ●</b>}</span>
+          {isMarkdown && mode === "edit" && <MarkdownToolbar targetRef={editorRef} />}
           <div className="wb-doc-actions">
             {isHtml && mode === "preview" && (
               <div className="wb-segmented">
@@ -321,9 +324,9 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
           <iframe title={path} sandbox="allow-scripts" srcDoc={previewHtml || draft} />
         </div>
       ) : mode === "preview" && isMarkdown ? (
-        <div className="wb-reading"><div className="wb-memory-body" onDoubleClick={() => setMode("edit")}>{renderDocument(draft)}</div></div>
+        <div className="wb-reading"><div className="wb-memory-body" onDoubleClick={() => setMode("edit")}>{renderDocument(draft, { onToggleTask: (line) => setDraft(toggleTask(draft, line)) })}</div></div>
       ) : (
-        <CodeEditor value={draft} onChange={setDraft} language={languageOf(path)} onKeyDown={onEditorKey} />
+        <CodeEditor textareaRef={editorRef} value={draft} onChange={setDraft} language={languageOf(path)} onKeyDown={(event) => { if (isMarkdown && markdownShortcut(event)) return; onEditorKey(event); }} />
       )}
       <div className="wb-doc-foot">{formatBytes(file.size)} · изменён {formatDateTime(new Date(file.mtime).toISOString())}</div>
     </DocShell>
