@@ -155,7 +155,11 @@ async function build(id) {
     email.text_issues.forEach((issue) => console.log(`TEXT [${issue.type}] ${issue.message} … ${issue.context}${issue.suggestions.length ? ` → ${issue.suggestions.join(' / ')}` : ''}`));
     console.log(`Email Checker: ссылок ${email.summary?.totalLinks ?? '?'}, с UTM ${email.summary?.linksWithUtm ?? '?'}, картинок без alt ${email.summary?.imagesWithoutAlt ?? '?'}, битых ссылок ${email.links_failed.length}, замечаний к тексту ${email.text_issues.length}.`);
   }
-  console.log(check.ok ? 'ИТОГ: блокирующих ошибок нет. Замечания к тексту оцени по смыслу.' : `ИТОГ: блокирующих ошибок ${blocking} — исправь в letters/${id}.json (поля) или в компоненте и запусти build снова.`);
+  console.log(check.ok
+    ? 'ИТОГ: блокирующих ошибок нет. Замечания к тексту оцени по смыслу.'
+    : !blocking && !remoteRequired
+      ? 'ИТОГ: сборка и preflight без ошибок; Email Checker не запускался (--no-remote) — для итоговой проверки запусти build без этого флага.'
+      : `ИТОГ: блокирующих ошибок ${blocking} — исправь в letters/${id}.json (поля) или в компоненте и запусти build снова.`);
   process.exitCode = check.ok ? 0 : 1;
 }
 
