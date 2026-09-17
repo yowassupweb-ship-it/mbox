@@ -151,9 +151,8 @@
       <span class="badge" id="letter-status"></span>
       <div class="tabs" role="tablist">
         <button type="button" data-tab="brief" role="tab">Бриф</button>
-        <button type="button" data-tab="build" role="tab">Сборка<b id="count-items">0</b></button>
         <button type="button" data-tab="components" role="tab">Компоненты<b id="count-components">0</b></button>
-        <button type="button" data-tab="check" role="tab">Проверка<b id="count-check"></b></button>
+        <button type="button" data-tab="mailing" role="tab">Рассылка<b id="count-items">0</b></button>
       </div>
       <span class="fill"></span>
       <span class="status" id="status">Загрузка…</span>
@@ -195,8 +194,8 @@
       </div>
     </main>
 
-    <!-- 2. Сборка -->
-    <main class="view" id="view-build" hidden>
+    <!-- 3. Рассылка: ручная сборка, предпросмотр и проверка -->
+    <main class="view" id="view-mailing" hidden>
       <div class="build">
         <aside class="side">
           <div id="proposal"></div>
@@ -215,6 +214,7 @@
             <div class="adder"><select id="add-component" aria-label="Компонент"></select><button class="btn" type="button" id="add-button">Добавить</button></div>
             <ul class="errors" id="render-errors" hidden></ul>
           </div>
+          <div id="check"></div>
         </aside>
         <section class="stage" id="stage">
           <div class="stage-bar">
@@ -238,7 +238,7 @@
       </div>
     </main>
 
-    <!-- 3. Компоненты -->
+    <!-- 2. Компоненты -->
     <main class="view" id="view-components" hidden>
       <div class="page">
         <div class="actions" style="margin-top:0; margin-bottom:12px">
@@ -267,10 +267,6 @@
       </div>
     </main>
 
-    <!-- 4. Проверка -->
-    <main class="view" id="view-check" hidden>
-      <div class="page" id="check"></div>
-    </main>
   </div>
 
   <script>
@@ -331,9 +327,9 @@
       state.letters.unshift(letter);
       state.letter = letter;
       await saveNow('Новое письмо');
-      ui.letter = id; ui.tab = 'brief'; saveUi();
+      ui.letter = id; ui.tab = 'mailing'; saveUi();
       renderAll();
-      showTab('brief');
+      showTab('mailing');
     });
     function selectLetter(id) {
       state.letter = state.letters.find((l) => l.id === id) || state.letters[0] || null;
@@ -367,10 +363,12 @@
     // ── Вкладки ─────────────────────────────────────────────────────────────────────────
     document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => showTab(button.dataset.tab)));
     function showTab(tab) {
+      if (tab === 'build' || tab === 'check') tab = 'mailing';
+      if (!['brief', 'components', 'mailing'].includes(tab)) tab = 'mailing';
       state.tab = tab; ui.tab = tab; saveUi();
       document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('on', button.dataset.tab === tab));
-      ['brief', 'build', 'components', 'check'].forEach((name) => { $(`#view-${name}`).hidden = name !== tab; });
-      if (tab === 'build') renderPreview();
+      ['brief', 'components', 'mailing'].forEach((name) => { $(`#view-${name}`).hidden = name !== tab; });
+      if (tab === 'mailing') renderPreview();
     }
 
     function renderAll() {
@@ -421,7 +419,7 @@
       l.status = 'proposed';
       saveNow('Черновик состава по правилам');
       renderAll();
-      showTab('build');
+      showTab('mailing');
     });
     $('#ask-propose').addEventListener('click', async () => {
       const l = state.letter; if (!l) return;
@@ -450,7 +448,7 @@
       $('#items-count').textContent = `· ${body.items.length}`;
       $('#add-component').innerHTML = state.kit.registry.components.map((c) => `<option value="${c.id}">${c.id} · ${esc(c.name)}</option>`).join('');
       const items = $('#items');
-      if (!body.items.length) items.innerHTML = '<div class="empty">Пусто. Заполните бриф и попросите агента предложить блоки, возьмите черновик по правилам или добавьте компоненты ниже.</div>';
+      if (!body.items.length) items.innerHTML = '<div class="empty">Рассылка пока пустая. Добавьте любой компонент из списка или перейдите во вкладку «Компоненты» и нажмите «+ В письмо». Бриф заполнять необязательно.</div>';
       else items.replaceChildren(...body.items.map((item, index) => itemEditor(body, item, index)));
       renderPreview();
     }
@@ -524,7 +522,7 @@
       list.hidden = !result.errors.length;
       list.innerHTML = result.errors.map((e) => `<li>${esc(e)}</li>`).join('');
       document.querySelectorAll('#items .item').forEach((el, index) => el.classList.toggle('err', result.errors.some((e) => e.includes(`(позиция ${index + 1})`))));
-      if (state.tab !== 'build') return;
+      if (state.tab !== 'mailing') return;
       const frame = $('#letter-frame');
       let scroll = 0;
       try { scroll = frame.contentWindow.scrollY; } catch { /* другой origin */ }
@@ -624,7 +622,7 @@
         l.status = externalBlocking ? 'needs-fix' : 'external-checked';
         await saveNow('Внешняя проверка Email Checker');
         renderAll();
-        showTab('check');
+        showTab('mailing');
         setStatus(externalBlocking ? `Email Checker: найдено проблем — ${externalBlocking}` : 'Email Checker пройден', externalBlocking ? 'err' : 'ok');
       } catch (error) {
         setStatus(`Email Checker не завершил проверку: ${error.message}`, 'err');
@@ -646,7 +644,7 @@
       ].join('\n'));
     });
 
-    // ── 3. Компоненты ───────────────────────────────────────────────────────────────────
+    // ── 2. Компоненты ───────────────────────────────────────────────────────────────────
     const PLACEHOLDER_IMG = 'https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq';
     function sampleFields(component) {
       const values = {};
@@ -762,12 +760,11 @@
       sendAgent(`Добавь в конструктор email-campaign новый компонент${$('#c-name').value.trim() ? ` «${$('#c-name').value.trim()}»` : ''} (категория: ${$('#c-category').value.trim() || 'определи'}; когда ставить: ${$('#c-description').value.trim() || 'определи'}). Номер — components/registry.json next (сейчас ${pad(state.kit.registry.next)}). Приведи к строкам <tr em="block"> в стиле components/shell.html и style-guide.md, изменяемое вынеси в поля {{ключ}} с описанием в реестре, сохрани write_skill_file и проверь node scripts/letter.mjs build example --no-remote. HTML:\n\n${html}`);
     });
 
-    // ── 4. Проверка ─────────────────────────────────────────────────────────────────────
+    // ── Проверка внутри вкладки «Рассылка» ───────────────────────────────────────────────
     function renderCheck() {
       const box = $('#check');
       const l = state.letter;
       const c = l && l.check;
-      $('#count-check').textContent = c ? (c.ok ? '✓' : '!') : '';
       if (!l) { box.innerHTML = '<div class="empty">Выберите письмо</div>'; return; }
       const local = renderResult();
       const rows = (items, sev) => (items || []).map((item) => `<li><span class="sev ${sev}">${sev === 'error' ? 'ошибка' : sev === 'warn' ? 'внимание' : sev === 'ok' ? 'исправлено' : 'заметка'}</span>${esc(typeof item === 'string' ? item : item.detail || item.message || item.url || JSON.stringify(item))}${item && item.context ? `<span class="ctx">${esc(item.context)}${item.suggestions && item.suggestions.length ? ` → ${esc(item.suggestions.join(' / '))}` : ''}</span>` : ''}${item && item.status ? `<span class="ctx">HTTP ${esc(item.status)} ${esc(item.note || '')}</span>` : ''}</li>`).join('');
@@ -803,7 +800,7 @@
         }
         state.letter = state.letters.find((l) => l.id === ui.letter) || state.letters[0] || null;
         renderAll();
-        showTab(ui.tab || (state.letter && state.letter.letter && state.letter.letter.items.length ? 'build' : 'brief'));
+        showTab(ui.tab || 'mailing');
         setStatus(`${state.kit.registry.components.length} компонентов · ${state.letters.length} писем${bridge ? '' : ' · только просмотр'}`);
       } catch (error) {
         setStatus(`Не загрузилось: ${error.message}`, 'err');
