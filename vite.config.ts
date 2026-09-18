@@ -11,8 +11,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
-import { ensureNotesSchema, handleNotesApi } from "./server/notes.mjs";
-import { ensureStorageSchema, handleStorageApi } from "./server/storage.mjs";
+import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
+import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
@@ -985,6 +985,25 @@ function mboxDevApi() {
       });
 
       server.middlewares.use(async (req, res, next) => {
+        // Зеркало прод-сервера: заметка по ссылке отвечает без входа (см. server/notes.mjs).
+        if (req.url?.startsWith("/api/share/")) {
+          const shareUrl = new URL(req.url, "http://localhost");
+          const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
+          try {
+            const handled = await handleSharedNoteApi({
+              req, res, url: shareUrl, query: queryPostgres, readBody, sendJson,
+              storage: {
+                signedGet: (key) => storageSignedGet(queryPostgres, secretKey, key),
+                putStream: (key, stream, length, type) => storagePutStream(queryPostgres, secretKey, key, stream, length, type),
+              },
+              broadcast: (payload) => broadcastRealtime(realtimeClients, "entity_changed", { ...payload, actor: "по ссылке" }),
+            });
+            if (!handled) sendJson(res, 404, { error: "not_found" });
+          } catch (error) {
+            sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+          }
+          return;
+        }
         if (!req.url?.startsWith("/api/mbox/")) return next();
         const url = new URL(req.url, "http://localhost");
         const q = url.searchParams.get("q")?.trim() ?? "";

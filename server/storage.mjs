@@ -113,6 +113,28 @@ function publicConfig(row) {
   };
 }
 
+/**
+ * Для публичных страниц (заметка по ссылке): подписанная ссылка на объект и загрузка потоком без HTTP-обвязки
+ * handleStorageApi. Проверку, к каким ключам можно обращаться, делает вызывающий код.
+ */
+export async function storageSignedGet(query, secretKey, key, expires = 3600) {
+  const config = await loadConfig(query, secretKey);
+  if (!publicConfig(config).configured) return null;
+  return presignUrl({ endpoint: config.endpoint, path: objectPath(config, key), accessKeyId: config.access_key_id, secretAccessKey: config.secret_access_key, region: config.region, expires });
+}
+
+export async function storagePutStream(query, secretKey, key, stream, length, contentType) {
+  const config = await loadConfig(query, secretKey);
+  if (!publicConfig(config).configured) return { ok: false, error: "Хранилище S3 не настроено" };
+  const response = await s3(config, {
+    method: "PUT",
+    key,
+    headers: { "content-length": String(length), "content-type": contentType || "application/octet-stream" },
+    body: stream,
+  });
+  return response.ok ? { ok: true } : { ok: false, error: await s3Error(response) };
+}
+
 async function s3(config, { method, key = "", query = {}, headers = {}, body, payloadHash }) {
   const url = new URL(config.endpoint);
   const path = objectPath(config, key);

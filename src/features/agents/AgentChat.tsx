@@ -84,12 +84,52 @@ function parseMention(raw: string): string {
   return match ? match[1] : "";
 }
 
-const MARKDOWN_TOKEN = /(\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|(?<!\w)_[^_\n]+_(?!\w))/g;
+// Ссылки идут первыми: внутри URL бывают «_» и «*», которые иначе съел бы курсив.
+const MARKDOWN_TOKEN = /(\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?»"'`]|\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|(?<!\w)_[^_\n]+_(?!\w))/g;
+const MARKDOWN_LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
+
+/** Ключ вкладки рабочего места из ссылки на MBOX: «/?tab=file:9» или «https://<сервер MBOX>/?tab=file:9». */
+function workbenchTabOf(href: string) {
+  try {
+    const url = new URL(href, serverOrigin());
+    const sameServer = url.origin === serverOrigin() || url.origin === window.location.origin;
+    const tab = url.searchParams.get("tab");
+    return sameServer && tab && url.pathname === "/" ? tab : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ссылка в сообщении: на MBOX — открыть вкладку в рабочем месте, остальное — в браузере. */
+function ChatLink({ href, children }: { href: string; children: ReactNode }) {
+  if (!/^(https?:\/\/|\/)/i.test(href)) return <>{children}</>;
+  const tab = workbenchTabOf(href);
+  const absolute = href.startsWith("/") ? `${serverOrigin()}${href}` : href;
+  return (
+    <a
+      className="console-log-link"
+      href={absolute}
+      target="_blank"
+      rel="noreferrer noopener"
+      onClick={(event) => {
+        if (!tab) return;
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: { kind: "tab", key: tab, actor: "", reply_to: "", title: "", note: "", quiet: true } }));
+      }}
+      title={tab ? "Открыть во вкладке MBOX" : absolute}
+    >
+      {children}
+    </a>
+  );
+}
 
 function renderInlineMarkdown(content: string, keyPrefix: string): ReactNode[] {
   const parts = content.split(MARKDOWN_TOKEN).filter((part) => part !== "");
   return parts.map((part, partIndex) => {
     const key = `${keyPrefix}-${partIndex}`;
+    const link = part.match(MARKDOWN_LINK);
+    if (link) return <ChatLink key={key} href={link[2]}>{link[1]}</ChatLink>;
+    if (/^https?:\/\//i.test(part)) return <ChatLink key={key} href={part}>{part}</ChatLink>;
     if (part.startsWith("**") && part.endsWith("**")) return <b key={key}>{part.slice(2, -2)}</b>;
     if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
     if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;

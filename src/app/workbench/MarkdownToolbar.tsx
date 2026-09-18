@@ -102,7 +102,14 @@ export function markdownShortcut(event: ReactKeyboardEvent<HTMLTextAreaElement>)
 }
 
 /** Картинка из буфера или перетаскивания → S3 → ![имя](постоянная ссылка). Возвращает true, если обработано. */
-export function useImageInsert(targetRef: RefObject<HTMLTextAreaElement | null>, keyPrefix: string, onError: (message: string) => void) {
+/** upload — свой загрузчик (страница заметки по ссылке грузит через токен); по умолчанию — S3 MBOX. Возвращает адрес картинки. */
+type ImageUploader = (file: File, name: string, key: string) => Promise<string>;
+const uploadToMbox: ImageUploader = async (file, _name, key) => {
+  await uploadToStorage(key, file);
+  return storageFileUrl(key);
+};
+
+export function useImageInsert(targetRef: RefObject<HTMLTextAreaElement | null>, keyPrefix: string, onError: (message: string) => void, upload: ImageUploader = uploadToMbox) {
   const [uploading, setUploading] = useState(0);
 
   async function insertImages(files: File[]) {
@@ -118,9 +125,9 @@ export function useImageInsert(targetRef: RefObject<HTMLTextAreaElement | null>,
       replaceRange(el, at, el.selectionEnd, `${placeholder}\n`, at + placeholder.length + 1, at + placeholder.length + 1);
       setUploading((value) => value + 1);
       try {
-        await uploadToStorage(key, file);
+        const src = await upload(file, name, key);
         const index = el.value.indexOf(placeholder);
-        const markdown = `![${name.replace(/\.[a-z0-9]+$/i, "")}](${storageFileUrl(key)})`;
+        const markdown = `![${name.replace(/\.[a-z0-9]+$/i, "")}](${src})`;
         if (index >= 0) replaceRange(el, index, index + placeholder.length, markdown, index + markdown.length, index + markdown.length);
       } catch (error) {
         const index = el.value.indexOf(placeholder);

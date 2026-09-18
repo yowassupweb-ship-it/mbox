@@ -17,6 +17,8 @@ export type OpenTabEvent = {
   path?: string;
   url?: string;
   key?: string;
+  /** Открыто самим человеком (ссылка в чате) — без уведомления «агент открыл…». */
+  quiet?: boolean;
 };
 
 export type OpenTabResult = { text: string; tone: "ok" | "warn" };

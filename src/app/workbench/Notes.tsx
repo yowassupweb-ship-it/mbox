@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Eye, Pencil, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
+import { Check, Copy, Eye, Link2, Pencil, Pin, PinOff, Plus, RefreshCw, Share2, Trash2, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
+import { merge3 } from "../../lib/merge3";
+import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
 import { DocShell } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
@@ -142,6 +144,12 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const mode = savedMode ?? autoMode;
   const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const savedRef = useRef("");
+  // Версия заметки, от которой идут правки: заметку могут одновременно править по ссылке (/n/…).
+  const baseUpdatedRef = useRef(cached?.updated_at ?? "");
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const savingRef = useRef(false);
+  const [mergeNotice, setMergeNotice] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
   const [imageError, setImageError] = useState("");
@@ -156,25 +164,74 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
         setNote(loaded);
         setContent(loaded.content ?? "");
         savedRef.current = loaded.content ?? "";
+        baseUpdatedRef.current = loaded.updated_at;
         if (loaded.content) setAutoMode("preview");
       })
       .catch(() => { if (alive) setMissing(true); });
     return () => { alive = false; };
   }, [noteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save = useCallback(async (text: string) => {
-    if (text === savedRef.current) { setState("saved"); return; }
-    setState("saving");
+  /** Чужая версия (правка по ссылке): без своих правок — взять, со своими — слить построчно. */
+  const absorbRemote = useCallback((remote: Note) => {
+    const remoteText = remote.content ?? "";
+    const local = contentRef.current;
+    if (local === savedRef.current) {
+      if (remoteText !== local) setContent(remoteText);
+    } else {
+      const merged = merge3(savedRef.current, local, remoteText);
+      if (merged.conflict) {
+        setMergeNotice("Заметку одновременно поправили по ссылке в том же месте — оставлена ваша версия фрагмента");
+        window.setTimeout(() => setMergeNotice(""), 10000);
+      }
+      if (merged.text !== local) setContent(merged.text);
+    }
+    savedRef.current = remoteText;
+    baseUpdatedRef.current = remote.updated_at;
+    setNote(remote);
+    patchListed(remote);
+  }, []);
+
+  const save = useCallback(async (_text?: string) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     try {
-      const { note: updated } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text }) });
-      savedRef.current = text;
-      setNote(updated);
-      patchListed(updated);
-      setState((current) => (current === "saving" ? "saved" : current));
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const text = contentRef.current;
+        if (text === savedRef.current) { setState("saved"); return; }
+        setState("saving");
+        const response = await fetch(`/api/mbox/notes/${noteId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text, base_updated_at: baseUpdatedRef.current }) });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 409 && data.note) { absorbRemote(data.note); continue; }
+        if (!response.ok) throw new Error(data.error || `request_failed:${response.status}`);
+        savedRef.current = text;
+        baseUpdatedRef.current = data.note.updated_at;
+        setNote(data.note);
+        patchListed(data.note);
+        setState(contentRef.current === text ? "saved" : "pending");
+        return;
+      }
+      setState("pending");
     } catch {
       setState("error");
+    } finally {
+      savingRef.current = false;
     }
-  }, [noteId]);
+  }, [noteId, absorbRemote]);
+
+  // Правки по ссылке появляются здесь сами, пока заметка открыта и видна.
+  useEffect(() => {
+    if (!visible || !note) return;
+    const timer = window.setInterval(async () => {
+      if (document.hidden || savingRef.current) return;
+      try {
+        const { note: remote } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`);
+        if (remote.updated_at !== baseUpdatedRef.current) absorbRemote(remote);
+      } catch {
+        // нет сети — попробуем в следующий раз
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [visible, note?.id, noteId, absorbRemote]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Автосохранение: заметки пишутся на ходу, кнопка «Сохранить» только мешала бы.
   useEffect(() => {
@@ -275,7 +332,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     <DocShell
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}</span>
+          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}{mergeNotice && <span className="wb-save-state is-pending"> {mergeNotice}</span>}</span>
           {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
           <div className="wb-doc-actions">
             <select className="wb-bar-select" value={note.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} title="Проект">
@@ -286,6 +343,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
               <button type="button" className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(content); setMode("preview"); }}><Eye size={13} /></button>
               <button type="button" className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")}><Pencil size={13} /></button>
             </div>
+            <ShareButton noteId={noteId} />
             <button type="button" className={note.pinned ? "is-on" : undefined} onClick={() => void update({ pinned: !note.pinned })} title={note.pinned ? "Открепить" : "Закрепить сверху"}>{note.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
             <button type="button" className="is-danger" onClick={() => void remove()} title="Удалить заметку"><Trash2 size={14} /></button>
           </div>
@@ -329,5 +387,104 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
         </article>
       )}
     </DocShell>
+  );
+}
+
+type NoteShare = { token: string; mode: "view" | "edit"; created_at: string; last_used_at?: string | null };
+
+/**
+ * «Поделиться»: ссылка на просмотр и ссылка на правку. Открываются в любом браузере без входа в MBOX
+ * (/n/<токен>), отзываются одной кнопкой. Перевыпуск — новый токен, старая ссылка перестаёт работать.
+ */
+function ShareButton({ noteId }: { noteId: string }) {
+  const [open, setOpen] = useState(false);
+  const [shares, setShares] = useState<NoteShare[]>([]);
+  const [busy, setBusy] = useState("");
+  const [copied, setCopied] = useState("");
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  const load = useCallback(async () => {
+    setShares((await fetchJson<{ shares: NoteShare[] }>(`/api/mbox/notes/${noteId}/shares`)).shares);
+  }, [noteId]);
+
+  useEffect(() => { if (open) void load().catch(() => setShares([])); }, [open, load]);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => { if (!boxRef.current?.contains(event.target as Node)) setOpen(false); };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const linkOf = (share: NoteShare) => `${serverOrigin()}/n/${share.token}`;
+
+  async function create(mode: "view" | "edit", regenerate = false) {
+    setBusy(mode);
+    try {
+      const { share } = await fetchJson<{ share: NoteShare }>(`/api/mbox/notes/${noteId}/shares`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode, regenerate }) });
+      await load();
+      await copy(share);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function revoke(mode: "view" | "edit") {
+    if (!window.confirm(mode === "edit" ? "Отозвать ссылку на правку? Она перестанет открываться." : "Отозвать ссылку на просмотр? Она перестанет открываться.")) return;
+    setBusy(mode);
+    try {
+      await fetchJson(`/api/mbox/notes/${noteId}/shares/${mode}`, { method: "DELETE" });
+      await load();
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function copy(share: NoteShare) {
+    try { await navigator.clipboard.writeText(linkOf(share)); } catch { /* буфер недоступен — ссылка видна в поле */ }
+    setCopied(share.mode);
+    window.setTimeout(() => setCopied(""), 1600);
+  }
+
+  const rows: Array<{ mode: "view" | "edit"; label: string; hint: string }> = [
+    { mode: "view", label: "Просмотр", hint: "Читать без входа в MBOX" },
+    { mode: "edit", label: "Редактирование", hint: "Править текст и вставлять картинки" },
+  ];
+
+  return (
+    <div className="wb-share" ref={boxRef}>
+      <button type="button" className={shares.length ? "is-on" : undefined} onClick={() => setOpen(!open)} title="Поделиться ссылкой" aria-expanded={open}>
+        <Share2 size={14} />
+      </button>
+      {open && (
+        <div className="wb-share-panel" role="dialog" aria-label="Ссылки на заметку">
+          {rows.map((row) => {
+            const share = shares.find((item) => item.mode === row.mode);
+            return (
+              <div key={row.mode} className="wb-share-row">
+                <div className="wb-share-head">
+                  <b>{row.label}</b>
+                  <span>{row.hint}</span>
+                </div>
+                {share ? (
+                  <>
+                    <div className="wb-share-link">
+                      <input readOnly value={linkOf(share)} onFocus={(event) => event.currentTarget.select()} aria-label={`Ссылка: ${row.label}`} />
+                      <button type="button" onClick={() => void copy(share)} title="Скопировать">{copied === row.mode ? <Check size={13} /> : <Copy size={13} />}</button>
+                    </div>
+                    <div className="wb-share-actions">
+                      <span>{share.last_used_at ? `открывали ${formatSince(share.last_used_at)}` : "ещё не открывали"}</span>
+                      <button type="button" disabled={busy === row.mode} onClick={() => void create(row.mode, true)} title="Новая ссылка, старая перестанет работать"><RefreshCw size={12} /> Перевыпустить</button>
+                      <button type="button" className="is-danger" disabled={busy === row.mode} onClick={() => void revoke(row.mode)}><X size={12} /> Отозвать</button>
+                    </div>
+                  </>
+                ) : (
+                  <button type="button" className="wb-share-create" disabled={busy === row.mode} onClick={() => void create(row.mode)}><Link2 size={13} /> Создать ссылку</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

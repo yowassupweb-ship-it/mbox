@@ -422,6 +422,8 @@ async function runCodex(item) {
     "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
     // См. claude-inbox-watcher.mjs — тот же пробел без языкового сигнала уводил ответы на английский.
     "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
+    // Длинный отчёт в чате терялся — теперь он всегда отдельным файлом со ссылкой (MCP save_report).
+    "If the answer is a report, audit, research or anything longer than ~20 lines, first save the full text as Markdown with the mbox-prod MCP tool save_report, then reply in chat with a short summary (5-10 lines) and the returned markdown_link — the owner must get a clickable link.",
     // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
     "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
     "",

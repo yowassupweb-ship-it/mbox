@@ -466,6 +466,34 @@ server.registerTool(
   },
 );
 
+// Отчёт (аудит, исследование, разбор) — отдельным Markdown-файлом в «Файлах» MBOX, а не простынёй в чате:
+// его можно открыть вкладкой, переслать и поправить. В ответе в чат — короткий итог и ссылка из поля link.
+server.registerTool(
+  "save_report",
+  {
+    title: "Save a Markdown report as an MBOX file",
+    description: "Save a report (audit, research, review, plan) as a Markdown file in MBOX «Файлы» and get a clickable link. Use it whenever the answer is longer than ~20 lines or the owner may want to reopen/forward it. Put a short summary plus the returned markdown link in the chat reply.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      name: z.string().describe("File name ending with .md, e.g. seo-audit-vs-travel-2026-09-16.md"),
+      content: z.string().describe("Full report in Markdown"),
+      category: z.string().default("Отчёты"),
+    },
+  },
+  async ({ project, name, content, category }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    const fileName = /\.md$/i.test(name) ? name : `${name}.md`;
+    const data = await mboxFetch("/api/mbox/artifacts", {
+      method: "POST",
+      body: JSON.stringify({ name: fileName, category, version: "v1", status: "created", content, project_id: target?.id || null, access_level: "agents" }),
+    });
+    const id = data.artifact?.id;
+    const link = `${baseUrl.replace(/\/+$/, "")}/?tab=file:${id}`;
+    return withPush({ content: [{ type: "text", text: JSON.stringify({ id, name: fileName, link, markdown_link: `[${fileName}](${link})` }, null, 2) }] });
+  },
+);
+
 server.registerTool(
   "record_memory",
   {

@@ -175,6 +175,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   openTabHandler.current = (event) => {
     void applyOpenTab(event, tabs, () => { setActivity("local"); setSidebarOpen(true); })
       .then((result) => {
+        if (event.quiet && result.tone === "ok") return;
         const who = event.actor || "Агент";
         setAgentNotice({ tone: result.tone, text: result.tone === "ok" ? `${who} открыл ${result.text}${event.note ? ` — ${event.note}` : ""}` : result.text });
       })

@@ -14,8 +14,8 @@ import { WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
-import { ensureNotesSchema, handleNotesApi } from "./notes.mjs";
-import { ensureStorageSchema, handleStorageApi } from "./storage.mjs";
+import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
+import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
@@ -2844,6 +2844,20 @@ const httpServer = http.createServer(async (req, res) => {
   }
   try {
     if (url.pathname.startsWith("/api/mbox/")) return await handleApi(req, res, url);
+    // Заметка по ссылке (/n/<токен>) — без входа в MBOX, доступ определяет только токен.
+    if (url.pathname.startsWith("/api/share/")) {
+      const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
+      const handled = await handleSharedNoteApi({
+        req, res, url, query, readBody, sendJson,
+        storage: {
+          signedGet: (key) => storageSignedGet(query, secretKey, key),
+          putStream: (key, stream, length, type) => storagePutStream(query, secretKey, key, stream, length, type),
+        },
+        broadcast: (payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }),
+      });
+      if (!handled) sendJson(res, 404, { error: "not_found" });
+      return;
+    }
     return serveStatic(req, res, url);
   } catch (error) {
     return sendJson(res, 503, { error: error instanceof Error ? error.message : "unknown_error" });

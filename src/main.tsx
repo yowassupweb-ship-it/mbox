@@ -1,4 +1,4 @@
-import { StrictMode, type CSSProperties, type FormEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { StrictMode, Suspense, lazy, type CSSProperties, type FormEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
@@ -973,8 +973,18 @@ function EntityLine({ title, value }: { title: string; value: string }) {
     </div>
   );
 }
+// Заметка по ссылке (/n/<токен>) открывается без входа в MBOX — отдельная страница, грузится своим чанком.
+const SharedNotePage = lazy(() => import("./pages/SharedNotePage").then((module) => ({ default: module.SharedNotePage })));
+const sharedNoteToken = window.location.pathname.match(/^\/n\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    {sharedNoteToken ? (
+      <Suspense fallback={null}>
+        <SharedNotePage token={sharedNoteToken} />
+      </Suspense>
+    ) : (
+      <App />
+    )}
   </StrictMode>,
 );

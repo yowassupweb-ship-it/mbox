@@ -1328,3 +1328,7 @@
 .console-attach-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer; }
 .console-attach-btn:hover { background: rgba(255, 255, 255, .06); color: var(--text-main); }
 .console-input-row.is-drop { outline: 2px dashed color-mix(in srgb, var(--accent-color) 60%, transparent); outline-offset: -4px; }
+
+/* Ссылки в сообщениях: на MBOX открывают вкладку, наружу — браузер. */
+.console-log-link { color: var(--accent-color); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-color) 45%, transparent); text-underline-offset: 2px; overflow-wrap: anywhere; }
+.console-log-link:hover { text-decoration-color: var(--accent-color); }

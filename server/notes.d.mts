@@ -18,3 +18,10 @@ export function ensureNotesSchema(query: Query): Promise<void>;
 export function listNotes(query: Query, search?: string, limit?: unknown): Promise<Row[]>;
 export function createNote(query: Query, input: Row): Promise<Row>;
 export function handleNotesApi(input: Handler & { actor: string }): Promise<boolean>;
+export function handleSharedNoteApi(input: Omit<Handler, "allowed"> & {
+  storage: {
+    signedGet: (key: string) => Promise<string | null>;
+    putStream: (key: string, stream: ReadableStream, length: number, contentType: string) => Promise<{ ok: boolean; error?: string }>;
+  };
+  broadcast?: (payload: Record<string, unknown>) => void;
+}): Promise<boolean>;
