@@ -6,6 +6,7 @@
 | --- | --- |
 | `route-compressor-corp` | Корпоративная версия программы тура «Вокруг света» из менеджерской программы newmanager.vs |
 | `email-campaign` | HTML-рассылки «Вокруг света» из проверенных блоков для UniSender |
+| `post-writing` | Посты, заголовки и подписи для Telegram-канала «Вокруг света» плюс разбор их эффективности |
 | `mbox-api` | Прямой доступ к API MBOX для ручек, которых нет в MCP |
 | `a11y-audit`, `apply-aesthetic`, `brandkit`, `data-dashboard`, `design-code`, `design-component`, `design-doctrine`, `design-qa`, `design-review`, `design-tokens`, `figma-integration`, `governance`, `image-to-code`, `migrate-design-system`, `performance`, `prototype`, `redesign`, `token-build`, `ux-writing` | UX/UI Agent Skills (19 шт., карточки в `server/ux-ui-skill-catalog.mjs`). Пакет — только `SKILL.md`: файлы `rules/…` и `scripts/…`, на которые они ссылаются, в исходной установке отсутствовали |
 
