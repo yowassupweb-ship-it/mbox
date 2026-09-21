@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Eye, FolderOpen, GitCompare, History, Monitor, Pencil, RefreshCw, RotateCcw, Save, Smartphone, X } from "lucide-react";
 import { formatBytes, formatDateTime, formatSince } from "../../lib/format";
 import { gitLetter } from "./LocalFolders";
@@ -49,6 +49,66 @@ export function lineDiff(before: string, after: string): DiffLine[] | null {
   return out;
 }
 
+type DiffPiece = { kind: "same" | "add" | "del"; text: string };
+
+/**
+ * Пословное сравнение одной строки. В прозе абзац — это одна длинная строка, и построчный diff на
+ * дописанное слово показывал весь абзац сразу удалённым и добавленным заново: видно, что «что-то
+ * изменилось», но не видно что. Режем по пробелам, сохраняя их отдельными кусками, чтобы склеить
+ * строку обратно без потерь.
+ */
+function wordDiff(before: string, after: string): DiffPiece[] {
+  const a = before.split(/(\s+)/).filter(Boolean);
+  const b = after.split(/(\s+)/).filter(Boolean);
+  if (a.length * b.length > 250_000) return [{ kind: "del", text: before }, { kind: "add", text: after }];
+  const cols = b.length + 1;
+  const table = new Uint32Array((a.length + 1) * cols);
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      table[i * cols + j] = a[i] === b[j] ? table[(i + 1) * cols + j + 1] + 1 : Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
+    }
+  }
+  const out: DiffPiece[] = [];
+  const push = (kind: DiffPiece["kind"], text: string) => {
+    const last = out[out.length - 1];
+    if (last && last.kind === kind) last.text += text;
+    else out.push({ kind, text });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { push("same", a[i]); i += 1; j += 1; }
+    else if (table[(i + 1) * cols + j] >= table[i * cols + j + 1]) { push("del", a[i]); i += 1; }
+    else { push("add", b[j]); j += 1; }
+  }
+  while (i < a.length) push("del", a[i++]);
+  while (j < b.length) push("add", b[j++]);
+  return out;
+}
+
+/** Доля общего текста: по ней решаем, одна это правленая строка или две разные. */
+function sameRatio(pieces: DiffPiece[]) {
+  let same = 0;
+  let total = 0;
+  for (const piece of pieces) {
+    total += piece.text.length;
+    if (piece.kind === "same") same += piece.text.length;
+  }
+  return total ? same / total : 1;
+}
+
+function InlineDiffLine({ pieces, kind }: { pieces: DiffPiece[]; kind: "add" | "del" }) {
+  const other = kind === "add" ? "del" : "add";
+  return (
+    <div className={`wb-diff-line is-${kind}`}>
+      <span>{kind === "add" ? "+" : "−"}</span>
+      {pieces.map((piece, index) => piece.kind === other ? null
+        : piece.kind === "same" ? <span key={index}>{piece.text}</span>
+        : <mark key={index} className={`wb-diff-word is-${kind}`}>{piece.text}</mark>)}
+    </div>
+  );
+}
+
 export function DiffLines({ lines }: { lines: DiffLine[] }) {
   // Длинные неизменённые куски сворачиваем, оставляя по три строки контекста.
   const blocks: Array<DiffLine | { kind: "gap"; count: number }> = [];
@@ -69,13 +129,40 @@ export function DiffLines({ lines }: { lines: DiffLine[] }) {
   }
   const changed = lines.filter((line) => line.kind !== "same").length;
   if (!changed) return <p className="wb-empty">Содержимое совпадает.</p>;
-  return (
-    <div className="wb-diff">
-      {blocks.map((block, index) => block.kind === "gap"
-        ? <div key={index} className="wb-diff-gap">⋯ {block.count} без изменений</div>
-        : <div key={index} className={`wb-diff-line is-${block.kind}`}><span>{block.kind === "add" ? "+" : block.kind === "del" ? "−" : " "}</span>{block.text || " "}</div>)}
-    </div>
-  );
+
+  // Равные по длине встречные пачки «удалено» и «добавлено» — это почти всегда правленые строки,
+  // а не разные: показываем их парами с подсветкой изменившихся слов внутри.
+  const rows: ReactNode[] = [];
+  for (let index = 0; index < blocks.length;) {
+    const block = blocks[index];
+    if (block.kind === "gap") { rows.push(<div key={rows.length} className="wb-diff-gap">⋯ {block.count} без изменений</div>); index += 1; continue; }
+    if (block.kind === "del") {
+      let end = index;
+      while (end < blocks.length && blocks[end].kind === "del") end += 1;
+      let addEnd = end;
+      while (addEnd < blocks.length && blocks[addEnd].kind === "add") addEnd += 1;
+      const dels = blocks.slice(index, end) as DiffLine[];
+      const adds = blocks.slice(end, addEnd) as DiffLine[];
+      if (dels.length && dels.length === adds.length) {
+        dels.forEach((del, pair) => {
+          const add = adds[pair];
+          const pieces = wordDiff(del.text, add.text);
+          if (sameRatio(pieces) >= 0.3) {
+            rows.push(<InlineDiffLine key={rows.length} pieces={pieces} kind="del" />);
+            rows.push(<InlineDiffLine key={rows.length + 1} pieces={pieces} kind="add" />);
+          } else {
+            rows.push(<div key={rows.length} className="wb-diff-line is-del"><span>−</span>{del.text || " "}</div>);
+            rows.push(<div key={rows.length + 1} className="wb-diff-line is-add"><span>+</span>{add.text || " "}</div>);
+          }
+        });
+        index = addEnd;
+        continue;
+      }
+    }
+    rows.push(<div key={rows.length} className={`wb-diff-line is-${block.kind}`}><span>{block.kind === "add" ? "+" : block.kind === "del" ? "−" : " "}</span>{block.text || " "}</div>);
+    index += 1;
+  }
+  return <div className="wb-diff">{rows}</div>;
 }
 
 export function UnifiedDiff({ text }: { text: string }) {
