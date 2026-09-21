@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS notes (
   id BIGSERIAL PRIMARY KEY,
   title TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
+  tabs JSONB NOT NULL DEFAULT '[]'::jsonb,
   pinned BOOLEAN NOT NULL DEFAULT false,
   color TEXT NOT NULL DEFAULT 'default',
   theme TEXT NOT NULL DEFAULT 'graphite',
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 ALTER TABLE notes ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT 'default';
 ALTER TABLE notes ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'graphite';
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS tabs JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(pinned DESC, updated_at DESC);
 -- Ссылки на заметку для людей без входа в MBOX: одна на режим (просмотр / правка), отзыв — удалением строки.
 CREATE TABLE IF NOT EXISTS note_shares (
@@ -40,6 +42,7 @@ const SHARE_TOKEN = /^[A-Za-z0-9_-]{24,64}$/;
 const INTERNAL_FILE = "/api/mbox/storage/file?key=";
 const NOTE_COLORS = new Set(["default", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray"]);
 const NOTE_THEMES = new Set(["light", "graphite", "black"]);
+const MAX_NOTE_TABS = 50;
 
 function noteColor(value) {
   const color = String(value || "default");
@@ -51,6 +54,28 @@ function noteTheme(value) {
   return NOTE_THEMES.has(theme) ? theme : "graphite";
 }
 
+function noteTabs(value, fallbackContent = "") {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const tabs = source.slice(0, MAX_NOTE_TABS).map((item, index) => {
+    const proposed = String(item?.id || `tab-${index + 1}`).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || `tab-${index + 1}`;
+    let id = proposed;
+    let suffix = 2;
+    while (seen.has(id)) id = `${proposed.slice(0, 58)}-${suffix++}`;
+    seen.add(id);
+    return {
+      id,
+      title: String(item?.title || `Вкладка ${index + 1}`).trim().slice(0, 120) || `Вкладка ${index + 1}`,
+      content: String(item?.content ?? ""),
+    };
+  });
+  return tabs.length ? tabs : [{ id: "main", title: "Основная", content: String(fallbackContent || "") }];
+}
+
+function tabsWithContent(tabs, transform) {
+  return tabs.map((tab) => ({ ...tab, content: transform(tab.content) }));
+}
+
 /** Картинки в тексте хранятся ссылкой, требующей входа в MBOX; на публичной странице — ссылкой по токену. */
 function toSharedUrls(content, token) {
   return String(content || "").split(INTERNAL_FILE).join(`/api/share/notes/${token}/file?key=`);
@@ -60,8 +85,8 @@ function toInternalUrls(content) {
   return String(content || "").replace(/\/api\/share\/notes\/[A-Za-z0-9_-]+\/file\?key=/g, INTERNAL_FILE);
 }
 
-const NOTE_COLUMNS = `id::text, title, content, pinned, color, theme, project_id::text, tags, author, created_at::text, updated_at::text,
-  octet_length(content) AS size_bytes`;
+const NOTE_COLUMNS = `id::text, title, content, tabs, pinned, color, theme, project_id::text, tags, author, created_at::text, updated_at::text,
+  octet_length(content) + pg_column_size(tabs) AS size_bytes`;
 
 export async function ensureNotesSchema(query) {
   await query(NOTES_SCHEMA_SQL);
@@ -76,20 +101,21 @@ export async function listNotes(query, search = "", limit = 200) {
   const q = String(search || "").trim();
   return (await query(
     `SELECT id::text, title, left(content, 400) AS snippet, pinned, color, theme, project_id::text, tags, author, created_at::text, updated_at::text,
-            octet_length(content) AS size_bytes
+            octet_length(content) + pg_column_size(tabs) AS size_bytes
      FROM notes
-     WHERE $1 = '' OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR array_to_string(tags, ' ') ILIKE '%' || $1 || '%'
+     WHERE $1 = '' OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR tabs::text ILIKE '%' || $1 || '%' OR array_to_string(tags, ' ') ILIKE '%' || $1 || '%'
      ORDER BY pinned DESC, updated_at DESC
      LIMIT $2`,
     [q, Math.min(Math.max(Number(limit) || 200, 1), 500)],
   )).rows;
 }
 
-export async function createNote(query, { title, content, color, theme, project_id: projectId, tags, author }) {
-  const text = String(content ?? "");
+export async function createNote(query, { title, content, tabs, color, theme, project_id: projectId, tags, author }) {
+  const noteTabList = noteTabs(tabs, content);
+  const text = noteTabList[0].content;
   return (await query(
-    `INSERT INTO notes(title, content, color, theme, project_id, tags, author) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${NOTE_COLUMNS}`,
-    [String(title || "").trim() || titleFrom(text), text, noteColor(color), noteTheme(theme), projectId || null, Array.isArray(tags) ? tags.map(String) : [], String(author || "")],
+    `INSERT INTO notes(title, content, tabs, color, theme, project_id, tags, author) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8) RETURNING ${NOTE_COLUMNS}`,
+    [String(title || "").trim() || titleFrom(text), text, JSON.stringify(noteTabList), noteColor(color), noteTheme(theme), projectId || null, Array.isArray(tags) ? tags.map(String) : [], String(author || "")],
   )).rows[0];
 }
 
@@ -148,13 +174,20 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
       const body = await readBody(req);
       const has = (field) => Object.prototype.hasOwnProperty.call(body, field);
       const content = has("content") ? String(body.content ?? "") : null;
+      let tabs = has("tabs") ? noteTabs(body.tabs, content) : null;
       // base_updated_at — версия, от которой редактировал клиент. Заметку могли поправить по ссылке:
       // тогда 409 со свежей версией, и клиент сливает правки, а не затирает чужие.
-      const base = content !== null && body.base_updated_at ? String(body.base_updated_at) : "";
-      if (base) {
+      const changesDocument = content !== null || tabs !== null;
+      const base = changesDocument && body.base_updated_at ? String(body.base_updated_at) : "";
+      if (changesDocument) {
         const current = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [match[1]])).rows[0];
-        if (current && current.updated_at !== base) { sendJson(res, 409, { error: "conflict", note: current }); return true; }
+        if (base && current && current.updated_at !== base) { sendJson(res, 409, { error: "conflict", note: current }); return true; }
+        if (!tabs && content !== null) {
+          tabs = noteTabs(current?.tabs, current?.content);
+          tabs[0] = { ...tabs[0], content };
+        }
       }
+      const primaryContent = tabs ? tabs[0].content : content;
       const row = (await query(
         `UPDATE notes SET
            content = COALESCE($1, content),
@@ -164,14 +197,15 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
            tags = COALESCE($8, tags),
            color = CASE WHEN $9::boolean THEN $10 ELSE color END,
            theme = CASE WHEN $11::boolean THEN $12 ELSE theme END,
-           updated_at = CASE WHEN $1 IS NOT NULL OR $2::boolean OR $6::boolean OR $8 IS NOT NULL OR $9::boolean OR $11::boolean THEN now() ELSE updated_at END
-         WHERE id = $13
+           tabs = CASE WHEN $13::boolean THEN $14::jsonb ELSE tabs END,
+           updated_at = CASE WHEN $1 IS NOT NULL OR $2::boolean OR $6::boolean OR $8 IS NOT NULL OR $9::boolean OR $11::boolean OR $13::boolean THEN now() ELSE updated_at END
+         WHERE id = $15
          RETURNING ${NOTE_COLUMNS}`,
         [
-          content,
+          primaryContent,
           has("title") && String(body.title || "").trim() !== "",
           String(body.title || "").trim(),
-          titleFrom(content),
+          titleFrom(primaryContent),
           typeof body.pinned === "boolean" ? body.pinned : null,
           has("project_id"),
           body.project_id || null,
@@ -180,6 +214,8 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
           noteColor(body.color),
           has("theme"),
           noteTheme(body.theme),
+          tabs !== null,
+          JSON.stringify(tabs || []),
           match[1],
         ],
       )).rows[0];
@@ -243,7 +279,10 @@ export async function handleSharedNoteApi({ req, res, url, query, readBody, send
 
     if (sub) return false;
     const note = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [share.note_id])).rows[0];
-    const shaped = (row) => ({ title: row.title, content: toSharedUrls(row.content, token), theme: noteTheme(row.theme), updated_at: row.updated_at });
+    const shaped = (row) => {
+      const tabs = tabsWithContent(noteTabs(row.tabs, row.content), (content) => toSharedUrls(content, token));
+      return { title: row.title, content: tabs[0].content, tabs, theme: noteTheme(row.theme), updated_at: row.updated_at };
+    };
 
     if (req.method === "GET") {
       await query("UPDATE note_shares SET last_used_at = now() WHERE token = $1", [token]).catch(() => {});
@@ -254,13 +293,20 @@ export async function handleSharedNoteApi({ req, res, url, query, readBody, send
     if (req.method === "PATCH") {
       if (share.mode !== "edit") { sendJson(res, 403, { error: "Ссылка только для просмотра" }); return true; }
       const body = await readBody(req);
-      const content = toInternalUrls(String(body.content ?? ""));
-      if (Buffer.byteLength(content) > MAX_SHARED_CONTENT) { sendJson(res, 413, { error: "Заметка больше 2 МБ" }); return true; }
+      let tabs;
+      if (Array.isArray(body.tabs)) tabs = noteTabs(body.tabs, note.content);
+      else {
+        tabs = noteTabs(note.tabs, note.content);
+        tabs[0] = { ...tabs[0], content: String(body.content ?? "") };
+      }
+      tabs = tabsWithContent(tabs, toInternalUrls);
+      if (Buffer.byteLength(JSON.stringify(tabs)) > MAX_SHARED_CONTENT) { sendJson(res, 413, { error: "Заметка больше 2 МБ" }); return true; }
       const base = String(body.base_updated_at || "");
       if (base && note.updated_at !== base) { sendJson(res, 409, { error: "conflict", note: shaped(note) }); return true; }
+      const content = tabs[0].content;
       const row = (await query(
-        `UPDATE notes SET content = $1, title = $2, updated_at = now() WHERE id = $3 RETURNING ${NOTE_COLUMNS}`,
-        [content, titleFrom(content), share.note_id],
+        `UPDATE notes SET content = $1, tabs = $2::jsonb, title = $3, updated_at = now() WHERE id = $4 RETURNING ${NOTE_COLUMNS}`,
+        [content, JSON.stringify(tabs), titleFrom(content), share.note_id],
       )).rows[0];
       broadcast?.({ entity: "notes", action: "update", detail: `#${share.note_id}` });
       sendJson(res, 200, { note: shaped(row) });

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Eye, Pencil } from "lucide-react";
-import { merge3 } from "../lib/merge3";
+import { Eye, Pencil, Plus, X } from "lucide-react";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
 import { CodeEditor } from "../app/workbench/CodeEditor";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "../app/workbench/DocumentTools";
+import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } from "../app/workbench/noteTabs";
+import { askText } from "../ui/askText";
 
-type SharedNote = { title: string; content: string; theme: "light" | "graphite" | "black"; updated_at: string };
+type SharedNote = { title: string; content: string; tabs?: NoteTab[]; theme: "light" | "graphite" | "black"; updated_at: string };
 type Status = "loading" | "saved" | "pending" | "saving" | "error" | "missing";
 
 const POLL_MS = 4000;
@@ -29,14 +30,20 @@ export function SharedNotePage({ token }: { token: string }) {
   const api = `/api/share/notes/${token}`;
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [editing, setEditing] = useState(false);
-  const [content, setContent] = useState("");
+  const [tabs, setTabs] = useState<NoteTab[]>(() => noteTabsOf(null));
+  const [activeTabId, setActiveTabId] = useState("main");
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const content = activeTab?.content ?? "";
+  const setContent = useCallback((next: string | ((current: string) => string)) => {
+    setTabs((current) => current.map((tab) => tab.id === activeTabId ? { ...tab, content: typeof next === "function" ? next(tab.content) : next } : tab));
+  }, [activeTabId]);
   const [theme, setTheme] = useState<SharedNote["theme"]>("graphite");
   const [viewerTheme, setViewerTheme] = useState<SharedNote["theme"] | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [notice, setNotice] = useState("");
-  const base = useRef<{ content: string; updatedAt: string }>({ content: "", updatedAt: "" });
-  const contentRef = useRef("");
-  contentRef.current = content;
+  const base = useRef<{ tabs: NoteTab[]; updatedAt: string }>({ tabs: noteTabsOf(null), updatedAt: "" });
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const saving = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
@@ -54,28 +61,30 @@ export function SharedNotePage({ token }: { token: string }) {
     window.setTimeout(() => setNotice((current) => (current === message ? "" : current)), 8000);
   };
 
-  // Замена текста снаружи (чужая правка) не должна выкидывать курсор в конец поля.
-  const replaceContent = useCallback((next: string) => {
+  // Замена вкладок снаружи (чужая правка) не должна выкидывать курсор в конец поля.
+  const replaceTabs = useCallback((next: NoteTab[]) => {
     const el = textareaRef.current;
     const selection = el && document.activeElement === el ? [el.selectionStart, el.selectionEnd] : null;
-    setContent(next);
+    setTabs(next);
+    if (!next.some((tab) => tab.id === activeTabId)) setActiveTabId(next[0]?.id ?? "main");
     if (selection) window.requestAnimationFrame(() => el?.setSelectionRange(Math.min(selection[0], el.value.length), Math.min(selection[1], el.value.length)));
-  }, []);
+  }, [activeTabId]);
 
   /** Свести чужую версию со своей: без своих правок — просто взять, со своими — merge3. */
   const absorbRemote = useCallback((remote: SharedNote) => {
-    const local = contentRef.current;
-    if (local === base.current.content) {
-      if (remote.content !== local) replaceContent(remote.content);
+    const remoteTabs = noteTabsOf(remote);
+    const local = tabsRef.current;
+    if (sameNoteTabs(local, base.current.tabs)) {
+      if (!sameNoteTabs(remoteTabs, local)) replaceTabs(remoteTabs);
     } else {
-      const merged = merge3(base.current.content, local, remote.content);
+      const merged = mergeNoteTabs(base.current.tabs, local, remoteTabs);
       if (merged.conflict) flash("Кто-то одновременно поправил то же место — оставлена ваша версия этого фрагмента.");
-      if (merged.text !== local) replaceContent(merged.text);
+      if (!sameNoteTabs(merged.tabs, local)) replaceTabs(merged.tabs);
     }
-    base.current = { content: remote.content, updatedAt: remote.updated_at };
+    base.current = { tabs: remoteTabs, updatedAt: remote.updated_at };
     setTheme(remote.theme || "graphite");
     document.title = remote.title || "Заметка";
-  }, [replaceContent]);
+  }, [replaceTabs]);
 
   useEffect(() => {
     let alive = true;
@@ -86,8 +95,10 @@ export function SharedNotePage({ token }: { token: string }) {
         if (!response.ok) { setStatus("missing"); setNotice(data.error || "Ссылка недействительна"); return; }
         setMode(data.mode);
         setEditing(false);
-        base.current = { content: data.note.content, updatedAt: data.note.updated_at };
-        setContent(data.note.content);
+        const loadedTabs = noteTabsOf(data.note);
+        base.current = { tabs: loadedTabs, updatedAt: data.note.updated_at };
+        setTabs(loadedTabs);
+        setActiveTabId(loadedTabs[0]?.id ?? "main");
         setTheme(data.note.theme || "graphite");
         document.title = data.note.title || "Заметка";
         setStatus("saved");
@@ -101,15 +112,15 @@ export function SharedNotePage({ token }: { token: string }) {
     saving.current = true;
     try {
       for (let attempt = 0; attempt < 4; attempt += 1) {
-        const text = contentRef.current;
-        if (text === base.current.content) { setStatus("saved"); return; }
+        const currentTabs = tabsRef.current;
+        if (sameNoteTabs(currentTabs, base.current.tabs)) { setStatus("saved"); return; }
         setStatus("saving");
-        const response = await fetch(api, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text, base_updated_at: base.current.updatedAt }) });
+        const response = await fetch(api, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ tabs: currentTabs, base_updated_at: base.current.updatedAt }) });
         const data = await response.json().catch(() => ({}));
         if (response.status === 409 && data.note) { absorbRemote(data.note); continue; }
         if (!response.ok) throw new Error(data.error || `Ошибка ${response.status}`);
-        base.current = { content: text, updatedAt: data.note.updated_at };
-        setStatus(contentRef.current === text ? "saved" : "pending");
+        base.current = { tabs: noteTabsOf(data.note), updatedAt: data.note.updated_at };
+        setStatus(sameNoteTabs(tabsRef.current, currentTabs) ? "saved" : "pending");
         return;
       }
       setStatus("pending");
@@ -123,11 +134,11 @@ export function SharedNotePage({ token }: { token: string }) {
 
   // Сохранение на ходу, как в Google Docs: пауза в наборе — и текст уже на сервере.
   useEffect(() => {
-    if (status === "loading" || status === "missing" || mode !== "edit" || content === base.current.content) return;
+    if (status === "loading" || status === "missing" || mode !== "edit" || sameNoteTabs(tabs, base.current.tabs)) return;
     setStatus("pending");
     const timer = window.setTimeout(() => void save(), SAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [content, mode, save, status === "loading" || status === "missing"]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tabs, mode, save, status === "loading" || status === "missing"]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Чужие правки: раз в 4 секунды, только пока вкладка видна и мы не посреди сохранения.
   useEffect(() => {
@@ -149,7 +160,7 @@ export function SharedNotePage({ token }: { token: string }) {
   // Уходят со страницы с несохранённым — предупредить, как любой редактор документов.
   useEffect(() => {
     const onLeave = (event: BeforeUnloadEvent) => {
-      if (mode === "edit" && contentRef.current !== base.current.content) event.preventDefault();
+      if (mode === "edit" && !sameNoteTabs(tabsRef.current, base.current.tabs)) event.preventDefault();
     };
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);
@@ -181,6 +192,39 @@ export function SharedNotePage({ token }: { token: string }) {
     if (!text.includes("\n")) return;
     event.preventDefault();
     setParts(titleText + text.slice(0, text.indexOf("\n")), [text.slice(text.indexOf("\n") + 1), bodyText].filter(Boolean).join("\n"));
+  }
+
+  function addTab() {
+    const next = createNoteTab(tabs.length);
+    setTabs((current) => [...current, next]);
+    setActiveTabId(next.id);
+    setEditing(true);
+  }
+
+  async function renameTab(tab: NoteTab) {
+    if (mode !== "edit") return;
+    const title = await askText({ title: "Название вкладки", value: tab.title, confirmLabel: "Переименовать" });
+    if (!title || title === tab.title) return;
+    setTabs((current) => current.map((item) => item.id === tab.id ? { ...item, title: title.slice(0, 120) } : item));
+  }
+
+  function removeTab(tab: NoteTab) {
+    if (mode !== "edit" || tabs.length <= 1) return;
+    if (tab.content.trim() && !window.confirm(`Удалить вкладку «${tab.title}» вместе с её содержимым?`)) return;
+    const index = tabs.findIndex((item) => item.id === tab.id);
+    const remaining = tabs.filter((item) => item.id !== tab.id);
+    setTabs(remaining);
+    if (activeTabId === tab.id) setActiveTabId(remaining[Math.min(index, remaining.length - 1)]?.id ?? remaining[0]?.id ?? "main");
+  }
+
+  function onTabKey(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === "F2" && mode === "edit") { event.preventDefault(); void renameTab(tabs[index]); return; }
+    const nextIndex = event.key === "ArrowUp" ? Math.max(0, index - 1) : event.key === "ArrowDown" ? Math.min(tabs.length - 1, index + 1) : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    setActiveTabId(tabs[nextIndex].id);
+    const buttons = event.currentTarget.closest("[role=tablist]")?.querySelectorAll<HTMLButtonElement>("[role=tab]");
+    buttons?.[nextIndex]?.focus();
   }
 
   const statusLabel: Record<Status, string> = {
@@ -237,46 +281,57 @@ export function SharedNotePage({ token }: { token: string }) {
       </header>
       {find.bar}
       {notice && <div className="share-notice" role="status">{notice}</div>}
-      <main className="share-doc">
-        {status === "loading" ? (
-          <p className="share-muted">Открываю заметку…</p>
-        ) : showEditor ? (
-          <>
-            <input
-              ref={titleRef}
-              className="share-title-input"
-              value={titleText}
-              onChange={(event) => setParts(event.target.value, bodyText)}
-              onKeyDown={onTitleKey}
-              onPaste={onTitlePaste}
-              placeholder="Заголовок"
-              spellCheck
-            />
-            <CodeEditor
-              textareaRef={textareaRef}
-              className="share-markdown"
-              variant="document"
-              autoGrow
-              language="markdown"
-              value={bodyText}
-              onChange={(value) => setParts(titleText, value)}
-              onKeyDown={(event) => { markdownShortcut(event); }}
-              onPaste={images.onPaste}
-              onDrop={images.onDrop}
-              onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}
-              placeholder="Текст. Картинку можно вставить из буфера или перетащить сюда. Сохраняется само."
-              spellCheck
-            />
-          </>
-        ) : (
-          <article ref={previewRef} className="wb-memory-body" onDoubleClick={() => canEdit && setEditing(true)} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}>
-            {titleText.trim() && <h1 className="share-title">{titleText.replace(/^#{1,6}\s+/, "")}</h1>}
-            {bodyText.trim()
-              ? renderDocument(bodyText, canEdit ? { onToggleTask: (line) => setContent((current) => toggleTask(current, line + 1)) } : {})
-              : !titleText.trim() && <p className="share-muted">Пока пусто.</p>}
-          </article>
-        )}
-      </main>
+      <div className="share-workspace">
+        <main className="share-doc">
+          {status === "loading" ? (
+            <p className="share-muted">Открываю заметку…</p>
+          ) : showEditor ? (
+            <>
+              <input
+                ref={titleRef}
+                className="share-title-input"
+                value={titleText}
+                onChange={(event) => setParts(event.target.value, bodyText)}
+                onKeyDown={onTitleKey}
+                onPaste={onTitlePaste}
+                placeholder="Заголовок"
+                spellCheck
+              />
+              <CodeEditor
+                textareaRef={textareaRef}
+                className="share-markdown"
+                variant="document"
+                autoGrow
+                language="markdown"
+                value={bodyText}
+                onChange={(value) => setParts(titleText, value)}
+                onKeyDown={(event) => { markdownShortcut(event); }}
+                onPaste={images.onPaste}
+                onDrop={images.onDrop}
+                onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}
+                placeholder="Текст. Картинку можно вставить из буфера или перетащить сюда. Сохраняется само."
+                spellCheck
+              />
+            </>
+          ) : (
+            <article ref={previewRef} className="wb-memory-body" onDoubleClick={() => canEdit && setEditing(true)} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}>
+              {titleText.trim() && <h1 className="share-title">{titleText.replace(/^#{1,6}\s+/, "")}</h1>}
+              {bodyText.trim()
+                ? renderDocument(bodyText, canEdit ? { onToggleTask: (line) => setContent((current) => toggleTask(current, line + 1)) } : {})
+                : !titleText.trim() && <p className="share-muted">Пока пусто.</p>}
+            </article>
+          )}
+        </main>
+        <aside className="share-note-tabs" role="tablist" aria-label="Вкладки заметки" aria-orientation="vertical">
+          <div className="share-note-tabs-head"><span>Вкладки</span>{canEdit && <button type="button" onClick={addTab} title="Добавить вкладку" aria-label="Добавить вкладку"><Plus size={14} /></button>}</div>
+          {tabs.map((tab, index) => (
+            <div key={tab.id} className={tab.id === activeTabId ? "share-note-tab is-active" : "share-note-tab"}>
+              <button type="button" role="tab" aria-selected={tab.id === activeTabId} tabIndex={tab.id === activeTabId ? 0 : -1} onClick={() => setActiveTabId(tab.id)} onDoubleClick={() => void renameTab(tab)} onKeyDown={(event) => onTabKey(event, index)} title={canEdit ? `${tab.title}. Двойной клик или F2 — переименовать` : tab.title}>{tab.title}</button>
+              {canEdit && tabs.length > 1 && <button type="button" className="is-danger" onClick={() => removeTab(tab)} title={`Удалить вкладку «${tab.title}»`} aria-label={`Удалить вкладку «${tab.title}»`}><X size={12} /></button>}
+            </div>
+          ))}
+        </aside>
+      </div>
       <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={textareaRef} previewRef={previewRef} onFind={find.openFind} markdown={canEdit} />
     </div>
   );

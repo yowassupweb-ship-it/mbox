@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Eye, Link2, Pencil, Pin, PinOff, Plus, RefreshCw, Share2, Trash2, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
-import { merge3 } from "../../lib/merge3";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
+import { askText } from "../../ui/askText";
 import { DocShell } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
@@ -12,10 +12,11 @@ import { useRemembered } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
 import { CodeEditor } from "./CodeEditor";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
+import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } from "./noteTabs";
 
 export type NoteColor = "default" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "gray";
 export type NoteTheme = "light" | "graphite" | "black";
-export type Note = { id: string; title: string; content?: string; snippet?: string; pinned: boolean; color: NoteColor; theme: NoteTheme; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
+export type Note = { id: string; title: string; content?: string; tabs?: NoteTab[]; snippet?: string; pinned: boolean; color: NoteColor; theme: NoteTheme; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
 
 const NOTE_COLORS: Array<{ value: NoteColor; label: string }> = [
   { value: "default", label: "Без метки" },
@@ -160,17 +161,24 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const cached = notesStore.list.find((item) => item.id === noteId && typeof item.content === "string");
   const [note, setNote] = useState<Note | null>(cached ?? null);
   const [missing, setMissing] = useState(false);
-  const [content, setContent] = useState(cached?.content ?? "");
+  const [noteTabs, setNoteTabs] = useState<NoteTab[]>(() => noteTabsOf(cached));
+  const [rememberedTabId, setActiveTabId] = useRemembered<string | null>(`note:${noteId}:active-tab`, null);
+  const activeTab = noteTabs.find((tab) => tab.id === rememberedTabId) ?? noteTabs[0];
+  const activeTabId = activeTab?.id ?? "main";
+  const content = activeTab?.content ?? "";
+  const setContent = useCallback((next: string | ((current: string) => string)) => {
+    setNoteTabs((current) => current.map((tab) => tab.id === activeTabId ? { ...tab, content: typeof next === "function" ? next(tab.content) : next } : tab));
+  }, [activeTabId]);
   // Режим по умолчанию зависит от содержимого (пустая — сразу правка), выбор человека — запоминается.
   const [autoMode, setAutoMode] = useState<"edit" | "preview">("edit");
   const [savedMode, setMode] = useRemembered<"edit" | "preview" | null>(`note:${noteId}:mode`, null);
   const mode = savedMode ?? autoMode;
   const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
-  const savedRef = useRef("");
+  const savedRef = useRef<NoteTab[]>(noteTabsOf(cached));
   // Версия заметки, от которой идут правки: заметку могут одновременно править по ссылке (/n/…).
   const baseUpdatedRef = useRef(cached?.updated_at ?? "");
-  const contentRef = useRef(content);
-  contentRef.current = content;
+  const tabsRef = useRef(noteTabs);
+  tabsRef.current = noteTabs;
   const savingRef = useRef(false);
   const [mergeNotice, setMergeNotice] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -182,16 +190,17 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content, enabled: visible });
 
   useEffect(() => {
-    if (cached) { savedRef.current = cached.content ?? ""; return; }
+    if (cached) { savedRef.current = noteTabsOf(cached); return; }
     let alive = true;
     fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`)
       .then(({ note: loaded }) => {
         if (!alive) return;
+        const loadedTabs = noteTabsOf(loaded);
         setNote(loaded);
-        setContent(loaded.content ?? "");
-        savedRef.current = loaded.content ?? "";
+        setNoteTabs(loadedTabs);
+        savedRef.current = loadedTabs;
         baseUpdatedRef.current = loaded.updated_at;
-        if (loaded.content) setAutoMode("preview");
+        if (loadedTabs.some((tab) => tab.content)) setAutoMode("preview");
       })
       .catch(() => { if (alive) setMissing(true); });
     return () => { alive = false; };
@@ -199,41 +208,42 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
 
   /** Чужая версия (правка по ссылке): без своих правок — взять, со своими — слить построчно. */
   const absorbRemote = useCallback((remote: Note) => {
-    const remoteText = remote.content ?? "";
-    const local = contentRef.current;
-    if (local === savedRef.current) {
-      if (remoteText !== local) setContent(remoteText);
+    const remoteTabs = noteTabsOf(remote);
+    const local = tabsRef.current;
+    if (sameNoteTabs(local, savedRef.current)) {
+      if (!sameNoteTabs(remoteTabs, local)) setNoteTabs(remoteTabs);
     } else {
-      const merged = merge3(savedRef.current, local, remoteText);
+      const merged = mergeNoteTabs(savedRef.current, local, remoteTabs);
       if (merged.conflict) {
         setMergeNotice("Заметку одновременно поправили по ссылке в том же месте — оставлена ваша версия фрагмента");
         window.setTimeout(() => setMergeNotice(""), 10000);
       }
-      if (merged.text !== local) setContent(merged.text);
+      if (!sameNoteTabs(merged.tabs, local)) setNoteTabs(merged.tabs);
     }
-    savedRef.current = remoteText;
+    savedRef.current = remoteTabs;
     baseUpdatedRef.current = remote.updated_at;
     setNote(remote);
     patchListed(remote);
   }, []);
 
-  const save = useCallback(async (_text?: string) => {
+  const save = useCallback(async () => {
     if (savingRef.current) return;
     savingRef.current = true;
     try {
       for (let attempt = 0; attempt < 4; attempt += 1) {
-        const text = contentRef.current;
-        if (text === savedRef.current) { setState("saved"); return; }
+        const currentTabs = tabsRef.current;
+        if (sameNoteTabs(currentTabs, savedRef.current)) { setState("saved"); return; }
         setState("saving");
-        const response = await fetch(`/api/mbox/notes/${noteId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text, base_updated_at: baseUpdatedRef.current }) });
+        const response = await fetch(`/api/mbox/notes/${noteId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ tabs: currentTabs, base_updated_at: baseUpdatedRef.current }) });
         const data = await response.json().catch(() => ({}));
         if (response.status === 409 && data.note) { absorbRemote(data.note); continue; }
         if (!response.ok) throw new Error(data.error || `request_failed:${response.status}`);
-        savedRef.current = text;
+        const savedTabs = noteTabsOf(data.note);
+        savedRef.current = savedTabs;
         baseUpdatedRef.current = data.note.updated_at;
         setNote(data.note);
         patchListed(data.note);
-        setState(contentRef.current === text ? "saved" : "pending");
+        setState(sameNoteTabs(tabsRef.current, currentTabs) ? "saved" : "pending");
         return;
       }
       setState("pending");
@@ -261,23 +271,23 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
 
   // Автосохранение: заметки пишутся на ходу, кнопка «Сохранить» только мешала бы.
   useEffect(() => {
-    if (!note || content === savedRef.current) return;
+    if (!note || sameNoteTabs(noteTabs, savedRef.current)) return;
     setState("pending");
-    const timer = window.setTimeout(() => void save(content), 700);
+    const timer = window.setTimeout(() => void save(), 700);
     return () => window.clearTimeout(timer);
-  }, [content, note, save]);
+  }, [noteTabs, note, save]);
 
   useEffect(() => { onDirty(tabKey, state === "pending" || state === "saving" || state === "error"); }, [state, tabKey, onDirty]);
   useEffect(() => () => onDirty(tabKey, false), [tabKey, onDirty]);
 
   useEffect(() => {
     if (visible && mode === "edit") (content.split("\n")[0].trim() ? textareaRef.current : titleRef.current)?.focus();
-  }, [visible, mode, note?.id]);
+  }, [visible, mode, note?.id, activeTabId]);
 
   useEffect(() => {
     if (!visible) return;
     function onKey(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(content); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -290,7 +300,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   }
 
   async function remove() {
-    if (content.trim() && !window.confirm("Удалить заметку?")) return;
+    if (noteTabs.some((tab) => tab.content.trim()) && !window.confirm("Удалить заметку?")) return;
     await fetchJson(`/api/mbox/notes/${noteId}`, { method: "DELETE" });
     notesStore.list = notesStore.list.filter((item) => item.id !== noteId);
     notesStore.listeners.forEach((listener) => listener());
@@ -349,6 +359,38 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     focusAt(textareaRef.current, rest.length);
   }
 
+  function addTab() {
+    const next = createNoteTab(noteTabs.length);
+    setNoteTabs((current) => [...current, next]);
+    setActiveTabId(next.id);
+    setMode("edit");
+  }
+
+  async function renameTab(tab: NoteTab) {
+    const title = await askText({ title: "Название вкладки", value: tab.title, confirmLabel: "Переименовать" });
+    if (!title || title === tab.title) return;
+    setNoteTabs((current) => current.map((item) => item.id === tab.id ? { ...item, title: title.slice(0, 120) } : item));
+  }
+
+  function removeTab(tab: NoteTab) {
+    if (noteTabs.length <= 1) return;
+    if (tab.content.trim() && !window.confirm(`Удалить вкладку «${tab.title}» вместе с её содержимым?`)) return;
+    const index = noteTabs.findIndex((item) => item.id === tab.id);
+    const remaining = noteTabs.filter((item) => item.id !== tab.id);
+    setNoteTabs(remaining);
+    if (activeTabId === tab.id) setActiveTabId(remaining[Math.min(index, remaining.length - 1)]?.id ?? remaining[0]?.id ?? null);
+  }
+
+  function onTabKey(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === "F2") { event.preventDefault(); void renameTab(noteTabs[index]); return; }
+    const nextIndex = event.key === "ArrowLeft" ? Math.max(0, index - 1) : event.key === "ArrowRight" ? Math.min(noteTabs.length - 1, index + 1) : event.key === "Home" ? 0 : event.key === "End" ? noteTabs.length - 1 : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    setActiveTabId(noteTabs[nextIndex].id);
+    const buttons = event.currentTarget.closest("[role=tablist]")?.querySelectorAll<HTMLButtonElement>("[role=tab]");
+    buttons?.[nextIndex]?.focus();
+  }
+
   if (missing) return <div className="wb-doc-missing">Заметка не найдена — возможно, её удалили.</div>;
   if (!note) return <div className="wb-doc-missing">Открываю заметку…</div>;
 
@@ -380,7 +422,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
               {NOTE_COLORS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
             <div className="wb-segmented">
-              <button type="button" className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(content); setMode("preview"); }}><Eye size={13} /></button>
+              <button type="button" className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(); setMode("preview"); }}><Eye size={13} /></button>
               <button type="button" className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")}><Pencil size={13} /></button>
             </div>
             <ShareButton noteId={noteId} />
@@ -401,7 +443,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             onChange={(event) => setParts(event.target.value, bodyText)}
             onKeyDown={onTitleKey}
             onPaste={onTitlePaste}
-            onBlur={() => void save(content)}
+            onBlur={() => void save()}
             placeholder="Заголовок"
             spellCheck
           />
@@ -412,7 +454,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             language="markdown"
             value={bodyText}
             onChange={(value) => setParts(titleText, value)}
-            onBlur={() => void save(content)}
+            onBlur={() => void save()}
             onKeyDown={onBodyKey}
             onPaste={images.onPaste}
             onDrop={images.onDrop}
@@ -431,6 +473,26 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
           ) : <p className="wb-empty">Пустая заметка. Двойной клик — начать писать.</p>}
         </article>
       )}
+        <div className="wb-note-tabs" role="tablist" aria-label="Вкладки заметки">
+          {noteTabs.map((tab, index) => (
+            <div key={tab.id} className={tab.id === activeTabId ? "wb-note-tab is-active" : "wb-note-tab"}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab.id === activeTabId}
+                tabIndex={tab.id === activeTabId ? 0 : -1}
+                onClick={() => setActiveTabId(tab.id)}
+                onDoubleClick={() => void renameTab(tab)}
+                onKeyDown={(event) => onTabKey(event, index)}
+                title={`${tab.title}. Двойной клик или F2 — переименовать`}
+              >
+                {tab.title}
+              </button>
+              {noteTabs.length > 1 && <button type="button" className="wb-note-tab-close is-danger" onClick={() => removeTab(tab)} title={`Удалить вкладку «${tab.title}»`} aria-label={`Удалить вкладку «${tab.title}»`}><X size={11} /></button>}
+            </div>
+          ))}
+          <button type="button" className="wb-note-tab-add" onClick={addTab} title="Добавить вкладку" aria-label="Добавить вкладку"><Plus size={13} /></button>
+        </div>
       </div>
       <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={textareaRef} previewRef={previewRef} onFind={find.openFind} />
     </DocShell>
