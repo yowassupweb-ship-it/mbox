@@ -399,10 +399,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <ActivityButton label="Артефакты" icon={activityIcon("artifacts.png")} active={sidebarOpen && activity === "files"} onClick={() => showActivity("files")} />
         <ActivityButton label="Хранилище S3" icon={activityIcon("storage.png")} active={tabs.active === "storage"} onClick={() => tabs.open("storage", true)} />
         <ActivityButton label="Поиск по памяти (Ctrl+K)" icon={activityIcon("memory.png")} active={sidebarOpen && activity === "search"} onClick={() => showActivity("search")} />
+        <ActivityButton label="История" icon={systemIcon("history.png")} active={tabs.active === "history"} onClick={() => tabs.open("history", true)} />
         <ActivityButton label="Агенты" icon={activityIcon("agents.png")} active={sidebarOpen && activity === "agents"} onClick={() => showActivity("agents")} badge={needsHuman.length} />
         <ActivityButton label="Навыки" icon={activityIcon("skills.png")} active={sidebarOpen && activity === "skills"} onClick={() => showActivity("skills")} />
         <ActivityButton label="Инструменты" icon={activityIcon("tools.png")} active={sidebarOpen && activity === "tools"} onClick={() => showActivity("tools")} />
-        <ActivityButton label="SSH" icon={<TerminalSquare />} active={sidebarOpen && activity === "ssh"} onClick={() => showActivity("ssh")} />
+        <ActivityButton label="SSH" icon={<img src="/assets/icons/project/ssh.png" alt="" draggable={false} />} active={sidebarOpen && activity === "ssh"} onClick={() => showActivity("ssh")} />
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Консоль агентов">
           <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
