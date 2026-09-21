@@ -457,15 +457,10 @@
    flex: none на шапке/composer и flex: 1 1 auto + min-height: 0 + overflow-y: auto на логе —
    более надёжный паттерн: лог сжимается и скроллится сам, а header и composer никогда не режутся. */
 .agent-chat-shell.console {
-  --text-main: #f5f5f7;
-  --text-2: rgba(245, 245, 247, .72);
-  --text-muted: rgba(245, 245, 247, .48);
-  --border-color: rgba(255, 255, 255, .1);
-  --element-bg: #151518;
   color: var(--text-main);
   display: flex;
   flex-direction: column;
-  background: #0c0c0e;
+  background: var(--bg-color);
 }
 
 .agent-chat-shell.console .console-bar,
@@ -589,8 +584,8 @@
   gap: var(--space-2);
   min-height: 42px;
   padding: 7px 10px;
-  background: #17171a;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  background: var(--surface-panel);
+  border-bottom: 1px solid var(--border-color);
   overflow: visible;
 }
 
@@ -644,16 +639,16 @@
   place-items: center;
   min-width: 38px;
   min-height: 34px;
-  border: 1px solid rgba(255, 255, 255, .08);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 0;
-  background: rgba(255, 255, 255, .045);
+  background: var(--element-bg);
   color: var(--text-2);
 }
 .agent-chat-shell .console-bar .chat-close:hover {
   color: var(--text-main);
-  border-color: rgba(255, 255, 255, .16);
-  background: rgba(255, 255, 255, .075);
+  border-color: color-mix(in srgb, var(--text-main) 20%, var(--border-color));
+  background: var(--bg-raised);
 }
 
 /* Не растягивается (flex: none) — лог занимает всё оставшееся место. Если запросов накопилось
@@ -669,7 +664,7 @@
 
 .console-needs-answer .needs-answer {
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .console-log {
@@ -707,7 +702,7 @@
   gap: 8px;
 }
 
-.console-log-time { flex: none; color: #5b6b66; font-variant-numeric: tabular-nums; min-width: 62px; }
+.console-log-time { flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 62px; }
 
 .console-log-actor {
   flex: none;
@@ -735,7 +730,7 @@
 .console-log-text code {
   padding: 1px 5px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .08);
+  background: var(--code-bg);
   font-family: var(--font-mono);
   font-size: .95em;
 }
@@ -754,11 +749,11 @@
 }
 .console-log-table th, .console-log-table td {
   padding: 4px 10px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, .1));
+  border: 1px solid var(--border-color);
   text-align: left;
   white-space: nowrap;
 }
-.console-log-table th { color: var(--text-2); font-weight: 600; background: rgba(255, 255, 255, .04); }
+.console-log-table th { color: var(--text-2); font-weight: 600; background: var(--surface-chrome); }
 
 /* Инструменты, реально вызванные для ответа — бейджами сразу под сообщением, а не отдельной
    строкой лога: читается как "приложено к этому ответу", а не как ещё одно сообщение. */
@@ -774,7 +769,7 @@
   align-items: center;
   gap: 4px;
   padding: 2px 8px 2px 6px;
-  border: 1px solid rgba(255, 255, 255, .08);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-color) 10%, transparent);
   color: var(--text-2);
@@ -818,9 +813,9 @@
 .console-trace {
   margin: 4px 0 0;
   padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, .06);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .03);
+  background: color-mix(in srgb, var(--text-main) 4%, transparent);
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -840,7 +835,7 @@
 
 .console-action-btn {
   padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, .14);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-color) 14%, transparent);
   color: var(--text-main);
@@ -863,9 +858,9 @@
 }
 
 .post-part-card {
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, .03);
+  background: color-mix(in srgb, var(--text-main) 4%, transparent);
   overflow: hidden;
 }
 
@@ -874,7 +869,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 6px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  border-bottom: 1px solid var(--border-color);
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-2);
@@ -921,7 +916,7 @@
 .post-part-nav button:hover { color: var(--text-main); }
 
 .post-part-dots { display: flex; gap: 5px; }
-.post-part-dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(255, 255, 255, .2); font-style: normal; }
+.post-part-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--text-main) 24%, transparent); font-style: normal; }
 .post-part-dots i.is-active { background: var(--accent-color); }
 
 .post-part-reject-toggle {
@@ -953,7 +948,7 @@
 .post-part-rating button {
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, .3);
+  color: var(--text-muted);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -975,9 +970,9 @@
   resize: vertical;
   min-height: 30px;
   padding: 5px 7px;
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .02);
+  background: var(--surface-chrome);
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -1019,9 +1014,9 @@
   resize: vertical;
   min-height: 32px;
   padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .02);
+  background: var(--surface-chrome);
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1029,7 +1024,7 @@
 
 .post-builder-redo {
   padding: 6px 12px;
-  border: 1px solid rgba(255, 255, 255, .14);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-2);
@@ -1040,7 +1035,7 @@
 }
 
 .post-builder-redo:disabled { opacity: .4; cursor: not-allowed; }
-.post-builder-redo:not(:disabled):hover { color: var(--text-main); border-color: rgba(255, 255, 255, .3); }
+.post-builder-redo:not(:disabled):hover { color: var(--text-main); border-color: color-mix(in srgb, var(--text-main) 30%, var(--border-color)); }
 
 .console-log-line.typing { opacity: .7; }
 
@@ -1052,7 +1047,7 @@
   width: 16px;
   height: 16px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid var(--border-color);
   border-radius: 50%;
   background: transparent;
   color: var(--text-muted);
@@ -1071,8 +1066,8 @@
   align-items: flex-end;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid rgba(255, 255, 255, .06);
-  background: #101012;
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-chrome);
 }
 
 /* Подсказки по @/,/,$,# — плавающий список над composer'ом, не над логом. Раньше был голый список
@@ -1086,10 +1081,10 @@
   margin-bottom: 8px;
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, .1);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  background: #17171a;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .5);
+  background: var(--bg-raised);
+  box-shadow: var(--float);
   padding: 5px;
   display: grid;
   gap: 2px;
@@ -1202,7 +1197,7 @@
 }
 .console-log-line:hover .console-reply-btn,
 .console-reply-btn:focus-visible { opacity: 1; }
-.console-reply-btn:hover { background: rgba(255, 255, 255, .06); color: var(--accent-color); }
+.console-reply-btn:hover { background: color-mix(in srgb, var(--text-main) 7%, transparent); color: var(--accent-color); }
 @media (pointer: coarse) { .console-reply-btn { opacity: .7; } }
 
 .console-quote {
@@ -1215,7 +1210,7 @@
   border: 0;
   border-left: 2px solid color-mix(in srgb, var(--accent-color) 55%, transparent);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: rgba(255, 255, 255, .03);
+  background: color-mix(in srgb, var(--text-main) 4%, transparent);
   color: var(--text-muted);
   font: inherit;
   font-size: 11.5px;
@@ -1233,8 +1228,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 14px;
-  border-top: 1px solid rgba(255, 255, 255, .06);
-  background: #131316;
+  border-top: 1px solid var(--border-color);
+  background: var(--element-bg);
   color: var(--text-muted);
   font-size: 11.5px;
 }
@@ -1254,7 +1249,7 @@
   color: var(--text-muted);
   cursor: pointer;
 }
-.console-reply-bar button:hover { background: rgba(255, 255, 255, .08); color: var(--text-main); }
+.console-reply-bar button:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-main); }
 
 .console-send-btn {
   flex: none;
@@ -1276,9 +1271,9 @@
   margin: 4px 0;
   padding: 8px 10px;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, .08);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .04);
+  background: var(--surface-chrome);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
@@ -1313,15 +1308,15 @@
 .console-log-line.out.is-flash .console-bubble { background: color-mix(in srgb, var(--accent-color) 10%, transparent); }
 
 .console-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
-.console-attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; padding: 5px 9px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 8px; background: rgba(0, 0, 0, .2); color: var(--text-main); font-size: 12px; text-decoration: none; }
+.console-attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; padding: 5px 9px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--element-bg); color: var(--text-main); font-size: 12px; text-decoration: none; }
 .console-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console-attachment em { flex: none; color: var(--text-muted); font-style: normal; font-size: 11px; }
 .console-attachment:hover { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
 .console-attachment.is-image { padding: 0; overflow: hidden; }
 .console-attachment.is-image img { display: block; max-width: 260px; max-height: 200px; object-fit: cover; }
 
-.console-drafts { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; border-top: 1px solid rgba(255, 255, 255, .06); background: #101012; }
-.console-draft { position: relative; display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 3px 4px 3px 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .1); border-radius: 6px; font-size: 11.5px; }
+.console-drafts { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; border-top: 1px solid var(--border-color); background: var(--surface-chrome); }
+.console-draft { position: relative; display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 3px 4px 3px 8px; overflow: hidden; border: 1px solid var(--border-color); border-radius: 6px; font-size: 11.5px; }
 .console-draft i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent-color) 16%, transparent); transition: width .2s ease; }
 .console-draft > * { position: relative; }
 .console-draft span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1330,9 +1325,9 @@
 .console-draft.is-error { border-color: rgba(255, 77, 94, .45); }
 .console-draft.is-error em { color: var(--state-danger); }
 .console-draft button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-muted); cursor: pointer; }
-.console-draft button:hover { background: rgba(255, 255, 255, .08); color: var(--text-main); }
+.console-draft button:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-main); }
 .console-attach-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer; }
-.console-attach-btn:hover { background: rgba(255, 255, 255, .06); color: var(--text-main); }
+.console-attach-btn:hover { background: color-mix(in srgb, var(--text-main) 7%, transparent); color: var(--text-main); }
 .console-input-row.is-drop { outline: 2px dashed color-mix(in srgb, var(--accent-color) 60%, transparent); outline-offset: -4px; }
 
 /* Ссылки в сообщениях: на MBOX открывают вкладку, наружу — браузер. */

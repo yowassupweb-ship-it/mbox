@@ -1,14 +1,22 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Eye, Pencil } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Eye, Palette, Pencil } from "lucide-react";
 import { merge3 } from "../lib/merge3";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
+import { CodeEditor } from "../app/workbench/CodeEditor";
 
 type SharedNote = { title: string; content: string; theme: "light" | "graphite" | "black"; updated_at: string };
 type Status = "loading" | "saved" | "pending" | "saving" | "error" | "missing";
 
 const POLL_MS = 4000;
 const SAVE_DELAY_MS = 800;
+const SHARED_THEME_KEY = "mbox.shared-note-theme";
+const THEME_ORDER: SharedNote["theme"][] = ["light", "graphite", "black"];
+const THEME_LABEL: Record<SharedNote["theme"], string> = {
+  light: "Светлая",
+  graphite: "Графитовая",
+  black: "Чёрная",
+};
 
 /**
  * Заметка по ссылке /n/<токен> — для людей без входа в MBOX: бесконечный документ, как в Google Docs.
@@ -19,9 +27,10 @@ const SAVE_DELAY_MS = 800;
 export function SharedNotePage({ token }: { token: string }) {
   const api = `/api/share/notes/${token}`;
   const [mode, setMode] = useState<"view" | "edit">("view");
-  const [editing, setEditing] = useState(true);
+  const [editing, setEditing] = useState(false);
   const [content, setContent] = useState("");
   const [theme, setTheme] = useState<SharedNote["theme"]>("graphite");
+  const [viewerTheme, setViewerTheme] = useState<SharedNote["theme"] | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [notice, setNotice] = useState("");
   const base = useRef<{ content: string; updatedAt: string }>({ content: "", updatedAt: "" });
@@ -30,6 +39,11 @@ export function SharedNotePage({ token }: { token: string }) {
   const saving = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(SHARED_THEME_KEY);
+    if (stored === "light" || stored === "graphite" || stored === "black") setViewerTheme(stored);
+  }, []);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -67,7 +81,7 @@ export function SharedNotePage({ token }: { token: string }) {
         if (!alive) return;
         if (!response.ok) { setStatus("missing"); setNotice(data.error || "Ссылка недействительна"); return; }
         setMode(data.mode);
-        setEditing(data.mode === "edit");
+        setEditing(false);
         base.current = { content: data.note.content, updatedAt: data.note.updated_at };
         setContent(data.note.content);
         setTheme(data.note.theme || "graphite");
@@ -144,14 +158,6 @@ export function SharedNotePage({ token }: { token: string }) {
     return data.url as string;
   });
 
-  // Бесконечный документ: поле растёт под текст, прокручивается вся страница, а не поле внутри неё.
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [content, editing]);
-
   const breakAt = content.indexOf("\n");
   const titleText = breakAt < 0 ? content : content.slice(0, breakAt);
   const bodyText = breakAt < 0 ? "" : content.slice(breakAt + 1);
@@ -175,7 +181,7 @@ export function SharedNotePage({ token }: { token: string }) {
 
   const statusLabel: Record<Status, string> = {
     loading: "Открываю…",
-    saved: mode === "edit" ? "Все изменения сохранены" : "Только просмотр",
+    saved: mode === "edit" ? "Все изменения сохранены" : "Документ открыт",
     pending: "Есть несохранённые изменения…",
     saving: "Сохраняю…",
     error: "Не сохранилось — повторю при следующей правке",
@@ -195,12 +201,29 @@ export function SharedNotePage({ token }: { token: string }) {
 
   const canEdit = mode === "edit";
   const showEditor = canEdit && editing;
+  const activeTheme = viewerTheme || theme;
+  const cycleTheme = () => {
+    const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(activeTheme) + 1) % THEME_ORDER.length];
+    setViewerTheme(nextTheme);
+    window.localStorage.setItem(SHARED_THEME_KEY, nextTheme);
+  };
 
   return (
-    <div className={`share-page doc-theme-${theme}`}>
+    <div className={`share-page doc-theme-${activeTheme}`}>
       <header className="share-bar">
         <span className="share-brand">MBOX</span>
         <span className={`share-status is-${status}`}>{statusLabel[status]}</span>
+        <span className="share-access">{canEdit ? "Только редактирование" : "Только просмотр"}</span>
+        <button
+          type="button"
+          className="share-theme-button"
+          onClick={cycleTheme}
+          aria-label={`Сменить тему. Сейчас ${THEME_LABEL[activeTheme].toLowerCase()}`}
+          title="Сменить тему"
+        >
+          <Palette size={14} aria-hidden="true" />
+          <span>{THEME_LABEL[activeTheme]}</span>
+        </button>
         {showEditor && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
         {canEdit && (
           <div className="share-toggle" role="group" aria-label="Режим">
@@ -225,11 +248,14 @@ export function SharedNotePage({ token }: { token: string }) {
               placeholder="Заголовок"
               spellCheck
             />
-            <textarea
-              ref={textareaRef}
-              className="share-editor"
+            <CodeEditor
+              textareaRef={textareaRef}
+              className="share-markdown"
+              variant="document"
+              autoGrow
+              language="markdown"
               value={bodyText}
-              onChange={(event) => setParts(titleText, event.target.value)}
+              onChange={(value) => setParts(titleText, value)}
               onKeyDown={(event) => { markdownShortcut(event); }}
               onPaste={images.onPaste}
               onDrop={images.onDrop}

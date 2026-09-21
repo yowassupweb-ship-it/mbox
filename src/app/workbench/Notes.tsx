@@ -10,6 +10,7 @@ import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
+import { CodeEditor } from "./CodeEditor";
 
 export type NoteColor = "default" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "gray";
 export type NoteTheme = "light" | "graphite" | "black";
@@ -390,11 +391,13 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             placeholder="Заголовок"
             spellCheck
           />
-          <textarea
-            ref={textareaRef}
-            className="wb-note-editor"
+          <CodeEditor
+            textareaRef={textareaRef}
+            className="wb-note-markdown"
+            variant="document"
+            language="markdown"
             value={bodyText}
-            onChange={(event) => setParts(titleText, event.target.value)}
+            onChange={(value) => setParts(titleText, value)}
             onBlur={() => void save(content)}
             onKeyDown={onBodyKey}
             onPaste={images.onPaste}

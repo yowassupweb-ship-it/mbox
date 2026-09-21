@@ -1328,6 +1328,33 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .tok-fn { color: #82aaff; }
 .tok-punct { color: #7f918c; }
 
+/* Markdown-документы используют тот же двухслойный редактор, но с метриками обычного текста. */
+.wb-code-wrap.is-document { min-height: 0; overflow: hidden; background: transparent; }
+.wb-code-wrap.is-document .wb-code-layer,
+.wb-code-wrap.is-document .wb-code-editor.is-layered {
+  padding: 6px 28px 64px;
+  font-family: var(--font-sans);
+  font-size: var(--wb-fs-reading);
+  font-weight: var(--weight-text);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+.wb-code-wrap.is-document .wb-code-layer { color: var(--text-main); }
+.wb-code-wrap.is-document .wb-code-editor.is-layered { caret-color: var(--text-main); white-space: pre-wrap; }
+.wb-code-wrap.is-document .tok-comment { color: var(--text-muted); }
+.wb-code-wrap.is-document .tok-string,
+.wb-code-wrap.is-document .tok-value { color: color-mix(in srgb, var(--state-ok) 62%, var(--text-main)); }
+.wb-code-wrap.is-document .tok-keyword,
+.wb-code-wrap.is-document .tok-tag { color: var(--accent-color); }
+.wb-code-wrap.is-document .tok-attr,
+.wb-code-wrap.is-document .tok-prop { color: color-mix(in srgb, var(--state-warn) 62%, var(--text-main)); }
+.wb-code-wrap.is-document .tok-punct { color: color-mix(in srgb, var(--note-purple) 68%, var(--text-main)); }
+.wb-code-wrap.is-document.is-autogrow { height: auto; min-height: 60vh; overflow: visible; }
+.wb-code-wrap.is-document.is-autogrow .wb-code-layer { position: relative; inset: auto; min-height: 60vh; padding: 0; overflow: hidden; }
+.wb-code-wrap.is-document.is-autogrow .wb-code-editor.is-layered { height: 100%; min-height: 60vh; padding: 0; overflow: hidden; }
+
 .wb-html-preview { height: 100%; display: flex; justify-content: center; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
 .wb-html-preview iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: 4px; background: #fff; }
 .wb-html-preview.is-mobile iframe { width: 390px; max-width: 100%; }
@@ -2519,6 +2546,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-note-title { width: 100%; padding: 22px 28px 4px; border: 0; outline: none; background: transparent; color: var(--text-main); font: inherit; font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
 .wb-note-title::placeholder { color: var(--text-muted); }
 .wb-note-edit .wb-note-editor { flex: 1; min-height: 0; max-width: none; padding-top: 6px; overflow: auto; }
+.wb-note-edit .wb-note-markdown { flex: 1; width: 100%; min-height: 0; max-width: none; }
 .wb-note-title { flex: none; }
 .wb-memory-body h1.wb-note-title-view { margin: 0 0 10px; color: var(--text-main); font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
 
@@ -2575,6 +2603,24 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
 .share-status.is-pending, .share-status.is-saving { color: var(--state-warn); }
 .share-status.is-error { color: var(--state-danger); }
+.share-access { flex: none; color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.share-theme-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.share-theme-button:hover { border-color: color-mix(in srgb, var(--accent-color) 42%, var(--wb-line)); color: var(--text-main); }
+.share-theme-button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 .share-bar .wb-md-toolbar { flex: 1 1 auto; }
 .share-toggle { display: inline-flex; flex: none; margin-left: auto; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); overflow: hidden; }
 .share-toggle button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
@@ -2596,6 +2642,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   .share-doc { padding: 24px 16px 30vh; }
   .share-title, .share-title-input { font-size: 22px; }
   .share-toggle button { padding: 0 8px; }
+  .share-theme-button span { display: none; }
+  .share-theme-button { width: 30px; justify-content: center; padding: 0; }
+  .share-status { display: none; }
   .share-bar .wb-md-toolbar { display: none; }
 }
 
