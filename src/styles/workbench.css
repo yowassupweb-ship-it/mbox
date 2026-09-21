@@ -1790,6 +1790,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-version-source.is-agent { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--accent-color); }
 .wb-version-source.is-disk { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
 .wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: #8ab4ff; }
+/* Правка заметки человеком снаружи MBOX — отдельный цвет: по списку версий должно быть сразу видно,
+   что текст поменял не владелец, а тот, кому дали ссылку. */
+.wb-version-source.is-share { background: color-mix(in srgb, var(--note-purple, #b18cff) 20%, transparent); color: var(--note-purple, #b18cff); }
+.wb-version-source.is-baseline { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
 .wb-file-meta { margin-top: 14px; }
 
 /* ─── Каркас документа: текст главный, сведения — выдвижная панель ─── */

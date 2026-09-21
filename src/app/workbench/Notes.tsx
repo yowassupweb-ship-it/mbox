@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Eye, Link2, Pencil, Pin, PinOff, Plus, RefreshCw, Share2, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Copy, Eye, GitCompare, History, Link2, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
 import { askText } from "../../ui/askText";
-import { DocShell } from "./docLayout";
+import { DocShell, DrawerToggle, useDrawer } from "./docLayout";
+import { DiffLines, lineDiff } from "./LocalFileDocument";
 import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
@@ -17,6 +18,17 @@ import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } 
 export type NoteColor = "default" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "gray";
 export type NoteTheme = "light" | "graphite" | "black";
 export type Note = { id: string; title: string; content?: string; tabs?: NoteTab[]; snippet?: string; pinned: boolean; color: NoteColor; theme: NoteTheme; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
+type NoteVersion = { id: string; title: string; sha: string; size_bytes: number; author: string; source: string; created_at: string };
+type NoteVersionFull = NoteVersion & { content: string; tabs: NoteTab[] };
+
+const VERSION_SOURCE_LABEL: Record<string, string> = { mbox: "MBOX", share: "по ссылке", baseline: "начало" };
+
+/** Текст всей заметки для сравнения. Вкладки разделяем заголовком — иначе правка во второй вкладке
+ *  выглядела бы как правка первой, и дифф врал бы про то, что именно поменялось. */
+function versionText(tabs: NoteTab[]) {
+  if (tabs.length <= 1) return tabs[0]?.content ?? "";
+  return tabs.map((tab) => `—— ${tab.title} ——\n${tab.content}`).join("\n\n");
+}
 
 const NOTE_COLORS: Array<{ value: NoteColor; label: string }> = [
   { value: "default", label: "Без метки" },
@@ -187,6 +199,10 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imageError, setImageError] = useState("");
   const [shared, setShared] = useState(false);
+  const [versions, setVersions] = useState<NoteVersion[]>([]);
+  const [viewing, setViewing] = useState<NoteVersionFull | null>(null);
+  const [compare, setCompare] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useDrawer(`mbox.doc.note.history:${noteId}`);
   const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
   const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content, enabled: visible });
 
@@ -226,6 +242,16 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     setNote(remote);
     patchListed(remote);
   }, []);
+
+  // Список версий тянем только когда панель открыта: у закрытой панели он никому не нужен, а заметок много.
+  const loadVersions = useCallback(async () => {
+    try {
+      setVersions((await fetchJson<{ versions: NoteVersion[] }>(`/api/mbox/notes/${noteId}/versions`)).versions);
+    } catch { /* история не критична: заметка открывается и без неё */ }
+  }, [noteId]);
+
+  // Пересобираем список и после своих сохранений, и после чужих правок по ссылке — обе меняют updated_at.
+  useEffect(() => { if (drawerOpen) void loadVersions(); }, [drawerOpen, loadVersions, note?.updated_at]);
 
   const save = useCallback(async () => {
     if (savingRef.current) return;
@@ -392,6 +418,29 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     buttons?.[nextIndex]?.focus();
   }
 
+  // Сравниваем выбранную версию с тем, что в редакторе прямо сейчас, а не с последним сохранением:
+  // человек хочет видеть, что он потеряет откатом, включая ещё не сохранённые правки.
+  const versionDiff = useMemo(() => {
+    if (!viewing || !compare) return null;
+    const before = versionText(viewing.tabs?.length ? viewing.tabs : [{ id: "main", title: "Основная", content: viewing.content }]);
+    return lineDiff(before, versionText(noteTabs));
+  }, [viewing, compare, noteTabs]);
+
+  async function openVersion(version: NoteVersion) {
+    try {
+      setViewing((await fetchJson<{ version: NoteVersionFull }>(`/api/mbox/notes/${noteId}/versions/${version.id}`)).version);
+    } catch { /* версию могли вытеснить из истории, пока список висел открытым */ }
+  }
+
+  /** Откат — обычная правка: текст версии кладётся в редактор и сохраняется общим путём, поэтому
+   *  сам откат тоже попадает в историю и его, в свою очередь, можно откатить. */
+  function restore(version: NoteVersionFull) {
+    const restored = version.tabs?.length ? version.tabs : [{ id: "main", title: "Основная", content: version.content }];
+    setNoteTabs(restored);
+    setViewing(null);
+    setMode("edit");
+  }
+
   if (missing) return <div className="wb-doc-missing">Заметка не найдена — возможно, её удалили.</div>;
   if (!note) return <div className="wb-doc-missing">Открываю заметку…</div>;
 
@@ -428,14 +477,51 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             </div>
             <ShareButton noteId={noteId} onSharedChange={setShared} />
             <button type="button" className={note.pinned ? "is-on" : undefined} onClick={() => void update({ pinned: !note.pinned })} title={note.pinned ? "Открепить" : "Закрепить сверху"}>{note.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
+            <DrawerToggle open={drawerOpen} onToggle={() => setDrawerOpen(!drawerOpen)} label="История" count={versions.length} />
             <button type="button" className="is-danger" onClick={() => void remove()} title="Удалить заметку"><Trash2 size={14} /></button>
           </div>
+        </>
+      )}
+      drawerOpen={drawerOpen}
+      onCloseDrawer={() => { setDrawerOpen(false); setViewing(null); }}
+      drawer={(
+        <>
+          <div className="wb-side-tabs">
+            <button type="button" className="is-on"><History size={12} /> Версии · {versions.length}</button>
+          </div>
+          {versions.length ? (
+            <ul className="wb-version-list">
+              {versions.map((version) => (
+                <li key={version.id}>
+                  <button type="button" className={viewing?.id === version.id ? "is-active" : undefined} onClick={() => void openVersion(version)}>
+                    <span className={`wb-version-source is-${version.source}`}>{VERSION_SOURCE_LABEL[version.source] ?? version.source}</span>
+                    <b>{version.title || "без заголовка"}</b>
+                    <span className="wb-tree-hint">{formatSince(version.created_at)} · {version.author || "—"}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="wb-empty">Версий пока нет — первая появится при следующей правке заметки.</p>}
         </>
       )}
     >
       {find.bar}
       <div className={`wb-note-surface doc-theme-${note.theme || "graphite"}`}>
-      {mode === "edit" ? (
+      {viewing ? (
+        <div className="wb-version-view">
+          <div className="wb-banner">
+            Версия от {formatDateTime(viewing.created_at)} · {viewing.author || "—"} · {VERSION_SOURCE_LABEL[viewing.source] ?? viewing.source}
+            <button type="button" className={compare ? "is-on" : undefined} onClick={() => setCompare((value) => !value)}>
+              <GitCompare size={12} /> {compare ? "Показать версию целиком" : "Показать изменения"}
+            </button>
+            <button type="button" onClick={() => restore(viewing)}><RotateCcw size={12} /> Откатить к этой версии</button>
+            <button type="button" onClick={() => setViewing(null)}><X size={12} /> Закрыть</button>
+          </div>
+          {compare
+            ? (versionDiff ? <DiffLines lines={versionDiff} /> : <p className="wb-empty">Заметка слишком большая для построчного сравнения.</p>)
+            : <pre className="wb-version-text">{versionText(viewing.tabs?.length ? viewing.tabs : [{ id: "main", title: "Основная", content: viewing.content }])}</pre>}
+        </div>
+      ) : mode === "edit" ? (
         <div className="wb-note-edit">
           <input
             ref={titleRef}

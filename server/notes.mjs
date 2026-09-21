@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 
 // Заметки — свои короткие записи человека (не память агентов): быстро записать, найти, закрепить.
@@ -33,6 +33,20 @@ CREATE TABLE IF NOT EXISTS note_shares (
   last_used_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_note_shares_mode ON note_shares(note_id, mode);
+-- Снимки заметки после сохранения: посмотреть, что изменилось, и откатиться.
+CREATE TABLE IF NOT EXISTS note_versions (
+  id BIGSERIAL PRIMARY KEY,
+  note_id BIGINT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  tabs JSONB NOT NULL DEFAULT '[]'::jsonb,
+  sha TEXT NOT NULL,
+  size_bytes INT NOT NULL DEFAULT 0,
+  author TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'mbox',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_note_versions_note ON note_versions(note_id, created_at DESC, id DESC);
 `;
 
 // Заметка по ссылке может быть большой, но не бесконечной: защита публичной правки от мусора.
@@ -43,6 +57,11 @@ const INTERNAL_FILE = "/api/mbox/storage/file?key=";
 const NOTE_COLORS = new Set(["default", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray"]);
 const NOTE_THEMES = new Set(["light", "graphite", "black"]);
 const MAX_NOTE_TABS = 50;
+const MAX_VERSION_BYTES = 1024 * 1024;
+const VERSIONS_PER_NOTE = 60;
+// Заметка сохраняется сама, раз в несколько секунд. Без склейки история за один вечер превратилась бы
+// в сотню одинаковых строк, в которых уже ничего не найти.
+const VERSION_COALESCE = "10 minutes";
 
 function noteColor(value) {
   const color = String(value || "default");
@@ -119,6 +138,71 @@ export async function createNote(query, { title, content, tabs, color, theme, pr
   )).rows[0];
 }
 
+function versionSha(title, tabs) {
+  return createHash("sha1").update(`${String(title || "")}\n${JSON.stringify(tabs)}`).digest("hex");
+}
+
+/**
+ * Снимок заметки после сохранения. Правка того же автора в пределах VERSION_COALESCE обновляет
+ * последнюю запись, а не заводит новую: иначе автосохранение забивает историю. Если истории ещё нет,
+ * сначала кладём состояние ДО этой правки (baseline) — иначе откатываться было бы не к чему.
+ */
+export async function recordNoteVersion(query, { noteId, title, content, tabs, previous, author, source = "mbox" }) {
+  const list = noteTabs(tabs, content);
+  const payload = JSON.stringify(list);
+  const bytes = Buffer.byteLength(payload, "utf8");
+  if (bytes > MAX_VERSION_BYTES) return { skipped: "too_large" };
+  const hash = versionSha(title, list);
+  const latest = (await query(
+    `SELECT id::text, sha, author, now() - created_at < $2::interval AS fresh
+     FROM note_versions WHERE note_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [noteId, VERSION_COALESCE],
+  )).rows[0];
+  if (latest?.sha === hash) return { skipped: "unchanged" };
+
+  if (!latest && previous && previous.sha !== hash) {
+    const baseTabs = noteTabs(previous.tabs, previous.content);
+    const basePayload = JSON.stringify(baseTabs);
+    if (Buffer.byteLength(basePayload, "utf8") <= MAX_VERSION_BYTES) {
+      await query(
+        `INSERT INTO note_versions(note_id, title, content, tabs, sha, size_bytes, author, source, created_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, 'baseline', now() - interval '1 millisecond')`,
+        [noteId, previous.title || "", baseTabs[0].content, basePayload, versionSha(previous.title, baseTabs), Buffer.byteLength(basePayload, "utf8"), "до первой правки"],
+      );
+    }
+  }
+
+  // Склейка только со своей же свежей правкой: чужая правка по ссылке обязана остаться отдельной точкой.
+  if (latest?.fresh && latest.author === String(author || "")) {
+    await query(
+      `UPDATE note_versions SET title = $2, content = $3, tabs = $4::jsonb, sha = $5, size_bytes = $6, source = $7, created_at = now() WHERE id = $1`,
+      [latest.id, String(title || ""), list[0].content, payload, hash, bytes, String(source || "mbox")],
+    );
+    return { merged: latest.id };
+  }
+
+  const inserted = (await query(
+    `INSERT INTO note_versions(note_id, title, content, tabs, sha, size_bytes, author, source)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8) RETURNING id::text, created_at::text`,
+    [noteId, String(title || ""), list[0].content, payload, hash, bytes, String(author || ""), String(source || "mbox")],
+  )).rows[0];
+  await query(
+    `DELETE FROM note_versions WHERE note_id = $1 AND id NOT IN (
+       SELECT id FROM note_versions WHERE note_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2
+     )`,
+    [noteId, VERSIONS_PER_NOTE],
+  );
+  return { version: inserted };
+}
+
+export async function listNoteVersions(query, noteId, limit = 60) {
+  return (await query(
+    `SELECT id::text, title, sha, size_bytes, author, source, created_at::text
+     FROM note_versions WHERE note_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`,
+    [noteId, Math.min(Math.max(Number(limit) || 60, 1), 200)],
+  )).rows;
+}
+
 export async function handleNotesApi({ req, res, url, query, readBody, sendJson, actor, allowed }) {
   if (!url.pathname.startsWith("/api/mbox/notes")) return false;
   if (!allowed) {
@@ -154,6 +238,23 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
         return true;
       }
     }
+    // История версий: список без текста, одна версия — с текстом и вкладками. Откат клиент делает
+    // обычным PATCH содержимого, чтобы он прошёл через ту же проверку версии и сам попал в историю.
+    const versionsMatch = url.pathname.match(/^\/api\/mbox\/notes\/(\d+)\/versions(?:\/(\d+))?$/);
+    if (versionsMatch && req.method === "GET") {
+      const [, noteId, versionId] = versionsMatch;
+      if (versionId) {
+        const row = (await query(
+          `SELECT id::text, title, content, tabs, sha, size_bytes, author, source, created_at::text
+           FROM note_versions WHERE note_id = $1 AND id = $2`,
+          [noteId, versionId],
+        )).rows[0];
+        sendJson(res, row ? 200 : 404, row ? { version: row } : { error: "not_found" });
+        return true;
+      }
+      sendJson(res, 200, { versions: await listNoteVersions(query, noteId, url.searchParams.get("limit")) });
+      return true;
+    }
     if (url.pathname === "/api/mbox/notes" && req.method === "GET") {
       sendJson(res, 200, { notes: await listNotes(query, url.searchParams.get("q") || "", url.searchParams.get("limit")) });
       return true;
@@ -179,8 +280,9 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
       // тогда 409 со свежей версией, и клиент сливает правки, а не затирает чужие.
       const changesDocument = content !== null || tabs !== null;
       const base = changesDocument && body.base_updated_at ? String(body.base_updated_at) : "";
+      let current = null;
       if (changesDocument) {
-        const current = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [match[1]])).rows[0];
+        current = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [match[1]])).rows[0];
         if (base && current && current.updated_at !== base) { sendJson(res, 409, { error: "conflict", note: current }); return true; }
         if (!tabs && content !== null) {
           tabs = noteTabs(current?.tabs, current?.content);
@@ -219,6 +321,17 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
           match[1],
         ],
       )).rows[0];
+      if (row && changesDocument) {
+        await recordNoteVersion(query, {
+          noteId: match[1],
+          title: row.title,
+          content: row.content,
+          tabs: row.tabs,
+          previous: current ? { title: current.title, content: current.content, tabs: current.tabs, sha: versionSha(current.title, noteTabs(current.tabs, current.content)) } : null,
+          author: String(actor || ""),
+          source: "mbox",
+        }).catch(() => {});
+      }
       sendJson(res, row ? 200 : 404, row ? { note: row } : { error: "not_found" });
       return true;
     }
@@ -308,6 +421,17 @@ export async function handleSharedNoteApi({ req, res, url, query, readBody, send
         `UPDATE notes SET content = $1, tabs = $2::jsonb, title = $3, updated_at = now() WHERE id = $4 RETURNING ${NOTE_COLUMNS}`,
         [content, JSON.stringify(tabs), titleFrom(content), share.note_id],
       )).rows[0];
+      // Правка по ссылке — отдельная точка истории: её не склеивают с правками владельца, и по автору
+      // видно, что текст поменял человек снаружи MBOX.
+      await recordNoteVersion(query, {
+        noteId: share.note_id,
+        title: row.title,
+        content: row.content,
+        tabs: row.tabs,
+        previous: { title: note.title, content: note.content, tabs: note.tabs, sha: versionSha(note.title, noteTabs(note.tabs, note.content)) },
+        author: "по ссылке",
+        source: "share",
+      }).catch(() => {});
       broadcast?.({ entity: "notes", action: "update", detail: `#${share.note_id}` });
       sendJson(res, 200, { note: shaped(row) });
       return true;

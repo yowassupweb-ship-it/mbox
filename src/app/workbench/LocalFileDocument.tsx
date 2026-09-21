@@ -49,7 +49,7 @@ export function lineDiff(before: string, after: string): DiffLine[] | null {
   return out;
 }
 
-function DiffLines({ lines }: { lines: DiffLine[] }) {
+export function DiffLines({ lines }: { lines: DiffLine[] }) {
   // Длинные неизменённые куски сворачиваем, оставляя по три строки контекста.
   const blocks: Array<DiffLine | { kind: "gap"; count: number }> = [];
   for (let index = 0; index < lines.length; index += 1) {
