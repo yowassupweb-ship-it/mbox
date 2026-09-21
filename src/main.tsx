@@ -16,6 +16,9 @@ import {
   Plus,
   Server,
   ShieldCheck,
+  Sun,
+  Moon,
+  Contrast,
   Zap,
 } from "lucide-react";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
@@ -43,9 +46,25 @@ import type {
 } from "./types";
 import "./styles.css";
 
+type AppTheme = "light" | "graphite" | "black";
+
+const THEME_STORAGE_KEY = "mbox.theme";
+
+function readTheme(): AppTheme {
+  const saved = localStorage.getItem(THEME_STORAGE_KEY);
+  return saved === "light" || saved === "black" || saved === "graphite" ? saved : "graphite";
+}
+
 function App() {
   const [me, setMe] = useState<Me>({ user: null });
   const [authChecked, setAuthChecked] = useState(false);
+  const [theme, setTheme] = useState<AppTheme>(readTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme === "light" ? "light" : "dark";
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   useEffect(() => {
     fetchJson<Me>("/api/mbox/auth/me")
@@ -56,9 +75,9 @@ function App() {
 
   if (!authChecked) return <ShellLoading />;
   if (!me.user) return <LoginScreen onLogin={setMe} />;
-  return <Workspace user={me.user} onLogout={() => setMe({ user: null })} />;
+  return <Workspace user={me.user} onLogout={() => setMe({ user: null })} theme={theme} onThemeChange={setTheme} />;
 }
-function Workspace({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
+function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
   // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
   const data = useMboxData("", onLogout);
@@ -143,7 +162,7 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
   useEffect(() => { if (todoMarks.length) bootstrapSeen(todoMarks); }, [todoMarks]);
 
   return (
-    <div className="app dark app-workbench">
+    <div className={`app app-workbench theme-${theme}${theme === "light" ? "" : " dark"}`} data-theme={theme}>
       {data.offline && <OfflineBanner onRetry={data.reload} />}
       <Workbench
         data={data}
@@ -179,6 +198,8 @@ function Workspace({ user, onLogout }: { user: { username: string; role: string 
           history: () => <HistoryBoard events={data.auditEvents} />,
           settings: () => (
             <SettingsBoard
+              theme={theme}
+              onThemeChange={onThemeChange}
               server={<ServerBoard pulse={realtime.pulse} />}
               access={<AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
             />
@@ -546,11 +567,14 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
 }
 /** Сервер и Доступ раньше были двумя кнопками нижнего меню — сведены в одну «Настройки» с
  * внутренним переключателем, задача стояла с самого начала переверстки и не отменялась. */
-function SettingsBoard({ server, access }: { server: ReactNode; access: ReactNode }) {
-  const [tab, setTab] = useState<"server" | "access">("server");
+function SettingsBoard({ server, access, theme, onThemeChange }: { server: ReactNode; access: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+  const [tab, setTab] = useState<"appearance" | "server" | "access">("appearance");
   return (
     <div className="settings-board">
       <div className="settings-tabs" role="tablist" aria-label="Настройки">
+        <button role="tab" aria-selected={tab === "appearance"} className={tab === "appearance" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("appearance")}>
+          <Contrast size={16} /> Интерфейс
+        </button>
         <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
           <Server size={16} /> Сервер
         </button>
@@ -558,8 +582,55 @@ function SettingsBoard({ server, access }: { server: ReactNode; access: ReactNod
           <ShieldCheck size={16} /> Доступ
         </button>
       </div>
-      {tab === "server" ? server : access}
+      {tab === "appearance" ? <AppearanceSettings theme={theme} onChange={onThemeChange} /> : tab === "server" ? server : access}
     </div>
+  );
+}
+
+const THEME_OPTIONS: Array<{ id: AppTheme; title: string; description: string; icon: typeof Sun }> = [
+  { id: "light", title: "Светлая", description: "Чистая спокойная поверхность для дневной работы", icon: Sun },
+  { id: "graphite", title: "Графитовая", description: "Мягкий тёмно-серый фон с умеренным контрастом", icon: Contrast },
+  { id: "black", title: "Тёмная", description: "Глубокий чёрный фон для работы вечером", icon: Moon },
+];
+
+function AppearanceSettings({ theme, onChange }: { theme: AppTheme; onChange: (theme: AppTheme) => void }) {
+  return (
+    <section className="appearance-settings" aria-labelledby="appearance-title">
+      <header className="appearance-heading">
+        <div>
+          <p>Внешний вид</p>
+          <h2 id="appearance-title">Тема MBOX</h2>
+        </div>
+        <span>Сохраняется на этом устройстве</span>
+      </header>
+      <div className="theme-options" role="radiogroup" aria-label="Тема интерфейса">
+        {THEME_OPTIONS.map((option) => {
+          const Icon = option.icon;
+          const selected = theme === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              className={selected ? "theme-option is-selected" : "theme-option"}
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(option.id)}
+            >
+              <span className={`theme-preview is-${option.id}`} aria-hidden="true">
+                <span className="theme-preview-rail" />
+                <span className="theme-preview-body"><i /><i /><i /></span>
+              </span>
+              <span className="theme-option-copy">
+                <strong><Icon size={16} />{option.title}</strong>
+                <span>{option.description}</span>
+              </span>
+              <span className="theme-choice" aria-hidden="true" />
+            </button>
+          );
+        })}
+      </div>
+      <p className="appearance-note">Inter используется для интерфейса и документов. Моноширинный шрифт остаётся только в коде, терминале и технических данных.</p>
+    </section>
   );
 }
 

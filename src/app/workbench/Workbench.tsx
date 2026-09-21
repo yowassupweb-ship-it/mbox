@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Database, GitBranch, PanelBottom, PanelLeft, PanelRight, TerminalSquare, X } from "lucide-react";
+import { AlertTriangle, Archive, Bot, ChevronDown, ChevronUp, Cloud, Database, FolderKanban, FolderOpen, GitBranch, PanelBottom, PanelLeft, PanelRight, Search, Settings, Sparkles, StickyNote, TerminalSquare, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { AgentChat } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -40,8 +40,6 @@ import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsA
 import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent } from "./agentTabs";
 import { SkillPageDocument } from "./SkillPageDocument";
-
-const MENU = "/assets/icons/bottom-menu";
 
 type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
@@ -384,22 +382,22 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       })}</div>
 
       <nav className="wb-activitybar" aria-label="Разделы">
-        <ActivityButton label="Проекты (Ctrl+Shift+E)" icon={`${MENU}/provodnik.png`} active={sidebarOpen && activity === "explorer"} onClick={() => showActivity("explorer")} />
-        <ActivityButton label="Заметки (Ctrl+Alt+N — новая)" icon={`${MENU}/zametki.png`} active={sidebarOpen && activity === "notes"} onClick={() => showActivity("notes")} />
-        <ActivityButton label="Папки (локальные файлы и git)" icon={`${MENU}/papki.png`} active={sidebarOpen && activity === "local"} onClick={() => showActivity("local")} />
-        <ActivityButton label="Артефакты" icon={`${MENU}/artefakty.png`} active={sidebarOpen && activity === "files"} onClick={() => showActivity("files")} />
-        <ActivityButton label="Хранилище S3" icon={`${MENU}/hranilishe.png`} active={tabs.active === "storage"} onClick={() => tabs.open("storage", true)} />
-        <ActivityButton label="Поиск по памяти (Ctrl+K)" icon={`${MENU}/pamyat.png`} active={sidebarOpen && activity === "search"} onClick={() => showActivity("search")} />
-        <ActivityButton label="Агенты" icon={`${MENU}/agenty.png`} active={sidebarOpen && activity === "agents"} onClick={() => showActivity("agents")} badge={needsHuman.length} />
-        <ActivityButton label="Навыки" icon={`${MENU}/navyki.png`} active={sidebarOpen && activity === "skills"} onClick={() => showActivity("skills")} />
-        <ActivityButton label="Инструменты" icon={`${MENU}/instrumenty.png`} active={sidebarOpen && activity === "tools"} onClick={() => showActivity("tools")} />
-        <ActivityButton label="SSH" icon="/assets/icons/icons/ssh.png" active={sidebarOpen && activity === "ssh"} onClick={() => showActivity("ssh")} />
+        <ActivityButton label="Проекты (Ctrl+Shift+E)" icon={<FolderKanban />} active={sidebarOpen && activity === "explorer"} onClick={() => showActivity("explorer")} />
+        <ActivityButton label="Заметки (Ctrl+Alt+N — новая)" icon={<StickyNote />} active={sidebarOpen && activity === "notes"} onClick={() => showActivity("notes")} />
+        <ActivityButton label="Папки (локальные файлы и git)" icon={<FolderOpen />} active={sidebarOpen && activity === "local"} onClick={() => showActivity("local")} />
+        <ActivityButton label="Артефакты" icon={<Archive />} active={sidebarOpen && activity === "files"} onClick={() => showActivity("files")} />
+        <ActivityButton label="Хранилище S3" icon={<Cloud />} active={tabs.active === "storage"} onClick={() => tabs.open("storage", true)} />
+        <ActivityButton label="Поиск по памяти (Ctrl+K)" icon={<Search />} active={sidebarOpen && activity === "search"} onClick={() => showActivity("search")} />
+        <ActivityButton label="Агенты" icon={<Bot />} active={sidebarOpen && activity === "agents"} onClick={() => showActivity("agents")} badge={needsHuman.length} />
+        <ActivityButton label="Навыки" icon={<Sparkles />} active={sidebarOpen && activity === "skills"} onClick={() => showActivity("skills")} />
+        <ActivityButton label="Инструменты" icon={<Wrench />} active={sidebarOpen && activity === "tools"} onClick={() => showActivity("tools")} />
+        <ActivityButton label="SSH" icon={<TerminalSquare />} active={sidebarOpen && activity === "ssh"} onClick={() => showActivity("ssh")} />
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Консоль агентов">
-          <img src={`${MENU}/konsol.png`} width={22} height={22} alt="" draggable={false} />
+          <TerminalSquare aria-hidden="true" />
           <span className="wb-activity-tip" role="tooltip">Консоль агентов</span>
         </button>
-        <ActivityButton label="Настройки" icon="/assets/icons/icons/settings.png" active={tabs.active === "settings"} onClick={() => tabs.open("settings", true)} />
+        <ActivityButton label="Настройки" icon={<Settings />} active={tabs.active === "settings"} onClick={() => tabs.open("settings", true)} />
       </nav>
 
       <aside className="wb-sidebar" aria-label="Боковая панель" data-scroll-scope={`sidebar:${activity}`}>
@@ -588,10 +586,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   );
 }
 
-function ActivityButton({ label, icon, active, onClick, badge }: { label: string; icon: string; active: boolean; onClick: () => void; badge?: number }) {
+function ActivityButton({ label, icon, active, onClick, badge }: { label: string; icon: ReactNode; active: boolean; onClick: () => void; badge?: number }) {
   return (
     <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} aria-label={label} aria-pressed={active}>
-      <img src={icon} width={22} height={22} alt="" />
+      <span className="wb-activity-icon" aria-hidden="true">{icon}</span>
       <span className="wb-activity-tip" role="tooltip">{label}</span>
       {Boolean(badge) && <b>{badge}</b>}
     </button>

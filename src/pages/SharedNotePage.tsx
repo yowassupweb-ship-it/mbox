@@ -4,7 +4,7 @@ import { merge3 } from "../lib/merge3";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
 
-type SharedNote = { title: string; content: string; updated_at: string };
+type SharedNote = { title: string; content: string; theme: "light" | "graphite" | "black"; updated_at: string };
 type Status = "loading" | "saved" | "pending" | "saving" | "error" | "missing";
 
 const POLL_MS = 4000;
@@ -21,6 +21,7 @@ export function SharedNotePage({ token }: { token: string }) {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [editing, setEditing] = useState(true);
   const [content, setContent] = useState("");
+  const [theme, setTheme] = useState<SharedNote["theme"]>("graphite");
   const [status, setStatus] = useState<Status>("loading");
   const [notice, setNotice] = useState("");
   const base = useRef<{ content: string; updatedAt: string }>({ content: "", updatedAt: "" });
@@ -54,6 +55,7 @@ export function SharedNotePage({ token }: { token: string }) {
       if (merged.text !== local) replaceContent(merged.text);
     }
     base.current = { content: remote.content, updatedAt: remote.updated_at };
+    setTheme(remote.theme || "graphite");
     document.title = remote.title || "Заметка";
   }, [replaceContent]);
 
@@ -68,6 +70,7 @@ export function SharedNotePage({ token }: { token: string }) {
         setEditing(data.mode === "edit");
         base.current = { content: data.note.content, updatedAt: data.note.updated_at };
         setContent(data.note.content);
+        setTheme(data.note.theme || "graphite");
         document.title = data.note.title || "Заметка";
         setStatus("saved");
       })
@@ -194,7 +197,7 @@ export function SharedNotePage({ token }: { token: string }) {
   const showEditor = canEdit && editing;
 
   return (
-    <div className="share-page">
+    <div className={`share-page doc-theme-${theme}`}>
       <header className="share-bar">
         <span className="share-brand">MBOX</span>
         <span className={`share-status is-${status}`}>{statusLabel[status]}</span>

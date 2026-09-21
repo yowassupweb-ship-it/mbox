@@ -13,11 +13,13 @@
   /* Иерархия по важности. Текст документа — обычное начертание и самый удобный для чтения размер;
      обвязка (вкладки, дерево, подписи) — мельче и тише; жирное — только заголовки и имена.
      Токены переопределены здесь, чтобы старые панели внутри вкладок сели в ту же шкалу. */
-  /* Cascadia Code (первый доступный моноширинный на Windows) — вариативный и плотный на мелком
-     кегле: основной текст на 350 читается легче, подписи и дерево — 400, заголовки — 600. */
-  --weight-text: 350;
+  /* Inter — обычный интерфейс и документы. Моноширинный набор остаётся у кода, терминала и
+     технических идентификаторов через --font-mono и специализированные классы. */
+  --weight-text: 400;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", "Liberation Mono", monospace;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  font-optical-sizing: auto;
   --weight-normal: 400;
   --weight-medium: 540;
   --weight-bold: 640;
@@ -31,11 +33,11 @@
   --wb-activity: 44px;
   --wb-titlebar: 38px;
   --wb-status: 22px;
-  --wb-line: rgba(133, 245, 219, 0.12);
-  --wb-surface: #0c0d0f;
-  --wb-surface-2: #101114;
-  --wb-hover: rgba(133, 245, 219, 0.06);
-  --wb-selected: rgba(41, 224, 214, 0.13);
+  --wb-line: var(--border-color);
+  --wb-surface: var(--surface-chrome);
+  --wb-surface-2: var(--surface-panel);
+  --wb-hover: var(--surface-hover);
+  --wb-selected: var(--surface-selected);
   height: 100dvh;
   width: 100%;
   /* Раскладка никогда не прокручивает окно: переполнение внутри панели не должно сдвигать весь интерфейс. */
@@ -65,6 +67,7 @@ body.wb-resizing * {
   min-width: 0;
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-surface);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--text-main) 2%, transparent);
 }
 
 .wb-titlebar .topbar {
@@ -234,16 +237,12 @@ body.wb-resizing * {
   transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease;
 }
 
-.wb-activity img {
-  width: 30px;
-  height: 30px;
-  object-fit: contain;
-  opacity: 1;
-  image-rendering: pixelated;
-}
+.wb-activity-icon { width: 30px; height: 30px; display: grid; place-items: center; color: var(--text-muted); transition: color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-out); }
+.wb-activity-icon svg { width: 21px; height: 21px; stroke-width: 1.7; }
 .wb-activity:hover { background: color-mix(in srgb, var(--accent-color) 9%, transparent); }
+.wb-activity:hover .wb-activity-icon { color: var(--text-2); transform: translateY(-1px); }
 .wb-activity.is-active { border-left-color: var(--accent-color); }
-.wb-activity.is-active img { opacity: 1; }
+.wb-activity.is-active .wb-activity-icon { color: var(--accent-color); }
 .wb-activity:focus-visible { outline: 1px solid var(--accent-color); outline-offset: -3px; }
 
 .wb-activity-tip {
@@ -1818,8 +1817,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Консоль и старые панели внутри рабочего места — в ту же шкалу, без жирного основного текста. */
 .wb pre,
 .wb code,
-.wb kbd,
-.wb textarea { font-family: var(--font-mono); }
+.wb kbd { font-family: var(--font-mono); }
 .wb-memory-body pre { color: #c9d6d2; }
 .wb .console-log { font-size: 12px; line-height: 1.6; }
 .wb .console-log-text { font-weight: var(--weight-text); }
@@ -1830,6 +1828,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* ─── Заметки ───────────────────────────────────────── */
 
 .wb-note-item {
+  --note-mark: transparent;
   position: relative;
   display: grid;
   gap: 2px;
@@ -1839,7 +1838,18 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-note-item:hover { background: var(--wb-hover); }
-.wb-note-item.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); }
+.wb-note-item:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-note-item[data-note-color="red"] { --note-mark: var(--note-red); }
+.wb-note-item[data-note-color="orange"] { --note-mark: var(--note-orange); }
+.wb-note-item[data-note-color="yellow"] { --note-mark: var(--note-yellow); }
+.wb-note-item[data-note-color="green"] { --note-mark: var(--note-green); }
+.wb-note-item[data-note-color="cyan"] { --note-mark: var(--note-cyan); }
+.wb-note-item[data-note-color="blue"] { --note-mark: var(--note-blue); }
+.wb-note-item[data-note-color="purple"] { --note-mark: var(--note-purple); }
+.wb-note-item[data-note-color="gray"] { --note-mark: var(--note-gray); }
+.wb-note-item:not([data-note-color="default"]) { border-left-color: var(--note-mark); background: color-mix(in srgb, var(--note-mark) 4%, transparent); }
+.wb-note-item.is-active { background: var(--wb-selected); border-left-color: var(--note-mark, var(--accent-color)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 14%, transparent); }
+.wb-note-item.is-active[data-note-color="default"] { border-left-color: var(--accent-color); }
 .wb-note-item-title { overflow: hidden; color: var(--text-main); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .wb-note-item-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-2); font-size: 11px; line-height: 1.4; }
 .wb-note-item-meta { color: var(--text-muted); font-size: 10px; }
@@ -1847,6 +1857,50 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-note-item:hover .wb-note-pin,
 .wb-note-pin.is-on { opacity: 1; }
 .wb-note-pin.is-on { color: var(--accent-color); }
+
+.wb-note-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--doc-bg);
+  color: var(--text-main);
+  transition: background-color var(--duration-base) ease, color var(--duration-base) ease;
+}
+.doc-theme-light {
+  --doc-bg: var(--doc-light-bg);
+  --text-main: var(--doc-light-text);
+  --text-2: var(--doc-light-text-2);
+  --text-muted: var(--doc-light-muted);
+  --wb-line: var(--doc-light-line);
+  --wb-surface: var(--doc-light-bg);
+  --wb-surface-2: #ffffff;
+  --code-bg: var(--doc-light-code);
+}
+.doc-theme-graphite {
+  --doc-bg: var(--doc-graphite-bg);
+  --text-main: var(--doc-graphite-text);
+  --text-2: var(--doc-graphite-text-2);
+  --text-muted: var(--doc-graphite-muted);
+  --wb-line: var(--doc-graphite-line);
+  --wb-surface: var(--doc-graphite-bg);
+  --wb-surface-2: #2c2d32;
+  --code-bg: var(--doc-graphite-code);
+}
+.doc-theme-black {
+  --doc-bg: var(--doc-black-bg);
+  --text-main: var(--doc-black-text);
+  --text-2: var(--doc-black-text-2);
+  --text-muted: var(--doc-black-muted);
+  --wb-line: var(--doc-black-line);
+  --wb-surface: var(--doc-black-bg);
+  --wb-surface-2: #101013;
+  --code-bg: var(--doc-black-code);
+}
+.wb-note-surface > .wb-note-edit,
+.wb-note-surface > .wb-reading { flex: 1; min-height: 0; }
+.wb-note-theme-select { max-width: 122px; }
+.wb-note-color-select { max-width: 96px; }
 
 .wb-note-editor {
   flex: 1;
@@ -2487,7 +2541,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .share-page {
   /* Те же токены, что у рабочего места (.wb): страница живёт вне него. */
-  --weight-text: 350;
+  --weight-text: 400;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   --weight-normal: 400;
   --weight-medium: 540;
   --text-xs: 11px;
@@ -2496,14 +2551,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   --text-lg: 15px;
   --text-xl: 17px;
   --wb-fs-reading: 15px;
-  --wb-line: rgba(133, 245, 219, 0.12);
-  --wb-surface: #0c0d0f;
-  --wb-surface-2: #101114;
-  --wb-hover: rgba(133, 245, 219, 0.06);
+  --wb-hover: color-mix(in srgb, var(--text-main) 6%, transparent);
   min-height: 100dvh;
-  background: var(--bg-color);
+  background: var(--doc-bg);
   color: var(--text-main);
-  font-family: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+  font-family: var(--font-sans);
+  font-optical-sizing: auto;
 }
 .share-bar {
   position: sticky;

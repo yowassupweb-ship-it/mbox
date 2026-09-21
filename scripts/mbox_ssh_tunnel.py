@@ -57,8 +57,15 @@ def main():
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(ssh_host, username=ssh_user, password=ssh_password, timeout=20, banner_timeout=20, auth_timeout=20)
+    # Прод держит SSH-сессии ограниченное время без трафика. Keepalive не даёт локальному
+    # слушателю остаться «живым» на 15432 с уже мёртвым transport внутри.
+    transport = client.get_transport()
+    if transport is None:
+        print("SSH transport was not created", file=sys.stderr)
+        return 1
+    transport.set_keepalive(15)
 
-    server = ForwardServer((local_host, local_port), make_handler(client.get_transport(), remote_host, remote_port))
+    server = ForwardServer((local_host, local_port), make_handler(transport, remote_host, remote_port))
     thread = threading.Thread(target=server.serve_forever, daemon=False)
     print(f"forwarding {local_host}:{local_port} -> {ssh_host}:{remote_host}:{remote_port}")
     thread.start()

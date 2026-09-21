@@ -11,7 +11,27 @@ import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
 
-export type Note = { id: string; title: string; content?: string; snippet?: string; pinned: boolean; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
+export type NoteColor = "default" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "gray";
+export type NoteTheme = "light" | "graphite" | "black";
+export type Note = { id: string; title: string; content?: string; snippet?: string; pinned: boolean; color: NoteColor; theme: NoteTheme; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
+
+const NOTE_COLORS: Array<{ value: NoteColor; label: string }> = [
+  { value: "default", label: "Без метки" },
+  { value: "red", label: "Красная" },
+  { value: "orange", label: "Оранжевая" },
+  { value: "yellow", label: "Жёлтая" },
+  { value: "green", label: "Зелёная" },
+  { value: "cyan", label: "Бирюзовая" },
+  { value: "blue", label: "Синяя" },
+  { value: "purple", label: "Фиолетовая" },
+  { value: "gray", label: "Серая" },
+];
+
+const NOTE_THEMES: Array<{ value: NoteTheme; label: string }> = [
+  { value: "light", label: "Светлый документ" },
+  { value: "graphite", label: "Графитовый документ" },
+  { value: "black", label: "Чёрный документ" },
+];
 
 /** Список заметок общий для боковой панели и заголовков вкладок; вкладка заметки сообщает о правках. */
 const notesStore = {
@@ -86,7 +106,7 @@ export function NotesView({ tabs }: { tabs: TabsApi }) {
   function renderItem(note: Note) {
     const key = `note:${note.id}`;
     return (
-      <div key={note.id} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => tabs.open(key)} onDoubleClick={() => tabs.open(key, true)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") tabs.open(key, true); }}>
+      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => tabs.open(key)} onDoubleClick={() => tabs.open(key, true)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") tabs.open(key, true); }}>
         <div className="wb-note-item-title">{note.title || "Пустая заметка"}</div>
         {snippetOf(note) && <div className="wb-note-item-snippet">{snippetOf(note)}</div>}
         <div className="wb-note-item-meta">{formatSince(note.updated_at)}</div>
@@ -339,6 +359,12 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
               <option value="">без проекта</option>
               {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
+            <select className="wb-bar-select wb-note-theme-select" value={note.theme || "graphite"} onChange={(event) => void update({ theme: event.target.value as NoteTheme })} title="Тема документа" aria-label="Тема документа">
+              {NOTE_THEMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            <select className="wb-bar-select wb-note-color-select" value={note.color || "default"} onChange={(event) => void update({ color: event.target.value as NoteColor })} title="Цвет карточки" aria-label="Цвет карточки">
+              {NOTE_COLORS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
             <div className="wb-segmented">
               <button type="button" className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(content); setMode("preview"); }}><Eye size={13} /></button>
               <button type="button" className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")}><Pencil size={13} /></button>
@@ -350,6 +376,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
         </>
       )}
     >
+      <div className={`wb-note-surface doc-theme-${note.theme || "graphite"}`}>
       {mode === "edit" ? (
         <div className="wb-note-edit">
           <input
@@ -386,6 +413,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
           ) : <p className="wb-empty">Пустая заметка. Двойной клик — начать писать.</p>}
         </article>
       )}
+      </div>
     </DocShell>
   );
 }

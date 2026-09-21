@@ -9,65 +9,111 @@
   font-display: swap;
 }
 
-/* Дизайн-система «Терминал» — консольный интерфейс. Только тёмная тема.
-   Принцип сместился с «выпуклого стекла» (Shar) на плоский терминал: моноширинный шрифт
-   везде, прямоугольные формы вместо пилюль, жёсткая офсетная тень вместо мягкого блика,
-   контрастные видимые границы вместо почти невидимых. «Парящие» элементы (шапка, FAB,
-   тулбар графа) остаются плавающими — просто одеты в терминальный, а не стеклянный вид. */
+/* Основной текст MBOX и документов. Inter хранится локально, поэтому интерфейс не зависит
+   от Google Fonts/CDN и одинаково выглядит в браузере, Desktop и публичных заметках. */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter-Variable.ttf") format("truetype-variations");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter-Italic-Variable.ttf") format("truetype-variations");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* Human Interface MBOX: одна семантическая система и три режима поверхности.
+   Компоненты используют только смысловые переменные; темы меняют значения здесь. */
 
 :root {
-  /* Поверхности — почти чёрный грунт, лёгкий шаг вверх для приподнятого */
-  --bg-color: #08090a;
-  --container-bg: #08090a;
-  --element-bg: #121316;
-  --bg-raised: #121316;
-  --bg-sunken: #08090a;
+  --bg-color: #202124;
+  --container-bg: #26272b;
+  --element-bg: #2d2e33;
+  --bg-raised: #34353a;
+  --bg-sunken: #1b1c1f;
+  --surface-chrome: #25262a;
+  --surface-panel: #2a2b2f;
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-selected: rgba(77, 163, 255, 0.17);
 
   /* Текст — чуть холодный белый, в тон акцентному циану */
-  --text-main: #eef4f1;
-  --text-2: rgba(238, 244, 241, 0.7);
-  --text-muted: rgba(238, 244, 241, 0.44);
+  --text-main: #f5f5f7;
+  --text-2: rgba(245, 245, 247, 0.72);
+  --text-muted: rgba(245, 245, 247, 0.5);
 
   /* Границы видимые, не декоративные — терминальные боксы читаются по контуру, не по тени */
-  --border-color: rgba(133, 245, 219, 0.16);
+  --border-color: rgba(255, 255, 255, 0.11);
   --border-width: 1px;
-  --hairline: rgba(133, 245, 219, 0.16);
+  --hairline: rgba(255, 255, 255, 0.11);
 
   /* Акцент — терминальный циан. Отдельно от --state-ok (зелёный) и брендов агентов,
      чтобы «интерактивное» и «успех» не путались. */
-  --accent-color: #29e0d6;
-  --accent-2: #29e0d6;
-  --accent-chin: #0d5f5a;
-  --accent-edge: #0d5f5a;
+  --accent-color: #4da3ff;
+  --accent-2: #4da3ff;
+  --accent-chin: #245f9d;
+  --accent-edge: #245f9d;
 
   --green: #22c55e;
   --green-edge: #15803d;
 
   /* Тени — жёсткий офсет вместо мягкого блика. Терминальное окно, не стекло. */
   --chin-color: #000000;
-  --chin-shadow: 2px 2px 0 rgba(0, 0, 0, 0.65);
-  --container-inset: inset 0 0 0 1px rgba(0, 0, 0, 0.55), inset 0 2px 5px rgba(0, 0, 0, 0.4);
-  --accent-shadow: 2px 2px 0 color-mix(in srgb, var(--accent-color) 55%, transparent);
-  --green-shadow: 2px 2px 0 color-mix(in srgb, var(--green-edge) 65%, transparent);
-  --float: 4px 5px 0 rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(133, 245, 219, 0.1);
+  --chin-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --container-inset: inset 0 0 0 1px var(--border-color);
+  --accent-shadow: 0 6px 18px color-mix(in srgb, var(--accent-color) 24%, transparent);
+  --green-shadow: 0 6px 18px color-mix(in srgb, var(--green-edge) 24%, transparent);
+  --float: 0 18px 48px rgba(0, 0, 0, 0.32), 0 0 0 1px var(--border-color);
 
   /* Стекло для «парящих» элементов — темнее и жёстче по кромке, чем у Shar, но всё ещё
      полупрозрачное с блюром: парящее сохраняется, глянец — нет. */
-  --glass: rgba(6, 8, 8, 0.72);
-  --glass-brd: rgba(133, 245, 219, 0.22);
-  --glass-shadow: 0 6px 0 rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(133, 245, 219, 0.08);
-  --blur-glass: 14px;
+  --glass: rgba(38, 39, 43, 0.82);
+  --glass-brd: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 18px 48px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--border-color);
+  --blur-glass: 20px;
 
   /* Состояния */
   --state-ok: #35c759;
   --state-ok-soft: #58d977;
-  --state-live: #29e0d6;
+  --state-live: #4da3ff;
   --state-warn: #ffb000;
   --state-off: #5b6b66;
   --state-danger: #ff4d5e;
 
-  --eyebrow: #6fd8cc;
-  --code-bg: rgba(133, 245, 219, 0.08);
+  --eyebrow: #88bdff;
+  --code-bg: rgba(255, 255, 255, 0.06);
+
+  --note-red: #ff6b6b;
+  --note-orange: #ff9f43;
+  --note-yellow: #f6c945;
+  --note-green: #52c878;
+  --note-cyan: #45c6c8;
+  --note-blue: #5a9cff;
+  --note-purple: #a783ff;
+  --note-gray: #9298a3;
+
+  --doc-light-bg: #fbfbfc;
+  --doc-light-text: #1d1d1f;
+  --doc-light-text-2: rgba(29, 29, 31, 0.72);
+  --doc-light-muted: rgba(29, 29, 31, 0.48);
+  --doc-light-line: rgba(29, 29, 31, 0.12);
+  --doc-light-code: rgba(29, 29, 31, 0.06);
+  --doc-graphite-bg: #242529;
+  --doc-graphite-text: #f5f5f7;
+  --doc-graphite-text-2: rgba(245, 245, 247, 0.72);
+  --doc-graphite-muted: rgba(245, 245, 247, 0.48);
+  --doc-graphite-line: rgba(255, 255, 255, 0.11);
+  --doc-graphite-code: rgba(255, 255, 255, 0.06);
+  --doc-black-bg: #050506;
+  --doc-black-text: #f5f5f7;
+  --doc-black-text-2: rgba(245, 245, 247, 0.72);
+  --doc-black-muted: rgba(245, 245, 247, 0.46);
+  --doc-black-line: rgba(255, 255, 255, 0.1);
+  --doc-black-code: rgba(255, 255, 255, 0.06);
 
   /* Шкала отступов, шаг 4px */
   --space-1: 4px;
@@ -83,16 +129,14 @@
 
   /* Радиусы — терминальные прямоугольники, не пилюли и не огромные Shar-скругления.
      Кнопки чуть мягче блоков — так рука читает «это нажимается» на ощупь глаза. */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
-  --radius-pill: 12px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
 
-  /* Типографика — моноширинный шрифт везде, включая заголовки. Настоящего pixel-фонта в
-     системных стеках нет и грузить веб-шрифт без спроса нельзя (см. правило репозитория
-     «никаких новых зависимостей») — консольность даёт сам моноширинный набор + разрядка
-     на заголовках (см. .panel-title, h1-h3 в base.css). */
+  /* Inter — обычный текст, mono — только код и технические поверхности, pixel — брендовые акценты. */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
   --font-pixel: "Press Start 2P", var(--font-mono);
   --text-xs: 11px;
@@ -112,10 +156,60 @@
   --duration-fast: 0.12s;
   --duration-base: 0.2s;
 
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  font-optical-sizing: auto;
   color: var(--text-main);
   background: var(--bg-color);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme="light"] {
+  --bg-color: #f5f5f7;
+  --container-bg: #ffffff;
+  --element-bg: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-sunken: #ececf0;
+  --surface-chrome: #f7f7f9;
+  --surface-panel: #ffffff;
+  --surface-hover: rgba(22, 24, 29, 0.055);
+  --surface-selected: rgba(0, 122, 255, 0.12);
+  --text-main: #1d1d1f;
+  --text-2: rgba(29, 29, 31, 0.72);
+  --text-muted: rgba(29, 29, 31, 0.5);
+  --border-color: rgba(22, 24, 29, 0.12);
+  --hairline: rgba(22, 24, 29, 0.12);
+  --accent-color: #007aff;
+  --accent-2: #007aff;
+  --accent-chin: #0059bd;
+  --accent-edge: #0059bd;
+  --chin-color: #d7d7dc;
+  --chin-shadow: 0 1px 2px rgba(31, 35, 42, 0.09);
+  --container-inset: inset 0 0 0 1px var(--border-color);
+  --float: 0 18px 48px rgba(31, 35, 42, 0.14), 0 0 0 1px var(--border-color);
+  --glass: rgba(255, 255, 255, 0.82);
+  --glass-brd: rgba(22, 24, 29, 0.12);
+  --glass-shadow: 0 18px 48px rgba(31, 35, 42, 0.14), 0 0 0 1px var(--border-color);
+  --state-live: #007aff;
+  --eyebrow: #0066cc;
+  --code-bg: rgba(22, 24, 29, 0.055);
+}
+
+:root[data-theme="black"] {
+  --bg-color: #050506;
+  --container-bg: #0a0a0c;
+  --element-bg: #111114;
+  --bg-raised: #17171b;
+  --bg-sunken: #000000;
+  --surface-chrome: #0b0b0d;
+  --surface-panel: #101013;
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-selected: rgba(77, 163, 255, 0.17);
+  --text-main: #f5f5f7;
+  --text-2: rgba(245, 245, 247, 0.72);
+  --text-muted: rgba(245, 245, 247, 0.46);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.1);
+  --glass: rgba(10, 10, 12, 0.84);
 }

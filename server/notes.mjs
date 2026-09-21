@@ -10,12 +10,16 @@ CREATE TABLE IF NOT EXISTS notes (
   title TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
   pinned BOOLEAN NOT NULL DEFAULT false,
+  color TEXT NOT NULL DEFAULT 'default',
+  theme TEXT NOT NULL DEFAULT 'graphite',
   project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
   tags TEXT[] NOT NULL DEFAULT '{}',
   author TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'graphite';
 CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(pinned DESC, updated_at DESC);
 -- Ссылки на заметку для людей без входа в MBOX: одна на режим (просмотр / правка), отзыв — удалением строки.
 CREATE TABLE IF NOT EXISTS note_shares (
@@ -34,6 +38,18 @@ const MAX_SHARED_CONTENT = 2 * 1024 * 1024;
 const MAX_SHARED_IMAGE = 25 * 1024 * 1024;
 const SHARE_TOKEN = /^[A-Za-z0-9_-]{24,64}$/;
 const INTERNAL_FILE = "/api/mbox/storage/file?key=";
+const NOTE_COLORS = new Set(["default", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "gray"]);
+const NOTE_THEMES = new Set(["light", "graphite", "black"]);
+
+function noteColor(value) {
+  const color = String(value || "default");
+  return NOTE_COLORS.has(color) ? color : "default";
+}
+
+function noteTheme(value) {
+  const theme = String(value || "graphite");
+  return NOTE_THEMES.has(theme) ? theme : "graphite";
+}
 
 /** Картинки в тексте хранятся ссылкой, требующей входа в MBOX; на публичной странице — ссылкой по токену. */
 function toSharedUrls(content, token) {
@@ -44,7 +60,7 @@ function toInternalUrls(content) {
   return String(content || "").replace(/\/api\/share\/notes\/[A-Za-z0-9_-]+\/file\?key=/g, INTERNAL_FILE);
 }
 
-const NOTE_COLUMNS = `id::text, title, content, pinned, project_id::text, tags, author, created_at::text, updated_at::text,
+const NOTE_COLUMNS = `id::text, title, content, pinned, color, theme, project_id::text, tags, author, created_at::text, updated_at::text,
   octet_length(content) AS size_bytes`;
 
 export async function ensureNotesSchema(query) {
@@ -59,7 +75,7 @@ function titleFrom(content) {
 export async function listNotes(query, search = "", limit = 200) {
   const q = String(search || "").trim();
   return (await query(
-    `SELECT id::text, title, left(content, 400) AS snippet, pinned, project_id::text, tags, author, created_at::text, updated_at::text,
+    `SELECT id::text, title, left(content, 400) AS snippet, pinned, color, theme, project_id::text, tags, author, created_at::text, updated_at::text,
             octet_length(content) AS size_bytes
      FROM notes
      WHERE $1 = '' OR title ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%' OR array_to_string(tags, ' ') ILIKE '%' || $1 || '%'
@@ -69,11 +85,11 @@ export async function listNotes(query, search = "", limit = 200) {
   )).rows;
 }
 
-export async function createNote(query, { title, content, project_id: projectId, tags, author }) {
+export async function createNote(query, { title, content, color, theme, project_id: projectId, tags, author }) {
   const text = String(content ?? "");
   return (await query(
-    `INSERT INTO notes(title, content, project_id, tags, author) VALUES ($1, $2, $3, $4, $5) RETURNING ${NOTE_COLUMNS}`,
-    [String(title || "").trim() || titleFrom(text), text, projectId || null, Array.isArray(tags) ? tags.map(String) : [], String(author || "")],
+    `INSERT INTO notes(title, content, color, theme, project_id, tags, author) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${NOTE_COLUMNS}`,
+    [String(title || "").trim() || titleFrom(text), text, noteColor(color), noteTheme(theme), projectId || null, Array.isArray(tags) ? tags.map(String) : [], String(author || "")],
   )).rows[0];
 }
 
@@ -146,8 +162,10 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
            pinned = COALESCE($5, pinned),
            project_id = CASE WHEN $6::boolean THEN $7::bigint ELSE project_id END,
            tags = COALESCE($8, tags),
-           updated_at = CASE WHEN $1 IS NOT NULL OR $2::boolean OR $6::boolean OR $8 IS NOT NULL THEN now() ELSE updated_at END
-         WHERE id = $9
+           color = CASE WHEN $9::boolean THEN $10 ELSE color END,
+           theme = CASE WHEN $11::boolean THEN $12 ELSE theme END,
+           updated_at = CASE WHEN $1 IS NOT NULL OR $2::boolean OR $6::boolean OR $8 IS NOT NULL OR $9::boolean OR $11::boolean THEN now() ELSE updated_at END
+         WHERE id = $13
          RETURNING ${NOTE_COLUMNS}`,
         [
           content,
@@ -158,6 +176,10 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
           has("project_id"),
           body.project_id || null,
           Array.isArray(body.tags) ? body.tags.map(String) : null,
+          has("color"),
+          noteColor(body.color),
+          has("theme"),
+          noteTheme(body.theme),
           match[1],
         ],
       )).rows[0];
@@ -221,7 +243,7 @@ export async function handleSharedNoteApi({ req, res, url, query, readBody, send
 
     if (sub) return false;
     const note = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [share.note_id])).rows[0];
-    const shaped = (row) => ({ title: row.title, content: toSharedUrls(row.content, token), updated_at: row.updated_at });
+    const shaped = (row) => ({ title: row.title, content: toSharedUrls(row.content, token), theme: noteTheme(row.theme), updated_at: row.updated_at });
 
     if (req.method === "GET") {
       await query("UPDATE note_shares SET last_used_at = now() WHERE token = $1", [token]).catch(() => {});
