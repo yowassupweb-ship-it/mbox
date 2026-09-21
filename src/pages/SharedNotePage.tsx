@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Eye, Pencil, Plus, X } from "lucide-react";
+import { Eye, PanelLeftClose, PanelLeftOpen, Pencil, Plus, X } from "lucide-react";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
 import { CodeEditor } from "../app/workbench/CodeEditor";
@@ -32,6 +32,7 @@ export function SharedNotePage({ token }: { token: string }) {
   const [editing, setEditing] = useState(false);
   const [tabs, setTabs] = useState<NoteTab[]>(() => noteTabsOf(null));
   const [activeTabId, setActiveTabId] = useState("main");
+  const [tabsOpen, setTabsOpen] = useState(() => window.localStorage.getItem("mbox.shared-note-tabs") !== "closed");
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const content = activeTab?.content ?? "";
   const setContent = useCallback((next: string | ((current: string) => string)) => {
@@ -44,6 +45,7 @@ export function SharedNotePage({ token }: { token: string }) {
   const base = useRef<{ tabs: NoteTab[]; updatedAt: string }>({ tabs: noteTabsOf(null), updatedAt: "" });
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  useEffect(() => { window.localStorage.setItem("mbox.shared-note-tabs", tabsOpen ? "open" : "closed"); }, [tabsOpen]);
   const saving = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
@@ -322,14 +324,24 @@ export function SharedNotePage({ token }: { token: string }) {
             </article>
           )}
         </main>
-        <aside className="share-note-tabs" role="tablist" aria-label="Вкладки заметки" aria-orientation="vertical">
-          <div className="share-note-tabs-head"><span>Вкладки</span>{canEdit && <button type="button" onClick={addTab} title="Добавить вкладку" aria-label="Добавить вкладку"><Plus size={14} /></button>}</div>
-          {tabs.map((tab, index) => (
-            <div key={tab.id} className={tab.id === activeTabId ? "share-note-tab is-active" : "share-note-tab"}>
-              <button type="button" role="tab" aria-selected={tab.id === activeTabId} tabIndex={tab.id === activeTabId ? 0 : -1} onClick={() => setActiveTabId(tab.id)} onDoubleClick={() => void renameTab(tab)} onKeyDown={(event) => onTabKey(event, index)} title={canEdit ? `${tab.title}. Двойной клик или F2 — переименовать` : tab.title}>{tab.title}</button>
-              {canEdit && tabs.length > 1 && <button type="button" className="is-danger" onClick={() => removeTab(tab)} title={`Удалить вкладку «${tab.title}»`} aria-label={`Удалить вкладку «${tab.title}»`}><X size={12} /></button>}
+        <aside className={tabsOpen ? "share-note-tabs" : "share-note-tabs is-collapsed"} aria-label="Панель вкладок заметки">
+          <div className="share-note-tabs-head">
+            {tabsOpen && <span>Вкладки</span>}
+            <div>
+              {tabsOpen && canEdit && <button type="button" onClick={addTab} title="Добавить вкладку" aria-label="Добавить вкладку"><Plus size={14} /></button>}
+              <button type="button" onClick={() => setTabsOpen((open) => !open)} title={tabsOpen ? "Свернуть вкладки" : "Показать вкладки"} aria-label={tabsOpen ? "Свернуть вкладки" : "Показать вкладки"} aria-expanded={tabsOpen}>
+                {tabsOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+              </button>
             </div>
-          ))}
+          </div>
+          {tabsOpen && <div className="share-note-tabs-list" role="tablist" aria-label="Вкладки заметки" aria-orientation="vertical">
+            {tabs.map((tab, index) => (
+              <div key={tab.id} className={tab.id === activeTabId ? "share-note-tab is-active" : "share-note-tab"}>
+                <button type="button" role="tab" aria-selected={tab.id === activeTabId} tabIndex={tab.id === activeTabId ? 0 : -1} onClick={() => setActiveTabId(tab.id)} onDoubleClick={() => void renameTab(tab)} onKeyDown={(event) => onTabKey(event, index)} title={canEdit ? `${tab.title}. Двойной клик или F2 — переименовать` : tab.title}>{tab.title}</button>
+                {canEdit && tabs.length > 1 && <button type="button" className="is-danger" onClick={() => removeTab(tab)} title={`Удалить вкладку «${tab.title}»`} aria-label={`Удалить вкладку «${tab.title}»`}><X size={12} /></button>}
+              </div>
+            ))}
+          </div>}
         </aside>
       </div>
       <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={textareaRef} previewRef={previewRef} onFind={find.openFind} markdown={canEdit} />

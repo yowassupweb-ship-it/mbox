@@ -58,7 +58,9 @@ try {
   const browser = await chromium.launch({ headless: true, executablePath: browserPaths.find((candidate) => existsSync(candidate)) });
   let appTabs = 0;
   let sharedTabs = 0;
-  let sharedTabsAreRight = false;
+  let sharedTabsAreLeft = false;
+  let sharedDocumentIsCentered = false;
+  let sharedTabsCollapse = false;
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
     const [cookieName, cookieValue] = cookie.split("=");
@@ -79,13 +81,18 @@ try {
     sharedTabs = await page.locator('.share-note-tab [role="tab"]').count();
     const documentBox = await page.locator(".share-doc").boundingBox();
     const tabsBox = await page.locator(".share-note-tabs").boundingBox();
-    sharedTabsAreRight = Boolean(documentBox && tabsBox && tabsBox.x > documentBox.x + documentBox.width);
+    sharedTabsAreLeft = Boolean(documentBox && tabsBox && tabsBox.x + tabsBox.width < documentBox.x);
+    sharedDocumentIsCentered = Boolean(documentBox && Math.abs(documentBox.x + documentBox.width / 2 - 720) <= 1);
+    await page.getByRole("button", { name: "Свернуть вкладки" }).click();
+    sharedTabsCollapse = await page.locator('.share-note-tab [role="tab"]').count() === 0
+      && await page.getByRole("button", { name: "Показать вкладки" }).isVisible();
+    await page.getByRole("button", { name: "Показать вкладки" }).click();
     await page.screenshot({ path: path.join(process.env.TEMP || ".", "mbox-note-tabs-shared.png") });
   } finally {
     await browser.close();
   }
-  const passed = updated.note.tabs?.length === 2 && shared.note?.tabs?.length === 2 && shared.note.tabs[1].content.includes("Отдельный текст") && appTabs === 3 && sharedTabs === 3 && sharedTabsAreRight;
-  console.log(JSON.stringify({ passed, noteTabs: updated.note.tabs?.length, initialSharedTabs: shared.note?.tabs?.length, appTabs, sharedTabs, sharedTabsAreRight }, null, 2));
+  const passed = updated.note.tabs?.length === 2 && shared.note?.tabs?.length === 2 && shared.note.tabs[1].content.includes("Отдельный текст") && appTabs === 3 && sharedTabs === 3 && sharedTabsAreLeft && sharedDocumentIsCentered && sharedTabsCollapse;
+  console.log(JSON.stringify({ passed, noteTabs: updated.note.tabs?.length, initialSharedTabs: shared.note?.tabs?.length, appTabs, sharedTabs, sharedTabsAreLeft, sharedDocumentIsCentered, sharedTabsCollapse }, null, 2));
   if (!passed) process.exitCode = 1;
 } finally {
   if (noteId) await api(`/api/mbox/notes/${noteId}`, { method: "DELETE" }).catch(() => {});
