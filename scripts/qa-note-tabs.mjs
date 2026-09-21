@@ -61,6 +61,8 @@ try {
   let sharedTabsAreLeft = false;
   let sharedDocumentIsCentered = false;
   let sharedTabsCollapse = false;
+  let sharedToggleAligned = false;
+  let sharedSingleTabCollapses = false;
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
     const [cookieName, cookieValue] = cookie.split("=");
@@ -86,13 +88,27 @@ try {
     await page.getByRole("button", { name: "Свернуть вкладки" }).click();
     sharedTabsCollapse = await page.locator('.share-note-tab [role="tab"]').count() === 0
       && await page.getByRole("button", { name: "Показать вкладки" }).isVisible();
+    const toggleBox = await page.getByRole("button", { name: "Показать вкладки" }).boundingBox();
+    const titleBox = await page.locator(".share-title").boundingBox();
+    sharedToggleAligned = Boolean(toggleBox && titleBox && Math.abs(toggleBox.y + toggleBox.height / 2 - (titleBox.y + titleBox.height / 2)) <= 10);
     await page.getByRole("button", { name: "Показать вкладки" }).click();
     await page.screenshot({ path: path.join(process.env.TEMP || ".", "mbox-note-tabs-shared.png") });
+    const latest = await api(`/api/mbox/notes/${noteId}`);
+    await api(`/api/mbox/notes/${noteId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ base_updated_at: latest.note.updated_at, tabs: [latest.note.tabs[0]] }),
+    });
+    await page.evaluate(() => window.localStorage.setItem("mbox.shared-note-tabs", "open"));
+    await page.reload({ waitUntil: "networkidle" });
+    sharedSingleTabCollapses = await page.locator('.share-note-tab [role="tab"]').count() === 0
+      && await page.getByRole("button", { name: "Показать вкладки" }).isVisible();
+    await page.screenshot({ path: path.join(process.env.TEMP || ".", "mbox-note-tabs-shared-single.png") });
   } finally {
     await browser.close();
   }
-  const passed = updated.note.tabs?.length === 2 && shared.note?.tabs?.length === 2 && shared.note.tabs[1].content.includes("Отдельный текст") && appTabs === 3 && sharedTabs === 3 && sharedTabsAreLeft && sharedDocumentIsCentered && sharedTabsCollapse;
-  console.log(JSON.stringify({ passed, noteTabs: updated.note.tabs?.length, initialSharedTabs: shared.note?.tabs?.length, appTabs, sharedTabs, sharedTabsAreLeft, sharedDocumentIsCentered, sharedTabsCollapse }, null, 2));
+  const passed = updated.note.tabs?.length === 2 && shared.note?.tabs?.length === 2 && shared.note.tabs[1].content.includes("Отдельный текст") && appTabs === 3 && sharedTabs === 3 && sharedTabsAreLeft && sharedDocumentIsCentered && sharedTabsCollapse && sharedToggleAligned && sharedSingleTabCollapses;
+  console.log(JSON.stringify({ passed, noteTabs: updated.note.tabs?.length, initialSharedTabs: shared.note?.tabs?.length, appTabs, sharedTabs, sharedTabsAreLeft, sharedDocumentIsCentered, sharedTabsCollapse, sharedToggleAligned, sharedSingleTabCollapses }, null, 2));
   if (!passed) process.exitCode = 1;
 } finally {
   if (noteId) await api(`/api/mbox/notes/${noteId}`, { method: "DELETE" }).catch(() => {});

@@ -33,6 +33,7 @@ export function SharedNotePage({ token }: { token: string }) {
   const [tabs, setTabs] = useState<NoteTab[]>(() => noteTabsOf(null));
   const [activeTabId, setActiveTabId] = useState("main");
   const [tabsOpen, setTabsOpen] = useState(() => window.localStorage.getItem("mbox.shared-note-tabs") !== "closed");
+  const didAutoCollapseTabs = useRef(false);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const content = activeTab?.content ?? "";
   const setContent = useCallback((next: string | ((current: string) => string)) => {
@@ -46,6 +47,11 @@ export function SharedNotePage({ token }: { token: string }) {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   useEffect(() => { window.localStorage.setItem("mbox.shared-note-tabs", tabsOpen ? "open" : "closed"); }, [tabsOpen]);
+  useEffect(() => {
+    if (status === "loading" || didAutoCollapseTabs.current) return;
+    didAutoCollapseTabs.current = true;
+    if (tabs.length === 1) setTabsOpen(false);
+  }, [status, tabs.length]);
   const saving = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
