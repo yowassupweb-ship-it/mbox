@@ -11,6 +11,7 @@ import { CodeEditor } from "./CodeEditor";
 import { languageOf } from "./codeHighlight";
 import { buildLocalPreview } from "./localPreview";
 import { MarkdownToolbar, markdownShortcut, toggleTask } from "./MarkdownToolbar";
+import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 
@@ -115,6 +116,9 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   // Предпросмотр HTML со стилями, скриптами, шрифтами и картинками из соседних файлов (localPreview.ts).
   const [previewHtml, setPreviewHtml] = useState("");
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const find = useDocumentFind({ editorRef, previewRef, text: draft, enabled: visible });
   useEffect(() => {
     if (!isHtml || mode !== "preview") return;
     let alive = true;
@@ -298,6 +302,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
         </>
       )}
     >
+      {find.bar}
       {conflict && (
         <div className="wb-banner is-warn">
           Файл изменился на диске, пока он был открыт.
@@ -324,11 +329,12 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
           <iframe title={path} sandbox="allow-scripts" srcDoc={previewHtml || draft} />
         </div>
       ) : mode === "preview" && isMarkdown ? (
-        <div className="wb-reading"><div className="wb-memory-body" onDoubleClick={() => setMode("edit")}>{renderDocument(draft, { onToggleTask: (line) => setDraft(toggleTask(draft, line)) })}</div></div>
+        <div ref={previewRef} className="wb-reading" onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}><div className="wb-memory-body" onDoubleClick={() => setMode("edit")}>{renderDocument(draft, { onToggleTask: (line) => setDraft(toggleTask(draft, line)) })}</div></div>
       ) : (
-        <CodeEditor textareaRef={editorRef} value={draft} onChange={setDraft} language={languageOf(path)} onKeyDown={(event) => { if (isMarkdown && markdownShortcut(event)) return; onEditorKey(event); }} />
+        <CodeEditor textareaRef={editorRef} value={draft} onChange={setDraft} language={languageOf(path)} onKeyDown={(event) => { if (isMarkdown && markdownShortcut(event)) return; onEditorKey(event); }} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)} />
       )}
       <div className="wb-doc-foot">{formatBytes(file.size)} · изменён {formatDateTime(new Date(file.mtime).toISOString())}</div>
+      <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={editorRef} previewRef={previewRef} onFind={find.openFind} markdown={isMarkdown} />
     </DocShell>
   );
 }

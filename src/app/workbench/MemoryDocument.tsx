@@ -8,6 +8,7 @@ import { DocShell, DrawerToggle, MetaStrip, useDrawer } from "./docLayout";
 import type { TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
+import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 
 type MemoryRecord = Memory & { project_name?: string | null; todo_id?: string | null };
 type MemoryLink = { id: string; from_memory_id: string; from_title: string; to_memory_id: string; to_title: string; link_type: string };
@@ -134,6 +135,9 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
   const [similar, setSimilar] = useState<Similar[]>([]);
   const [drawerOpen, setDrawerOpen] = useDrawer("mbox.doc.memory.related");
   const contentRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const find = useDocumentFind({ editorRef: contentRef, previewRef, text: draft.content, enabled: visible });
 
   const dirty = useMemo(() => {
     if (!editing) return false;
@@ -309,6 +313,7 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
         </>
       )}
     >
+      {find.bar}
       {editing ? (
         <div className="wb-reading wb-memory-editor">
           <input className="wb-memory-title-input" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Название" autoFocus={isNew} />
@@ -331,11 +336,11 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
           </div>
           <>
             <MarkdownToolbar targetRef={contentRef} />
-            <textarea ref={contentRef} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} onKeyDown={markdownShortcut} placeholder="Текст записи — markdown: панель сверху, Ctrl+B, Ctrl+Shift+9 (чекбоксы)." spellCheck={false} />
+            <textarea ref={contentRef} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} onKeyDown={markdownShortcut} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)} placeholder="Текст записи — markdown: панель сверху, Ctrl+B, Ctrl+Shift+9 (чекбоксы)." spellCheck={false} />
           </>
         </div>
       ) : memory && (
-        <article className="wb-reading">
+        <article ref={previewRef} className="wb-reading" onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}>
           <h1 className="wb-doc-title" onDoubleClick={startEdit}>{memory.title || "Без названия"}</h1>
           <MetaStrip items={[
             project && <button type="button" className="wb-meta-link" onClick={() => tabs.open(`entity:${project.id}:memories`)}>{project.name}</button>,
@@ -350,6 +355,7 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
           <div className="wb-memory-body" onDoubleClick={startEdit}>{memory.content ? renderDocument(memory.content) : <p className="is-muted">Пусто. Двойной клик — начать писать.</p>}</div>
         </article>
       )}
+      <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={contentRef} previewRef={previewRef} onFind={find.openFind} />
     </DocShell>
   );
 }

@@ -4,6 +4,7 @@ import { merge3 } from "../lib/merge3";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
 import { CodeEditor } from "../app/workbench/CodeEditor";
+import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "../app/workbench/DocumentTools";
 
 type SharedNote = { title: string; content: string; theme: "light" | "graphite" | "black"; updated_at: string };
 type Status = "loading" | "saved" | "pending" | "saving" | "error" | "missing";
@@ -38,7 +39,10 @@ export function SharedNotePage({ token }: { token: string }) {
   contentRef.current = content;
   const saving = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content });
 
   useEffect(() => {
     const stored = window.localStorage.getItem(SHARED_THEME_KEY);
@@ -232,6 +236,7 @@ export function SharedNotePage({ token }: { token: string }) {
           </div>
         )}
       </header>
+      {find.bar}
       {notice && <div className="share-notice" role="status">{notice}</div>}
       <main className="share-doc">
         {status === "loading" ? (
@@ -259,12 +264,13 @@ export function SharedNotePage({ token }: { token: string }) {
               onKeyDown={(event) => { markdownShortcut(event); }}
               onPaste={images.onPaste}
               onDrop={images.onDrop}
+              onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}
               placeholder="Текст. Картинку можно вставить из буфера или перетащить сюда. Сохраняется само."
               spellCheck
             />
           </>
         ) : (
-          <article className="wb-memory-body" onDoubleClick={() => canEdit && setEditing(true)}>
+          <article ref={previewRef} className="wb-memory-body" onDoubleClick={() => canEdit && setEditing(true)} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}>
             {titleText.trim() && <h1 className="share-title">{titleText.replace(/^#{1,6}\s+/, "")}</h1>}
             {bodyText.trim()
               ? renderDocument(bodyText, canEdit ? { onToggleTask: (line) => setContent((current) => toggleTask(current, line + 1)) } : {})
@@ -272,6 +278,7 @@ export function SharedNotePage({ token }: { token: string }) {
           </article>
         )}
       </main>
+      <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={textareaRef} previewRef={previewRef} onFind={find.openFind} markdown={canEdit} />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
 import { CodeEditor } from "./CodeEditor";
+import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 
 export type NoteColor = "default" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "gray";
 export type NoteTheme = "light" | "graphite" | "black";
@@ -172,9 +173,12 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const savingRef = useRef(false);
   const [mergeNotice, setMergeNotice] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewRef = useRef<HTMLElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imageError, setImageError] = useState("");
   const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
+  const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content, enabled: visible });
 
   useEffect(() => {
     if (cached) { savedRef.current = cached.content ?? ""; return; }
@@ -377,6 +381,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
         </>
       )}
     >
+      {find.bar}
       <div className={`wb-note-surface doc-theme-${note.theme || "graphite"}`}>
       {mode === "edit" ? (
         <div className="wb-note-edit">
@@ -402,12 +407,13 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             onKeyDown={onBodyKey}
             onPaste={images.onPaste}
             onDrop={images.onDrop}
+            onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}
             placeholder={"Текст заметки. Панель сверху или Ctrl+B, Ctrl+Shift+9 (чекбоксы)… Картинку можно вставить из буфера. Сохраняется само."}
             spellCheck
           />
         </div>
       ) : (
-        <article className="wb-reading" onDoubleClick={() => setMode("edit")}>
+        <article ref={previewRef} className="wb-reading" onDoubleClick={() => setMode("edit")} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}>
           {content.trim() ? (
             <div className="wb-memory-body">
               {titleText.trim() && <h1 className="wb-note-title-view">{titleText.replace(/^#{1,6}\s+/, "")}</h1>}
@@ -417,6 +423,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
         </article>
       )}
       </div>
+      <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={textareaRef} previewRef={previewRef} onFind={find.openFind} />
     </DocShell>
   );
 }

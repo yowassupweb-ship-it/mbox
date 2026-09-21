@@ -25,7 +25,7 @@ export function WbMenu({ x, y, onClose, children }: { x: number; y: number; onCl
     });
   }, [x, y]);
 
-  const host = (document.querySelector(".wb") as HTMLElement | null) ?? document.body;
+  const host = (document.querySelector(".wb") as HTMLElement | null) ?? (document.querySelector(".share-page") as HTMLElement | null) ?? document.body;
   return createPortal(
     <div className="wb-menu-scrim" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }}>
       <div ref={ref} className="wb-menu" style={pos} onClick={(event) => event.stopPropagation()} role="menu">

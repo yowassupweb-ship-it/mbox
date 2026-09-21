@@ -8,7 +8,7 @@ import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
  * пунктами, чекбоксами. Правит textarea через execCommand("insertText"): изменения попадают в историю,
  * Ctrl+Z работает, React получает обычное событие input.
  */
-type Action = "h0" | "h1" | "h2" | "h3" | "bold" | "italic" | "strike" | "code" | "ul" | "ol" | "task" | "quote" | "link";
+export type MarkdownAction = "h0" | "h1" | "h2" | "h3" | "bold" | "italic" | "strike" | "code" | "ul" | "ol" | "task" | "quote" | "link";
 
 function replaceRange(el: HTMLTextAreaElement, start: number, end: number, text: string, selectStart: number, selectEnd: number) {
   el.focus();
@@ -53,7 +53,7 @@ function lines(el: HTMLTextAreaElement, transform: (line: string, index: number,
   replaceRange(el, start, end, next, start, start + next.length);
 }
 
-function applyAction(el: HTMLTextAreaElement, action: Action) {
+export function applyMarkdownAction(el: HTMLTextAreaElement, action: MarkdownAction) {
   switch (action) {
     case "bold": return wrap(el, "**", "жирный текст");
     case "italic": return wrap(el, "*", "курсив");
@@ -91,13 +91,13 @@ function applyAction(el: HTMLTextAreaElement, action: Action) {
 /** Горячие клавиши markdown для textarea: Ctrl+B, Ctrl+I, Ctrl+Shift+X (зачеркнуть), Ctrl+Shift+8/7/9 (списки), Ctrl+K (ссылка). */
 export function markdownShortcut(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
-  const map: Record<string, Action> = event.shiftKey
+  const map: Record<string, MarkdownAction> = event.shiftKey
     ? { KeyX: "strike", Digit8: "ul", Digit7: "ol", Digit9: "task", Period: "quote" }
     : { KeyB: "bold", KeyI: "italic", KeyK: "link", KeyE: "code", Digit1: "h1", Digit2: "h2", Digit3: "h3", Digit0: "h0" };
   const action = map[event.code];
   if (!action) return false;
   event.preventDefault();
-  applyAction(event.currentTarget, action);
+  applyMarkdownAction(event.currentTarget, action);
   return true;
 }
 
@@ -168,7 +168,7 @@ export function MarkdownToolbar({ targetRef, onPickImages, uploading = 0 }: { ta
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const run = (action: Action) => { const el = targetRef.current; if (el) applyAction(el, action); };
+  const run = (action: MarkdownAction) => { const el = targetRef.current; if (el) applyMarkdownAction(el, action); };
 
   useLayoutEffect(() => {
     const el = boxRef.current;

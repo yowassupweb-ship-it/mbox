@@ -1,11 +1,11 @@
-import { useMemo, useRef, type ClipboardEventHandler, type DragEventHandler, type FocusEventHandler, type KeyboardEvent as ReactKeyboardEvent, type Ref } from "react";
+import { useMemo, useRef, type ClipboardEventHandler, type DragEventHandler, type FocusEventHandler, type KeyboardEvent as ReactKeyboardEvent, type MouseEventHandler, type Ref } from "react";
 import { highlightCode, type CodeLanguage } from "./codeHighlight";
 
 /**
  * Редактор кода с подсветкой: подсвеченный слой <pre> под прозрачным textarea с теми же шрифтом, отступами
  * и переносами. Правка, выделение, IME и undo — родные у textarea; прокрутка слоя идёт за textarea.
  */
-export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPaste, onDrop, textareaRef, placeholder, autoFocus, spellCheck = false, className, variant = "code", autoGrow = false }: {
+export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPaste, onDrop, onContextMenu, textareaRef, placeholder, autoFocus, spellCheck = false, className, variant = "code", autoGrow = false }: {
   value: string;
   onChange: (value: string) => void;
   language: CodeLanguage;
@@ -13,6 +13,7 @@ export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPas
   onBlur?: FocusEventHandler<HTMLTextAreaElement>;
   onPaste?: ClipboardEventHandler<HTMLTextAreaElement>;
   onDrop?: DragEventHandler<HTMLTextAreaElement>;
+  onContextMenu?: MouseEventHandler<HTMLTextAreaElement>;
   textareaRef?: Ref<HTMLTextAreaElement>;
   placeholder?: string;
   autoFocus?: boolean;
@@ -37,6 +38,7 @@ export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPas
         onBlur={onBlur}
         onPaste={onPaste}
         onDrop={onDrop}
+        onContextMenu={onContextMenu}
         onScroll={(event) => {
           const layer = layerRef.current;
           if (!layer) return;
