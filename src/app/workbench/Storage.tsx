@@ -23,7 +23,7 @@ function uploadLabel(item: Upload) {
   return `${formatBytes(item.loaded)} из ${formatBytes(item.total)} · ${formatBytes(speed)}/с · осталось ${eta}`;
 }
 
-const ICONS = "/assets/icons/icons";
+const PROJECT_ICONS = "/assets/icons/project";
 
 async function apiError(response: Response) {
   const data = await response.json().catch(() => ({}));
@@ -170,7 +170,7 @@ export function StorageDocument() {
               )}
               {listing.folders.map((folder) => (
                 <tr key={folder} className="is-folder">
-                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><img src={`${ICONS}/папка.png`} width={16} height={16} alt="" />{folder.slice(prefix.length).replace(/\/$/, "")}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><img src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />{folder.slice(prefix.length).replace(/\/$/, "")}</button></td>
                   <td className="is-num">—</td>
                   <td />
                   <td className="wb-storage-actions"><button type="button" onClick={() => void remove(folder)} title="Удалить папку"><Trash2 size={13} /></button></td>
@@ -178,7 +178,7 @@ export function StorageDocument() {
               ))}
               {listing.objects.map((object) => (
                 <tr key={object.key}>
-                  <td><button type="button" className="wb-storage-name" onClick={async () => { const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title="Открыть в новом окне"><img src={`${ICONS}/документы.png`} width={16} height={16} alt="" />{object.key.slice(prefix.length)}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={async () => { const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title="Открыть в новом окне"><img src={`${PROJECT_ICONS}/documents.png`} width={16} height={16} alt="" />{object.key.slice(prefix.length)}</button></td>
                   <td className="is-num">{formatBytes(object.size)}</td>
                   <td>{object.last_modified ? formatDateTime(object.last_modified) : ""}</td>
                   <td className="wb-storage-actions">

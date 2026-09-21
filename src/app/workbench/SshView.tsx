@@ -55,7 +55,7 @@ export function SshView() {
             <div className="wb-menu-group-head is-static">Серверы</div>
             {hosts.map((host) => (
               <div key={host} className="wb-menu-item has-icon wb-ssh-item" role="button" tabIndex={0} onClick={() => void connect(host)} onKeyDown={(event) => { if (event.key === "Enter") void connect(host); }} title="Подключиться">
-                <img src="/assets/icons/icons/ssh.png" width={16} height={16} alt="" draggable={false} />
+                <img src="/assets/icons/project/ssh.png" width={16} height={16} alt="" draggable={false} />
                 <span className="wb-menu-item-title">{host}</span>
                 <button type="button" className="wb-ssh-stop" onClick={(event) => { event.stopPropagation(); setHosts((current) => current.filter((item) => item !== host)); }} title="Убрать из списка"><X size={11} /></button>
               </div>

@@ -12,7 +12,7 @@ import { CodeEditor } from "./CodeEditor";
 import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 
-const ICONS = "/assets/icons/icons";
+const PROJECT_ICONS = "/assets/icons/project";
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Язык подсветки артефакта: по расширению имени, иначе по виду содержимого. */
@@ -50,7 +50,7 @@ export function fileKind(artifact: Pick<Artifact, "name" | "content" | "category
 const kindLabel: Record<FileKind, string> = { html: "HTML", markdown: "Markdown", json: "JSON", code: "Код", text: "Текст" };
 
 export function fileIcon(kind: FileKind) {
-  return kind === "markdown" || kind === "text" ? `${ICONS}/документы.png` : `${ICONS}/стек.png`;
+  return kind === "markdown" || kind === "text" ? `${PROJECT_ICONS}/documents.png` : `${PROJECT_ICONS}/stack.png`;
 }
 
 function readTextFile(file: File): Promise<string> {
@@ -187,7 +187,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                         <li key={category.name}>
                           <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(key)}>
                             <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
-                            <img src={`${ICONS}/папка.png`} width={16} height={16} alt="" />
+                            <img src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />
                             <span className="wb-tree-label">{category.name}</span>
                             <span className="wb-tree-count">{category.files.length}</span>
                           </div>

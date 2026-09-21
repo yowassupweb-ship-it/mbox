@@ -30,7 +30,7 @@ function PaneIcon({ paneId, session }: { paneId: string; session?: Session }) {
   if (chatPeer(paneId)) return <AgentAvatar name={chatPeer(paneId)} size={16} />;
   if (isChatPane(paneId)) return <MessagesSquare size={13} className="wb-console-pane-icon" />;
   if (paneId.startsWith("agent:")) return <AgentAvatar name={paneId.slice(6)} status={session?.status ?? "stopped"} live={session?.status === "running"} size={16} />;
-  if (paneId.startsWith("ssh:")) return <img className="wb-console-pane-icon" src="/assets/icons/icons/ssh.png" width={14} height={14} alt="" draggable={false} />;
+  if (paneId.startsWith("ssh:")) return <img className="wb-console-pane-icon" src="/assets/icons/project/ssh.png" width={14} height={14} alt="" draggable={false} />;
   return <SquareTerminal size={13} className="wb-console-pane-icon" />;
 }
 

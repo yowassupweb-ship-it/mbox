@@ -1358,7 +1358,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <Paperclip size={15} />
               </button>
               <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void attachFiles([...(event.target.files ?? [])]); event.target.value = ""; }} />
-              <span className="console-prompt">{liveMention ? `@${liveMention}` : peer ? `@${peer}` : ""}<img src="/assets/icons/icons/галочка.png" width={13} height={13} alt="" /></span>
+              <span className="console-prompt">{liveMention ? `@${liveMention}` : peer ? `@${peer}` : ""}<img src="/assets/icons/project/check.png" width={13} height={13} alt="" /></span>
               <textarea
                 ref={composerRef}
                 value={text}

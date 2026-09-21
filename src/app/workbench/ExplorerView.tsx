@@ -12,8 +12,8 @@ import { fileIcon, fileKind } from "./Files";
 import { folderIcon } from "./tabMeta";
 import { usePersistentState, type TabsApi } from "./tabs";
 
-const ICONS = "/assets/icons/icons";
 const SYSTEM_ICONS = "/assets/icons/system";
+const PROJECT_ICONS = "/assets/icons/project";
 const CLOSED_STATUSES = ["done", "archived"];
 
 type Props = {
@@ -184,7 +184,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
               <li>
                 <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(`files:${project.id}`)}>
                   <ChevronRight className={isOpen(`files:${project.id}`) ? "wb-chevron is-open" : "wb-chevron"} size={14} />
-                  <img src={`${ICONS}/документы.png`} width={16} height={16} alt="" />
+                  <img src={`${PROJECT_ICONS}/documents.png`} width={16} height={16} alt="" />
                   <span className="wb-tree-label">Файлы</span>
                   <span className="wb-tree-count">{files.length}</span>
                 </div>
@@ -223,7 +223,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
         <span>Проекты</span>
         <div className="wb-view-actions">
           <button type="button" className={showDone ? "is-on" : undefined} onClick={() => setShowDone((value) => !value)} title={showDone ? "Скрыть готовые todo" : "Показать готовые todo"}>
-            <img src={`${ICONS}/галочка.png`} width={13} height={13} alt="" />
+            <img src={`${PROJECT_ICONS}/check.png`} width={13} height={13} alt="" />
           </button>
           <button type="button" onClick={() => setExpanded([])} title="Свернуть всё"><ChevronsDownUp size={14} /></button>
           <button type="button" onClick={data.reload} title="Обновить"><RefreshCw size={13} /></button>

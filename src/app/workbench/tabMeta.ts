@@ -7,12 +7,12 @@ import { noteTitle } from "./Notes";
 const MENU = "/assets/icons/bottom-menu";
 const NAVIGATION = "/assets/icons/navigation";
 const SYSTEM = "/assets/icons/system";
-const ICONS = "/assets/icons/icons";
+const PROJECT = "/assets/icons/project";
 
 export type TabMeta = { title: string; hint: string; icon: string };
 
 export function folderIcon(name: string) {
-  return `${ICONS}/${name === "Посты" ? "посты" : name === "Документы" ? "документы" : "папка"}.png`;
+  return `${PROJECT}/${name === "Посты" ? "posts" : name === "Документы" ? "documents" : "folder"}.png`;
 }
 
 export function tabMeta(key: string, data: MboxData, titles: Record<string, string>): TabMeta {
@@ -51,7 +51,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "local": {
       const path = key.split(":").slice(2).join(":");
       const name = path.split("/").pop() || path;
-      return { title: name, hint: path, icon: /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg)$/i.test(name) ? `${SYSTEM}/figma.png` : /\.(md|mdx|markdown|txt|rst)$/i.test(name) ? `${ICONS}/документы.png` : `${NAVIGATION}/folders.png` };
+      return { title: name, hint: path, icon: /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg)$/i.test(name) ? `${SYSTEM}/figma.png` : /\.(md|mdx|markdown|txt|rst)$/i.test(name) ? `${PROJECT}/documents.png` : `${NAVIGATION}/folders.png` };
     }
     case "skillblocks":
       return { title: "Компоненты писем", hint: `Навык ${first} · компоненты и сборка`, icon: `${NAVIGATION}/skills.png` };
@@ -70,10 +70,10 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "tool":
       return { title: titles[key] ?? first, hint: "Инструмент", icon: `${NAVIGATION}/tools.png` };
     case "file": {
-      if (first === "new") return { title: "Новый файл", hint: "Файлы", icon: `${ICONS}/документы.png` };
+      if (first === "new") return { title: "Новый файл", hint: "Файлы", icon: `${PROJECT}/documents.png` };
       const file = data.artifacts.find((item) => item.id === first);
       const owner = data.projects.find((item) => item.id === file?.project_id);
-      return { title: file?.name || `Файл #${first}`, hint: [owner?.name ?? "Без проекта", file?.category].filter(Boolean).join(" › "), icon: file ? fileIcon(fileKind(file)) : `${ICONS}/документы.png` };
+      return { title: file?.name || `Файл #${first}`, hint: [owner?.name ?? "Без проекта", file?.category].filter(Boolean).join(" › "), icon: file ? fileIcon(fileKind(file)) : `${PROJECT}/documents.png` };
     }
     case "memory": {
       if (first === "new") return { title: "Новая запись", hint: "Память", icon: `${NAVIGATION}/memory.png` };
@@ -83,9 +83,9 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "term": {
       const pane = key.slice(5);
       const title = consoleLabel(pane) || (chatPeer(pane) ? `Чат с ${chatPeer(pane)}` : isChatPane(pane) ? "Чат агентов" : pane.startsWith("agent:") ? pane.slice(6) : pane.startsWith("ssh:") ? `SSH · ${pane.slice(4)}` : pane.replace(/^tool:/, ""));
-      return { title, hint: "Терминал в редакторе — вернуть в консоль можно кнопкой в заголовке", icon: pane.startsWith("ssh:") ? `${ICONS}/ssh.png` : `${SYSTEM}/console.png` };
+      return { title, hint: "Терминал в редакторе — вернуть в консоль можно кнопкой в заголовке", icon: pane.startsWith("ssh:") ? `${PROJECT}/ssh.png` : `${SYSTEM}/console.png` };
     }
     default:
-      return { title: key, hint: key, icon: `${ICONS}/папка.png` };
+      return { title: key, hint: key, icon: `${PROJECT}/folder.png` };
   }
 }

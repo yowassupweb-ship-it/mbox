@@ -15,6 +15,7 @@ import { askText } from "../ui/askText";
 
 const ICONS = "/assets/icons/icons";
 const SYSTEM_ICONS = "/assets/icons/system";
+const PROJECT_ICONS = "/assets/icons/project";
 
 // Кроме постоянных сущностей у проекта могут быть свои папки: folder:<id>.
 type View = "todo" | ProjectEntityKind | `folder:${string}`;
@@ -338,7 +339,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
 
         <div className="entity-add-wrap">
           <button className="entity-tile is-add" type="button" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((value) => !value)}>
-            <img src={`${ICONS}/добавть.png`} width={60} height={60} alt="" />
+            <img src={`${PROJECT_ICONS}/add.png`} width={60} height={60} alt="" />
             <b>Папка</b>
             <small>добавить</small>
           </button>
@@ -361,15 +362,15 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
               <div className="entity-add-group">
                 <strong>Быстрые папки</strong>
                 <button type="button" role="menuitem" onClick={() => void createFolder("Посты")}>
-                  <img src={`${ICONS}/посты.png`} width={15} height={15} alt="" /> Посты
+                  <img src={`${PROJECT_ICONS}/posts.png`} width={15} height={15} alt="" /> Посты
                 </button>
                 <button type="button" role="menuitem" onClick={() => void createFolder("Документы")}>
-                  <img src={`${ICONS}/документы.png`} width={15} height={15} alt="" /> Документы
+                  <img src={`${PROJECT_ICONS}/documents.png`} width={15} height={15} alt="" /> Документы
                 </button>
               </div>
               <div className="entity-add-group">
                 <button type="button" role="menuitem" onClick={() => void createFolder()}>
-                  <img src={`${ICONS}/папка.png`} width={15} height={15} alt="" /> Своя папка…
+                  <img src={`${PROJECT_ICONS}/folder.png`} width={15} height={15} alt="" /> Своя папка…
                 </button>
               </div>
             </div>
