@@ -3,65 +3,87 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <title>Конструктор письма — Вокруг света</title>
   <style>
     /* Конструктор письма под управлением агента. Страница во вкладке MBOX (каталог навыков → «Запустить»
        или MCP open_tab skill-file:email-campaign/library.html). Письмо — letters/<id>.json: бриф → состав из
        компонентов C### с полями → проверка. Сборку делает components/render.js — тот же код, что у агента
        (scripts/letter.mjs), поэтому предпросмотр здесь совпадает с готовым HTML. */
-    :root {
+    :root,
+    :root[data-theme="graphite"] {
       color-scheme: dark;
-      --bg: #08090a; --surface: #0c0d0f; --surface-2: #101114; --surface-3: #15171b;
-      --line: rgba(133, 245, 219, .12); --line-strong: rgba(133, 245, 219, .24); --hover: rgba(133, 245, 219, .06); --selected: rgba(41, 224, 214, .13);
-      --accent: #29e0d6; --accent-ink: #04201e;
-      --text: #eef4f1; --text-2: rgba(238, 244, 241, .7); --text-muted: rgba(238, 244, 241, .44);
+      --bg: #202124; --surface: #26272b; --surface-2: #2a2b2f; --surface-3: #34353a; --sunken: #1b1c1f;
+      --line: rgba(255, 255, 255, .11); --line-strong: rgba(255, 255, 255, .18); --hover: rgba(255, 255, 255, .06); --selected: rgba(77, 163, 255, .17);
+      --accent: #4da3ff; --accent-hover: #69b2ff; --accent-soft: rgba(77, 163, 255, .12); --accent-ink: #fff;
+      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .5);
       --ok: #35c759; --warn: #ffb000; --danger: #ff4d5e;
-      --radius-sm: 4px; --radius-md: 8px;
+      --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
+      --shadow-chin: 0 1px 0 rgba(0, 0, 0, .25), 0 8px 22px rgba(0, 0, 0, .12);
       --font-sans: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
       --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
     }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f5f5f7; --surface: #fff; --surface-2: #fff; --surface-3: #f0f0f2; --sunken: #e9e9ec;
+      --line: rgba(29, 29, 31, .14); --line-strong: rgba(29, 29, 31, .22); --hover: rgba(29, 29, 31, .055); --selected: rgba(0, 122, 255, .12);
+      --accent: #007aff; --accent-hover: #006ee6; --accent-soft: rgba(0, 122, 255, .09); --accent-ink: #fff;
+      --text: #1d1d1f; --text-2: rgba(29, 29, 31, .72); --text-muted: rgba(29, 29, 31, .5);
+      --shadow-chin: 0 1px 0 rgba(29, 29, 31, .04), 0 8px 24px rgba(29, 29, 31, .07);
+    }
+    :root[data-theme="black"] {
+      color-scheme: dark;
+      --bg: #050506; --surface: #0a0a0c; --surface-2: #111114; --surface-3: #18181c; --sunken: #000;
+      --line: rgba(255, 255, 255, .12); --line-strong: rgba(255, 255, 255, .2); --hover: rgba(255, 255, 255, .07); --selected: rgba(77, 163, 255, .18);
+      --accent: #4da3ff; --accent-hover: #69b2ff; --accent-soft: rgba(77, 163, 255, .12); --accent-ink: #fff;
+      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .5);
+      --shadow-chin: 0 1px 0 rgba(255, 255, 255, .035), 0 10px 28px rgba(0, 0, 0, .36);
+    }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); transition: background-color 140ms ease, color 140ms ease; }
     button, input, textarea, select { font: inherit; color: inherit; }
     button { cursor: pointer; }
     [hidden] { display: none !important; }
 
     .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-    .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-    .eyebrow { color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
-    .letter-pick { display: flex; align-items: center; gap: 6px; }
-    .letter-pick select { max-width: 320px; }
-    .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
-    .tabs button { padding: 5px 12px; border: 0; background: none; color: var(--text-2); }
-    .tabs button + button { border-left: 1px solid var(--line); }
-    .tabs button.on { background: var(--selected); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+    .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--surface); box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 2%, transparent); }
+    .top-main { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; min-height: 42px; padding: 5px 10px; }
+    .letter-pick { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 220px; max-width: 520px; }
+    .letter-pick select { flex: 1; width: auto; min-width: 0; }
+    .top .btn, .stage-bar .btn { min-height: 30px; padding-inline: 9px; }
+    .top-nav { order: -1; display: flex; flex: none; align-items: center; gap: 8px; min-height: 42px; padding: 0 6px; border-right: 1px solid var(--line); }
+    .tabs { align-self: stretch; display: inline-flex; gap: 2px; }
+    .tabs button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 108px; padding: 0 9px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); text-align: left; }
+    .tabs button:hover { color: var(--text); background: var(--hover); }
+    .tabs button.on { border-bottom-color: var(--accent); background: var(--selected); color: var(--text); }
+    .tab-step { color: var(--accent); font: 600 10px var(--font-mono); }
     .tabs b { margin-left: 5px; color: var(--text-muted); font: 600 11px var(--font-mono); }
     .fill { flex: 1; }
-    .status { color: var(--text-muted); font-size: 12px; }
+    .status { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
     .status.ok { color: var(--ok); } .status.err { color: var(--danger); }
     .badge { padding: 1px 7px; border-radius: var(--radius-sm); font: 600 11px/18px var(--font-mono); background: rgba(255,255,255,.06); color: var(--text-2); white-space: nowrap; }
     .badge.brief { color: var(--text-2); } .badge.proposed { color: var(--accent); background: var(--selected); }
     .badge.checked { color: var(--ok); background: rgba(53,199,89,.12); } .badge.needs-fix { color: var(--warn); background: rgba(255,176,0,.12); }
 
     .view { min-height: 0; overflow: auto; }
-    input, textarea, select { min-height: 28px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); outline: none; }
+    input, textarea, select { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); outline: none; }
     textarea { resize: vertical; line-height: 1.45; }
     input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--surface-3); }
     input::placeholder, textarea::placeholder { color: var(--text-muted); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--text); font-size: 12px; white-space: nowrap; }
+    input:disabled, textarea:disabled, select:disabled { opacity: 1; color: var(--text-2); background: var(--sunken); -webkit-text-fill-color: var(--text-2); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--text); font-size: 12px; white-space: nowrap; }
     .btn:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); }
     .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
-    .btn.primary:hover:not(:disabled) { background: #5ff0e8; }
+    .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
     .btn.ghost { border-color: transparent; color: var(--text-2); }
-    .btn.small { min-height: 22px; padding: 0 6px; }
+    .btn.small { min-height: 28px; padding: 0 8px; }
     .btn:disabled { opacity: .4; cursor: default; }
     .num { color: var(--accent); font: 700 13px/1 var(--font-mono); }
     .chip { padding: 1px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); font-size: 11px; white-space: nowrap; }
     .muted { color: var(--text-muted); }
-    h2 { margin: 0 0 8px; color: var(--text-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
-    .panel { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); padding: 14px; }
+    h2 { margin: 0 0 12px; color: var(--text); font: 600 13px/1.3 var(--font-sans); letter-spacing: -.01em; }
+    .panel { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); padding: 18px; box-shadow: var(--shadow-chin); }
     .panel + .panel { margin-top: 12px; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .grid .wide { grid-column: 1 / -1; }
@@ -76,8 +98,15 @@
     .empty { padding: 28px 12px; color: var(--text-muted); text-align: center; }
 
     /* Бриф */
-    .page { max-width: 900px; margin: 0 auto; padding: 16px 16px 60px; }
+    .page { max-width: 960px; margin: 0 auto; padding: 28px 24px 72px; }
     .page.is-wide { max-width: 1440px; }
+    .page-intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; margin-bottom: 24px; padding: 4px 2px 22px; border-bottom: 1px solid var(--line); }
+    .page-intro .kicker { display: block; margin-bottom: 7px; color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
+    .page-intro h1 { max-width: 660px; margin: 0; font-size: clamp(27px, 3.6vw, 44px); line-height: 1.05; letter-spacing: -.035em; }
+    .page-intro p { max-width: 650px; margin: 12px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.65; }
+    .journey { display: grid; gap: 8px; min-width: 240px; margin: 0; padding: 0; list-style: none; }
+    .journey li { display: grid; grid-template-columns: 24px 1fr; align-items: center; gap: 9px; color: var(--text-2); font-size: 12px; }
+    .journey b { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--accent); font: 600 10px var(--font-mono); }
     .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     .type { padding: 9px 11px; border: 1px solid var(--line); border-left: 2px solid transparent; border-radius: var(--radius-sm); background: var(--surface); text-align: left; }
     .type small { display: block; color: var(--text-muted); font-size: 11px; }
@@ -88,13 +117,15 @@
     .tour-head .num { flex: 1; }
 
     /* Сборка */
-    .build { --side: 400px; display: grid; grid-template-columns: var(--side) 6px minmax(0, 1fr); height: 100%; min-height: 0; }
+    .build { --side: 380px; display: grid; grid-template-columns: var(--side) 5px minmax(0, 1fr); height: 100%; min-height: 0; }
     .build.side-collapsed { grid-template-columns: 0 6px minmax(0, 1fr); }
     .build.side-collapsed .side { visibility: hidden; padding: 0; border: 0; }
     .side-resizer { position: relative; cursor: col-resize; background: transparent; border-left: 1px solid var(--line); }
     .side-resizer:hover, .side-resizer.dragging { background: color-mix(in srgb, var(--accent) 30%, transparent); }
     .build.side-collapsed .side-resizer { cursor: default; }
-    .side { min-width: 0; min-height: 0; overflow: auto; padding: 12px; }
+    .side { min-width: 0; min-height: 0; overflow: auto; padding: 8px; }
+    .side .panel { padding: 12px; }
+    .side .panel + .panel { margin-top: 8px; }
     .item { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
     .item + .item { margin-top: 6px; }
     .item.err { border-color: rgba(255,77,94,.45); }
@@ -105,15 +136,18 @@
     .adder select { flex: 1; min-width: 0; }
     .errors { margin: 8px 0 0; padding: 8px 10px 8px 26px; border: 1px solid rgba(255,77,94,.35); border-radius: var(--radius-sm); background: rgba(255,77,94,.07); color: #ffb3bb; font-size: 12px; }
     .stage { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
-    .stage-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
-    .editor-hint { color: var(--text-muted); font-size: 11px; }
+    .stage-bar { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .stage-bar:has(.formatbar:not([hidden])) { flex-wrap: wrap; }
+    .stage-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+    .stage-actions + .stage-actions { padding-left: 6px; border-left: 1px solid var(--line); }
+    .editor-hint { display: none; }
     .formatbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; padding-top: 8px; border-top: 1px solid var(--line); }
     .formatbar .field-name { max-width: 240px; overflow: hidden; color: var(--text-2); font: 600 11px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
     .formatbar label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11px; }
     .formatbar input[type="number"] { width: 62px; min-height: 26px; }
     .formatbar input[type="color"] { width: 34px; min-height: 26px; padding: 2px; }
     .formatbar .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--selected); color: var(--accent); }
-    .stage-body { min-height: 0; overflow: hidden; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
+    .stage-body { min-height: 0; overflow: hidden; padding: 6px; background: var(--sunken); }
     /* Письмо всегда верстается в настоящей ширине (700 px компьютер, 390 px телефон) и уменьшается под сцену:
        в узкой сцене иначе срабатывала мобильная вёрстка и блоки «в ряд» вставали друг под друга. */
     .letter-fit { position: relative; height: 100%; margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
@@ -146,31 +180,48 @@
     .ctx { display: block; margin-top: 2px; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 
     ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: rgba(238, 244, 241, .16); }
-    @media (max-width: 900px) { .build, .build.side-collapsed { grid-template-columns: 1fr; height: auto; } .side-resizer { display: none; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid, .types { grid-template-columns: 1fr; } .stage-body { height: 75vh; } }
+    ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: color-mix(in srgb, var(--text) 18%, transparent); }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (max-width: 900px) { .top { display: grid; } .top-main { flex-wrap: wrap; } .letter-pick { flex: 1; max-width: none; } .letter-pick select { width: 100%; max-width: none; } .top-nav { order: 0; overflow-x: auto; border-top: 1px solid var(--line); border-right: 0; } .tabs button { min-width: 112px; } .page-intro { grid-template-columns: 1fr; } .journey { grid-template-columns: repeat(3, minmax(0, 1fr)); } .build, .build.side-collapsed { grid-template-columns: 1fr; height: auto; } .side-resizer { display: none; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid, .types { grid-template-columns: 1fr; } .stage-bar { flex-wrap: wrap; } .stage-body { height: 75vh; } }
+    @media (max-width: 620px) { .top-main, .top-nav { padding-inline: 12px; } .top-main { gap: 10px; } .letter-pick { flex: 1 1 100%; min-width: 0; } .letter-pick select { flex: 1; min-width: 0; } .top-main > .status { flex: 1 1 100%; } .top-nav { align-items: stretch; } .tabs { flex: 1; } .tabs button { min-width: max-content; flex: 1; padding-inline: 10px; } .page { padding: 22px 14px 60px; } .journey { grid-template-columns: 1fr; } .page-intro h1 { font-size: 30px; } }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="top">
-      <span class="eyebrow">email-campaign</span>
-      <div class="letter-pick">
-        <select id="letter-select" aria-label="Письмо"></select>
-        <button class="btn small" type="button" id="letter-new">+ Письмо</button>
+      <div class="top-main">
+        <div class="letter-pick">
+          <select id="letter-select" aria-label="Текущее письмо"></select>
+          <button class="btn" type="button" id="letter-new">Новое письмо</button>
+        </div>
+        <span class="badge" id="letter-status"></span>
+        <span class="fill"></span>
+        <span class="status" id="status">Загрузка…</span>
       </div>
-      <span class="badge" id="letter-status"></span>
-      <div class="tabs" role="tablist">
-        <button type="button" data-tab="brief" role="tab">Бриф</button>
-        <button type="button" data-tab="components" role="tab">Компоненты<b id="count-components">0</b></button>
-        <button type="button" data-tab="mailing" role="tab">Рассылка<b id="count-items">0</b></button>
+      <div class="top-nav">
+        <div class="tabs" role="tablist" aria-label="Этапы подготовки письма">
+          <button type="button" data-tab="brief" role="tab"><span class="tab-step">01</span> Бриф</button>
+          <button type="button" data-tab="components" role="tab"><span class="tab-step">02</span> Блоки<b id="count-components">0</b></button>
+          <button type="button" data-tab="mailing" role="tab"><span class="tab-step">03</span> Готовое письмо<b id="count-items">0</b></button>
+        </div>
       </div>
-      <span class="fill"></span>
-      <span class="status" id="status">Загрузка…</span>
     </header>
 
     <!-- 1. Бриф -->
     <main class="view" id="view-brief" hidden>
       <div class="page">
+        <section class="page-intro">
+          <div>
+            <span class="kicker">Шаг 1 из 3</span>
+            <h1>Сначала смысл. Потом блоки и вёрстка.</h1>
+            <p>Опишите задачу письма и добавьте материалы. Агент предложит состав, соберёт его из проверенных компонентов и не станет выдумывать недостающие цены, даты или ссылки.</p>
+          </div>
+          <ol class="journey" aria-label="Путь к готовому письму">
+            <li><b>01</b><span>Заполнить бриф</span></li>
+            <li><b>02</b><span>Собрать блоки</span></li>
+            <li><b>03</b><span>Проверить HTML</span></li>
+          </ol>
+        </section>
         <div class="panel">
           <h2>Формат</h2>
           <div class="types" id="brief-types"></div>
@@ -229,14 +280,20 @@
         <div class="side-resizer" id="side-resizer" role="separator" aria-orientation="vertical" aria-label="Ширина панели письма" title="Потяните, чтобы изменить ширину. Двойной клик — свернуть или развернуть"></div>
         <section class="stage" id="stage">
           <div class="stage-bar">
-            <button class="btn ghost" type="button" id="toggle-side" title="Свернуть или развернуть панель письма">Скрыть панель</button>
-            <button class="btn primary" type="button" id="check-now">Проверить Email Checker</button>
-            <button class="btn" type="button" id="ask-check">Агенту: проверить и исправить</button>
-            <button class="btn" type="button" id="copy-html">Копировать HTML</button>
-            <button class="btn" type="button" id="download-html">Скачать .html</button>
+            <div class="stage-actions">
+              <button class="btn primary" type="button" id="check-now" title="Проверить письмо в Email Checker">Проверить</button>
+              <button class="btn" type="button" id="ask-check" title="Передать исправления агенту">С агентом</button>
+            </div>
+            <div class="stage-actions">
+              <button class="btn" type="button" id="copy-html" title="Копировать HTML письма">HTML</button>
+              <button class="btn" type="button" id="download-html" title="Скачать письмо в формате HTML">Скачать</button>
+            </div>
             <span class="fill"></span>
             <span class="editor-hint" id="editor-hint">Дважды нажмите на текст письма, чтобы изменить его</span>
-            <button class="btn ghost" type="button" id="toggle-mobile">Телефон</button>
+            <div class="stage-actions">
+              <button class="btn ghost" type="button" id="toggle-side" title="Скрыть панель письма" aria-pressed="true">Панель</button>
+              <button class="btn ghost" type="button" id="toggle-mobile" aria-pressed="false">Телефон</button>
+            </div>
             <div class="formatbar" id="text-tools" role="toolbar" aria-label="Форматирование текста" hidden>
               <span class="field-name" id="text-field"></span>
               <button class="btn small" type="button" id="format-bold" aria-pressed="false">Жирный</button>
@@ -253,6 +310,13 @@
     <!-- 2. Компоненты -->
     <main class="view" id="view-components" hidden>
       <div class="page is-wide">
+        <section class="page-intro">
+          <div>
+            <span class="kicker">Шаг 2 из 3</span>
+            <h1>Библиотека проверенных блоков</h1>
+            <p>Найдите подходящий блок, посмотрите его в реальном масштабе и добавьте в письмо. Новые компоненты сразу получают номер и сохраняются для следующих выпусков.</p>
+          </div>
+        </section>
         <div class="actions" style="margin-top:0; margin-bottom:12px">
           <input id="c-search" type="search" placeholder="Номер или название: 7, карточка, подвал" style="flex:1">
           <button class="btn primary" type="button" id="c-new-toggle">+ Новый компонент</button>
@@ -378,7 +442,11 @@
       if (tab === 'build' || tab === 'check') tab = 'mailing';
       if (!['brief', 'components', 'mailing'].includes(tab)) tab = 'mailing';
       state.tab = tab; ui.tab = tab; saveUi();
-      document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('on', button.dataset.tab === tab));
+      document.querySelectorAll('[data-tab]').forEach((button) => {
+        const selected = button.dataset.tab === tab;
+        button.classList.toggle('on', selected);
+        button.setAttribute('aria-selected', String(selected));
+      });
       ['brief', 'components', 'mailing'].forEach((name) => { $(`#view-${name}`).hidden = name !== tab; });
       if (tab === 'mailing') renderPreview();
     }
@@ -397,7 +465,7 @@
       const brief = briefOf();
       $('#view-brief .page').style.opacity = brief ? '' : '.4';
       if (!brief) return;
-      $('#brief-types').innerHTML = TYPES.map((t) => `<button type="button" class="type ${brief.type === t.value ? 'on' : ''}" data-type="${esc(t.value)}">${esc(t.title)}<small>${esc(t.hint)}</small></button>`).join('');
+      $('#brief-types').innerHTML = TYPES.map((t) => `<button type="button" class="type ${brief.type === t.value ? 'on' : ''}" data-type="${esc(t.value)}" aria-pressed="${brief.type === t.value}">${esc(t.title)}<small>${esc(t.hint)}</small></button>`).join('');
       document.querySelectorAll('#brief-types [data-type]').forEach((button) => button.addEventListener('click', () => { brief.type = button.dataset.type; changed(); renderBrief(); }));
       document.querySelectorAll('[data-brief]').forEach((input) => { input.value = brief[input.dataset.brief] ?? ''; });
       renderTours();
@@ -617,9 +685,11 @@
       let saved = {};
       try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { saved = {}; }
       const apply = () => {
-        build.style.setProperty('--side', `${Math.min(720, Math.max(240, saved.width || 400))}px`);
+        build.style.setProperty('--side', `${Math.min(640, Math.max(260, saved.width || 380))}px`);
         build.classList.toggle('side-collapsed', Boolean(saved.collapsed));
-        toggle.textContent = saved.collapsed ? 'Показать панель' : 'Скрыть панель';
+        toggle.textContent = 'Панель';
+        toggle.title = saved.collapsed ? 'Показать панель письма' : 'Скрыть панель письма';
+        toggle.setAttribute('aria-pressed', String(!saved.collapsed));
       };
       const store = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch { /* без хранилища */ } };
       const flip = () => { saved.collapsed = !saved.collapsed; store(); apply(); };
@@ -642,7 +712,7 @@
     function fitLetter() {
       const body = $('#stage-body'), fit = $('#letter-fit'), frame = $('#letter-frame');
       const width = state.mobile ? 390 : 700;
-      const availW = Math.max(120, body.clientWidth - 24), availH = Math.max(120, body.clientHeight - 24);
+      const availW = Math.max(120, body.clientWidth - 12), availH = Math.max(120, body.clientHeight - 12);
       const scale = Math.min(1, availW / width);
       fit.style.width = `${Math.floor(width * scale) + 2}px`;
       frame.style.width = `${width}px`;
@@ -650,7 +720,7 @@
       frame.style.transform = scale < 1 ? `scale(${scale})` : '';
     }
     new ResizeObserver(fitLetter).observe($('#stage-body'));
-    $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; fitLetter(); });
+    $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; $('#toggle-mobile').setAttribute('aria-pressed', String(state.mobile)); fitLetter(); });
     $('#copy-html').addEventListener('click', async () => { try { await navigator.clipboard.writeText(renderResult().html); setStatus('HTML скопирован', 'ok'); } catch { setStatus('Буфер недоступен — скачайте файл', 'err'); } });
     $('#download-html').addEventListener('click', () => {
       const link = document.createElement('a');
@@ -697,7 +767,7 @@
       } finally {
         button.disabled = false;
         button.removeAttribute('aria-busy');
-        button.textContent = 'Проверить Email Checker';
+        button.textContent = 'Проверить';
       }
     }
     $('#check-now').addEventListener('click', checkNow);

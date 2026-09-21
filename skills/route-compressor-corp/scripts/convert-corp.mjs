@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Черновик корпоративной версии программы тура для навыка route-to-operator.
+// Черновик корпоративной версии программы тура для навыка route-compressor-corp.
 // Источник — только out/tour-<номер>.json (создаёт fetch-tour.mjs). Скрипт делает механическую часть: убирает время,
 // цены и название тура, раскладывает программу по дням и пунктам с полными текстами. Сократить описания до смысла
 // по rules.md должен агент — он пишет текст в out/work/tour-<номер>.md, а route.mjs собирает из него out/ready/tour-<номер>.html.
@@ -13,7 +13,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Код и данные разведены: навык ставится с сервера MBOX в ~/.claude/skills и перезаписывается синхронизацией,
 // а доступ к менеджерке, сессия и результаты живут в рабочей папке человека.
-export const DATA_DIR = process.env.ROUTE_OPERATOR_HOME || path.join(os.homedir(), "Desktop", "Mbox", "route-operator-skill");
+const MBOX_DIR = path.join(os.homedir(), "Desktop", "Mbox");
+const DEFAULT_DATA_DIR = path.join(MBOX_DIR, "route-compressor-corp");
+const LEGACY_DATA_DIR = path.join(MBOX_DIR, "route-operator-skill");
+export const DATA_DIR = process.env.ROUTE_COMPRESSOR_CORP_HOME || process.env.ROUTE_OPERATOR_HOME || (fs.existsSync(DEFAULT_DATA_DIR) || !fs.existsSync(LEGACY_DATA_DIR) ? DEFAULT_DATA_DIR : LEGACY_DATA_DIR);
 export const OUT_DIR = path.join(DATA_DIR, "out");
 export const READY_DIR = path.join(OUT_DIR, "ready");
 export const WORK_DIR = path.join(OUT_DIR, "work");
@@ -141,7 +144,7 @@ export function buildDraft(tour) {
 
 export function renderDraft(id, draft) {
   const lines = [
-    `<!-- Черновик навыка route-to-operator. НЕ результат: перепиши его в out/work/tour-${id}.md по rules.md; результат соберётся в out/ready/tour-${id}.html. -->`,
+    `<!-- Черновик навыка route-compressor-corp. НЕ результат: перепиши его в out/work/tour-${id}.md по rules.md; результат соберётся в out/ready/tour-${id}.html. -->`,
     "",
     `# Черновик тура ${id}`,
     "",

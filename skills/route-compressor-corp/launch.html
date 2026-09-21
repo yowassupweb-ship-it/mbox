@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Корпоративная версия программы тура</title>
+  <style>
+    /* Форма открывается вкладкой MBOX из каталога навыков или агентом через
+       skill-file:route-compressor-corp/launch.html и отправляет задание в чат. */
+    :root,
+    :root[data-theme="graphite"] {
+      color-scheme: dark;
+      --bg: #202124; --surface: #26272b; --surface-2: #2a2b2f; --surface-3: #34353a; --sunken: #1b1c1f;
+      --line: rgba(255, 255, 255, .11); --line-strong: rgba(255, 255, 255, .18); --hover: rgba(255, 255, 255, .06); --selected: rgba(77, 163, 255, .17);
+      --accent: #4da3ff; --accent-hover: #69b2ff; --accent-ink: #fff;
+      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .5);
+      --ok: #35c759; --warn: #ffb000;
+      --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
+      --shadow-chin: 0 1px 2px rgba(0, 0, 0, .24);
+      --font-sans: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f5f5f7; --surface: #fff; --surface-2: #fff; --surface-3: #f0f0f2; --sunken: #e9e9ec;
+      --line: rgba(29, 29, 31, .14); --line-strong: rgba(29, 29, 31, .22); --hover: rgba(29, 29, 31, .055); --selected: rgba(0, 122, 255, .12);
+      --accent: #007aff; --accent-hover: #006ee6; --accent-ink: #fff;
+      --text: #1d1d1f; --text-2: rgba(29, 29, 31, .72); --text-muted: rgba(29, 29, 31, .5);
+      --shadow-chin: 0 1px 2px rgba(31, 35, 42, .09);
+    }
+    :root[data-theme="black"] {
+      color-scheme: dark;
+      --bg: #050506; --surface: #0a0a0c; --surface-2: #111114; --surface-3: #18181c; --sunken: #000;
+      --line: rgba(255, 255, 255, .12); --line-strong: rgba(255, 255, 255, .2); --hover: rgba(255, 255, 255, .07); --selected: rgba(77, 163, 255, .18);
+      --accent: #4da3ff; --accent-hover: #69b2ff; --accent-ink: #fff;
+      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .5);
+      --shadow-chin: 0 1px 2px rgba(0, 0, 0, .5);
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    .shell { width: min(100% - 40px, 920px); margin: 0 auto; padding: 34px 0 56px; }
+    .intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: end; margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(26px, 4vw, 38px); font-weight: 620; line-height: 1.08; letter-spacing: -.03em; }
+    .lead { max-width: 650px; margin: 10px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.6; }
+    .steps { display: grid; gap: 7px; min-width: 230px; margin: 0; padding: 0; list-style: none; }
+    .steps li { display: grid; grid-template-columns: 25px 1fr; align-items: center; gap: 9px; color: var(--text-2); font-size: 12px; }
+    .steps b { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--accent); font: 600 10px var(--font-mono); }
+    .card { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--shadow-chin); }
+    .field { display: grid; gap: 5px; }
+    .field + .field { margin-top: 16px; }
+    label { color: var(--text-2); font-size: 12px; font-weight: 500; }
+    label span { color: var(--text-muted); font-weight: 400; }
+    input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); outline: none; }
+    input { min-height: 36px; }
+    textarea { min-height: 116px; resize: vertical; line-height: 1.5; }
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
+    input:focus, textarea:focus { border-color: var(--accent); background: var(--surface-3); }
+    input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; margin-top: 8px; }
+    .chips:empty { display: none; }
+    .chip { padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--selected); font: 12px var(--font-mono); }
+    .hint { margin: 12px 2px 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; }
+    .button { min-height: 34px; padding: 0 13px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .button.primary { background: var(--accent); color: var(--accent-ink); }
+    .button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .button.secondary { border-color: var(--line-strong); background: transparent; color: var(--text); }
+    .button.secondary:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); }
+    .button:active:not(:disabled) { transform: translateY(1px); }
+    .button:disabled { opacity: .45; cursor: default; }
+    .notice { min-height: 18px; color: var(--ok); font-size: 12px; }
+    .preview-label { display: block; margin: 18px 0 6px; color: var(--text-muted); font-size: 11px; }
+    pre { min-height: 62px; margin: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--sunken); color: var(--text-2); font: 12px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-width: 720px) { .shell { width: min(100% - 24px, 920px); padding-top: 22px; } .intro { grid-template-columns: 1fr; gap: 16px; } .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); min-width: 0; } .steps li { grid-template-columns: 25px 1fr; } .card { padding: 14px; } }
+    @media (max-width: 480px) { .steps { grid-template-columns: 1fr; } .actions .button { flex: 1; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="intro">
+      <div>
+        <p class="eyebrow">route-compressor-corp</p>
+        <h1>Корпоративная программа тура</h1>
+        <p class="lead">Добавьте номера туров. Агент возьмёт программы из менеджерки, сократит их по редакционным правилам и откроет готовые HTML-страницы.</p>
+      </div>
+      <ol class="steps" aria-label="Этапы подготовки программы">
+        <li><b>01</b><span>Указать туры</span></li>
+        <li><b>02</b><span>Сжать текст</span></li>
+        <li><b>03</b><span>Открыть HTML</span></li>
+      </ol>
+    </header>
+    <form class="card" id="form">
+      <div class="field">
+        <label for="tours">Номера туров или ссылки <span>через пробел, запятую или с новой строки</span></label>
+        <textarea id="tours" placeholder="12345, 12346&#10;http://newmanager.vs/tours/12347/edit"></textarea>
+        <div class="chips" id="chips"></div>
+      </div>
+      <div class="field">
+        <label for="notes">Пожелания <span>необязательно</span></label>
+        <input id="notes" autocomplete="off" placeholder="Например: сделай короче второй день, подчеркни гастрономию">
+      </div>
+      <div class="actions">
+        <button class="button primary" type="submit" id="send" disabled>Запустить</button>
+        <button class="button secondary" type="button" id="copy">Скопировать задание</button>
+        <span class="notice" id="notice"></span>
+      </div>
+      <span class="preview-label">Задание агенту</span>
+      <pre id="preview"></pre>
+    </form>
+    <p class="hint">Готовые страницы появятся в <code>out/ready</code> рабочей папки навыка — агент откроет их в MBOX.</p>
+  </main>
+  <script>
+    const tours = document.querySelector('#tours');
+    const notes = document.querySelector('#notes');
+    const chips = document.querySelector('#chips');
+    const preview = document.querySelector('#preview');
+    const send = document.querySelector('#send');
+    const notice = document.querySelector('#notice');
+    const storageKey = 'route-compressor-corp-launch';
+
+    const ids = () => [...new Set((tours.value.match(/tours\/(\d+)|\b\d{3,}\b/g) || []).map((item) => item.replace(/\D/g, '')))];
+    const task = () => {
+      const list = ids();
+      return [
+        `Используй навык route-compressor-corp: корпоративная версия программы для туров ${list.join(', ')}.`,
+        notes.value.trim() ? `Пожелания: ${notes.value.trim()}.` : '',
+        'Когда страницы готовы — открой мне папку out/ready через MBOX (open_tab) и коротко перечисли спорные места.',
+      ].filter(Boolean).join('\n');
+    };
+    const store = () => { try { localStorage.setItem(storageKey, JSON.stringify({ tours: tours.value, notes: notes.value })); } catch { /* без хранилища */ } };
+    const update = () => {
+      const list = ids();
+      chips.replaceChildren(...list.map((id) => Object.assign(document.createElement('span'), { className: 'chip', textContent: id })));
+      preview.textContent = list.length ? task() : 'Добавьте хотя бы один номер тура.';
+      send.disabled = !list.length;
+      store();
+    };
+    try { const saved = JSON.parse(localStorage.getItem(storageKey) || localStorage.getItem('route-to-operator-launch') || 'null'); if (saved) { tours.value = saved.tours || ''; notes.value = saved.notes || ''; } } catch { /* без хранилища */ }
+
+    const flash = (text) => { notice.textContent = text; setTimeout(() => { notice.textContent = ''; }, 4000); };
+    document.querySelector('#form').addEventListener('input', update);
+    document.querySelector('#form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!ids().length) return;
+      if (window.mbox) { window.mbox.send(task()); flash('Задание отправлено в чат MBOX — ответ придёт в консоли.'); }
+      else { navigator.clipboard?.writeText(task()); flash('Не в MBOX: задание скопировано, вставьте его в чат агента.'); }
+    });
+    document.querySelector('#copy').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(task()); flash('Скопировано.'); } catch { flash('Не удалось скопировать — выделите текст ниже.'); }
+    });
+    if (!window.mbox) send.textContent = 'Скопировать и запустить';
+    update();
+  </script>
+</body>
+</html>

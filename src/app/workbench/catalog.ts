@@ -53,6 +53,7 @@ export function formatLastUsed(value: string | null): string {
 }
 
 export function skillGroup(skill: AgentSkill): string {
-  if (skill.owner.includes("UX/UI")) return "UX/UI";
-  return "Основные";
+  if (skill.category) return skill.category;
+  if (skill.owner.includes("UX/UI")) return "Дизайн и интерфейсы";
+  return "Рабочие сценарии";
 }

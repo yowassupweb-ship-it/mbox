@@ -2793,10 +2793,20 @@ export async function replyAsJarvis(item) {
     // "Джарвис использовал инструменты: ..." — видимый след того, что реально было вызвано,
     // а не просто текст. Отдельным полем в props, а не вклеено в текст, чтобы клиент рисовал
     // это отдельной приглушённой строкой в логе.
+    let skillArtifactId = "";
+    if (item.props?.source === "skill-page") {
+      const artifact = await client.query(
+        `INSERT INTO artifacts(project_id, name, category, version, status, content, access_level)
+         VALUES ($1, $2, 'Навыки', 'v1', 'ready', $3, 'agents')
+         RETURNING id::text`,
+        [item.project_id || null, `Результат навыка ${String(item.props.skill || "навык")} · #${item.id}`, reply],
+      );
+      skillArtifactId = artifact.rows[0]?.id || "";
+    }
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights, ...replyIdentity })],
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights, ...(skillArtifactId ? { artifact_id: skillArtifactId } : {}), ...replyIdentity })],
     );
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });

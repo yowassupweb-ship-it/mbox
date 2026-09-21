@@ -8,6 +8,12 @@ import { usePersistentState, type TabsApi } from "./tabs";
 
 const HUMAN = "Человек";
 
+function activeTheme() {
+  return document.querySelector<HTMLElement>(".app[data-theme]")?.dataset.theme
+    || document.documentElement.dataset.theme
+    || "graphite";
+}
+
 type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:write-files" | "mbox:files" | "mbox:email-check"; id: number; path?: string; content?: string; message?: string; html?: string; files?: Array<{ path: string; content: string; message?: string }> };
 
 /**
@@ -59,7 +65,16 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
   }, [skill]);
 
   // Мост вставляется один раз на загрузку: хранилище формы читается в момент открытия.
-  const srcDoc = useMemo(() => (content !== null && isHtml ? withBridge(content, readStorage(storageKey), skill) : ""), [content, isHtml, storageKey, skill]);
+  const srcDoc = useMemo(() => (content !== null && isHtml ? withBridge(content, readStorage(storageKey), skill, activeTheme()) : ""), [content, isHtml, storageKey, skill]);
+
+  useEffect(() => {
+    if (!isHtml) return;
+    const themeHost = document.querySelector<HTMLElement>(".app[data-theme]") || document.documentElement;
+    const pushTheme = () => frameRef.current?.contentWindow?.postMessage({ type: "mbox:theme", theme: activeTheme() }, "*");
+    const observer = new MutationObserver(pushTheme);
+    observer.observe(themeHost, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, [isHtml]);
 
   useEffect(() => {
     if (!isHtml) return;
@@ -174,7 +189,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
         <div className="wb-doc-missing">Загрузка…</div>
       ) : isHtml ? (
         <div className={viewport === "mobile" ? "wb-html-preview is-mobile" : "wb-html-preview"}>
-          <iframe ref={frameRef} key={reload} title={`${skill}/${file}`} sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads" srcDoc={srcDoc} />
+          <iframe ref={frameRef} key={reload} title={`${skill}/${file}`} sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads" srcDoc={srcDoc} onLoad={() => frameRef.current?.contentWindow?.postMessage({ type: "mbox:theme", theme: activeTheme() }, "*")} />
         </div>
       ) : (
         <div className="wb-reading"><div className="wb-memory-body">{renderDocument(content)}</div></div>
@@ -188,8 +203,9 @@ function readStorage(key: string): Record<string, string> {
 }
 
 /** window.mbox и localStorage для страницы в песочнице. Скрипт идёт первым в <head>, до скриптов самой страницы. */
-function withBridge(html: string, storage: Record<string, string>, skill: string) {
+function withBridge(html: string, storage: Record<string, string>, skill: string, theme: string) {
   const bridge = `<script>(function(){
+document.documentElement.dataset.theme=${JSON.stringify(theme)};
 var items=${JSON.stringify(storage).replace(/</g, "\\u003c")};
 function sync(){parent.postMessage({type:"mbox:storage",items:items},"*");}
 var store={getItem:function(k){return Object.prototype.hasOwnProperty.call(items,k)?items[k]:null;},setItem:function(k,v){items[k]=String(v);sync();},removeItem:function(k){delete items[k];sync();},clear:function(){items={};sync();},key:function(i){return Object.keys(items)[i]||null;}};
@@ -197,7 +213,7 @@ Object.defineProperty(store,"length",{get:function(){return Object.keys(items).l
 try{Object.defineProperty(window,"localStorage",{configurable:true,value:store});}catch(e){}
 var seq=0,waiting={};
 function call(type,payload){return new Promise(function(resolve,reject){var id=++seq;waiting[id]={resolve:resolve,reject:reject};parent.postMessage(Object.assign({type:type,id:id},payload),"*");});}
-window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.type!=="mbox:reply"||!waiting[d.id])return;var w=waiting[d.id];delete waiting[d.id];d.ok?w.resolve(d.result):w.reject(new Error(d.error||"MBOX"));});
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d)return;if(d.type==="mbox:theme"){document.documentElement.dataset.theme=d.theme||"graphite";return;}if(d.type!=="mbox:reply"||!waiting[d.id])return;var w=waiting[d.id];delete waiting[d.id];d.ok?w.resolve(d.result):w.reject(new Error(d.error||"MBOX"));});
 window.mbox={embedded:true,skill:${JSON.stringify(skill)},
 send:function(text){parent.postMessage({type:"mbox:send",text:String(text)},"*");},
 close:function(){parent.postMessage({type:"mbox:close"},"*");},

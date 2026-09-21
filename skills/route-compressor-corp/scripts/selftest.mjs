@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Самопроверка навыка route-to-operator: копирует скрипты во временную папку, подкладывает синтетический тур
+// Самопроверка навыка route-compressor-corp: копирует скрипты во временную папку, подкладывает синтетический тур
 // и прогоняет route.mjs на правильном тексте и на текстах с типичными нарушениями. Сеть не нужна,
 // менеджерская программа и out/ навыка не затрагиваются.
 //
@@ -62,7 +62,7 @@ function run(text, { keepState = false } = {}) {
   if (!keepState) fs.rmSync(statePath, { force: true });
   fs.rmSync(htmlPath, { force: true });
   fs.writeFileSync(textPath, text);
-  const result = spawnSync(process.execPath, [path.join(root, "scripts", "route.mjs"), ID, "--no-fetch"], { encoding: "utf8", env: { ...process.env, ROUTE_OPERATOR_HOME: root } });
+  const result = spawnSync(process.execPath, [path.join(root, "scripts", "route.mjs"), ID, "--no-fetch"], { encoding: "utf8", env: { ...process.env, ROUTE_COMPRESSOR_CORP_HOME: root } });
   return { code: result.status, output: `${result.stdout || ""}${result.stderr || ""}` };
 }
 

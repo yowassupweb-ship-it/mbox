@@ -22,7 +22,7 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
   const groups = useMemo(() => {
     const map = new Map<string, typeof data.skills>();
     for (const skill of data.skills) {
-      if (needle && !`${skill.name} ${skill.summary} ${skill.owner} ${skill.id}`.toLowerCase().includes(needle)) continue;
+      if (needle && !`${skill.name} ${skill.summary} ${skill.goal || ""} ${skill.category || ""} ${skill.owner} ${skill.id}`.toLowerCase().includes(needle)) continue;
       const group = skillGroup(skill);
       map.set(group, [...(map.get(group) ?? []), skill]);
     }
@@ -37,7 +37,11 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
           <button type="button" onClick={reload} title="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
-      <Filter value={filter} onChange={setFilter} placeholder="Найти навык" />
+      <div className="wb-skills-intro">
+        <span>Готовые способы выполнить работу с агентом</span>
+        <small>Выберите результат — MBOX откроет нужный сценарий и сохранит итог рядом с проектом.</small>
+      </div>
+      <Filter value={filter} onChange={setFilter} placeholder="Что нужно сделать?" />
       <div className="wb-view-body">
         {loading && <p className="wb-empty">Загрузка…</p>}
         {groups.map(([group, skills]) => {

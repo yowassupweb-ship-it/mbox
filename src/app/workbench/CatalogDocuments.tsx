@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, ExternalLink, FolderOpen, Play, Square } from "lucide-react";
+import { ArrowRight, Check, Copy, ExternalLink, FolderOpen, Play, Square } from "lucide-react";
 import { openSkillPage } from "./agentTabs";
 import type { TabsApi } from "./tabs";
 import type { LocalTool, ToolRunEvent } from "../../types";
 import { formatLastUsed, formatTokens, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { ToolIcon } from "./CatalogViews";
+import { fetchJson } from "../../lib/api";
 
 function useCopy() {
   const [copied, setCopied] = useState("");
@@ -21,47 +22,62 @@ export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsAp
   const { copied, copy } = useCopy();
   const skill = data.skills.find((item) => item.id === skillId);
   if (!skill) return <div className="wb-doc-missing">{loading ? "Загрузка…" : "Навык не найден в каталоге."}</div>;
+  const steps = skill.steps?.length ? skill.steps : ["Передайте исходные данные", "Агент выполнит сценарий", "Получите готовый результат"];
 
   return (
-    <div className="wb-doc-page is-narrow wb-catalog-doc">
-      <header className="wb-catalog-head">
-        <span className="wb-doc-crumbs">Навыки › {skill.owner}</span>
-        <h1>{skill.name}</h1>
-        <p>{skill.summary}</p>
-        {!!skill.pages?.length && (
-          <div className="wb-skill-launch">
-            {skill.pages.map((page, index) => (
-              <button key={page.target} type="button" className={index === 0 ? "is-primary" : undefined} onClick={() => openSkillPage(page, tabs)}>
-                {index === 0 && <Play size={13} />}{index === 0 ? `Запустить · ${page.title}` : page.title}
-              </button>
-            ))}
-          </div>
-        )}
+    <div className={`wb-doc-page is-narrow wb-catalog-doc wb-skill-doc${skill.id === "email-campaign" ? " is-mail" : ""}`}>
+      <header className="wb-skill-hero">
+        <div className="wb-skill-hero-main">
+          <span className="wb-doc-crumbs">Навыки › {skill.category || "Рабочий сценарий"}</span>
+          <span className="wb-skill-kicker">Готовый сценарий для агента</span>
+          <h1>{skill.name}</h1>
+          <p>{skill.goal || skill.summary}</p>
+          {!!skill.pages?.length && (
+            <div className="wb-skill-launch">
+              {skill.pages.map((page, index) => (
+                <button key={page.target} type="button" className={index === 0 ? "is-primary" : undefined} onClick={() => openSkillPage(page, tabs)}>
+                  {index === 0 && <Play size={14} />}{page.title}<ArrowRight size={13} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <aside className="wb-skill-outcome">
+          <span><Check size={14} /> Результат</span>
+          <strong>{skill.output || "Готовый результат в MBOX"}</strong>
+          <small>Результат остаётся в рабочем контексте и его можно открыть позже.</small>
+        </aside>
       </header>
+      <section className="wb-skill-flow" aria-label="Как работает навык">
+        {steps.map((step, index) => (
+          <div key={step}><b>{index + 1}</b><span>{step}</span>{index < steps.length - 1 && <ArrowRight size={15} />}</div>
+        ))}
+      </section>
       <div className="wb-stat-row">
         <div><b>{skill.calls}</b><span>вызовов</span></div>
         <div><b>{skill.calls_24h}</b><span>за сутки</span></div>
         <div><b>{formatTokens(skill.tokens)}</b><span>токенов</span></div>
         <div><b>{formatLastUsed(skill.last_used_at)}</b><span>последний раз</span></div>
       </div>
-      <dl className="wb-spec">
+      <section className="wb-skill-details">
+        <h2>Что понадобится</h2>
+        <dl className="wb-spec">
         <dt>Вход</dt><dd>{skill.input || "—"}</dd>
-        <dt>Результат</dt><dd>{skill.output || "—"}</dd>
         {skill.trigger && (
           <>
             <dt>Вызов</dt>
             <dd><code>{skill.trigger}</code> <button type="button" className="wb-inline-btn" onClick={() => copy(skill.trigger, "trigger")}><Copy size={12} />{copied === "trigger" ? "скопировано" : ""}</button></dd>
           </>
         )}
-        <dt>Исполнитель</dt><dd>{skill.owner}</dd>
-        <dt>Модель</dt><dd>{skill.last_model || "—"}</dd>
+        <dt>Работает с</dt><dd>{skill.owner}</dd>
         {skill.location && (
           <>
             <dt>SKILL.md</dt>
             <dd><code>{skill.location}</code> <button type="button" className="wb-inline-btn" onClick={() => copy(skill.location!, "location")}><Copy size={12} />{copied === "location" ? "скопировано" : ""}</button></dd>
           </>
         )}
-      </dl>
+        </dl>
+      </section>
     </div>
   );
 }
@@ -82,18 +98,21 @@ function desktop(): DesktopBridge | undefined {
   return window.mboxDesktop as DesktopBridge | undefined;
 }
 
-export function ToolDocument({ toolId }: { toolId: string }) {
+export function ToolDocument({ toolId, tabs }: { toolId: string; tabs: TabsApi }) {
   const { data, loading } = useToolsCatalog();
   const tool = data.tools.find((item) => item.id === toolId);
   if (!tool) return <div className="wb-doc-missing">{loading ? "Загрузка…" : "Инструмент не найден в каталоге."}</div>;
-  return <ToolPage tool={tool} />;
+  return <ToolPage tool={tool} tabs={tabs} />;
 }
 
-function ToolPage({ tool }: { tool: LocalTool }) {
+function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
   const { copied, copy } = useCopy();
   const [run, setRun] = useState<RunState>(EMPTY_RUN);
   const [canRun, setCanRun] = useState(() => Boolean(desktop()?.runTool));
+  const [artifactId, setArtifactId] = useState("");
+  const [artifactNote, setArtifactNote] = useState("");
   const logRef = useRef<HTMLDivElement | null>(null);
+  const savedRunRef = useRef("");
 
   useEffect(() => {
     const refresh = () => setCanRun(Boolean(desktop()?.runTool));
@@ -123,10 +142,39 @@ function ToolPage({ tool }: { tool: LocalTool }) {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [run.lines.length]);
 
+  useEffect(() => {
+    if (run.running || !run.label || !run.note) return;
+    const key = `${tool.id}:${run.label}:${run.note}:${run.lines.length}`;
+    if (savedRunRef.current === key) return;
+    savedRunRef.current = key;
+    const content = [
+      `# ${tool.name} · ${run.label}`,
+      "",
+      `Статус: ${run.note}`,
+      `Создано: ${new Date().toLocaleString("ru-RU")}`,
+      "",
+      "```text",
+      ...(run.lines.length ? run.lines.map((line) => `${line.stream === "err" ? "[stderr] " : ""}${line.line}`) : ["Команда завершилась без текстового вывода."]),
+      "```",
+    ].join("\n");
+    setArtifactNote("сохраняю результат…");
+    void fetchJson<{ artifact: { id: string } }>("/api/mbox/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: `${tool.name} · ${run.label} · ${new Date().toLocaleString("ru-RU")}`, category: "Инструменты", version: "v1", status: "ready", content, access_level: "agents" }),
+    }).then(({ artifact }) => {
+      setArtifactId(artifact.id);
+      setArtifactNote("результат сохранён в Файлы");
+    }).catch(() => setArtifactNote("не удалось сохранить результат в Файлы"));
+  }, [run.label, run.lines, run.note, run.running, tool.id, tool.name]);
+
   async function start(label: string) {
     const bridge = desktop();
     if (!bridge?.runTool) return;
     setRun({ running: true, label, lines: [], note: "запускаю" });
+    savedRunRef.current = "";
+    setArtifactId("");
+    setArtifactNote("");
     try {
       await bridge.runTool(tool.id, label);
     } catch (cause) {
@@ -190,7 +238,7 @@ function ToolPage({ tool }: { tool: LocalTool }) {
 
       {(run.lines.length > 0 || run.note) && (
         <section className="wb-run-log">
-          <header><i className={run.running ? "is-live" : undefined} />{run.label}<span>{run.note}</span></header>
+          <header><i className={run.running ? "is-live" : undefined} />{run.label}<span>{run.note}{artifactNote ? ` · ${artifactNote}` : ""}</span>{artifactId && <button type="button" className="wb-inline-btn" onClick={() => tabs.open(`file:${artifactId}`, true)}>Открыть артефакт</button>}</header>
           <div ref={logRef} role="log">
             {run.lines.length ? run.lines.map((row, index) => <div key={index} className={row.stream === "err" ? "is-err" : undefined}>{row.line}</div>) : <div>—</div>}
           </div>

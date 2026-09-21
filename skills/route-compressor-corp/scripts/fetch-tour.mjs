@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Добыча данных тура из менеджерской программы (newmanager.vs) для навыка route-to-operator.
+// Добыча данных тура из менеджерской программы (newmanager.vs) для навыка route-compressor-corp.
 // Только чтение: вход, GET страницы редактирования тура, разбор полей формы и программы тура. Форму не отправляет.
 //
 //   node scripts/fetch-tour.mjs <номер-тура | ссылка на tours/<номер>/edit>
@@ -11,7 +11,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Доступ, сессия и скачанные туры — в рабочей папке человека, не в папке навыка: её перезаписывает синхронизация с MBOX.
-const DATA_DIR = process.env.ROUTE_OPERATOR_HOME || path.join(os.homedir(), "Desktop", "Mbox", "route-operator-skill");
+const MBOX_DIR = path.join(os.homedir(), "Desktop", "Mbox");
+const DEFAULT_DATA_DIR = path.join(MBOX_DIR, "route-compressor-corp");
+const LEGACY_DATA_DIR = path.join(MBOX_DIR, "route-operator-skill");
+const DATA_DIR = process.env.ROUTE_COMPRESSOR_CORP_HOME || process.env.ROUTE_OPERATOR_HOME || (fs.existsSync(DEFAULT_DATA_DIR) || !fs.existsSync(LEGACY_DATA_DIR) ? DEFAULT_DATA_DIR : LEGACY_DATA_DIR);
 const CONFIG_FILE = path.join(DATA_DIR, "newmanager.env");
 const SESSION_FILE = path.join(DATA_DIR, ".newmanager-session.json");
 const OUT_DIR = path.join(DATA_DIR, "out");
@@ -76,7 +79,7 @@ async function request(jar, url, { method = "GET", body, headers = {} } = {}) {
         headers: {
           cookie: jar.header(),
           accept: "text/html,application/xhtml+xml",
-          "user-agent": "Mozilla/5.0 (route-to-operator skill)",
+          "user-agent": "Mozilla/5.0 (route-compressor-corp skill)",
           ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
           ...headers,
         },
