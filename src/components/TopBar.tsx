@@ -88,7 +88,7 @@ export function TopBar({
   onToggleConsole,
   activeTitle = "MBOX",
   activeHint = "Рабочее место",
-  activeIcon = "/assets/icons/bottom-menu/provodnik.png",
+  activeIcon = "/assets/icons/navigation/projects.png",
   activeDirty = false,
   tabCount = 0,
   realtimeState = "connecting",

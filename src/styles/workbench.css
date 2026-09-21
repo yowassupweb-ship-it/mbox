@@ -239,10 +239,13 @@ body.wb-resizing * {
 
 .wb-activity-icon { width: 30px; height: 30px; display: grid; place-items: center; color: var(--text-muted); transition: color var(--duration-fast) ease, transform var(--duration-fast) var(--ease-out); }
 .wb-activity-icon svg { width: 21px; height: 21px; stroke-width: 1.7; }
+.wb-activity-icon img { width: 30px; height: 30px; object-fit: contain; opacity: .72; transition: opacity var(--duration-fast) ease, filter var(--duration-fast) ease; }
 .wb-activity:hover { background: color-mix(in srgb, var(--accent-color) 9%, transparent); }
 .wb-activity:hover .wb-activity-icon { color: var(--text-2); transform: translateY(-1px); }
+.wb-activity:hover .wb-activity-icon img { opacity: .92; }
 .wb-activity.is-active { border-left-color: var(--accent-color); }
 .wb-activity.is-active .wb-activity-icon { color: var(--accent-color); }
+.wb-activity.is-active .wb-activity-icon img { opacity: 1; filter: drop-shadow(0 2px 5px color-mix(in srgb, var(--accent-color) 24%, transparent)); }
 .wb-activity:focus-visible { outline: 1px solid var(--accent-color); outline-offset: -3px; }
 
 .wb-activity-tip {

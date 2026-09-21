@@ -8,7 +8,7 @@ import { countUnseen, onSeenChange } from "../lib/seen";
 import type { AuditEvent, Project } from "../types";
 import { EmptyState, Metric, MetricGrid, Panel } from "../ui";
 
-const BOTTOM_ICONS = "/assets/icons/bottom-menu";
+const NAVIGATION_ICONS = "/assets/icons/navigation";
 
 export function Overview({ data, onOpenProject }: { data: MboxData; onOpenProject: (projectId: string) => void }) {
   const totalBytes = sumBytes([
@@ -29,9 +29,9 @@ export function Overview({ data, onOpenProject }: { data: MboxData; onOpenProjec
         </Panel>
       )}
       <MetricGrid>
-        <Metric title="Память" value={data.memoriesTotal} subtitle={formatBytes(data.memoriesTotalBytes)} image={`${BOTTOM_ICONS}/память.png`} />
-        <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/артефакты.png`} />
-        <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} image={`${BOTTOM_ICONS}/проекты.png`} />
+        <Metric title="Память" value={data.memoriesTotal} subtitle={formatBytes(data.memoriesTotalBytes)} image={`${NAVIGATION_ICONS}/memory.png`} />
+        <Metric title="Артефакты" value={data.artifacts.length} subtitle={formatBytes(sumBytes(data.artifacts.map((item) => item.memory_bytes)))} image={`${NAVIGATION_ICONS}/artifacts.png`} />
+        <Metric title="Проекты" value={data.projects.length} subtitle={formatBytes(sumBytes(data.projects.map((item) => item.memory_bytes)))} image={`${NAVIGATION_ICONS}/projects.png`} />
       </MetricGrid>
       {reviewCount > 0 && (
         <Panel title={`На проверке · ${reviewCount}`} icon={ClipboardCheck} className="review-panel">
