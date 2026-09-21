@@ -1052,6 +1052,16 @@ const IMAGE_TYPES = {
   ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf", ".eot": "application/vnd.ms-fontobject"
 };
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+const DOCUMENT_TYPES = {
+  ".pdf": "application/pdf",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".doc": "application/msword",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls": "application/vnd.ms-excel",
+  ".csv": "text/csv",
+  ".tsv": "text/tab-separated-values"
+};
+const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
 
 async function readWorkspaceImage(key, rel) {
   const { target, rel: cleanRel } = resolveInRoot(key, rel);
@@ -1062,6 +1072,40 @@ async function readWorkspaceImage(key, rel) {
   if (stat.size > MAX_IMAGE_BYTES) return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, tooLarge: true, dataUrl: "" };
   const buffer = await fs.promises.readFile(target);
   return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, dataUrl: `data:${mime};base64,${buffer.toString("base64")}` };
+}
+
+async function readWorkspaceData(key, rel) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  const mime = DOCUMENT_TYPES[path.extname(target).toLowerCase()];
+  if (!mime) throw new Error("Этот формат документа не поддерживается");
+  const stat = await fs.promises.stat(target);
+  if (!stat.isFile()) throw new Error("Это не файл");
+  if (stat.size > MAX_DOCUMENT_BYTES) return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, tooLarge: true, base64: "" };
+  const buffer = await fs.promises.readFile(target);
+  return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, base64: buffer.toString("base64") };
+}
+
+async function writeWorkspaceData(key, rel, base64, expectedMtime) {
+  const { target, rel: cleanRel } = resolveInRoot(key, rel);
+  assertWritable(cleanRel, target);
+  if (!DOCUMENT_TYPES[path.extname(target).toLowerCase()]) throw new Error("Этот формат документа не поддерживается");
+  const buffer = Buffer.from(String(base64 || ""), "base64");
+  if (buffer.byteLength > MAX_DOCUMENT_BYTES) throw new Error("Документ слишком большой для сохранения из MBOX");
+  try {
+    const stat = await fs.promises.stat(target);
+    if (expectedMtime && Math.abs(stat.mtimeMs - Number(expectedMtime)) > 1) {
+      const error = new Error("Файл изменился на диске после открытия");
+      error.code = "CONFLICT";
+      throw error;
+    }
+  } catch (error) {
+    if (error.code === "CONFLICT") throw error;
+    if (error.code !== "ENOENT") throw error;
+  }
+  await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await fs.promises.writeFile(target, buffer);
+  const stat = await fs.promises.stat(target);
+  return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs };
 }
 
 async function writeWorkspaceFile(key, rel, content, expectedMtime) {
@@ -1343,7 +1387,9 @@ ipcMain.on("mbox-desktop:take-storage-migration", (event) => {
   event.returnValue = trusted ? localUi.takePendingStorage() : null;
 });
 ipcMain.handle("mbox-desktop:ws-read-image", async (_event, key, rel) => readWorkspaceImage(key, rel));
+ipcMain.handle("mbox-desktop:ws-read-data", async (_event, key, rel) => readWorkspaceData(key, rel));
 ipcMain.handle("mbox-desktop:ws-write", async (_event, key, rel, content, expectedMtime) => writeWorkspaceFile(key, rel, content, expectedMtime));
+ipcMain.handle("mbox-desktop:ws-write-data", async (_event, key, rel, base64, expectedMtime) => writeWorkspaceData(key, rel, base64, expectedMtime));
 ipcMain.handle("mbox-desktop:ws-create", async (_event, key, rel, type) => createWorkspaceEntry(key, rel, type));
 ipcMain.handle("mbox-desktop:ws-rename", async (_event, key, rel, nextRel) => renameWorkspaceEntry(key, rel, nextRel));
 ipcMain.handle("mbox-desktop:ws-trash", async (_event, key, rel) => trashWorkspaceEntry(key, rel));
@@ -1380,6 +1426,15 @@ app.on("before-quit", () => {
 const runningTools = new Map();
 const TOOL_OUTPUT_LIMIT = 400;
 const LOCAL_TOOL_CATALOG = [
+  {
+    id: "tour-feed",
+    name: "Сформировать фид",
+    path: path.join(os.homedir(), "Desktop", "Фиды"),
+    commands: [
+      { label: "Сформировать фид", command: "python merge_feeds.py \"01.06\"", runnable: true },
+      { label: "Открыть папку", command: "explorer .", runnable: true }
+    ]
+  },
   {
     id: "obscura",
     name: "Obscura",
@@ -1438,7 +1493,8 @@ function toolWorkdirAllowed(dir) {
   const allowedRoots = [
     repoRoot,
     path.join(os.homedir(), "Desktop", "Mbox"),
-    path.join(os.homedir(), "Desktop", "MBOX")
+    path.join(os.homedir(), "Desktop", "MBOX"),
+    path.join(os.homedir(), "Desktop", "Фиды")
   ].map((item) => path.resolve(item).toLowerCase());
   const normalized = path.resolve(dir).toLowerCase();
   return allowedRoots.some((root) => normalized === root || normalized.startsWith(`${root}${path.sep}`));

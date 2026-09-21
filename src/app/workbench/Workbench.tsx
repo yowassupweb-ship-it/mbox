@@ -20,6 +20,7 @@ import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { LocalImageDocument } from "./LocalImageDocument";
+import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { ExplorerView } from "./ExplorerView";
@@ -32,7 +33,7 @@ import { StorageDocument } from "./Storage";
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
 import { CommitDocument, GitDiffDocument, LocalFileDocument } from "./LocalFileDocument";
-import { IMAGE_FILE, setAgentHint, setWorkspaceUser, useLocalWorkspace } from "./localWorkspace";
+import { IMAGE_FILE, OFFICE_FILE, setAgentHint, setWorkspaceUser, useLocalWorkspace } from "./localWorkspace";
 import { MemoryDocument } from "./MemoryDocument";
 import { SearchView } from "./SearchView";
 import { tabMeta } from "./tabMeta";
@@ -327,6 +328,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "local":
         return IMAGE_FILE.test(rest)
           ? <LocalImageDocument rootKey={first} path={rest} />
+          : OFFICE_FILE.test(rest)
+            ? <LocalOfficeDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />
           : <LocalFileDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
       case "gitdiff":
         return <GitDiffDocument rootKey={first} path={rest} tabs={tabs} />;
@@ -339,7 +342,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "skillpage":
         return <SkillPageDocument skill={first} file={rest} tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
       case "tool":
-        return <ToolDocument toolId={first} />;
+        return <ToolDocument toolId={first} tabs={tabs} />;
       case "file":
         return <FileDocument fileId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
       case "term":
