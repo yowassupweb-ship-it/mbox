@@ -109,14 +109,22 @@ export function useDocumentFind({ editorRef, previewRef, text, enabled = true }:
 
   useLayoutEffect(() => {
     if (!open || !query) { setCount(0); return; }
+    const findInput = inputRef.current;
+    const selectionStart = findInput?.selectionStart ?? query.length;
+    const selectionEnd = findInput?.selectionEnd ?? selectionStart;
+    const restoreFindFocus = () => {
+      if (!findInput) return;
+      findInput.focus({ preventScroll: true });
+      findInput.setSelectionRange(selectionStart, selectionEnd);
+    };
     const editor = editorRef.current;
     const preview = previewRef.current;
     const haystack = editor?.value ?? (preview ? previewText(preview) : text);
     const matches = positionsIn(haystack, query);
     setCount(matches.length);
-    if (!matches.length) return;
+    if (!matches.length) { restoreFindFocus(); return; }
     const active = index % matches.length;
-    if (active !== index) { setIndex(active); return; }
+    if (active !== index) { setIndex(active); restoreFindFocus(); return; }
     if (editor) {
       editor.setSelectionRange(matches[active], matches[active] + query.length);
       const line = editor.value.slice(0, matches[active]).split("\n").length - 1;
@@ -125,6 +133,7 @@ export function useDocumentFind({ editorRef, previewRef, text, enabled = true }:
     } else if (preview) {
       selectPreview(preview, matches[active], query.length);
     }
+    restoreFindFocus();
   }, [editorRef, index, open, previewRef, query, text]);
 
   const move = (delta: number) => setIndex((current) => count ? (current + delta + count) % count : 0);

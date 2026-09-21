@@ -44,7 +44,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const [gitOpen, setGitOpen] = usePersistentState("mbox.local.gitOpen", true);
   const [notice, setNotice] = useState("");
-  const [selected, setSelected] = usePersistentState<Selection | null>("mbox.local.selected", null);
+  const [selection, setSelection] = usePersistentState<Selection[]>("mbox.local.selection", []);
   const [clip, setClip] = useState<Clip | null>(null);
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
@@ -89,7 +89,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     const parts = path ? path.split("/") : [];
     const chain = [`${rootKey}:`, ...parts.map((_, index) => `${rootKey}:${parts.slice(0, index + 1).join("/")}`)];
     setExpanded((current) => [...new Set([...current, ...chain])]);
-    setSelected(path ? { rootKey, entry: { name: parts[parts.length - 1], path, type: "dir", size: 0, mtime: 0 } } : { rootKey, entry: null });
+    setSelection([path ? { rootKey, entry: { name: parts[parts.length - 1], path, type: "dir", size: 0, mtime: 0 } } : { rootKey, entry: null }]);
     for (const id of chain) { const [key, ...rest] = id.split(":"); void load(key, rest.join(":")); }
   }), [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -176,11 +176,12 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     void act(async () => {
       await bridge.trash(selection.rootKey, entry.path);
       tabs.close(localFileKey(selection.rootKey, entry.path));
-      setSelected(null);
+      setSelection([]);
     }, { rootKey: selection.rootKey, rel: parentOf(entry.path) });
   }
 
   function onTreeKey(event: KeyboardEvent) {
+    const selected = selection[selection.length - 1];
     if (!selected || (event.target as HTMLElement).tagName === "INPUT") return;
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.code === "KeyC") { event.preventDefault(); copy(selected, false); }
@@ -189,6 +190,22 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     else if (event.key === "Delete") { event.preventDefault(); trash(selected); }
     else if (event.key === "F2") { event.preventDefault(); void rename(selected); }
     else if (event.key === "Enter" && selected.entry?.type === "file") { event.preventDefault(); tabs.open(localFileKey(selected.rootKey, selected.entry.path), true); }
+  }
+
+  function isSelected(rootKey: string, path: string | null) {
+    return selection.some((item) => item.rootKey === rootKey && (item.entry?.path ?? null) === path);
+  }
+
+  function selectEntry(event: MouseEvent, rootKey: string, entry: DirEntry) {
+    if (event.ctrlKey || event.metaKey) {
+      setSelection((current) => current.some((item) => item.rootKey === rootKey && item.entry?.path === entry.path)
+        ? current.filter((item) => !(item.rootKey === rootKey && item.entry?.path === entry.path))
+        : [...current, { rootKey, entry }]);
+      return;
+    }
+    setSelection([{ rootKey, entry }]);
+    if (entry.type === "dir") toggle(rootKey, entry.path);
+    else tabs.open(localFileKey(rootKey, entry.path));
   }
 
   function parentOf(rel: string) {
@@ -221,11 +238,11 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
       return (
         <li key={entry.path}>
           <div
-            className={["wb-tree-row", tabs.active === tabKey ? "is-active" : "", selected?.rootKey === root.key && selected.entry?.path === entry.path ? "is-selected" : "", clip?.move && clip.rootKey === root.key && clip.path === entry.path ? "is-cut" : "", entry.heavy ? "is-heavy" : "", letter ? `git-${letter}` : ""].filter(Boolean).join(" ")}
+            className={["wb-tree-row", tabs.active === tabKey ? "is-active" : "", isSelected(root.key, entry.path) ? "is-selected" : "", clip?.move && clip.rootKey === root.key && clip.path === entry.path ? "is-cut" : "", entry.heavy ? "is-heavy" : "", letter ? `git-${letter}` : ""].filter(Boolean).join(" ")}
             style={{ ["--depth" as string]: depth }}
-            onClick={() => { setSelected({ rootKey: root.key, entry }); if (entry.type === "dir") toggle(root.key, entry.path); else tabs.open(tabKey); }}
+            onClick={(event) => selectEntry(event, root.key, entry)}
             onDoubleClick={() => { if (entry.type === "file") tabs.open(tabKey, true); }}
-            onContextMenu={(event: MouseEvent) => { event.preventDefault(); setSelected({ rootKey: root.key, entry }); setMenu({ rootKey: root.key, entry, x: event.clientX, y: event.clientY }); }}
+            onContextMenu={(event: MouseEvent) => { event.preventDefault(); if (!isSelected(root.key, entry.path)) setSelection([{ rootKey: root.key, entry }]); setMenu({ rootKey: root.key, entry, x: event.clientX, y: event.clientY }); }}
             title={entry.path}
           >
             {entry.type === "dir" ? <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} /> : <span className="wb-chevron-space" />}
@@ -256,7 +273,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
   return (
     <div className="wb-view">
       <header className="wb-view-head">
-        <span>Папки</span>
+        <span>Папки{selection.length > 1 ? ` · выбрано ${selection.length}` : ""}</span>
         <div className="wb-view-actions">
           <button type="button" onClick={() => void act(ws.add)} title="Подключить папку"><FolderPlus size={14} /></button>
           <button type="button" onClick={() => { ws.refresh(); for (const id of expanded) { const [rootKey, ...rest] = id.split(":"); void load(rootKey, rest.join(":")); } }} title="Обновить"><RefreshCw size={13} /></button>
@@ -272,7 +289,13 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
           <ul className="wb-tree">
             {found.map((item) => (
               <li key={`${item.rootKey}:${item.path}`}>
-                <div className={tabs.active === localFileKey(item.rootKey, item.path) ? "wb-tree-row is-active" : "wb-tree-row"} style={{ ["--depth" as string]: 0 }} onClick={() => tabs.open(localFileKey(item.rootKey, item.path))} onDoubleClick={() => tabs.open(localFileKey(item.rootKey, item.path), true)} title={item.path}>
+                <div
+                  className={["wb-tree-row", tabs.active === localFileKey(item.rootKey, item.path) ? "is-active" : "", isSelected(item.rootKey, item.path) ? "is-selected" : ""].filter(Boolean).join(" ")}
+                  style={{ ["--depth" as string]: 0 }}
+                  onClick={(event) => selectEntry(event, item.rootKey, { name: item.path.split("/").pop() || item.path, path: item.path, type: "file", size: 0, mtime: 0 })}
+                  onDoubleClick={() => tabs.open(localFileKey(item.rootKey, item.path), true)}
+                  title={item.path}
+                >
                   <FileTypeIcon name={item.path} />
                   <span className="wb-tree-label">{item.path.split("/").pop()}</span>
                   <span className="wb-tree-hint">{item.path.includes("/") ? item.path.slice(0, item.path.lastIndexOf("/")) : ws.roots.find((root) => root.key === item.rootKey)?.name}</span>
@@ -287,7 +310,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
           return (
             <ul className="wb-tree" key={root.key}>
               <li>
-                <div className="wb-tree-row wb-tree-project wb-root-row" style={{ ["--depth" as string]: 0 }} onClick={() => { setSelected({ rootKey: root.key, entry: null }); toggle(root.key, ""); }} onContextMenu={(event: MouseEvent) => { event.preventDefault(); setSelected({ rootKey: root.key, entry: null }); setMenu({ rootKey: root.key, entry: null, x: event.clientX, y: event.clientY }); }} title={root.path}>
+                <div className="wb-tree-row wb-tree-project wb-root-row" style={{ ["--depth" as string]: 0 }} onClick={() => { setSelection([{ rootKey: root.key, entry: null }]); toggle(root.key, ""); }} onContextMenu={(event: MouseEvent) => { event.preventDefault(); setSelection([{ rootKey: root.key, entry: null }]); setMenu({ rootKey: root.key, entry: null, x: event.clientX, y: event.clientY }); }} title={root.path}>
                   <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} />
                   <span className="wb-tree-label">{root.name}</span>
                   <span className="wb-root-actions">

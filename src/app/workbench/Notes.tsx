@@ -186,6 +186,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const titleRef = useRef<HTMLInputElement | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imageError, setImageError] = useState("");
+  const [shared, setShared] = useState(false);
   const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
   const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content, enabled: visible });
 
@@ -402,7 +403,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     <DocShell
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}{mergeNotice && <span className="wb-save-state is-pending"> {mergeNotice}</span>}</span>
+          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)}{shared && <span className="wb-shared-note-label">расшарена</span>} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}{mergeNotice && <span className="wb-save-state is-pending"> {mergeNotice}</span>}</span>
           {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
           <div className="wb-doc-actions">
             <select className="wb-bar-select" value={note.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} title="Проект">
@@ -425,7 +426,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
               <button type="button" className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(); setMode("preview"); }}><Eye size={13} /></button>
               <button type="button" className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")}><Pencil size={13} /></button>
             </div>
-            <ShareButton noteId={noteId} />
+            <ShareButton noteId={noteId} onSharedChange={setShared} />
             <button type="button" className={note.pinned ? "is-on" : undefined} onClick={() => void update({ pinned: !note.pinned })} title={note.pinned ? "Открепить" : "Закрепить сверху"}>{note.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
             <button type="button" className="is-danger" onClick={() => void remove()} title="Удалить заметку"><Trash2 size={14} /></button>
           </div>
@@ -505,7 +506,7 @@ type NoteShare = { token: string; mode: "view" | "edit"; created_at: string; las
  * «Поделиться»: ссылка на просмотр и ссылка на правку. Открываются в любом браузере без входа в MBOX
  * (/n/<токен>), отзываются одной кнопкой. Перевыпуск — новый токен, старая ссылка перестаёт работать.
  */
-function ShareButton({ noteId }: { noteId: string }) {
+function ShareButton({ noteId, onSharedChange }: { noteId: string; onSharedChange?: (shared: boolean) => void }) {
   const [open, setOpen] = useState(false);
   const [shares, setShares] = useState<NoteShare[]>([]);
   const [busy, setBusy] = useState("");
@@ -513,10 +514,17 @@ function ShareButton({ noteId }: { noteId: string }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
-    setShares((await fetchJson<{ shares: NoteShare[] }>(`/api/mbox/notes/${noteId}/shares`)).shares);
-  }, [noteId]);
+    const next = (await fetchJson<{ shares: NoteShare[] }>(`/api/mbox/notes/${noteId}/shares`)).shares;
+    setShares(next);
+    onSharedChange?.(next.length > 0);
+  }, [noteId, onSharedChange]);
 
-  useEffect(() => { if (open) void load().catch(() => setShares([])); }, [open, load]);
+  useEffect(() => {
+    void load().catch(() => {
+      setShares([]);
+      onSharedChange?.(false);
+    });
+  }, [load, onSharedChange]);
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => { if (!boxRef.current?.contains(event.target as Node)) setOpen(false); };
