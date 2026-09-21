@@ -40,6 +40,7 @@ import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsA
 import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent } from "./agentTabs";
 import { SkillPageDocument } from "./SkillPageDocument";
+import { FileTypeIcon } from "./FileTypeIcon";
 
 type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
@@ -444,6 +445,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
             {tabs.tabs.map((tab) => {
               const meta = tabMeta(tab.key, data, catalogTitles);
               const active = tab.key === tabs.active;
+              const isFileTab = tab.key.startsWith("file:") || tab.key.startsWith("local:");
               return (
                 <div
                   key={tab.key}
@@ -461,7 +463,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   onDrop={(event) => { event.preventDefault(); if (draggedTab) tabs.move(draggedTab, tab.key); setDraggedTab(null); }}
                   onDragEnd={() => setDraggedTab(null)}
                 >
-                  <img src={meta.icon} width={14} height={14} alt="" />
+                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={meta.icon} width={18} height={18} alt="" />}
                   <span className="wb-tab-title">{meta.title}</span>
                   <button type="button" className="wb-tab-close" onClick={(event) => { event.stopPropagation(); closeTab(tab.key); }} aria-label={`Закрыть ${meta.title}`}>
                     <X size={13} />

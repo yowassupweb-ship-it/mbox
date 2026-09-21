@@ -11,6 +11,7 @@ import { hasDraft, useDraft } from "./uiMemory";
 import { CodeEditor } from "./CodeEditor";
 import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
+import { FileTypeIcon } from "./FileTypeIcon";
 
 const PROJECT_ICONS = "/assets/icons/project";
 const FILE_ICONS = "/assets/icons/files";
@@ -215,7 +216,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                                       onDoubleClick={() => tabs.open(tabKey, true)}
                                       title={`${file.name || "Без имени"} · ${file.version} · ${file.status}`}
                                     >
-                                      <img src={fileIcon(fileKind(file), file.name)} width={16} height={16} alt="" />
+                                      <FileTypeIcon name={file.name} />
                                       <span className="wb-tree-label">{file.name || `Без имени #${file.id}`}</span>
                                       <span className="wb-tree-hint">{formatBytes(file.memory_bytes)}</span>
                                     </div>

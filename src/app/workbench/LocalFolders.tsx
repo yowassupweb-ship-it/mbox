@@ -6,7 +6,7 @@ import { usePersistentState, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
 import { onLocalReveal } from "./agentTabs";
 import { askText } from "../../ui/askText";
-import { fileIcon } from "./Files";
+import { FileTypeIcon } from "./FileTypeIcon";
 
 const PROJECT_ICONS = "/assets/icons/project";
 
@@ -24,11 +24,6 @@ export function gitLetter(change?: { index: string; worktree: string; untracked:
   if (change.untracked) return "U";
   const code = change.worktree !== " " ? change.worktree : change.index;
   return code === "?" ? "U" : code;
-}
-
-function iconFor(entry: { name: string; type: string }) {
-  if (entry.type === "dir") return `${PROJECT_ICONS}/folder.png`;
-  return fileIcon("text", entry.name);
 }
 
 type Menu = { rootKey: string; entry: DirEntry | null; x: number; y: number };
@@ -234,7 +229,9 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
             title={entry.path}
           >
             {entry.type === "dir" ? <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} /> : <span className="wb-chevron-space" />}
-            <img src={iconFor(entry)} width={16} height={16} alt="" />
+            {entry.type === "dir"
+              ? <img src={`${PROJECT_ICONS}/folder.png`} width={20} height={20} alt="" />
+              : <FileTypeIcon name={entry.name} />}
             <span className="wb-tree-label">{entry.name}</span>
             {letter && <span className={`wb-git-letter is-${letter}`}>{letter}</span>}
           </div>
@@ -276,7 +273,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
             {found.map((item) => (
               <li key={`${item.rootKey}:${item.path}`}>
                 <div className={tabs.active === localFileKey(item.rootKey, item.path) ? "wb-tree-row is-active" : "wb-tree-row"} style={{ ["--depth" as string]: 0 }} onClick={() => tabs.open(localFileKey(item.rootKey, item.path))} onDoubleClick={() => tabs.open(localFileKey(item.rootKey, item.path), true)} title={item.path}>
-                  <img src={iconFor({ name: item.path, type: "file" })} width={16} height={16} alt="" />
+                  <FileTypeIcon name={item.path} />
                   <span className="wb-tree-label">{item.path.split("/").pop()}</span>
                   <span className="wb-tree-hint">{item.path.includes("/") ? item.path.slice(0, item.path.lastIndexOf("/")) : ws.roots.find((root) => root.key === item.rootKey)?.name}</span>
                 </div>

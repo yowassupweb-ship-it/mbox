@@ -8,7 +8,7 @@ import { projectMemoryMatches } from "../../lib/memory";
 import { positionBetween, projectPosition, sortTodos } from "../../lib/tree";
 import { autoDetectEnabled, entitySummary, MANDATORY_ENTITIES, OPTIONAL_ENTITIES } from "../../pages/Projects";
 import type { Project } from "../../types";
-import { fileIcon, fileKind } from "./Files";
+import { FileTypeIcon } from "./FileTypeIcon";
 import { folderIcon } from "./tabMeta";
 import { usePersistentState, type TabsApi } from "./tabs";
 
@@ -193,7 +193,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
                     {files.map((file) => (
                       <li key={file.id}>
                         <div {...row(`file:${file.id}`)} style={{ ["--depth" as string]: 2 }} title={`${file.category} · ${file.version} · ${file.status}`}>
-                          <img src={fileIcon(fileKind(file), file.name)} width={16} height={16} alt="" />
+                          <FileTypeIcon name={file.name} />
                           <span className="wb-tree-label">{file.name || `Без имени #${file.id}`}</span>
                         </div>
                       </li>
