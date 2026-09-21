@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Eye, Palette, Pencil } from "lucide-react";
+import { Eye, Pencil } from "lucide-react";
 import { merge3 } from "../lib/merge3";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
@@ -220,13 +220,12 @@ export function SharedNotePage({ token }: { token: string }) {
         <span className="share-access">{canEdit ? "Только редактирование" : "Только просмотр"}</span>
         <button
           type="button"
-          className="share-theme-button"
+          className={`share-theme-button doc-theme-button is-${activeTheme}`}
           onClick={cycleTheme}
           aria-label={`Сменить тему. Сейчас ${THEME_LABEL[activeTheme].toLowerCase()}`}
           title="Сменить тему"
         >
-          <Palette size={14} aria-hidden="true" />
-          <span>{THEME_LABEL[activeTheme]}</span>
+          <span className="doc-theme-dot" aria-hidden="true" />
         </button>
         {showEditor && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
         {canEdit && (

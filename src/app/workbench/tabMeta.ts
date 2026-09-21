@@ -51,7 +51,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "local": {
       const path = key.split(":").slice(2).join(":");
       const name = path.split("/").pop() || path;
-      return { title: name, hint: path, icon: /\.(png|jpe?g|gif|webp|bmp|ico|avif|svg)$/i.test(name) ? `${SYSTEM}/figma.png` : /\.(md|mdx|markdown|txt|rst)$/i.test(name) ? `${PROJECT}/documents.png` : `${NAVIGATION}/folders.png` };
+      return { title: name, hint: path, icon: fileIcon("text", name) };
     }
     case "skillblocks":
       return { title: "Компоненты писем", hint: `Навык ${first} · компоненты и сборка`, icon: `${NAVIGATION}/skills.png` };
@@ -73,7 +73,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       if (first === "new") return { title: "Новый файл", hint: "Файлы", icon: `${PROJECT}/documents.png` };
       const file = data.artifacts.find((item) => item.id === first);
       const owner = data.projects.find((item) => item.id === file?.project_id);
-      return { title: file?.name || `Файл #${first}`, hint: [owner?.name ?? "Без проекта", file?.category].filter(Boolean).join(" › "), icon: file ? fileIcon(fileKind(file)) : `${PROJECT}/documents.png` };
+      return { title: file?.name || `Файл #${first}`, hint: [owner?.name ?? "Без проекта", file?.category].filter(Boolean).join(" › "), icon: file ? fileIcon(fileKind(file), file.name) : `${PROJECT}/documents.png` };
     }
     case "memory": {
       if (first === "new") return { title: "Новая запись", hint: "Память", icon: `${NAVIGATION}/memory.png` };

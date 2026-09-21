@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Bot, ChevronRight, FilePlus2, FolderPlus, GitBranch, RefreshCw, X } from "lucide-react";
 import { formatSince } from "../../lib/format";
-import { IMAGE_FILE, gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspaceBridge, type DirEntry, type GitSummary, type WorkspaceRoot } from "./localWorkspace";
+import { gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspaceBridge, type DirEntry, type GitSummary, type WorkspaceRoot } from "./localWorkspace";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
 import { onLocalReveal } from "./agentTabs";
 import { askText } from "../../ui/askText";
+import { fileIcon } from "./Files";
 
-const SYSTEM_ICONS = "/assets/icons/system";
 const PROJECT_ICONS = "/assets/icons/project";
 
 export function localFileKey(rootKey: string, rel: string) {
@@ -28,8 +28,7 @@ export function gitLetter(change?: { index: string; worktree: string; untracked:
 
 function iconFor(entry: { name: string; type: string }) {
   if (entry.type === "dir") return `${PROJECT_ICONS}/folder.png`;
-  if (IMAGE_FILE.test(entry.name)) return `${SYSTEM_ICONS}/figma.png`;
-  return /\.(md|mdx|markdown|txt|rst)$/i.test(entry.name) ? `${PROJECT_ICONS}/documents.png` : `${PROJECT_ICONS}/stack.png`;
+  return fileIcon("text", entry.name);
 }
 
 type Menu = { rootKey: string; entry: DirEntry | null; x: number; y: number };

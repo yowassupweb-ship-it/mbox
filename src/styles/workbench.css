@@ -93,7 +93,7 @@ body.wb-resizing * {
   width: 22px;
   height: 22px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
   opacity: 0.9;
 }
 
@@ -477,7 +477,7 @@ body.wb-resizing * {
 
 .wb-tree-row:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-tree-row.is-active { background: var(--wb-selected); color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
-.wb-tree-row img { flex: none; image-rendering: pixelated; }
+.wb-tree-row img { flex: none; image-rendering: auto; }
 
 .wb-tree-project { color: var(--text-main); font-weight: var(--weight-medium); }
 li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-color); }
@@ -700,7 +700,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   user-select: none;
 }
 
-.wb-tab img { flex: none; image-rendering: pixelated; opacity: 0.8; }
+.wb-tab img { flex: none; image-rendering: auto; opacity: 0.8; }
 .wb-tab:hover { background: var(--wb-hover); color: var(--text-2); }
 .wb-tab.is-active { background: var(--bg-color); color: var(--text-main); box-shadow: inset 0 1px 0 var(--accent-color); }
 .wb-tab.is-active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg-color); }
@@ -1956,8 +1956,29 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 .wb-note-surface > .wb-note-edit,
 .wb-note-surface > .wb-reading { flex: 1; min-height: 0; }
-.wb-note-theme-select { max-width: 122px; }
 .wb-note-color-select { max-width: 96px; }
+
+.wb-doc-actions .doc-theme-button,
+.share-theme-button.doc-theme-button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+}
+
+.doc-theme-dot {
+  width: 14px;
+  height: 14px;
+  display: block;
+  border: 1px solid color-mix(in srgb, var(--text-main) 34%, transparent);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 12%, transparent);
+}
+
+.doc-theme-button.is-light .doc-theme-dot { background: var(--doc-light-bg); }
+.doc-theme-button.is-graphite .doc-theme-dot { background: var(--doc-graphite-bg); }
+.doc-theme-button.is-black .doc-theme-dot { background: var(--doc-black-bg); }
 
 .wb-note-editor {
   flex: 1;
@@ -2641,11 +2662,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 6px;
   height: 28px;
-  padding: 0 9px;
+  padding: 0;
   border: 1px solid var(--wb-line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   background: var(--wb-surface-2);
   color: var(--text-2);
   font: inherit;
@@ -2676,8 +2696,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   .share-doc { padding: 24px 16px 30vh; }
   .share-title, .share-title-input { font-size: 22px; }
   .share-toggle button { padding: 0 8px; }
-  .share-theme-button span { display: none; }
-  .share-theme-button { width: 30px; justify-content: center; padding: 0; }
+  .share-theme-button { justify-content: center; }
   .share-status { display: none; }
   .share-bar .wb-md-toolbar { display: none; }
 }

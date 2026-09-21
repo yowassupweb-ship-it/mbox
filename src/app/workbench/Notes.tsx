@@ -29,11 +29,12 @@ const NOTE_COLORS: Array<{ value: NoteColor; label: string }> = [
   { value: "gray", label: "Серая" },
 ];
 
-const NOTE_THEMES: Array<{ value: NoteTheme; label: string }> = [
-  { value: "light", label: "Светлый документ" },
-  { value: "graphite", label: "Графитовый документ" },
-  { value: "black", label: "Чёрный документ" },
-];
+const NOTE_THEME_ORDER: NoteTheme[] = ["light", "graphite", "black"];
+const NOTE_THEME_LABEL: Record<NoteTheme, string> = { light: "светлая", graphite: "графитовая", black: "чёрная" };
+
+function nextNoteTheme(theme: NoteTheme) {
+  return NOTE_THEME_ORDER[(NOTE_THEME_ORDER.indexOf(theme) + 1) % NOTE_THEME_ORDER.length];
+}
 
 /** Список заметок общий для боковой панели и заголовков вкладок; вкладка заметки сообщает о правках. */
 const notesStore = {
@@ -352,6 +353,8 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   if (!note) return <div className="wb-doc-missing">Открываю заметку…</div>;
 
   const stateLabel = { saved: "сохранено", pending: "…", saving: "сохраняю…", error: "не сохранилось — Ctrl+S ещё раз" }[state];
+  const activeTheme = note.theme || "graphite";
+  const nextTheme = nextNoteTheme(activeTheme);
 
   return (
     <DocShell
@@ -364,9 +367,15 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
               <option value="">без проекта</option>
               {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
-            <select className="wb-bar-select wb-note-theme-select" value={note.theme || "graphite"} onChange={(event) => void update({ theme: event.target.value as NoteTheme })} title="Тема документа" aria-label="Тема документа">
-              {NOTE_THEMES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+            <button
+              type="button"
+              className={`doc-theme-button is-${activeTheme}`}
+              onClick={() => void update({ theme: nextTheme })}
+              title={`Тема документа: ${NOTE_THEME_LABEL[activeTheme]}`}
+              aria-label={`Тема документа: ${NOTE_THEME_LABEL[activeTheme]}. Переключить на ${NOTE_THEME_LABEL[nextTheme]}`}
+            >
+              <span className="doc-theme-dot" aria-hidden="true" />
+            </button>
             <select className="wb-bar-select wb-note-color-select" value={note.color || "default"} onChange={(event) => void update({ color: event.target.value as NoteColor })} title="Цвет карточки" aria-label="Цвет карточки">
               {NOTE_COLORS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>

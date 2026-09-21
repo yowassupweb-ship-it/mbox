@@ -193,7 +193,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
                     {files.map((file) => (
                       <li key={file.id}>
                         <div {...row(`file:${file.id}`)} style={{ ["--depth" as string]: 2 }} title={`${file.category} · ${file.version} · ${file.status}`}>
-                          <img src={fileIcon(fileKind(file))} width={16} height={16} alt="" />
+                          <img src={fileIcon(fileKind(file), file.name)} width={16} height={16} alt="" />
                           <span className="wb-tree-label">{file.name || `Без имени #${file.id}`}</span>
                         </div>
                       </li>
