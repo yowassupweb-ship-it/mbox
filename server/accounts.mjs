@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from "node:crypto";
+
 export async function ensureAccountsSchema(query) {
   await query(`CREATE TABLE IF NOT EXISTS project_memberships (
     project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -7,6 +9,15 @@ export async function ensureAccountsSchema(query) {
     PRIMARY KEY (project_id, user_id)
   )`);
   await query("CREATE INDEX IF NOT EXISTS idx_project_memberships_user ON project_memberships(user_id, project_id)");
+  await query(`CREATE TABLE IF NOT EXISTS account_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL DEFAULT 'VS Code',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+  )`);
+  await query("CREATE INDEX IF NOT EXISTS idx_account_tokens_user ON account_tokens(user_id, created_at DESC)");
 }
 
 const ownerOnly = (user, sendJson, res) => {
@@ -41,6 +52,33 @@ async function replaceMemberships(query, userId, projectIds) {
 }
 
 export async function handleAccountsApi({ req, res, url, query, readBody, sendJson, user }) {
+  if (url.pathname === "/api/mbox/account/tokens" && req.method === "GET") {
+    const result = await query(
+      "SELECT id::text, label, created_at::text, last_used_at::text FROM account_tokens WHERE user_id = $1 ORDER BY created_at DESC",
+      [user.id],
+    );
+    sendJson(res, 200, { tokens: result.rows });
+    return true;
+  }
+  if (url.pathname === "/api/mbox/account/tokens" && req.method === "POST") {
+    const body = await readBody(req);
+    const token = `mbox_${randomBytes(32).toString("base64url")}`;
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const result = await query(
+      `INSERT INTO account_tokens(user_id, token_hash, label)
+       VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'VS Code'))
+       RETURNING id::text, label, created_at::text`,
+      [user.id, tokenHash, String(body.label || "VS Code").trim()],
+    );
+    sendJson(res, 201, { token, credential: result.rows[0] });
+    return true;
+  }
+  const tokenMatch = url.pathname.match(/^\/api\/mbox\/account\/tokens\/(\d+)$/);
+  if (tokenMatch && req.method === "DELETE") {
+    const result = await query("DELETE FROM account_tokens WHERE id = $1 AND user_id = $2 RETURNING id::text", [tokenMatch[1], user.id]);
+    sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { ok: true } : { error: "not_found" });
+    return true;
+  }
   if (url.pathname === "/api/mbox/admin/users" && req.method === "GET") {
     if (!ownerOnly(user, sendJson, res)) return true;
     sendJson(res, 200, { users: await accountRows(query) });

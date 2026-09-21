@@ -258,6 +258,10 @@ export function SharedNotePage({ token }: { token: string }) {
   const canEdit = mode === "edit";
   const showEditor = canEdit && editing;
   const activeTheme = viewerTheme || theme;
+  useEffect(() => {
+    document.documentElement.dataset.theme = activeTheme;
+    document.documentElement.style.colorScheme = activeTheme === "light" ? "light" : "dark";
+  }, [activeTheme]);
   const cycleTheme = () => {
     const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(activeTheme) + 1) % THEME_ORDER.length];
     setViewerTheme(nextTheme);

@@ -11,7 +11,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const config = loadConfig();
 const baseUrl = requireValue(config.MBOX_URL, "MBOX_URL");
 const username = config.MBOX_USERNAME || "Admin";
-const password = requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD");
+const accessToken = String(config.MBOX_TOKEN || "").trim();
+const password = accessToken ? "" : requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
 const agentName = config.MBOX_AGENT_NAME || "Codex";
 const project = config.MBOX_PROJECT || "MBOX";
 const pollMs = Number(config.MBOX_WATCH_POLL_MS || 5000);
@@ -27,8 +28,9 @@ const aliases = (config.CODEX_CHAT_ALIASES || "codex,Codex,кодекс,Коде
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
-const seenPath = path.join(os.tmpdir(), `codex-chat-watcher-seen-${agentName}-${project}.json`);
-const lockPath = path.join(os.tmpdir(), `codex-chat-watcher-${agentName}-${project}.lock`);
+const accountKey = username.replace(/[^a-z0-9_-]+/gi, "_");
+const seenPath = path.join(os.tmpdir(), `codex-chat-watcher-seen-${accountKey}-${agentName}-${project}.json`);
+const lockPath = path.join(os.tmpdir(), `codex-chat-watcher-${accountKey}-${agentName}-${project}.lock`);
 const logPrefix = `[${agentName} chat]`;
 
 let cookie = "";
@@ -226,17 +228,18 @@ async function login() {
 }
 
 async function mboxFetch(apiPath, init = {}) {
-  if (!cookie) await login();
+  if (!accessToken && !cookie) await login();
   const response = await fetch(`${baseUrl}${apiPath}`, {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      cookie,
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }),
       "x-mbox-agent": agentName,
       ...(init.headers || {}),
     },
   });
   if (response.status === 401) {
+    if (accessToken) throw new Error("MBOX token rejected");
     cookie = "";
     await login();
     return mboxFetch(apiPath, init);

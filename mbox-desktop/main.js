@@ -659,7 +659,7 @@ function sessionMeta(session) {
     command: session.command,
     cwd: session.cwd,
     pid: session.child?.pid ?? session.pty?.pid ?? null,
-    terminal: Boolean(session.pty),
+    terminal: session.kind === "ssh",
     status: session.status,
     code: session.code,
     startedAt: session.startedAt,
@@ -716,11 +716,15 @@ function startSession({ id, kind, title, command, cwd, child, reveal = true, log
 
 function markStopped(id) {
   const session = sessions.get(id);
-  if (session?.status === "running") session.stopRequested = true;
+  if (session?.status === "running") {
+    session.stopRequested = true;
+    if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
 }
 
 function listSessions() {
-  return [...sessions.values()].map((session) => ({ ...sessionMeta(session), lines: session.lines.slice(-500), buffer: session.pty ? session.buffer : undefined }));
+  return [...sessions.values()].map((session) => ({ ...sessionMeta(session), lines: session.lines.slice(-500), buffer: session.kind === "ssh" ? session.buffer : undefined }));
 }
 
 function sendSessionInput(id, input) {
@@ -736,6 +740,8 @@ function resizeSession(id, cols, rows) {
   if (!session?.pty || session.status !== "running") return { ok: false };
   const safeCols = Math.max(20, Math.min(500, Math.floor(Number(cols) || 0)));
   const safeRows = Math.max(5, Math.min(200, Math.floor(Number(rows) || 0)));
+  session.cols = safeCols;
+  session.rows = safeRows;
   try { session.pty.resize(safeCols, safeRows); } catch { return { ok: false }; }
   return { ok: true };
 }
@@ -762,7 +768,13 @@ async function stopSession(id) {
     if (session.pty) {
       try { session.pty.kill(); } catch { killTree(session.pty.pid); }
     } else {
-      killTree(session.child?.pid);
+      if (session.kind === "ssh") {
+        session.status = "stopped";
+        session.endedAt = Date.now();
+        emitSession({ id, event: "exited", code: null, session: sessionMeta(session) });
+      } else {
+        killTree(session.child?.pid);
+      }
     }
   }
   return { ok: true };
@@ -801,6 +813,89 @@ function normalizeSshTarget(raw) {
 // спросить пароль и ключевую фразу, а удалённая оболочка не получает TTY — ни Tab, ни vim, ни Ctrl+C.
 // Страница рисует поток в xterm.js; буфер хранит хвост вывода, чтобы панель, открытая позже, увидела экран.
 const SSH_BUFFER_LIMIT = 256 * 1024;
+const SSH_RECONNECT_MIN_MS = 2000;
+const SSH_RECONNECT_MAX_MS = 15000;
+
+function sshJumpHost() {
+  const host = responderEnv.MBOX_SSH_HOST || (() => { try { return new URL(mboxUrl).hostname; } catch { return ""; } })();
+  if (!host) return "";
+  return responderEnv.MBOX_SSH_JUMP || `${responderEnv.MBOX_SSH_USER || "root"}@${host}`;
+}
+
+function sshArgs(target, port) {
+  const args = [
+    "-tt",
+    "-o", "ServerAliveInterval=20",
+    "-o", "ServerAliveCountMax=3",
+    "-o", "TCPKeepAlive=yes",
+    "-o", "ConnectTimeout=12"
+  ];
+  const jump = sshJumpHost();
+  const targetHost = target.split("@").pop().toLowerCase();
+  const jumpHost = jump.split("@").pop().toLowerCase();
+  if (jump && targetHost !== jumpHost) args.push("-J", jump);
+  if (port) args.push("-p", String(port));
+  args.push(target);
+  return args;
+}
+
+function appendSshData(session, data) {
+  session.buffer += data;
+  if (session.buffer.length > SSH_BUFFER_LIMIT) session.buffer = session.buffer.slice(-SSH_BUFFER_LIMIT);
+  emitSession({ id: session.id, event: "data", data });
+}
+
+function connectSshSession(session) {
+  if (session.stopRequested || sessions.get(session.id) !== session) return;
+  const pty = require("node-pty");
+  let term;
+  try {
+    term = pty.spawn("ssh.exe", sshArgs(session.target, session.port), {
+      name: "xterm-256color",
+      cols: session.cols,
+      rows: session.rows,
+      cwd: os.homedir(),
+      env: { ...process.env, TERM: "xterm-256color" }
+    });
+  } catch (error) {
+    appendSshData(session, `\r\n\x1b[33m— SSH не запустился: ${error.message}. Повторю подключение. —\x1b[0m\r\n`);
+    scheduleSshReconnect(session);
+    return;
+  }
+  session.pty = term;
+  session.status = "running";
+  session.code = null;
+  session.endedAt = null;
+  term.onData((data) => {
+    if (sessions.get(session.id) !== session || session.pty !== term) return;
+    session.reconnectAttempts = 0;
+    appendSshData(session, data);
+  });
+  term.onExit(({ exitCode }) => {
+    if (sessions.get(session.id) !== session || session.pty !== term) return;
+    session.pty = null;
+    if (session.stopRequested) {
+      session.status = "stopped";
+      session.code = null;
+      session.endedAt = Date.now();
+      emitSession({ id: session.id, event: "exited", code: null, session: sessionMeta(session) });
+      return;
+    }
+    session.code = exitCode ?? null;
+    scheduleSshReconnect(session);
+  });
+}
+
+function scheduleSshReconnect(session) {
+  if (session.stopRequested || sessions.get(session.id) !== session) return;
+  session.reconnectAttempts = (session.reconnectAttempts || 0) + 1;
+  const delay = Math.min(SSH_RECONNECT_MAX_MS, SSH_RECONNECT_MIN_MS * session.reconnectAttempts);
+  appendSshData(session, `\r\n\x1b[33m— SSH через MBOX prod разорван. Переподключение через ${Math.ceil(delay / 1000)} с… —\x1b[0m\r\n`);
+  session.reconnectTimer = setTimeout(() => {
+    session.reconnectTimer = null;
+    connectSshSession(session);
+  }, delay);
+}
 
 function startSshSession(rawTarget, cols, rows) {
   const { target, port, label } = normalizeSshTarget(rawTarget);
@@ -810,47 +905,34 @@ function startSshSession(rawTarget, cols, rows) {
     emitSession({ id, event: "started", reveal: true, session: sessionMeta(previous) });
     return { ok: true, id, pid: previous.pty?.pid ?? null, target: label, reused: true };
   }
-  const args = [];
-  if (port) args.push("-p", String(port));
-  args.push(target);
-  const pty = require("node-pty");
-  const term = pty.spawn("ssh.exe", args, {
-    name: "xterm-256color",
-    cols: Math.max(20, Math.min(500, Math.floor(Number(cols) || 100))),
-    rows: Math.max(5, Math.min(200, Math.floor(Number(rows) || 30))),
-    cwd: os.homedir(),
-    env: { ...process.env, TERM: "xterm-256color" }
-  });
+  const safeCols = Math.max(20, Math.min(500, Math.floor(Number(cols) || 100)));
+  const safeRows = Math.max(5, Math.min(200, Math.floor(Number(rows) || 30)));
+  const routeArgs = sshArgs(target, port);
   const session = {
     id,
     kind: "ssh",
     title: `SSH · ${label}`,
-    command: `ssh ${port ? `-p ${port} ` : ""}${target}`,
+    command: `ssh ${routeArgs.join(" ")}`,
     cwd: os.homedir(),
-    pty: term,
+    pty: null,
     buffer: "",
     lines: [],
     status: "running",
     code: null,
     startedAt: Date.now(),
-    endedAt: null
+    endedAt: null,
+    target,
+    port,
+    cols: safeCols,
+    rows: safeRows,
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    stopRequested: false
   };
   sessions.set(id, session);
   emitSession({ id, event: "started", reveal: true, session: sessionMeta(session) });
-  term.onData((data) => {
-    if (sessions.get(id) !== session) return;
-    session.buffer += data;
-    if (session.buffer.length > SSH_BUFFER_LIMIT) session.buffer = session.buffer.slice(-SSH_BUFFER_LIMIT);
-    emitSession({ id, event: "data", data });
-  });
-  term.onExit(({ exitCode }) => {
-    if (sessions.get(id) !== session) return;
-    session.status = session.stopRequested ? "stopped" : "exited";
-    session.code = session.stopRequested ? null : exitCode ?? null;
-    session.endedAt = Date.now();
-    emitSession({ id, event: "exited", code: session.code, session: sessionMeta(session) });
-  });
-  return { ok: true, id, pid: term.pid, target: label };
+  connectSshSession(session);
+  return { ok: true, id, pid: session.pty?.pid ?? null, target: label, jump: sshJumpHost() };
 }
 
 const crypto = require("crypto");
@@ -1486,6 +1568,7 @@ ipcMain.handle("mbox-desktop:tool-status", async () => toolStatus());
 app.on("before-quit", () => {
   for (const toolId of [...runningTools.keys()]) stopTool(toolId);
   for (const session of sessions.values()) {
+    if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
     if (session.status === "running" && session.kind === "agent") killTree(session.child?.pid);
     if (session.status === "running" && session.pty) {
       try { session.pty.kill(); } catch {}

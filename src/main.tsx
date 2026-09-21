@@ -201,7 +201,10 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
               theme={theme}
               onThemeChange={onThemeChange}
               server={<ServerBoard pulse={realtime.pulse} />}
-              access={<AccessBoard user={user} secrets={data.secrets} agents={data.agents} projects={data.projects} inbox={data.inbox} runs={data.runs} decisions={data.decisions} onSaved={data.reload} onLogout={onLogout} />}
+              access={<AccessBoard user={user} onLogout={onLogout} />}
+              team={<TeamBoard user={user} projects={data.projects} />}
+              passwords={<PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} />}
+              logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
             />
           ),
           todo: (project, todo) => <TodoNote project={project} todo={todo} onSaved={data.reload} />,
@@ -565,10 +568,18 @@ function HistoryBoard({ events }: { events: AuditEvent[] }) {
     </Panel>
   );
 }
-/** Сервер и Доступ раньше были двумя кнопками нижнего меню — сведены в одну «Настройки» с
- * внутренним переключателем, задача стояла с самого начала переверстки и не отменялась. */
-function SettingsBoard({ server, access, theme, onThemeChange }: { server: ReactNode; access: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
-  const [tab, setTab] = useState<"appearance" | "server" | "access">("appearance");
+type SettingsTab = "appearance" | "server" | "access" | "team" | "passwords" | "logs";
+
+function SettingsBoard({ server, access, team, passwords, logs, theme, onThemeChange }: { server: ReactNode; access: ReactNode; team: ReactNode; passwords: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+  const [tab, setTab] = useState<SettingsTab>("appearance");
+  const content: Record<SettingsTab, ReactNode> = {
+    appearance: <AppearanceSettings theme={theme} onChange={onThemeChange} />,
+    server,
+    access,
+    team,
+    passwords,
+    logs,
+  };
   return (
     <div className="settings-board">
       <div className="settings-tabs" role="tablist" aria-label="Настройки">
@@ -581,8 +592,17 @@ function SettingsBoard({ server, access, theme, onThemeChange }: { server: React
         <button role="tab" aria-selected={tab === "access"} className={tab === "access" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("access")}>
           <ShieldCheck size={16} /> Доступ
         </button>
+        <button role="tab" aria-selected={tab === "team"} className={tab === "team" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("team")}>
+          <GitBranch size={16} /> Команда
+        </button>
+        <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
+          <LockKeyhole size={16} /> Пароли
+        </button>
+        <button role="tab" aria-selected={tab === "logs"} className={tab === "logs" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("logs")}>
+          <History size={16} /> Логи
+        </button>
       </div>
-      {tab === "appearance" ? <AppearanceSettings theme={theme} onChange={onThemeChange} /> : tab === "server" ? server : access}
+      {content[tab]}
     </div>
   );
 }
@@ -794,7 +814,120 @@ function TodoForm({ projects, onSaved }: { projects: Project[]; onSaved: () => v
     </ManualForm>
   );
 }
-function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, onSaved, onLogout }: { user: { username: string; role: string }; secrets: SecretSummary[]; agents: AgentActivity[]; projects: Project[]; inbox: AgentInboxItem[]; runs: AgentRun[]; decisions: DecisionEntry[]; onSaved: () => void; onLogout: () => void }) {
+function AccessBoard({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
+  return (
+    <div className="content-grid settings-grid">
+      <Panel title="Аккаунт" icon={ShieldCheck}>
+        <div className="entity-list">
+          <EntityLine title="Пользователь" value={`${user.username} · ${user.role}`} />
+          <EntityLine title="Новые аккаунты" value={user.role === "owner" ? "создаёт владелец" : "управляет владелец"} />
+          <EntityLine title="Права" value="private / agents / public" />
+          <button className="primary-action" onClick={async () => {
+            await fetch("/api/mbox/auth/logout", { method: "POST" });
+            onLogout();
+          }}>Выйти</button>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function TeamBoard({ user, projects }: { user: { username: string; role: string }; projects: Project[] }) {
+  return (
+    <div className="content-grid settings-single-grid">
+      {user.role === "owner"
+        ? <AccountManager projects={projects} />
+        : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
+      <ResponderAccess username={user.username} />
+    </div>
+  );
+}
+
+type AccountToken = { id: string; label: string; created_at: string; last_used_at: string | null };
+
+function ResponderAccess({ username }: { username: string }) {
+  const [tokens, setTokens] = useState<AccountToken[]>([]);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => fetchJson<{ tokens: AccountToken[] }>("/api/mbox/account/tokens").then((result) => setTokens(result.tokens)), []);
+  useEffect(() => { void load(); }, [load]);
+  const agentName = `Codex-${username.replace(/\s+/g, "-")}`;
+  const command = token ? [
+    `$env:MBOX_URL='https://mbox.shar-os.ru'`,
+    `$env:MBOX_USERNAME='${username.replace(/'/g, "''")}'`,
+    `$env:MBOX_TOKEN='${token}'`,
+    `$env:MBOX_AGENT_NAME='${agentName.replace(/'/g, "''")}'`,
+    `node scripts/codex-chat-watcher.mjs`,
+  ].join("\n") : "";
+
+  async function createToken() {
+    setBusy(true);
+    try {
+      const result = await fetchJson<{ token: string }>("/api/mbox/account/tokens", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ label: `${username} · VS Code` }),
+      });
+      setToken(result.token);
+      await load();
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Panel title="Responder в VS Code" icon={Zap}>
+      <div className="responder-access">
+        <p>Персональный ключ подключает Codex/Claude и MBOX MCP к вашему аккаунту. Он видит только ваши сообщения и назначенные проекты.</p>
+        <button className="primary-action" type="button" disabled={busy} onClick={() => void createToken()}><KeyRound size={16} />{busy ? "Создаю…" : "Создать ключ VS Code"}</button>
+        {token && (
+          <div className="responder-token">
+            <strong>Скопируйте сейчас — повторно ключ не показывается</strong>
+            <textarea value={command} readOnly rows={6} aria-label="Команды подключения responder" />
+            <button type="button" onClick={() => void navigator.clipboard.writeText(command)}>Скопировать команды</button>
+          </div>
+        )}
+        <div className="account-list">
+          {tokens.map((item) => (
+            <div className="account-row responder-key-row" key={item.id}>
+              <div className="account-identity"><strong>{item.label}</strong><span>Создан {formatDateTime(item.created_at)}{item.last_used_at ? ` · использован ${formatSince(item.last_used_at)}` : " · ещё не использован"}</span></div>
+              <button type="button" onClick={async () => { await fetchJson(`/api/mbox/account/tokens/${item.id}`, { method: "DELETE" }); await load(); }}>Отозвать</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function LogsBoard({ runs, decisions }: { runs: AgentRun[]; decisions: DecisionEntry[] }) {
+  return (
+    <div className="content-grid settings-grid">
+      <Panel title="Agent run log" icon={History}>
+        <div className="agent-entity-list">
+          {runs.length ? runs.slice(0, 50).map((run) => (
+            <div className="agent-entity-row" key={run.id}>
+              <strong>{run.goal || `Run #${run.id}`}</strong>
+              <span>{run.agent_name} · {run.status} · файлов: {Array.isArray(run.touched_files) ? run.touched_files.length : 0} · {formatBytes(run.memory_bytes)}</span>
+              {run.result && <p>{run.result}</p>}
+            </div>
+          )) : <EmptyState text="Run log пуст" />}
+        </div>
+      </Panel>
+      <Panel title="Decision log" icon={Flag}>
+        <div className="agent-entity-list">
+          {decisions.length ? decisions.slice(0, 50).map((decision) => (
+            <div className="agent-entity-row" key={decision.id}>
+              <strong>{decision.title}</strong>
+              <span>{decision.actor} · {formatBytes(decision.memory_bytes)}</span>
+              <p>{decision.decision || decision.rationale}</p>
+            </div>
+          )) : <EmptyState text="Решений пока нет" />}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function PasswordsBoard({ secrets, projects, onSaved }: { secrets: SecretSummary[]; projects: Project[]; onSaved: () => void }) {
   const [items, setItems] = useState(secrets);
   const [formOpen, setFormOpen] = useState(false);
   const [editingSecret, setEditingSecret] = useState<SecretSummary | null>(null);
@@ -835,100 +968,8 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
   }
 
   return (
-    <div className="content-grid settings-grid">
-      <Panel title="Аккаунтинг" icon={ShieldCheck}>
-        <div className="entity-list">
-          <EntityLine title="Пользователь" value={`${user.username} · ${user.role}`} />
-          <EntityLine title="Новые аккаунты" value={user.role === "owner" ? "создаёт владелец" : "управляет владелец"} />
-          <EntityLine title="Права" value="private / agents / public" />
-          <button className="primary-action" onClick={async () => {
-            await fetch("/api/mbox/auth/logout", { method: "POST" });
-            onLogout();
-          }}>Выйти</button>
-        </div>
-      </Panel>
-      {user.role === "owner" && <AccountManager projects={projects} />}
-      <Panel title="Агенты" icon={GitBranch}>
-        <div className="entity-list">
-          {agents.length ? agents.map((agent) => {
-            const status = effectiveStatus(agent);
-            const working = isAgentWorking(agent, runs);
-            return (
-              <div className="agent-row" key={agent.id}>
-                <div className="agent-row-id">
-                  <AgentAvatar name={agent.name} status={status} live={working} size={40} />
-                  <div>
-                    <strong>{agent.name}</strong>
-                    <span>{agent.kind}{agent.client ? ` · ${agent.client}` : ""} · {agent.scope}</span>
-                  </div>
-                </div>
-                <div className="agent-status">
-                  <span className={`agent-state ${working ? "working" : status}`}>{working ? "в работе" : agentStatusLabels[status] || status}</span>
-                  <small>{agent.active_sessions} сессий · {agent.events} действий · {formatSince(agent.last_seen)}</small>
-                </div>
-              </div>
-            );
-          }) : <EmptyState text="Агенты пока не подключались" />}
-        </div>
-      </Panel>
-      <Panel title="Inbox агента" icon={BookOpen}>
-        <div className="agent-entity-list">
-          {inbox.length ? inbox.slice(0, 8).map((item) => (
-            <div className={item.requires_human ? "agent-entity-row needs-human" : "agent-entity-row"} key={item.id}>
-              <strong>{item.title}</strong>
-              <span>{item.agent_name} · {item.item_type} · {item.status} · {item.priority} · {formatBytes(item.memory_bytes)}</span>
-              {item.body && <p>{item.body}</p>}
-            </div>
-          )) : <EmptyState text="Inbox агента пуст" />}
-        </div>
-      </Panel>
-      <Panel title="Agent run log" icon={History}>
-        <div className="agent-entity-list">
-          {runs.length ? runs.slice(0, 8).map((run) => (
-            <div className="agent-entity-row" key={run.id}>
-              <strong>{run.goal || `Run #${run.id}`}</strong>
-              <span>{run.agent_name} · {run.status} · файлов: {Array.isArray(run.touched_files) ? run.touched_files.length : 0} · {formatBytes(run.memory_bytes)}</span>
-              {run.result && <p>{run.result}</p>}
-            </div>
-          )) : <EmptyState text="Run log пуст" />}
-        </div>
-      </Panel>
-      <Panel title="Decision log" icon={Flag}>
-        <div className="agent-entity-list">
-          {decisions.length ? decisions.slice(0, 8).map((decision) => (
-            <div className="agent-entity-row" key={decision.id}>
-              <strong>{decision.title}</strong>
-              <span>{decision.actor} · {formatBytes(decision.memory_bytes)}</span>
-              <p>{decision.decision || decision.rationale}</p>
-            </div>
-          )) : <EmptyState text="Решений пока нет" />}
-        </div>
-      </Panel>
-      <Panel title="Инструкция AI" icon={BookOpen}>
-        <div className="agent-guide">
-          <div>
-            <strong>Перед работой</strong>
-            <span>/api/mbox/agent/structure, затем /api/mbox/projects, затем /api/mbox/history</span>
-          </div>
-          <div>
-            <strong>Задачи</strong>
-            <span>Todo MBOX хранятся в проекте MBOX. Активная задача обновляется через PATCH /api/mbox/todos/:id.</span>
-          </div>
-          <div>
-            <strong>Связи</strong>
-            <span>Связанные проекты фиксируются отдельной сущностью graph_edges, а не только текстом в заметке.</span>
-          </div>
-          <div>
-            <strong>Контекст</strong>
-            <span>Короткая мысль идет в note, машинные факты идут в props: контекст, критерий, зависимость, экран, владелец.</span>
-          </div>
-          <div>
-            <strong>Доступы</strong>
-            <span>Логины и пароли агент читает только после одобрения через защищенную часть.</span>
-          </div>
-        </div>
-      </Panel>
-      <Panel title="Защищенное" icon={LockKeyhole}>
+    <div className="content-grid settings-single-grid">
+      <Panel title="Пароли" icon={LockKeyhole}>
         <div className="entity-list">
           <button className="primary-action add-secret-action" onClick={() => {
             setFormOpen((value) => !value);
@@ -959,7 +1000,7 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
               )}
             </div>
           )) : <EmptyState text="Логины и пароли пока не добавлены" />}
-          <div className="secret-policy">Пароли не показываются в списке. Агент получает доступ только после отдельного одобрения, а список агентов показывает, кому именно можно выдавать доступ.</div>
+          <div className="secret-policy">Пароли не показываются в списке. Агент получает доступ только после отдельного одобрения.</div>
         </div>
       </Panel>
     </div>

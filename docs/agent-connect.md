@@ -25,8 +25,13 @@ the MBOX access tools.
 
 Recommended local setup:
 
-- `MBOX_URL`, `MBOX_USERNAME`, `MBOX_PASSWORD`, `MBOX_AGENT_NAME` live in user-level environment
-  variables or another OS-level secret store.
+- In MBOX open **Настройки → Команда → Responder в VS Code** and create a personal key.
+- Set `MBOX_URL`, `MBOX_USERNAME`, `MBOX_TOKEN`, `MBOX_AGENT_NAME` in the VS Code terminal or its
+  user-level secret environment. `MBOX_TOKEN` is preferred over a password and can be revoked
+  independently without changing the account password.
+- `scripts/mbox-mcp-server.mjs`, `codex-chat-watcher.mjs`, `codex-inbox-watcher.mjs`, and
+  `claude-inbox-watcher.mjs` all accept the same personal token. Server-side authorization keeps the
+  responder inside that account's project memberships and private inbox/Jarvis history.
 - `~/.codex/config.toml` and Claude config may contain non-secret MCP command paths and non-secret
   labels only.
 - Project-level files may strengthen context, but must not be the only source of the MBOX contract.

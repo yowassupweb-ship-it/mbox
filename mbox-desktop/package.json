@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
@@ -30,7 +30,14 @@
       "resources/**/*",
       "package.json",
       "localUi.js",
-      "ui/**/*"
+      "ui/**/*",
+      "!node_modules/node-pty/prebuilds/darwin-*/**",
+      "!node_modules/node-pty/prebuilds/win32-arm64/**",
+      "!node_modules/node-pty/prebuilds/win32-x64/**/*.pdb",
+      "!node_modules/node-pty/build/**",
+      "!node_modules/node-pty/deps/**",
+      "!node_modules/node-pty/src/**",
+      "!node_modules/node-pty/third_party/**"
     ],
     "extraResources": [
       {
@@ -61,7 +68,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "asarUnpack": [
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/prebuilds/win32-x64/**"
     ],
     "npmRebuild": false
   }

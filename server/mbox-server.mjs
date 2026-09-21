@@ -829,6 +829,22 @@ async function recordMemoryAction({ memoryId, actor = "agent", action, note = ""
 }
 
 async function currentUser(req) {
+  const authorization = String(req.headers.authorization || "");
+  const apiToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : String(req.headers["x-mbox-token"] || "").trim();
+  if (apiToken) {
+    const tokenHash = createHash("sha256").update(apiToken).digest("hex");
+    const result = await query(
+      `SELECT u.id::text, u.username, u.role, t.id::text AS token_id, t.last_used_at
+       FROM account_tokens t JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = $1`,
+      [tokenHash],
+    );
+    const found = result.rows[0];
+    if (found && (!found.last_used_at || Date.now() - new Date(found.last_used_at).getTime() > 300000)) {
+      await query("UPDATE account_tokens SET last_used_at = now() WHERE id = $1", [found.token_id]);
+    }
+    return found ? { id: found.id, username: found.username, role: found.role } : null;
+  }
   const token = getCookie(req, "mbox_session");
   if (!token) return null;
   const tokenHash = createHash("sha256").update(token).digest("hex");

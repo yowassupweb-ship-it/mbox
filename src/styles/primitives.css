@@ -183,8 +183,16 @@
 
 .settings-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   align-self: start;
+}
+
+.settings-single-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
 }
 
 .settings-tab {

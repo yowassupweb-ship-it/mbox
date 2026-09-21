@@ -4,6 +4,7 @@ import { z } from "zod";
 
 const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "Admin";
+const accessToken = String(process.env.MBOX_TOKEN || "").trim();
 const password = process.env.MBOX_PASSWORD;
 // Имя агента обязательно. Молчаливый дефолт «MBOX Agent» плодил призраков: сессия без переменной
 // окружения заводила отдельного агента, и в ростере появлялись лишние имена рядом с настоящими.
@@ -12,8 +13,8 @@ const agentAliases = [agentName, ...(process.env.MBOX_AGENT_ALIASES || "").split
   .map((alias) => String(alias || "").trim())
   .filter(Boolean);
 
-if (!baseUrl || !password) {
-  console.error("MBOX_URL and MBOX_PASSWORD are required");
+if (!baseUrl || (!password && !accessToken)) {
+  console.error("MBOX_URL and either MBOX_TOKEN or MBOX_PASSWORD are required");
   process.exit(1);
 }
 
@@ -30,12 +31,12 @@ function isAgentAlias(value) {
 }
 
 async function mboxFetch(path, init = {}) {
-  if (!cookie) await login();
+  if (!accessToken && !cookie) await login();
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
-      cookie,
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }),
       // HTTP-заголовки — только ASCII; кириллическое имя агента ломало fetch с "character ...
       // greater than 255". Кодируем на выходе, сервер декодирует (actorFromReq/resolveRequestActor).
       "x-mbox-agent": encodeURIComponent(agentName),
@@ -43,6 +44,7 @@ async function mboxFetch(path, init = {}) {
     },
   });
   if (response.status === 401) {
+    if (accessToken) throw new Error("MBOX token rejected");
     cookie = "";
     await login();
     return mboxFetch(path, init);

@@ -879,6 +879,22 @@ function suggestMemoryHierarchy(input: Record<string, any>, memories: Array<Memo
 }
 
 async function currentUser(req: IncomingMessage) {
+  const authorization = String(req.headers.authorization || "");
+  const apiToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : String(req.headers["x-mbox-token"] || "").trim();
+  if (apiToken) {
+    const tokenHash = createHash("sha256").update(apiToken).digest("hex");
+    const result = await queryPostgres<{ id: string; username: string; role: string; token_id: string; last_used_at: string | null }>(
+      `SELECT u.id::text, u.username, u.role, t.id::text AS token_id, t.last_used_at::text
+       FROM account_tokens t JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = $1`,
+      [tokenHash],
+    );
+    const found = result.rows[0];
+    if (found && (!found.last_used_at || Date.now() - Date.parse(found.last_used_at) > 300000)) {
+      await queryPostgres("UPDATE account_tokens SET last_used_at = now() WHERE id = $1", [found.token_id]);
+    }
+    return found ? { id: found.id, username: found.username, role: found.role } : null;
+  }
   const token = getCookie(req, "mbox_session");
   if (!token) return null;
   const result = await queryPostgres<{ id: string; username: string; role: string }>(

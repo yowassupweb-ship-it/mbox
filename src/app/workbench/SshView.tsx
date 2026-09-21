@@ -36,6 +36,7 @@ export function SshView() {
         <p className="wb-empty">SSH-сессии открываются в приложении MBOX Desktop — в браузере их нет.</p>
       ) : (
         <>
+          <p className="wb-empty">Маршрут: MBOX prod → сервер. Соединение поддерживается и восстанавливается автоматически.</p>
           <form className="wb-filter wb-ssh-connect" onSubmit={submit}>
             <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="user@server или user@server:2222" spellCheck={false} autoComplete="off" />
           </form>
@@ -46,7 +47,7 @@ export function SshView() {
               <div key={session.id} className="wb-menu-item has-icon wb-ssh-item" role="button" tabIndex={0} onClick={() => revealSession(session.id)} onKeyDown={(event) => { if (event.key === "Enter") revealSession(session.id); }} title="Показать в консоли">
                 <i className={session.status === "running" ? "wb-dot is-live" : "wb-dot"} />
                 <span className="wb-menu-item-title">{session.title.replace(/^SSH · /, "")}</span>
-                <span className="wb-menu-item-meta">{session.status === "running" ? "подключено" : "закрыто"}</span>
+                <span className="wb-menu-item-meta">{session.status === "running" ? "постоянное" : "закрыто"}</span>
                 {session.status === "running" && (
                   <button type="button" className="wb-ssh-stop" onClick={(event) => { event.stopPropagation(); void desktop.stop(session.id); }} title="Отключиться"><Square size={11} /></button>
                 )}

@@ -10,7 +10,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const baseUrl = requireValue(process.env.MBOX_URL, "MBOX_URL");
 const username = process.env.MBOX_USERNAME || "Admin";
-const password = requireValue(process.env.MBOX_PASSWORD, "MBOX_PASSWORD");
+const accessToken = String(process.env.MBOX_TOKEN || "").trim();
+const password = accessToken ? "" : requireValue(process.env.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
 const agentName = process.env.MBOX_AGENT_NAME || "Claude";
 const project = process.env.MBOX_PROJECT || "MBOX";
 const pollMs = Number(process.env.MBOX_WATCH_POLL_MS || 15000);
@@ -27,8 +28,9 @@ const broadcastAliases = (process.env.MBOX_BROADCAST_ALIASES || "Всем,Все
   .map((alias) => alias.trim())
   .filter(Boolean);
 const logPrefix = `[${agentName} inbox]`;
-const seenPath = path.join(os.tmpdir(), `claude-inbox-watcher-seen-${agentName}.json`);
-const lockPath = path.join(os.tmpdir(), `claude-inbox-watcher-${agentName}-${project}.lock`);
+const accountKey = username.replace(/[^a-z0-9_-]+/gi, "_");
+const seenPath = path.join(os.tmpdir(), `claude-inbox-watcher-seen-${accountKey}-${agentName}.json`);
+const lockPath = path.join(os.tmpdir(), `claude-inbox-watcher-${accountKey}-${agentName}-${project}.lock`);
 const seen = new Set(loadSeen());
 const claudeCommand = process.env.CLAUDE_COMMAND || "claude";
 const claudeModel = process.env.CLAUDE_WATCH_MODEL || "";
@@ -168,17 +170,18 @@ async function login() {
 }
 
 async function mboxFetch(apiPath, init = {}) {
-  if (!cookie) await login();
+  if (!accessToken && !cookie) await login();
   const response = await fetch(`${baseUrl}${apiPath}`, {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      cookie,
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }),
       "x-mbox-agent": agentName,
       ...(init.headers || {}),
     },
   });
   if (response.status === 401) {
+    if (accessToken) throw new Error("MBOX token rejected");
     cookie = "";
     await login();
     return mboxFetch(apiPath, init);

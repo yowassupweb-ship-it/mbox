@@ -2707,7 +2707,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   min-height: 44px;
   padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
   border-bottom: 1px solid var(--wb-line);
-  background: color-mix(in srgb, var(--bg-color) 92%, transparent);
+  background: color-mix(in srgb, var(--doc-bg) 92%, transparent);
   backdrop-filter: blur(10px);
 }
 .share-brand { color: var(--accent-color); font-weight: 700; letter-spacing: 0.08em; font-size: 12px; }
