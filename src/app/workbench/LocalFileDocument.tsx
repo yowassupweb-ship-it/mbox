@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Eye, FolderOpen, GitCompare, History, Monitor, Pencil, RefreshCw, RotateCcw, Save, Smartphone, X } from "lucide-react";
 import { formatBytes, formatDateTime, formatSince } from "../../lib/format";
 import { gitLetter } from "./LocalFolders";
@@ -97,14 +97,20 @@ function sameRatio(pieces: DiffPiece[]) {
   return total ? same / total : 1;
 }
 
-function InlineDiffLine({ pieces, kind }: { pieces: DiffPiece[]; kind: "add" | "del" }) {
-  const other = kind === "add" ? "del" : "add";
+/**
+ * Правленая строка — одна строка, а не две. Показывать длинный абзац целиком красным и тут же
+ * целиком зелёным ради дописанного слова бессмысленно: глазу негде зацепиться. Вместо этого текст
+ * идёт один раз, удалённые слова зачёркнуты, добавленные подсвечены.
+ */
+function EditedDiffLine({ pieces }: { pieces: DiffPiece[] }) {
   return (
-    <div className={`wb-diff-line is-${kind}`}>
-      <span>{kind === "add" ? "+" : "−"}</span>
-      {pieces.map((piece, index) => piece.kind === other ? null
-        : piece.kind === "same" ? <span key={index}>{piece.text}</span>
-        : <mark key={index} className={`wb-diff-word is-${kind}`}>{piece.text}</mark>)}
+    <div className="wb-diff-line is-edit">
+      <span className="wb-diff-mark">±</span>
+      {/* Неизменённый текст — без обёртки: прямой <span> внутри строки забирает себе стиль
+          значка (.wb-diff-line > .wb-diff-mark шириной 16px) и текст сыплется в столбик. */}
+      {pieces.map((piece, index) => piece.kind === "same"
+        ? <Fragment key={index}>{piece.text}</Fragment>
+        : <mark key={index} className={`wb-diff-word is-${piece.kind}`}>{piece.text}</mark>)}
     </div>
   );
 }
@@ -131,7 +137,7 @@ export function DiffLines({ lines }: { lines: DiffLine[] }) {
   if (!changed) return <p className="wb-empty">Содержимое совпадает.</p>;
 
   // Равные по длине встречные пачки «удалено» и «добавлено» — это почти всегда правленые строки,
-  // а не разные: показываем их парами с подсветкой изменившихся слов внутри.
+  // а не разные: показываем каждую одной строкой с подсветкой изменившихся слов внутри.
   const rows: ReactNode[] = [];
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index];
@@ -148,18 +154,17 @@ export function DiffLines({ lines }: { lines: DiffLine[] }) {
           const add = adds[pair];
           const pieces = wordDiff(del.text, add.text);
           if (sameRatio(pieces) >= 0.3) {
-            rows.push(<InlineDiffLine key={rows.length} pieces={pieces} kind="del" />);
-            rows.push(<InlineDiffLine key={rows.length + 1} pieces={pieces} kind="add" />);
+            rows.push(<EditedDiffLine key={rows.length} pieces={pieces} />);
           } else {
-            rows.push(<div key={rows.length} className="wb-diff-line is-del"><span>−</span>{del.text || " "}</div>);
-            rows.push(<div key={rows.length + 1} className="wb-diff-line is-add"><span>+</span>{add.text || " "}</div>);
+            rows.push(<div key={rows.length} className="wb-diff-line is-del"><span className="wb-diff-mark">−</span>{del.text || " "}</div>);
+            rows.push(<div key={rows.length + 1} className="wb-diff-line is-add"><span className="wb-diff-mark">+</span>{add.text || " "}</div>);
           }
         });
         index = addEnd;
         continue;
       }
     }
-    rows.push(<div key={rows.length} className={`wb-diff-line is-${block.kind}`}><span>{block.kind === "add" ? "+" : block.kind === "del" ? "−" : " "}</span>{block.text || " "}</div>);
+    rows.push(<div key={rows.length} className={`wb-diff-line is-${block.kind}`}><span className="wb-diff-mark">{block.kind === "add" ? "+" : block.kind === "del" ? "−" : " "}</span>{block.text || " "}</div>);
     index += 1;
   }
   return <div className="wb-diff">{rows}</div>;
