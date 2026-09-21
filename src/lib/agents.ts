@@ -1,6 +1,18 @@
 import type { AgentActivity, AgentRun } from "../types";
 
 /**
+ * Клейм жив, только пока не истёк лиз. Протухший `claimed_by` — это «кто брал», а не «кто держит»:
+ * агент, у которого кончился лимит, никогда не возвращается снять его сам (todo #315). Сервер раз в
+ * минуту освобождает такие задачи, но до уборки их видит и интерфейс — поэтому спрашиваем время, а
+ * не наличие имени. Формат `claimed_until` — timestamptz из Postgres как текст, V8 его разбирает.
+ */
+export function isLeaseLive(todo: { claimed_by?: string | null; claimed_until?: string | null }) {
+  if (!todo.claimed_by || !todo.claimed_until) return false;
+  const until = Date.parse(todo.claimed_until);
+  return !Number.isNaN(until) && until > Date.now();
+}
+
+/**
  * Живость агента считается по свежести сердцебиения, а не по колонке status.
  *
  * Сессия agent_runs остаётся в статусе running навсегда, если агент упал или его просто закрыли:

@@ -850,6 +850,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-doc-crumbs { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.wb-shared-note-label { margin-left: 7px; color: var(--accent); font-weight: var(--weight-medium); }
 
 .wb-doc-actions { display: flex; align-items: center; gap: 6px; }
 
@@ -1166,6 +1167,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-menu-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
 .wb-menu-item-meta { overflow: hidden; color: var(--text-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 
+.wb-skills-intro { display: grid; gap: 3px; padding: 11px 12px 10px; border-bottom: 1px solid var(--wb-line); }
+.wb-skills-intro span { color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: 1.35; }
+.wb-skills-intro small { color: var(--text-muted); font-size: 10.5px; line-height: 1.45; }
+
 /* ─── Страницы навыка и инструмента ─────────────────── */
 
 .wb-catalog-doc { gap: 18px; padding-top: 24px; }
@@ -1176,6 +1181,26 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-catalog-head.has-icon > .wb-menu-item-icon { flex: none; margin-top: 18px; border-radius: 8px; }
 .wb-menu-item-icon { display: grid; place-items: center; border: 1px solid var(--wb-line); border-radius: 4px; background: var(--wb-surface); color: var(--accent-color); font-weight: var(--weight-bold); text-transform: uppercase; }
 .wb-catalog-head .wb-menu-item-icon { font-size: 20px; }
+
+.wb-skill-doc { gap: 18px; max-width: 980px; padding-top: 24px; }
+.wb-skill-hero { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(250px, .75fr); gap: 28px; padding: 24px; border: 1px solid var(--wb-line); border-radius: var(--radius-lg); background: var(--wb-surface-2); box-shadow: var(--chin-shadow); }
+.wb-skill-hero-main { min-width: 0; }
+.wb-skill-kicker { display: block; margin-top: 22px; color: var(--accent-color); font-size: 11px; font-weight: var(--weight-medium); letter-spacing: .08em; text-transform: uppercase; }
+.wb-skill-hero h1 { max-width: 680px; margin: 8px 0 12px; color: var(--text-main); font-size: clamp(27px, 3vw, 38px); line-height: 1.08; letter-spacing: -.03em; }
+.wb-skill-hero-main > p { max-width: 670px; margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
+.wb-skill-outcome { align-self: end; display: grid; gap: 9px; padding: 16px; border: 1px solid var(--wb-line); border-left: 2px solid var(--accent-color); border-radius: var(--radius-md); background: var(--wb-surface); }
+.wb-skill-outcome > span { display: inline-flex; align-items: center; gap: 7px; color: var(--accent-color); font-size: 11px; font-weight: var(--weight-medium); letter-spacing: .06em; text-transform: uppercase; }
+.wb-skill-outcome strong { color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-medium); line-height: 1.5; }
+.wb-skill-outcome small { color: var(--text-muted); line-height: 1.45; }
+.wb-skill-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--wb-line); }
+.wb-skill-flow > div { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 74px; padding: 14px 18px; }
+.wb-skill-flow > div + div { border-left: 1px solid var(--wb-line); }
+.wb-skill-flow b { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent); border-radius: var(--radius-sm); color: var(--accent-color); font-size: 11px; }
+.wb-skill-flow span { color: var(--text-main); font-size: var(--text-sm); line-height: 1.4; }
+.wb-skill-flow svg { position: absolute; right: -8px; z-index: 1; padding: 2px; background: var(--wb-surface); color: var(--text-muted); }
+.wb-skill-flow > div:last-child svg { display: none; }
+.wb-skill-details { display: grid; gap: 14px; padding: 2px 4px 32px; }
+.wb-skill-details h2 { margin: 0; color: var(--text-main); font-size: var(--text-lg); }
 
 .wb-stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); border: 1px solid var(--wb-line); border-radius: var(--radius-md); overflow: hidden; }
 .wb-stat-row > div { display: grid; gap: 2px; padding: 10px 14px; border-right: 1px solid var(--wb-line); }
@@ -1377,6 +1402,44 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-html-preview { height: 100%; display: flex; justify-content: center; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
 .wb-html-preview iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: 4px; background: #fff; }
 .wb-html-preview.is-mobile iframe { width: 390px; max-width: 100%; }
+
+.wb-pdf-view { height: 100%; min-height: 0; padding: 8px; background: var(--surface-deep); }
+.wb-pdf-view iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: #fff; }
+
+.wb-office-scroll { height: 100%; overflow: auto; padding: 32px 24px 64px; background: var(--surface-deep); }
+.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: #202124; background: #fff; box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: 15px; line-height: 1.55; }
+.wb-docx-page h1, .wb-docx-page h2, .wb-docx-page h3 { color: #17191d; line-height: 1.2; }
+.wb-docx-page img { max-width: 100%; height: auto; }
+.wb-docx-page table { width: 100%; border-collapse: collapse; }
+.wb-docx-page td, .wb-docx-page th { padding: 5px 7px; border: 1px solid #cfd3d8; vertical-align: top; }
+.wb-office-warnings { width: min(816px, 100%); margin: 14px auto 0; color: var(--text-muted); font-size: 12px; }
+
+.wb-sheet-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: 35px minmax(0, 1fr) 30px; background: var(--surface-1); }
+.wb-sheet-formula { display: grid; grid-template-columns: 68px minmax(160px, 1fr) auto; align-items: center; border-bottom: 1px solid var(--wb-line); background: var(--surface-2); }
+.wb-sheet-formula b { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--wb-line); color: var(--text-muted); font: 600 11px var(--font-mono); }
+.wb-sheet-formula input { min-width: 0; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--text-main); background: transparent; font: 12px var(--font-mono); }
+.wb-sheet-formula input:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+.wb-sheet-formula span { padding: 0 9px; color: var(--text-muted); font-size: 10.5px; }
+.wb-sheet-grid-wrap { overflow: auto; overscroll-behavior: contain; }
+.wb-sheet-grid { table-layout: fixed; min-width: max-content; border-collapse: separate; border-spacing: 0; color: var(--text-main); background: var(--surface-1); font-size: 12px; }
+.wb-sheet-grid th, .wb-sheet-grid td { box-sizing: border-box; width: 112px; min-width: 112px; height: 27px; padding: 4px 7px; overflow: hidden; border-right: 1px solid var(--wb-line); border-bottom: 1px solid var(--wb-line); text-overflow: ellipsis; white-space: nowrap; }
+.wb-sheet-grid thead th { position: sticky; z-index: 2; top: 0; height: 25px; color: var(--text-muted); background: var(--surface-2); font-weight: 500; text-align: center; }
+.wb-sheet-grid tbody th { position: sticky; z-index: 1; left: 0; width: 48px; min-width: 48px; color: var(--text-muted); background: var(--surface-2); font-weight: 500; text-align: center; }
+.wb-sheet-grid .is-corner { left: 0; z-index: 3; width: 48px; min-width: 48px; }
+.wb-sheet-grid td { cursor: cell; }
+.wb-sheet-grid td:hover { background: var(--surface-hover); }
+.wb-sheet-grid td.is-selected { position: relative; overflow: visible; box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
+.wb-sheet-tabs { display: flex; align-items: stretch; gap: 1px; overflow-x: auto; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
+.wb-sheet-tabs button { min-width: 86px; padding: 0 14px; border: 0; border-right: 1px solid var(--wb-line); color: var(--text-muted); background: transparent; font-size: 11.5px; }
+.wb-sheet-tabs button:hover { color: var(--text-main); background: var(--surface-hover); }
+.wb-sheet-tabs button.is-active { color: var(--text-main); background: var(--surface-1); box-shadow: inset 0 2px 0 var(--accent); }
+
+@media (max-width: 720px) {
+  .wb-docx-page { min-height: 0; padding: 36px 28px; }
+  .wb-office-scroll { padding: 12px 8px 40px; }
+  .wb-sheet-formula { grid-template-columns: 52px minmax(100px, 1fr); }
+  .wb-sheet-formula span { display: none; }
+}
 
 .wb-file-markdown { padding: 20px 32px 48px; }
 
@@ -1812,9 +1875,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   .wb-doc-bar .wb-drawer-toggle span { display: none; }
 }
 
+/* Колонка чтения уже холста — значит она стоит посередине, а не липнет к левому краю (todo #310).
+   На узкой вкладке max-width не срабатывает и auto-поля схлопываются в ноль: ничего не меняется. */
 .wb-reading {
   width: 100%;
   max-width: 820px;
+  margin-inline: auto;
   padding: 18px 28px 64px;
   box-sizing: border-box;
 }
@@ -1937,7 +2003,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   display: grid;
   grid-template-rows: minmax(0, 1fr) 22px;
   overflow: hidden;
-  background: var(--doc-bg);
+  /* Холст за листом чуть темнее самого листа — иначе центрированная колонка текста (todo #310)
+     читается как текст, съехавший в середину пустоты, а не как страница. */
+  background: color-mix(in srgb, var(--doc-bg) 93%, #000);
   color: var(--text-main);
   transition: background-color var(--duration-base) ease, color var(--duration-base) ease;
 }
@@ -1972,7 +2040,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   --code-bg: var(--doc-black-code);
 }
 .wb-note-surface > .wb-note-edit,
-.wb-note-surface > .wb-reading { min-height: 0; }
+.wb-note-surface > .wb-reading { min-height: 0; background: var(--doc-bg); }
 .wb-note-surface > .wb-reading { overflow: auto; }
 .wb-note-color-select { max-width: 96px; }
 
@@ -2041,6 +2109,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   flex: 1;
   width: 100%;
   max-width: 860px;
+  margin-inline: auto;
   min-height: 100%;
   padding: 20px 28px 64px;
   border: 0;
@@ -2605,15 +2674,30 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 
 /* Запуск навыка: кнопки страниц на карточке и ▶ в списке навыков. */
-.wb-skill-launch { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.wb-skill-launch button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.wb-skill-launch { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.wb-skill-launch button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 15px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wb-skill-launch button:hover { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); color: var(--text-main); }
-.wb-skill-launch button.is-primary { border-color: var(--accent-color); background: var(--accent-color); color: #031312; font-weight: var(--weight-medium); }
+.wb-skill-launch button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.wb-skill-launch button.is-primary { border-color: var(--accent-color); background: var(--accent-color); color: #fff; font-weight: var(--weight-medium); }
+.wb-skill-launch button:disabled { opacity: .45; cursor: not-allowed; }
 .wb-menu-item-row { position: relative; }
 .wb-menu-item-row > .wb-menu-item { padding-right: 36px; }
 .wb-menu-item-launch { position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; transform: translateY(-50%); }
 .wb-menu-item-row:hover .wb-menu-item-launch { color: var(--accent-color); border-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
 .wb-menu-item-launch:hover { background: var(--wb-selected); }
+.wb-menu-item-launch:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+
+@media (max-width: 760px) {
+  .wb-skill-doc { padding-top: 16px; }
+  .wb-skill-hero { grid-template-columns: 1fr; gap: 20px; padding: 20px; }
+  .wb-skill-hero h1 { font-size: 30px; }
+  .wb-skill-flow { grid-template-columns: 1fr; }
+  .wb-skill-flow > div + div { border-top: 1px solid var(--wb-line); border-left: 0; }
+  .wb-skill-flow svg { right: auto; bottom: -8px; left: 23px; transform: rotate(90deg); }
+  .wb-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wb-stat-row > div:nth-child(2) { border-right: 0; }
+  .wb-stat-row > div:nth-child(-n+2) { border-bottom: 1px solid var(--wb-line); }
+}
 
 /* ─── Диалог ввода (askText) — замена window.prompt, которого нет в Electron ─── */
 .ask-scrim { position: fixed; inset: 0; z-index: 400; display: grid; place-items: start center; padding-top: 18vh; background: rgba(0, 0, 0, .45); }
@@ -2653,7 +2737,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Заметка как на iPhone: первая строка — крупный заголовок и в правке, и в просмотре. */
 /* Прокручивается только текст: раньше поле имело min-height: 100% под заголовком, и при наборе двигались два
    скролла сразу (контейнер и поле) — заметка дёргалась вместе с курсором. */
-.wb-note-edit { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 860px; min-height: 0; }
+.wb-note-edit { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 860px; margin-inline: auto; min-height: 0; }
 .wb-note-title { width: 100%; padding: 22px 28px 4px; border: 0; outline: none; background: transparent; color: var(--text-main); font: inherit; font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
 .wb-note-title::placeholder { color: var(--text-muted); }
 .wb-note-edit .wb-note-editor { flex: 1; min-height: 0; max-width: none; padding-top: 6px; overflow: auto; }

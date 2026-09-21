@@ -828,6 +828,11 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     () => agents.filter((agent) => !peer || agent.name.toLowerCase() === peer.toLowerCase()).map((agent) => ({ agent, state: agentState(agent, runs) })),
     [agents, runs, peer],
   );
+  // Плашки «Codex: отвечает» под лентой больше нет (todo #314): она держалась на живом запуске и
+  // присутствии, а не на реальном ответе, и висела часами после того, как у агента кончился лимит,
+  // выдавая протухший клейм за работу. Состав и занятость агентов и так видны в шапке консоли,
+  // в пилюле хедера и в строке состояния. Ожидание Джарвиса ниже — другое дело: оно привязано
+  // к конкретному отправленному сообщению и гаснет вместе с ответом.
   const working = states.filter((entry) => entry.state.key === "working");
   // "N агентов на связи: имена" — раньше жило в шапке страницы и дублировало этот же ростер под
   // другим текстом. Состав разговора — дело консоли, не глобальной шапки.
@@ -1300,15 +1305,6 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 </div>
               );
             })}
-            {working.length > 0 && (
-              <div className="console-log-line sys typing">
-                <span className="console-log-time" />
-                <span className="console-thinking-row">
-                  <ThinkingSpinner />
-                  <span className="console-log-text">{working[0].agent.name}: {working[0].state.label}</span>
-                </span>
-              </div>
-            )}
             {awaitingJarvisId && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />

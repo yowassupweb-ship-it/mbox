@@ -920,6 +920,20 @@ function memberRouteAllowed(pathname) {
 // важно: Electron открывает удалённую страницу, и запускать произвольную строку из неё нельзя.
 const TOOL_CATALOG = [
   {
+    id: "tour-feed",
+    name: "Сформировать фид",
+    kind: "YML-каталог",
+    status: "готов локально",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Фиды",
+    icon: "/assets/icons/project/sources.png",
+    summary: "Собирает единый YML/XML-фид из файлов туров: сначала источники с префиксом 1, затем источники с префиксом 2 без повторяющихся ID.",
+    capabilities: ["YML/XML", "категории из файлов", "приоритет источников", "удаление дублей"],
+    commands: [
+      { label: "Сформировать фид", command: "python merge_feeds.py \"01.06\"", runnable: true },
+      { label: "Открыть папку", command: "explorer .", runnable: true },
+    ],
+  },
+  {
     id: "obscura",
     name: "Obscura",
     kind: "headless browser",
@@ -2424,6 +2438,24 @@ async function handleApiWithContext(req, res, url) {
         mbox_user_id: String(user.id),
         mbox_owner: isOwner(user),
       };
+      // Ответ на запуск из страницы навыка не должен растворяться в чате: сохраняем его как
+      // самостоятельный артефакт и связываем с сообщением. Это покрывает ответы Codex/Claude,
+      // которые приходят через общий POST /agent/inbox.
+      const replyTo = String(inboxProps.re || inboxProps.in_reply_to || "");
+      const isAgentResult = ["answer", "agent_response"].includes(String(body.item_type || ""));
+      if (isAgentResult && /^\d+$/.test(replyTo)) {
+        const parent = (await query("SELECT title, props FROM agent_inbox WHERE id = $1", [replyTo])).rows[0];
+        if (parent?.props?.source === "skill-page") {
+          const skill = String(parent.props.skill || "навык");
+          const artifact = await query(
+            `INSERT INTO artifacts(project_id, name, category, version, status, content, access_level)
+             VALUES ($1, $2, 'Навыки', 'v1', 'ready', $3, 'agents')
+             RETURNING id::text`,
+            [body.project_id || null, `Результат навыка ${skill} · #${replyTo}`, String(body.body || "")],
+          );
+          inboxProps.artifact_id = artifact.rows[0]?.id || "";
+        }
+      }
       const result = await query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
@@ -2906,6 +2938,42 @@ httpServer.on("upgrade", async (req, socket, head) => {
 });
 
 setInterval(() => broadcastRealtime("server_tick"), 5000).unref();
+
+// Лиз истекал, но снять его было некому: claimed_by и статус doing оставались навсегда, если агент
+// не вернулся — кончился лимит, упала сессия, закрыли окно. Задача висела «В работе у Codex» сутками,
+// а чат и шапка выдавали протухший клейм за живую работу (todo #315). Другой агент её всё-таки мог
+// забрать (claim и next-task пропускают истёкший лиз), но человек видел вечное «в работе».
+// Возвращаем в 'next', а не в 'open': задачу уже начинали, и в порядке выдачи next-task она должна
+// остаться выше нетронутых. done/archived не трогаем — там claimed_by это запись о том, кто сделал.
+async function releaseExpiredLeases() {
+  const result = await query(
+    `UPDATE todos
+        SET claimed_by = '',
+            claimed_until = NULL,
+            status = CASE WHEN status = 'doing' THEN 'next' ELSE status END,
+            updated_at = now()
+      WHERE claimed_by <> ''
+        AND claimed_until IS NOT NULL
+        AND claimed_until < now()
+        AND status NOT IN ('done', 'archived')
+      RETURNING id::text, title, status`,
+  );
+  for (const todo of result.rows) {
+    broadcastRealtime("entity_changed", {
+      entity: "todos",
+      action: "release",
+      actor: "MBOX",
+      detail: todo.title,
+      notification: `Лиз истёк, задача свободна: ${todo.title}`,
+    });
+  }
+  return result.rows.length;
+}
+
+setInterval(() => {
+  releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.message}`));
+}, 60000).unref();
+releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.message}`));
 
 // Схемы создаём здесь, а не рядом с импортами: query() читает requestContext, объявленный ниже импортов, —
 // вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».

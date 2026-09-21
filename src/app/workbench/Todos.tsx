@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ChevronRight, Eye, Pencil, Plus, Save, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
+import { isLeaseLive } from "../../lib/agents";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { formatSince } from "../../lib/format";
 import { todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "../../lib/labels";
@@ -130,7 +131,7 @@ export function TodoBoard({ project, tabs, onSaved }: { project: Project; tabs: 
                     <div className="wb-card-foot">
                       <span>#{todo.id}</span>
                       {mark.state !== "seen" && <span className="wb-card-new">{mark.state === "new" ? "новое" : "изменено"}</span>}
-                      {todo.claimed_by && <span className="wb-card-agent" title={`Держит ${todo.claimed_by}`}><AgentAvatar name={todo.claimed_by} size={14} />{todo.claimed_by}</span>}
+                      {isLeaseLive(todo) && <span className="wb-card-agent" title={`Держит ${todo.claimed_by}`}><AgentAvatar name={todo.claimed_by} size={14} />{todo.claimed_by}</span>}
                     </div>
                   </article>
                 );
@@ -201,7 +202,7 @@ export function TodoDocument({ project, todo, tabs, tabKey, visible, onDirty, on
   }
 
   const visibleProps = Object.entries(draft.props).filter(([key]) => !HIDDEN_PROPS.has(key));
-  const leaseActive = todo.claimed_by && todo.claimed_until && new Date(todo.claimed_until) > new Date();
+  const leaseActive = isLeaseLive(todo);
 
   return (
     <DocShell

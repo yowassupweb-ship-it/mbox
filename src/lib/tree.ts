@@ -1,5 +1,6 @@
 import type { FolderTreeNode } from "../components/FolderTree";
 import type { Artifact, FolderRow, Project, Todo } from "../types";
+import { isLeaseLive } from "./agents";
 import { formatBytes, plural } from "./format";
 import { todoPriorityLabel, todoStatusLabel } from "./labels";
 
@@ -129,7 +130,7 @@ export function projectToTree(project: Project): FolderTreeNode {
     bytes: project.memory_bytes,
     color: project.color,
     children: [
-      { id: project.id, type: "todo_group", name: `Todo (${openTodos})`, color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, bytes: todo.memory_bytes, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
+      { id: project.id, type: "todo_group", name: `Todo (${openTodos})`, color: "#28466d", children: sortedTodos.map((todo) => ({ id: todo.id, type: "todo" as const, name: todo.title, note: todo.note, status: todo.status, priority: todo.priority, bytes: todo.memory_bytes, meta: `${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${isLeaseLive(todo) ? ` · ${todo.claimed_by}` : ""} · ${formatBytes(todo.memory_bytes)}` })) },
       { id: project.id, type: "project_entity", entityKind: "git", name: "Git", meta: project.git_url ? "репозиторий" : "не указан", color: "#2e4a3a", children: [{ type: "meta", name: project.git_url || "Git не указан" }] },
       { id: project.id, type: "project_entity", entityKind: "relations", name: "Связи", meta: `${relatedNames.length}`, children: relatedNames.length ? relatedNames.map((name) => ({ type: "meta", name })) : [{ type: "meta", name: "Связей нет" }] },
       { id: project.id, type: "project_entity", entityKind: "properties", name: "Свойства", meta: `${Object.keys(project.props || {}).length}`, children: Object.entries(project.props || {}).map(([key, value]) => ({ type: "meta", name: `${key}: ${value}` })) },

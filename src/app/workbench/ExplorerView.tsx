@@ -2,6 +2,7 @@ import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import { ChevronRight, ChevronsDownUp, RefreshCw, X } from "lucide-react";
 import { projectEntityKinds } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
+import { isLeaseLive } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { todoPriorityLabel, todoStatusLabel } from "../../lib/labels";
 import { projectMemoryMatches } from "../../lib/memory";
@@ -154,11 +155,11 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
                 <ul className="wb-tree-children">
                   {shownTodos.length ? shownTodos.map((todo) => (
                     <li key={todo.id}>
-                      <div {...row(`todo:${todo.id}`)} style={{ ["--depth" as string]: 2 }} title={`#${todo.id} · ${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${todo.claimed_by ? ` · держит ${todo.claimed_by}` : ""}`}>
+                      <div {...row(`todo:${todo.id}`)} style={{ ["--depth" as string]: 2 }} title={`#${todo.id} · ${todoStatusLabel(todo.status)} · ${todoPriorityLabel(todo.priority)}${isLeaseLive(todo) ? ` · держит ${todo.claimed_by}` : ""}`}>
                         <span className={`wb-status-dot status-${todo.status}`} />
                         <span className={`wb-tree-label${CLOSED_STATUSES.includes(todo.status) ? " is-muted" : ""}`}>{todo.title}</span>
                         {(todo.priority === "urgent" || todo.priority === "high") && <span className={`wb-priority priority-${todo.priority}`}>!</span>}
-                        {todo.claimed_by && <span className="wb-tree-hint">{todo.claimed_by}</span>}
+                        {isLeaseLive(todo) && <span className="wb-tree-hint">{todo.claimed_by}</span>}
                       </div>
                     </li>
                   )) : <li className="wb-tree-empty" style={{ ["--depth" as string]: 2 }}>Нет задач</li>}

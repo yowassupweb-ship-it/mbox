@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { CheckCheck, Maximize2, Plus, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
+import { isLeaseLive } from "../../lib/agents";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
 import { countUnseen, formatDelta, markAllSeen, markSeen, seenDelta } from "../../lib/seen";
@@ -219,7 +220,7 @@ function TodoCard({ todo, seenVersion, onOpen, onSaved }: { todo: Todo; seenVers
       <div className="todo-note-card-meta">
         <span className={`todo-chip status-${status}`}>{todoStatusLabel(status)}</span>
         <span className={`todo-chip priority-${todo.priority}`}>{todoPriorityLabel(todo.priority)}</span>
-        {todo.claimed_by && (
+        {isLeaseLive(todo) && (
           <span className="todo-chip todo-claimed" title={`Взял в работу: ${todo.claimed_by}`}>
             <AgentAvatar name={todo.claimed_by} size={16} />
             {todo.claimed_by}
@@ -303,7 +304,11 @@ function TodoModal({ todo, projectName, onClose, onSaved }: { todo: Todo; projec
             <Select label="Приоритет" value={priority} onChange={(event) => setPriority(event.target.value)} options={priorityOptions} />
           </div>
           {todo.claimed_by && (
-            <p className="muted">В работе у {todo.claimed_by}{todo.claimed_until ? `, лиз до ${todo.claimed_until}` : ""}</p>
+            <p className="muted">
+              {isLeaseLive(todo)
+                ? `В работе у ${todo.claimed_by}, лиз до ${todo.claimed_until}`
+                : `Последним брал ${todo.claimed_by} — лиз истёк, задача свободна`}
+            </p>
           )}
         </div>
 

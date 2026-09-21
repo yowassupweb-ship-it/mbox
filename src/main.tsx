@@ -24,7 +24,7 @@ import {
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
 import { TopBar, type AgentRosterEntry } from "./components/TopBar";
 import { AgentAvatar } from "./components/AgentAvatar";
-import { RUN_STALE_MS, agentFamily, effectiveStatus, isAgentWorking, liveRunOf } from "./lib/agents";
+import { RUN_STALE_MS, agentFamily, effectiveStatus, isAgentWorking, isLeaseLive, liveRunOf } from "./lib/agents";
 import { fetchJson, saveEntity } from "./lib/api";
 import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
 import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
@@ -102,7 +102,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
     const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
     const onReview = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "review").length, 0);
     const blocked = data.projects.reduce((sum, project) => sum + project.todos.filter((todo) => todo.status === "blocked").length, 0);
-    const leased = data.projects.flatMap((project) => project.todos).filter((todo) => todo.claimed_by && todo.claimed_until && new Date(todo.claimed_until) > new Date());
+    const leased = data.projects.flatMap((project) => project.todos).filter(isLeaseLive);
     // Упавшая сессия интересна, пока свежая: недельной давности падение — это уже история, а не статус.
     const failedRun = data.runs.find((run) => run.status === "failed" && Date.now() - Date.parse(run.heartbeat_at || run.started_at) < RUN_STALE_MS);
 
