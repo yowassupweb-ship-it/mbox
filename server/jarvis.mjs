@@ -15,6 +15,16 @@ export function configureJarvis(deps) {
   ({ query, broadcastRealtime, rankMemories, recordMemoryAction } = deps);
 }
 
+/** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
+function workspaceMarkdownLink(workspace, relativePath) {
+  const rel = String(relativePath || "").replace(/^[\\/]+/, "");
+  const root = String(workspace?.root_path || "").replace(/[\\/]+$/, "");
+  const absolute = `${root}/${rel}`.replace(/\\/g, "/");
+  const href = encodeURI(absolute).replace(/\(/g, "%28").replace(/\)/g, "%29");
+  const label = rel.replace(/\]/g, "\\]") || String(workspace?.name || "Файл");
+  return `[${label}](path:${href})`;
+}
+
 // Джарвис раньше жил только в systemd-таймере (см. scripts/mbox-archivist.mjs) с шагом в минуту —
 // для чата это ощущалось как "не отвечает". Здесь та же логика ответа на прямое сообщение, но
 // вызывается синхронно из POST /agent/inbox сразу после вставки, без ожидания следующего тика.
@@ -2157,7 +2167,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
     if (name === "workspace_git" && !args.path) {
       const git = workspace.git || {};
       if (!git.isRepo) return `«${workspace.name}» не git-репозиторий (или приложение ещё не прислало сводку)`;
-      const changes = (git.changes || []).slice(0, 40).map((change) => `${change.untracked ? "U" : (change.worktree !== " " ? change.worktree : change.index)} ${change.path}`).join("\n");
+      const changes = (git.changes || []).slice(0, 40).map((change) => `${change.untracked ? "U" : (change.worktree !== " " ? change.worktree : change.index)} ${workspaceMarkdownLink(workspace, change.path)}`).join("\n");
       const commits = (git.commits || []).map((commit) => `${commit.short} ${commit.date?.slice(0, 10)} ${commit.author}: ${commit.subject}`).join("\n");
       return `ветка ${git.branch}${git.upstream ? ` → ${git.upstream}` : ""}, ↑${git.ahead || 0} ↓${git.behind || 0}, сводка от ${git.checkedAt || "?"}\nизменённые файлы (${git.changesTotal ?? 0}):\n${changes || "нет"}\nпоследние коммиты:\n${commits || "нет"}`;
     }
@@ -2173,15 +2183,15 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
       });
       if (op.status !== "done") return `не получилось: ${describeWorkspaceError(op.error, workspace)}`;
       const result = op.result || {};
-      if (name === "workspace_list_dir") return (result.entries || []).map((entry) => `${entry.type === "dir" ? "📁" : "📄"} ${entry.path}${entry.type === "file" ? ` (${entry.size} байт)` : ""}`).join("\n") || "каталог пуст";
-      if (name === "workspace_find_files") return (result.paths || []).join("\n") || "ничего не нашлось";
+      if (name === "workspace_list_dir") return (result.entries || []).map((entry) => `${entry.type === "dir" ? "Папка" : "Файл"}: ${workspaceMarkdownLink(workspace, entry.path)}${entry.type === "file" ? ` (${entry.size} байт)` : ""}`).join("\n") || "каталог пуст";
+      if (name === "workspace_find_files") return (result.paths || []).map((filePath) => workspaceMarkdownLink(workspace, filePath)).join("\n") || "ничего не нашлось";
       if (name === "workspace_read_file") {
         if (result.binary) return "это двоичный файл — прочитать как текст нельзя";
         if (result.tooLarge) return `файл слишком большой (${result.size} байт)`;
         const text = String(result.content || "");
         return text.length > 12000 ? `${text.slice(0, 12000)}\n… (показаны первые 12000 из ${text.length} символов)` : text || "(файл пуст)";
       }
-      if (name === "workspace_write_file") return `записал «${result.path}» в «${workspace.name}» (${result.size} байт); прежняя версия сохранена в истории MBOX`;
+      if (name === "workspace_write_file") return `записал ${workspaceMarkdownLink(workspace, result.path)} в «${workspace.name}» (${result.size} байт); прежняя версия сохранена в истории MBOX`;
       if (name === "workspace_git") return (result.commits || []).map((commit) => `${commit.short} ${commit.date?.slice(0, 10)} ${commit.author}: ${commit.subject}`).join("\n") || "коммитов с этим файлом нет";
     } catch (error) {
       return `не получилось: ${describeWorkspaceError(error, workspace)}`;
@@ -2615,6 +2625,8 @@ export async function replyAsJarvis(item) {
       + "record_memory, выбор между вариантами с обоснованием — record_decision. Цифры про туры и посты — только из "
       + "search_tour_dates и analyze_posts. Если результат помечен как неполный («показаны 20 из 102») — не достраивай остальное, "
       + "скажи, что видна часть. "
+      + "ССЫЛКИ НА ФАЙЛЫ. Workspace-инструменты возвращают локальные файлы markdown-ссылками вида [имя](path:C:/...). "
+      + "В ответе сохраняй такие ссылки без изменений: человек сможет нажать их и открыть файл прямо во вкладке MBOX Desktop. "
       + `Известные проекты: ${projectList.map((p) => p.name).join(", ") || "нет проектов"}. `
       + `Известные компании: ${companyNames.join(", ") || "нет компаний"}. `
       + `Сводка по MBOX сейчас: задач ${stats.todos_total}, незакрытых ${stats.todos_open}, записей в памяти ${stats.memories_total} — `

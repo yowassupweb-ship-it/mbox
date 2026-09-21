@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AtSign, CornerDownRight, DollarSign, FileText, Hash, Paperclip, Reply, SendHorizontal, Slash, Terminal, Wrench, X } from "lucide-react";
+import { ArrowUp, AtSign, CornerDownRight, DollarSign, FileText, Hash, Paperclip, Reply, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -100,23 +100,38 @@ function workbenchTabOf(href: string) {
   }
 }
 
-/** Ссылка в сообщении: на MBOX — открыть вкладку в рабочем месте, остальное — в браузере. */
+/** Локальный путь из markdown-ссылки, file:// URL или `инлайн-кода`. */
+function localPathOf(href: string) {
+  let value = href.trim();
+  if (/^path:/i.test(value)) value = value.slice(5);
+  else if (/^file:\/{2,3}/i.test(value)) value = value.replace(/^file:\/{2,3}/i, "");
+  else if (!/^[a-zA-Z]:[\\/]/.test(value)) return null;
+  try { value = decodeURIComponent(value); } catch { /* путь может содержать обычный % */ }
+  if (/^\/[a-zA-Z]:[\\/]/.test(value)) value = value.slice(1);
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("/") || value.startsWith("~") ? value : null;
+}
+
+/** Ссылка в сообщении: MBOX и локальный файл открываются внутри рабочего места, остальное — в браузере. */
 function ChatLink({ href, children }: { href: string; children: ReactNode }) {
-  if (!/^(https?:\/\/|\/)/i.test(href)) return <>{children}</>;
+  const localPath = localPathOf(href);
+  if (!localPath && !/^(https?:\/\/|\/)/i.test(href)) return <>{children}</>;
   const tab = workbenchTabOf(href);
   const absolute = href.startsWith("/") ? `${serverOrigin()}${href}` : href;
   return (
     <a
       className="console-log-link"
-      href={absolute}
-      target="_blank"
+      href={localPath ? "#" : absolute}
+      target={localPath || tab ? undefined : "_blank"}
       rel="noreferrer noopener"
       onClick={(event) => {
-        if (!tab) return;
+        if (!localPath && !tab) return;
         event.preventDefault();
-        window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: { kind: "tab", key: tab, actor: "", reply_to: "", title: "", note: "", quiet: true } }));
+        const detail = localPath
+          ? { kind: "path", path: localPath, actor: "", reply_to: "", title: String(children), note: "", quiet: true }
+          : { kind: "tab", key: tab, actor: "", reply_to: "", title: "", note: "", quiet: true };
+        window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail }));
       }}
-      title={tab ? "Открыть во вкладке MBOX" : absolute}
+      title={localPath ? `Открыть в MBOX: ${localPath}` : tab ? "Открыть во вкладке MBOX" : absolute}
     >
       {children}
     </a>
@@ -131,7 +146,10 @@ function renderInlineMarkdown(content: string, keyPrefix: string): ReactNode[] {
     if (link) return <ChatLink key={key} href={link[2]}>{link[1]}</ChatLink>;
     if (/^https?:\/\//i.test(part)) return <ChatLink key={key} href={part}>{part}</ChatLink>;
     if (part.startsWith("**") && part.endsWith("**")) return <b key={key}>{part.slice(2, -2)}</b>;
-    if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("`") && part.endsWith("`")) {
+      const code = part.slice(1, -1);
+      return localPathOf(code) ? <ChatLink key={key} href={`path:${code}`}><code>{code}</code></ChatLink> : <code key={key}>{code}</code>;
+    }
     if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
     if (part.startsWith("_") && part.endsWith("_")) return <em key={key}>{part.slice(1, -1)}</em>;
     return part;
@@ -1355,27 +1373,31 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); setDragFiles(false); void attachFiles([...event.dataTransfer.files]); } }}
             >
               <button type="button" className="console-attach-btn" onClick={() => fileInputRef.current?.click()} aria-label="Приложить файл" title="Приложить файл — или вставьте из буфера, перетащите сюда">
-                <Paperclip size={15} />
+                <Paperclip size={16} />
               </button>
               <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void attachFiles([...(event.target.files ?? [])]); event.target.value = ""; }} />
-              <span className="console-prompt">{liveMention ? `@${liveMention}` : peer ? `@${peer}` : ""}<img src="/assets/icons/project/check.png" width={13} height={13} alt="" /></span>
-              <textarea
-                ref={composerRef}
-                value={text}
-                onChange={(event) => { setText(event.target.value); setCursor(event.target.selectionStart); }}
-                onClick={(event) => setCursor(event.currentTarget.selectionStart)}
-                onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
-                onKeyDown={onKeyDown}
-                onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void attachFiles(files); } }}
-                placeholder={peer ? `Сообщение для ${peer} · Shift+Enter — новая строка` : "/команда, @агент; $проект; #артефакт · Shift+Enter — новая строка"}
-                spellCheck={false}
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                rows={1}
-              />
+              <div className="console-input-body">
+                {(liveMention || peer) && <span className="console-recipient"><AtSign size={11} />{liveMention || peer}</span>}
+                <textarea
+                  ref={composerRef}
+                  value={text}
+                  onChange={(event) => { setText(event.target.value); setCursor(event.target.selectionStart); }}
+                  onClick={(event) => setCursor(event.currentTarget.selectionStart)}
+                  onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
+                  onKeyDown={onKeyDown}
+                  onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void attachFiles(files); } }}
+                  placeholder={peer ? `Сообщение для ${peer}` : "Напишите сообщение…"}
+                  spellCheck
+                  autoComplete="off"
+                  rows={1}
+                />
+                <div className="console-input-hints" aria-hidden="true">
+                  <span><b>@</b> агент</span><span><b>/</b> команда</span><span><b>$</b> проект</span><span><b>#</b> артефакт</span>
+                  <span className="console-input-newline"><kbd>Shift</kbd><kbd>Enter</kbd> новая строка</span>
+                </div>
+              </div>
               <button type="submit" className="console-send-btn" disabled={(!text.trim() && !readyFiles.length) || uploadingFiles} aria-label="Отправить" title={uploadingFiles ? "Дождитесь загрузки файлов" : "Отправить (Enter)"}>
-                <SendHorizontal size={15} />
+                <ArrowUp size={16} strokeWidth={2.25} />
               </button>
             </form>
           </div>

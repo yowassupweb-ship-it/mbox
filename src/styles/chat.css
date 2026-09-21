@@ -1059,16 +1059,30 @@
 
 .console-composer {
   position: relative;
-}
-
-.console-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px 10px;
   border-top: 1px solid var(--border-color);
   background: var(--surface-chrome);
 }
+
+.console-input-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: end;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--text-main) 14%, var(--border-color));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--element-bg) 88%, var(--bg-color));
+  box-shadow: 0 1px 0 color-mix(in srgb, white 4%, transparent) inset;
+  transition: border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease, background-color var(--duration-fast) ease;
+}
+.console-input-row:focus-within { border-color: color-mix(in srgb, var(--accent-color) 58%, var(--border-color)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 10%, transparent); background: var(--element-bg); }
+.console-input-body { min-width: 0; display: grid; gap: 5px; }
+.console-recipient { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 12%, transparent); color: var(--accent-color); font-size: 10px; font-weight: var(--weight-medium); }
+.console-input-hints { min-width: 0; display: flex; align-items: center; gap: 9px; overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 9.5px; line-height: 1; white-space: nowrap; }
+.console-input-hints b { color: var(--text-2); font-weight: var(--weight-medium); }
+.console-input-newline { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
+.console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--surface-chrome); color: var(--text-muted); font: inherit; text-align: center; }
 
 /* Подсказки по @/,/,$,# — плавающий список над composer'ом, не над логом. Раньше был голый список
    строк текста; теперь каждая строка — иконка триггера в цветном кружке + значение + пояснение,
@@ -1157,9 +1171,9 @@
    Textarea растёт вверх по мере ввода (field-sizing: content), а Enter/Shift+Enter — как в любом
    чате: отправить/перенос строки (см. onKeyDown в AgentChat.tsx). */
 .console-input-row textarea {
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  min-height: 20px;
+  min-height: 24px;
   max-height: 220px;
   overflow-y: auto;
   border: 0;
@@ -1167,15 +1181,15 @@
   resize: none;
   background: transparent;
   color: var(--text-main);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-family: var(--font-sans);
+  font-size: 13px;
   line-height: 1.5;
-  padding: 2px 0;
+  padding: 2px 1px;
   /* Safari поворотом экрана иногда сам меняет видимый размер текста в полях — фиксируем. */
   -webkit-text-size-adjust: 100%;
   -webkit-appearance: none;
 }
-.console-input-row textarea::placeholder { color: var(--text-muted); }
+.console-input-row textarea::placeholder { color: color-mix(in srgb, var(--text-muted) 84%, transparent); }
 
 /* ─── Ответ на сообщение и отправка ─────────────────── */
 
@@ -1252,20 +1266,23 @@
 .console-reply-bar button:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-main); }
 
 .console-send-btn {
+  align-self: start;
   flex: none;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent-color) 18%, transparent);
-  color: var(--accent-color);
+  border-radius: var(--radius-pill);
+  background: var(--accent-color);
+  color: var(--bg-color);
   cursor: pointer;
+  transition: transform var(--duration-fast) ease, filter var(--duration-fast) ease, opacity var(--duration-fast) ease;
 }
-.console-send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-color) 28%, transparent); }
-.console-send-btn:disabled { background: none; color: var(--text-muted); opacity: .5; cursor: default; }
+.console-send-btn:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+.console-send-btn:active:not(:disabled) { transform: translateY(0); }
+.console-send-btn:disabled { background: var(--border-color); color: var(--text-muted); opacity: .55; cursor: default; }
 
 .console-log-pre {
   margin: 4px 0;
@@ -1326,7 +1343,7 @@
 .console-draft.is-error em { color: var(--state-danger); }
 .console-draft button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-muted); cursor: pointer; }
 .console-draft button:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-main); }
-.console-attach-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer; }
+.console-attach-btn { align-self: start; flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-md); background: none; color: var(--text-muted); cursor: pointer; }
 .console-attach-btn:hover { background: color-mix(in srgb, var(--text-main) 7%, transparent); color: var(--text-main); }
 .console-input-row.is-drop { outline: 2px dashed color-mix(in srgb, var(--accent-color) 60%, transparent); outline-offset: -4px; }
 
