@@ -2561,13 +2561,16 @@ export async function replyAsJarvis(item) {
     // «уже взят»: архивариус берёт только open и зависшие doing старше 10 минут.
     await client.query("UPDATE agent_inbox SET status = 'doing', updated_at = now() WHERE id = $1 AND status = 'open'", [item.id]);
 
+    const mboxUserId = String(item.props?.mbox_user_id || "");
+    const includeLegacyInbox = item.props?.mbox_owner === true;
+    const replyIdentity = mboxUserId ? { mbox_user_id: mboxUserId, mbox_owner: includeLegacyInbox } : {};
     const fastPathReply = await tryFastPath(client, item.body || item.title);
     if (fastPathReply) {
       jlog(item.id, `fast-path: "${String(item.body || "").slice(0, 80)}" -> без обращения к LLM`);
       await client.query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, fastPathReply, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], fast_path: true })],
+        [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, fastPathReply, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], fast_path: true, ...replyIdentity })],
       );
       await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
       broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: fastPathReply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил мгновенно` });
@@ -2655,8 +2658,9 @@ export async function replyAsJarvis(item) {
       `SELECT agent_name, body, title, props FROM agent_inbox
        WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = 'Claude' OR agent_name = $1)
          AND ($2::boolean OR project_id = ANY($3::bigint[]))
+         AND (props->>'mbox_user_id' = $4 OR ($5::boolean AND NOT (props ? 'mbox_user_id')))
        ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
-      [JARVIS_NAME, allowedProjectIds == null, allowedProjectIds || []],
+      [JARVIS_NAME, allowedProjectIds == null, allowedProjectIds || [], mboxUserId, includeLegacyInbox],
     )).rows.reverse();
     // Однократный запрос с несколькими действиями ("удали Тест и Тест 2") ненадёжен — модель
     // часто возвращает только один tool_call за раз, даже когда попросили вызывать функцию на
@@ -2709,7 +2713,10 @@ export async function replyAsJarvis(item) {
     // «Да, одобряю» само по себе ни о чём — смысл в сообщении, на которое отвечают (props.re), например в
     // вопросе об уборке памяти. 14 сентября на такое одобрение Джарвис ответил, что удалять ему нечем.
     const repliedTo = /^\d+$/.test(String(item.props?.re || ""))
-      ? (await client.query("SELECT body FROM agent_inbox WHERE id = $1", [item.props.re])).rows[0]?.body || ""
+      ? (await client.query(
+        "SELECT body FROM agent_inbox WHERE id = $1 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))",
+        [item.props.re, mboxUserId, includeLegacyInbox],
+      )).rows[0]?.body || ""
       : "";
     const activeGroups = selectToolGroups([item.body || item.title, repliedTo, ...recentHuman], recentTools);
     // Для Groq с его 8000 TPM — только группы самого сообщения, без подтянутых из истории.
@@ -2789,7 +2796,7 @@ export async function replyAsJarvis(item) {
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights })],
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights, ...replyIdentity })],
     );
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });
@@ -2807,7 +2814,7 @@ export async function replyAsJarvis(item) {
         await query(
           `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
            VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-          [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, `Не получилось ответить: ${String(error.message || error).slice(0, 200)}. Попробуй ещё раз.`, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], failed: true })],
+          [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, `Не получилось ответить: ${String(error.message || error).slice(0, 200)}. Попробуй ещё раз.`, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], failed: true, ...replyIdentity })],
         );
         await query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
         broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: "не получилось ответить", notification: `Агент ${JARVIS_NAME} споткнулся` });

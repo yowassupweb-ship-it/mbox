@@ -876,6 +876,84 @@
 
 /* Доступ */
 
+.account-manager,
+.account-create,
+.account-list { display: grid; gap: var(--space-3); }
+
+.account-create {
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--element-bg);
+}
+
+.account-create-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.account-create-fields input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--container-bg);
+  color: var(--text-main);
+}
+
+.account-projects { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.account-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.account-project.is-selected {
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--element-bg));
+  color: var(--text-main);
+}
+
+.account-project input { accent-color: var(--accent-color); }
+
+.account-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.account-identity { display: grid; gap: 3px; }
+.account-identity span,
+.account-owner-note { color: var(--text-muted); font-size: var(--text-xs); }
+
+.account-save {
+  justify-self: start;
+  min-height: 32px;
+  padding: 5px 11px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--container-bg);
+  color: var(--text-main);
+}
+
+.account-save:disabled { opacity: .45; cursor: default; }
+.account-error { color: var(--state-danger); font-size: var(--text-sm); }
+
+@media (max-width: 820px) {
+  .account-create-fields { grid-template-columns: 1fr; }
+}
+
 .access-levels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));

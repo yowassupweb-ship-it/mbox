@@ -839,7 +839,7 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
       <Panel title="Аккаунтинг" icon={ShieldCheck}>
         <div className="entity-list">
           <EntityLine title="Пользователь" value={`${user.username} · ${user.role}`} />
-          <EntityLine title="Регистрация" value="отключена" />
+          <EntityLine title="Новые аккаунты" value={user.role === "owner" ? "создаёт владелец" : "управляет владелец"} />
           <EntityLine title="Права" value="private / agents / public" />
           <button className="primary-action" onClick={async () => {
             await fetch("/api/mbox/auth/logout", { method: "POST" });
@@ -847,6 +847,7 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
           }}>Выйти</button>
         </div>
       </Panel>
+      {user.role === "owner" && <AccountManager projects={projects} />}
       <Panel title="Агенты" icon={GitBranch}>
         <div className="entity-list">
           {agents.length ? agents.map((agent) => {
@@ -962,6 +963,130 @@ function AccessBoard({ user, secrets, agents, projects, inbox, runs, decisions, 
         </div>
       </Panel>
     </div>
+  );
+}
+
+type AccountUser = {
+  id: string;
+  email: string;
+  username: string;
+  role: "owner" | "member";
+  projects: Array<{ project_id: string; project_name: string; role: string }>;
+};
+
+function ProjectAccessPicker({ projects, selected, onChange, disabled = false }: { projects: Project[]; selected: string[]; onChange: (ids: string[]) => void; disabled?: boolean }) {
+  return (
+    <div className="account-projects" aria-label="Доступные проекты">
+      {projects.map((project) => {
+        const checked = selected.includes(project.id);
+        return (
+          <label className={checked ? "account-project is-selected" : "account-project"} key={project.id}>
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled}
+              onChange={() => onChange(checked ? selected.filter((id) => id !== project.id) : [...selected, project.id])}
+            />
+            <span>{project.name}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function AccountManager({ projects }: { projects: Project[] }) {
+  const [accounts, setAccounts] = useState<AccountUser[]>([]);
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [draftProjects, setDraftProjects] = useState<Record<string, string[]>>({});
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    const result = await fetchJson<{ users: AccountUser[] }>("/api/mbox/admin/users");
+    setAccounts(result.users);
+    setDraftProjects(Object.fromEntries(result.users.map((account) => [account.id, account.projects.map((project) => project.project_id)])));
+  }, []);
+
+  useEffect(() => { load().catch((cause) => setError(cause instanceof Error ? cause.message : "Не удалось загрузить аккаунты")); }, [load]);
+
+  async function createAccount(event: FormEvent) {
+    event.preventDefault();
+    setBusy("new");
+    setError("");
+    try {
+      await fetchJson("/api/mbox/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, email, password, project_ids: projectIds }),
+      });
+      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось создать аккаунт");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveAccess(account: AccountUser) {
+    setBusy(account.id);
+    setError("");
+    try {
+      await fetchJson(`/api/mbox/admin/users/${account.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ project_ids: draftProjects[account.id] || [] }),
+      });
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось сохранить доступы");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <Panel title="Команда и общие проекты" icon={KeyRound}>
+      <div className="account-manager">
+        <form className="account-create" onSubmit={createAccount}>
+          <div className="account-create-fields">
+            <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Имя аккаунта" minLength={2} required />
+            <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email (необязательно)" type="email" />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль, минимум 8 знаков" type="password" minLength={8} required />
+          </div>
+          <ProjectAccessPicker projects={projects} selected={projectIds} onChange={setProjectIds} />
+          <button className="primary-action" disabled={busy === "new"} type="submit"><Plus size={16} />{busy === "new" ? "Создаю…" : "Создать аккаунт"}</button>
+        </form>
+        {error && <div className="account-error" role="alert">{error}</div>}
+        <div className="account-list">
+          {accounts.map((account) => {
+            const selected = draftProjects[account.id] || [];
+            const persisted = account.projects.map((project) => project.project_id);
+            const changed = [...selected].sort().join(",") !== [...persisted].sort().join(",");
+            return (
+              <div className="account-row" key={account.id}>
+                <div className="account-identity">
+                  <strong>{account.username}</strong>
+                  <span>{account.email} · {account.role === "owner" ? "владелец" : "участник"}</span>
+                </div>
+                {account.role === "owner" ? (
+                  <span className="account-owner-note">Все проекты и личный Jarvis</span>
+                ) : (
+                  <>
+                    <ProjectAccessPicker projects={projects} selected={selected} onChange={(ids) => setDraftProjects((current) => ({ ...current, [account.id]: ids }))} />
+                    <button className="account-save" type="button" disabled={!changed || busy === account.id} onClick={() => saveAccess(account)}>{busy === account.id ? "Сохраняю…" : "Сохранить доступ"}</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Panel>
   );
 }
 type NewSecret = {

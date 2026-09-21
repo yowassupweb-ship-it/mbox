@@ -12,6 +12,7 @@ import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
+import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
@@ -900,6 +901,19 @@ async function requireUser(req: IncomingMessage, res: ServerResponse) {
   return user;
 }
 
+async function devProjectScope(user: { id: string; role: string }) {
+  if (user.role === "owner") return { all: true, projectIds: [] as string[] };
+  const result = await queryPostgres<{ project_id: string }>(
+    "SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id",
+    [user.id],
+  );
+  return { all: false, projectIds: result.rows.map((row) => row.project_id) };
+}
+
+function devHasProjectAccess(scope: { all: boolean; projectIds: string[] }, projectId: unknown) {
+  return scope.all || (!projectId ? true : scope.projectIds.includes(String(projectId)));
+}
+
 function mboxDevApi() {
   return {
     name: "mbox-dev-api",
@@ -927,6 +941,7 @@ function mboxDevApi() {
       });
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
+      ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
       ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
@@ -1045,6 +1060,9 @@ function mboxDevApi() {
 
           const sessionUser = await requireUser(req, res);
           if (!sessionUser) return;
+          const devScope = await devProjectScope(sessionUser);
+
+          if (await handleAccountsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser })) return;
 
           if (await handleWorkspaceApi({
             req, res, url, query: queryPostgres, readBody, sendJson,
@@ -1336,6 +1354,7 @@ function mboxDevApi() {
           if (url.pathname === "/api/mbox/memories") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
+              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
               const result = await queryPostgres(
                 `INSERT INTO memories(project_id, todo_id, agent_run_id, title, content, entity_type, access_level, tags, metadata)
                  VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF($6, ''), 'memory'), COALESCE(NULLIF($7, ''), 'private'), $8, $9)
@@ -1358,7 +1377,9 @@ function mboxDevApi() {
                       count(*) OVER()::int AS total_count,
                       sum(pg_column_size(memories)) OVER()::bigint AS total_bytes
                FROM memories
-               ${mode ? `WHERE (SELECT ${mode}(${memoryHaystack} ILIKE '%' || term || '%') FROM unnest($1::text[]) AS term)` : ""}
+               ${mode
+                 ? `WHERE ($3::boolean OR project_id = ANY($4::bigint[])) AND (SELECT ${mode}(${memoryHaystack} ILIKE '%' || term || '%') FROM unnest($1::text[]) AS term)`
+                 : "WHERE ($1::boolean OR project_id = ANY($2::bigint[]))"}
                ORDER BY ${mode
             ? `(${memoryHaystack} ILIKE '%' || $2 || '%') DESC,
                   (SELECT count(*) FROM unnest($1::text[]) AS term WHERE title ILIKE '%' || term || '%') DESC,
@@ -1366,7 +1387,7 @@ function mboxDevApi() {
                   updated_at DESC`
             : `updated_at ${sortOldest ? "ASC" : "DESC"}`}
                LIMIT 300`,
-              mode ? [memoryTerms, q] : [],
+              mode ? [memoryTerms, q, devScope.all, devScope.projectIds] : [devScope.all, devScope.projectIds],
             );
             let result = await selectMemories(memoryTerms.length ? "bool_and" : "");
             if (!result.rows.length && memoryTerms.length > 1) result = await selectMemories("bool_or");
@@ -1579,14 +1600,15 @@ function mboxDevApi() {
                       m.created_at::text, m.updated_at::text
                FROM memories m
                LEFT JOIN projects p ON p.id = m.project_id
-               WHERE m.id = $1`,
-              [memoryMatch[1]],
+               WHERE m.id = $1 AND ($2::boolean OR m.project_id = ANY($3::bigint[]))`,
+              [memoryMatch[1], devScope.all, devScope.projectIds],
             );
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { memory: result.rows[0] } : { error: "not_found" });
           }
 
           if (memoryMatch && req.method === "PATCH") {
             const body = await readBody<Record<string, unknown>>(req);
+            if (Object.prototype.hasOwnProperty.call(body, "project_id") && !devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
             const result = await queryPostgres(
               `UPDATE memories SET
                  title = COALESCE(NULLIF($1, ''), title),
@@ -1596,9 +1618,9 @@ function mboxDevApi() {
                  project_id = CASE WHEN $5 THEN $6::bigint ELSE project_id END,
                  entity_type = COALESCE(NULLIF($7, ''), entity_type),
                  updated_at = now()
-               WHERE id = $8
+               WHERE id = $8 AND ($9::boolean OR project_id = ANY($10::bigint[]))
                RETURNING id::text`,
-              [String(body.title ?? "").trim(), body.content ?? null, String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : null, Object.prototype.hasOwnProperty.call(body, "project_id"), (body.project_id as string) || null, String(body.entity_type ?? ""), memoryMatch[1]],
+              [String(body.title ?? "").trim(), body.content ?? null, String(body.access_level ?? ""), Array.isArray(body.tags) ? body.tags : null, Object.prototype.hasOwnProperty.call(body, "project_id"), (body.project_id as string) || null, String(body.entity_type ?? ""), memoryMatch[1], devScope.all, devScope.projectIds],
             );
             if (result.rows[0]) await recordMemoryAction({ memoryId: result.rows[0].id, actor: String(actorFromReq(req)), action: "update", note: "memory updated via API", metadata: { fields: Object.keys(body || {}) } });
             if (result.rows[0]) await refreshMemoryEmbeddings();
@@ -1607,6 +1629,8 @@ function mboxDevApi() {
           }
 
           if (memoryMatch && req.method === "DELETE") {
+            const allowed = await queryPostgres("SELECT 1 FROM memories WHERE id = $1 AND ($2::boolean OR project_id = ANY($3::bigint[]))", [memoryMatch[1], devScope.all, devScope.projectIds]);
+            if (!allowed.rows[0]) return sendJson(res, 404, { error: "not_found" });
             await recordMemoryAction({ memoryId: memoryMatch[1], actor: String(actorFromReq(req)), action: "delete", note: "memory deleted via API" });
             await queryPostgres("DELETE FROM memories WHERE id = $1", [memoryMatch[1]]);
             await refreshMemoryEmbeddings();
@@ -1617,6 +1641,7 @@ function mboxDevApi() {
           if (url.pathname === "/api/mbox/folders") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
+              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
               const result = await queryPostgres(
                 `INSERT INTO folders(parent_id, name, entity_type, access_level, color, project_id)
                  VALUES ($1, $2, $3, $4, $5, $6)
@@ -1629,9 +1654,10 @@ function mboxDevApi() {
             const result = await queryPostgres(
               `SELECT id::text, parent_id::text, project_id::text, name, entity_type, access_level, color, pg_column_size(folders)::int AS memory_bytes
                FROM folders
-               WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR entity_type ILIKE '%' || $1 || '%'
+               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+                 AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR entity_type ILIKE '%' || $1 || '%')
                ORDER BY COALESCE(parent_id, 0), name`,
-              [q],
+              [q, devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { folders: result.rows });
           }
@@ -1647,15 +1673,16 @@ function mboxDevApi() {
                  access_level = COALESCE(NULLIF($4, ''), access_level),
                  color = COALESCE(NULLIF($5, ''), color)
                WHERE id = $6
+                 AND ($7::boolean OR project_id = ANY($8::bigint[]))
                RETURNING id::text`,
-              [body.parent_id || null, String(body.name ?? "").trim(), String(body.entity_type ?? ""), String(body.access_level ?? ""), String(body.color ?? ""), folderMatch[1]],
+              [body.parent_id || null, String(body.name ?? "").trim(), String(body.entity_type ?? ""), String(body.access_level ?? ""), String(body.color ?? ""), folderMatch[1], devScope.all, devScope.projectIds],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "folders" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { folder: result.rows[0] } : { error: "not_found" });
           }
 
           if (folderMatch && req.method === "DELETE") {
-            await queryPostgres("DELETE FROM folders WHERE id = $1", [folderMatch[1]]);
+            await queryPostgres("DELETE FROM folders WHERE id = $1 AND ($2::boolean OR project_id = ANY($3::bigint[]))", [folderMatch[1], devScope.all, devScope.projectIds]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "folders" });
             return sendJson(res, 200, { ok: true });
           }
@@ -1663,6 +1690,7 @@ function mboxDevApi() {
           if (url.pathname === "/api/mbox/artifacts") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
+              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
               const result = await queryPostgres(
                 `INSERT INTO artifacts(folder_id, project_id, name, category, version, status, content, access_level)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(NULLIF($8, ''), 'agents'))
@@ -1675,10 +1703,11 @@ function mboxDevApi() {
             const result = await queryPostgres(
               `SELECT id::text, folder_id::text, project_id::text, name, category, version, status, content, access_level, pg_column_size(artifacts)::int AS memory_bytes
                FROM artifacts
-               WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%'
+               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+                 AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%' OR content ILIKE '%' || $1 || '%')
                ORDER BY category, name
                LIMIT 300`,
-              [q],
+              [q, devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { artifacts: result.rows });
           }
@@ -1686,6 +1715,7 @@ function mboxDevApi() {
           const artifactMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)$/);
           if (artifactMatch && req.method === "PATCH") {
             const body = await readBody<Record<string, unknown>>(req);
+            if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
             const result = await queryPostgres(
               `UPDATE artifacts SET
                  folder_id = $1,
@@ -1696,22 +1726,23 @@ function mboxDevApi() {
                  status = COALESCE(NULLIF($6, ''), status),
                  content = COALESCE($7, content),
                  updated_at = now()
-               WHERE id = $8
+               WHERE id = $8 AND ($9::boolean OR project_id = ANY($10::bigint[]))
                RETURNING id::text`,
-              [body.folder_id || null, body.project_id || null, String(body.name ?? "").trim(), String(body.category ?? ""), String(body.version ?? ""), String(body.status ?? ""), body.content ?? null, artifactMatch[1]],
+              [body.folder_id || null, body.project_id || null, String(body.name ?? "").trim(), String(body.category ?? ""), String(body.version ?? ""), String(body.status ?? ""), body.content ?? null, artifactMatch[1], devScope.all, devScope.projectIds],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "artifacts" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { artifact: result.rows[0] } : { error: "not_found" });
           }
 
           if (artifactMatch && req.method === "DELETE") {
-            await queryPostgres("DELETE FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+            await queryPostgres("DELETE FROM artifacts WHERE id = $1 AND ($2::boolean OR project_id = ANY($3::bigint[]))", [artifactMatch[1], devScope.all, devScope.projectIds]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "artifacts" });
             return sendJson(res, 200, { ok: true });
           }
 
           if (url.pathname === "/api/mbox/companies") {
             if (req.method === "POST") {
+              if (!devScope.all) return sendJson(res, 403, { error: "owner_required" });
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
                 `INSERT INTO companies(folder_id, name, status, props, color, access_level)
@@ -1727,10 +1758,15 @@ function mboxDevApi() {
                       pg_column_size(companies)::int AS memory_bytes,
                       created_at::text, updated_at::text
                FROM companies
-               WHERE $1 = '' OR name ILIKE '%' || $1 || '%' OR status ILIKE '%' || $1 || '%' OR props::text ILIKE '%' || $1 || '%'
+               WHERE ($2::boolean OR EXISTS (
+                 SELECT 1 FROM graph_edges e
+                 WHERE e.from_entity = 'company' AND e.from_id = companies.id
+                   AND e.to_entity = 'project' AND e.to_id = ANY($3::bigint[])
+               ))
+                 AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR status ILIKE '%' || $1 || '%' OR props::text ILIKE '%' || $1 || '%')
                ORDER BY updated_at DESC
                LIMIT 200`,
-              [q],
+              [q, devScope.all, devScope.projectIds],
             );
             const relations = await queryPostgres(
               `SELECT e.id::text, e.from_id::text AS company_id, c.name AS company_name,
@@ -1739,7 +1775,9 @@ function mboxDevApi() {
                FROM graph_edges e
                JOIN companies c ON c.id = e.from_id AND e.from_entity = 'company'
                JOIN projects p ON p.id = e.to_id AND e.to_entity = 'project'
+               WHERE $1::boolean OR e.to_id = ANY($2::bigint[])
                ORDER BY e.created_at DESC`,
+              [devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, {
               companies: companies.rows.map((company) => ({
@@ -1862,6 +1900,7 @@ function mboxDevApi() {
             const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 200), 1), 200);
             const offset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
             if (req.method === "POST") {
+              if (!devScope.all) return sendJson(res, 403, { error: "owner_required" });
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
                 `INSERT INTO projects(name, status, stack, git_url, deploy_provider, deploy_target, color, access_level, props)
@@ -1884,7 +1923,8 @@ function mboxDevApi() {
                           + (SELECT count(*) FROM memories m WHERE m.project_id = p.id AND m.updated_at >= now() - interval '30 days')
                         ) AS activity_score
                ) activity ON true
-               WHERE $1 = ''
+               WHERE ($4::boolean OR p.id = ANY($5::bigint[]))
+                 AND ($1 = ''
                   OR p.name ILIKE '%' || $1 || '%'
                   OR p.status ILIKE '%' || $1 || '%'
                   OR p.git_url ILIKE '%' || $1 || '%'
@@ -1921,13 +1961,14 @@ function mboxDevApi() {
                     SELECT 1 FROM graph_edges e
                     WHERE ((e.from_entity = 'project' AND e.from_id = p.id) OR (e.to_entity = 'project' AND e.to_id = p.id))
                       AND (e.edge_type ILIKE '%' || $1 || '%' OR e.title ILIKE '%' || $1 || '%' OR e.description ILIKE '%' || $1 || '%' OR e.owner ILIKE '%' || $1 || '%' OR e.group_entity ILIKE '%' || $1 || '%')
-                  )
+                  ))
                ORDER BY activity.activity_score DESC, p.updated_at DESC
                LIMIT $2 OFFSET $3`,
-              [q, limit, offset],
+              [q, limit, offset, devScope.all, devScope.projectIds],
             );
             const todos = await queryPostgres(
-              "SELECT id::text, project_id::text, title, note, status, priority, props, pg_column_size(todos)::int AS memory_bytes FROM todos ORDER BY updated_at DESC",
+              "SELECT id::text, project_id::text, title, note, status, priority, props, pg_column_size(todos)::int AS memory_bytes FROM todos WHERE $1::boolean OR project_id = ANY($2::bigint[]) ORDER BY updated_at DESC",
+              [devScope.all, devScope.projectIds],
             );
             const relations = await queryPostgres(
               `SELECT e.id::text, e.from_id::text AS from_project_id, fp.name AS from_project_name,
@@ -1936,7 +1977,9 @@ function mboxDevApi() {
                JOIN projects fp ON fp.id = e.from_id AND e.from_entity = 'project'
                JOIN projects tp ON tp.id = e.to_id AND e.to_entity = 'project'
                WHERE e.from_entity = 'project' AND e.to_entity = 'project'
+                 AND ($1::boolean OR e.from_id = ANY($2::bigint[]) OR e.to_id = ANY($2::bigint[]))
                ORDER BY e.created_at DESC`,
+              [devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, {
               page: { limit, offset, count: projects.rows.length },
@@ -1957,6 +2000,7 @@ function mboxDevApi() {
               const toEntity = String(body.to_entity || "project");
               if (!fromId || !toId || (fromEntity === toEntity && fromId === toId)) return sendJson(res, 400, { error: "invalid_edge" });
               if (!["project", "company"].includes(fromEntity) || !["project", "company"].includes(toEntity)) return sendJson(res, 400, { error: "invalid_entity" });
+              if (!devScope.all && !((fromEntity === "project" && devScope.projectIds.includes(fromId)) || (toEntity === "project" && devScope.projectIds.includes(toId)))) return sendJson(res, 403, { error: "forbidden" });
               const result = await queryPostgres(
                 `INSERT INTO graph_edges(from_entity, from_id, to_entity, to_id, edge_type, title, description, owner, group_entity, strength, valid_until, score)
                  VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'related'), $6, $7, $8, $9, COALESCE($10, 1), $11, 1)
@@ -1976,8 +2020,12 @@ function mboxDevApi() {
                LEFT JOIN companies fc ON e.from_entity = 'company' AND fc.id = e.from_id
                LEFT JOIN projects tp ON e.to_entity = 'project' AND tp.id = e.to_id
                LEFT JOIN companies tc ON e.to_entity = 'company' AND tc.id = e.to_id
+               WHERE $1::boolean
+                  OR (e.from_entity = 'project' AND e.from_id = ANY($2::bigint[]))
+                  OR (e.to_entity = 'project' AND e.to_id = ANY($2::bigint[]))
                ORDER BY e.created_at DESC
                LIMIT 500`,
+              [devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { edges: result.rows });
           }
@@ -2019,6 +2067,7 @@ function mboxDevApi() {
 
           const projectMatch = url.pathname.match(/^\/api\/mbox\/projects\/(\d+)$/);
           if (projectMatch && req.method === "PATCH") {
+            if (!devHasProjectAccess(devScope, projectMatch[1])) return sendJson(res, 403, { error: "forbidden" });
             const body = await readBody<Record<string, unknown>>(req);
             const color = String(body.color ?? "").trim();
             if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return sendJson(res, 400, { error: "invalid_color" });
@@ -2054,6 +2103,7 @@ function mboxDevApi() {
           }
 
           if (projectMatch && req.method === "DELETE") {
+            if (!devScope.all) return sendJson(res, 403, { error: "owner_required" });
             await queryPostgres("DELETE FROM projects WHERE id = $1", [projectMatch[1]]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "projects" });
             return sendJson(res, 200, { ok: true });
@@ -2061,6 +2111,7 @@ function mboxDevApi() {
 
           if (url.pathname === "/api/mbox/todos" && req.method === "POST") {
             const body = await readBody<Record<string, unknown>>(req);
+            if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
             const result = await queryPostgres(
               `INSERT INTO todos(project_id, title, note, status, priority, props, access_level)
                VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'open'), COALESCE(NULLIF($5, ''), 'normal'), $6, COALESCE(NULLIF($7, ''), 'private'))
@@ -2082,9 +2133,9 @@ function mboxDevApi() {
                  priority = COALESCE(NULLIF($4, ''), priority),
                  props = COALESCE($6, props),
                  updated_at = now()
-               WHERE id = $5
+               WHERE id = $5 AND ($7::boolean OR project_id = ANY($8::bigint[]))
                RETURNING id::text, project_id::text, title, note, status, claimed_by`,
-              [String(body.title ?? "").trim(), body.note ?? null, String(body.status ?? ""), String(body.priority ?? ""), todoMatch[1], body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null],
+              [String(body.title ?? "").trim(), body.note ?? null, String(body.status ?? ""), String(body.priority ?? ""), todoMatch[1], body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, devScope.all, devScope.projectIds],
             );
             let auto_memory = null;
             if (result.rows[0] && String(body.status ?? "") === "done") {
@@ -2102,7 +2153,7 @@ function mboxDevApi() {
           }
 
           if (todoMatch && req.method === "DELETE") {
-            await queryPostgres("DELETE FROM todos WHERE id = $1", [todoMatch[1]]);
+            await queryPostgres("DELETE FROM todos WHERE id = $1 AND ($2::boolean OR project_id = ANY($3::bigint[]))", [todoMatch[1], devScope.all, devScope.projectIds]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "todos" });
             return sendJson(res, 200, { ok: true });
           }
@@ -2157,11 +2208,12 @@ function mboxDevApi() {
                       pg_column_size(audit_events)::int AS memory_bytes,
                       created_at::text
                FROM audit_events
-               WHERE $1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
-                  OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%'
+               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+                 AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
+                  OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%')
                ORDER BY created_at DESC
                LIMIT 200`,
-              [q],
+              [q, devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { events: result.rows });
           }
@@ -2285,6 +2337,11 @@ function mboxDevApi() {
 
           if (url.pathname === "/api/mbox/agent/inbox" && req.method === "POST") {
             const body = await readBody<{ project_id?: string | null; agent_name?: string; item_type?: string; title?: string; body?: string; status?: string; priority?: string; requires_human?: boolean; props?: Record<string, unknown> }>(req);
+            const inboxProps = {
+              ...(body.props && typeof body.props === "object" ? body.props : {}),
+              mbox_user_id: String(sessionUser.id),
+              mbox_owner: sessionUser.role === "owner",
+            };
             const result = await queryPostgres(
               `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
                VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
@@ -2298,7 +2355,7 @@ function mboxDevApi() {
                 String(body.status || ""),
                 String(body.priority || ""),
                 Boolean(body.requires_human),
-                JSON.stringify(body.props && typeof body.props === "object" ? body.props : {}),
+                JSON.stringify(inboxProps),
               ],
             );
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
@@ -2312,13 +2369,16 @@ function mboxDevApi() {
               let allowChain = senderName === "Человек";
               if (!allowChain) {
                 const recentChain = await queryPostgres<{ agent_name: string }>(
-                  "SELECT agent_name FROM agent_inbox WHERE item_type IN ('question', 'answer') AND project_id IS NOT DISTINCT FROM $1 ORDER BY created_at DESC LIMIT 6",
-                  [body.project_id || null],
+                  `SELECT agent_name FROM agent_inbox
+                   WHERE item_type IN ('question', 'answer') AND project_id IS NOT DISTINCT FROM $1
+                     AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))
+                   ORDER BY created_at DESC LIMIT 6`,
+                  [body.project_id || null, String(sessionUser.id), sessionUser.role === "owner"],
                 );
                 allowChain = recentChain.rows.some((row) => row.agent_name === "Человек");
               }
               if (allowChain) {
-                replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: body.props })
+                replyAsJarvis({ id: result.rows[0].id, project_id: body.project_id || null, title: body.title, body: body.body, props: inboxProps })
                   .catch((error: Error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
               } else {
                 console.log(`[jarvis] агент-агент цепочка достигла лимита без человека — авто-ответ на #${result.rows[0].id} пропущен`);
@@ -2345,18 +2405,29 @@ function mboxDevApi() {
                  AND ($2 = '' OR item_type = $2)
                  AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%')
                  AND (NULLIF($4, '') IS NULL OR id < NULLIF($4, '')::bigint)
+                 AND (props->>'mbox_user_id' = $6 OR ($7::boolean AND NOT (props ? 'mbox_user_id')))
                ORDER BY ${filtered ? "id DESC" : "updated_at DESC"}
                LIMIT $5`,
-              [agent, itemType, search, beforeId, limit],
+              [agent, itemType, search, beforeId, limit, String(sessionUser.id), sessionUser.role === "owner"],
             );
             return sendJson(res, 200, { inbox: result.rows });
           }
 
           const inboxMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)$/);
           if (inboxMatch && req.method === "GET") {
-            const item = (await queryPostgres(`SELECT ${INBOX_COLUMNS} FROM agent_inbox WHERE id = $1`, [inboxMatch[1]])).rows[0];
+            const item = (await queryPostgres(
+              `SELECT ${INBOX_COLUMNS} FROM agent_inbox
+               WHERE id = $1 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))`,
+              [inboxMatch[1], String(sessionUser.id), sessionUser.role === "owner"],
+            )).rows[0];
             if (!item) return sendJson(res, 404, { error: "not_found" });
-            const replies = await queryPostgres(`SELECT ${INBOX_COLUMNS} FROM agent_inbox WHERE props->>'re' = $1 OR props->>'in_reply_to' = $1 ORDER BY created_at`, [inboxMatch[1]]);
+            const replies = await queryPostgres(
+              `SELECT ${INBOX_COLUMNS} FROM agent_inbox
+               WHERE (props->>'re' = $1 OR props->>'in_reply_to' = $1)
+                 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))
+               ORDER BY created_at`,
+              [inboxMatch[1], String(sessionUser.id), sessionUser.role === "owner"],
+            );
             const errors = await queryPostgres("SELECT id::text, source, tool_name, message, created_at::text FROM jarvis_errors WHERE inbox_id = $1 ORDER BY created_at", [inboxMatch[1]]);
             return sendJson(res, 200, { inbox_item: item, replies: replies.rows, errors: errors.rows });
           }
@@ -2368,9 +2439,10 @@ function mboxDevApi() {
             const row = (await queryPostgres<{ id: string; project_id: string | null; title: string; body: string; props: Record<string, unknown> }>(
               `UPDATE agent_inbox SET status = 'doing', updated_at = now()
                WHERE id = $1 AND (item_type = 'question' OR (item_type = 'answer' AND agent_name = 'Человек' AND props->>'to' = $2))
+                 AND (props->>'mbox_user_id' = $3 OR ($4::boolean AND NOT (props ? 'mbox_user_id')))
                  AND (status = 'open' OR (status = 'doing' AND updated_at < now() - interval '10 minutes'))
                RETURNING id::text, project_id::text, title, body, props`,
-              [answerMatch[1], JARVIS_NAME],
+              [answerMatch[1], JARVIS_NAME, String(sessionUser.id), sessionUser.role === "owner"],
             )).rows[0];
             if (!row) return sendJson(res, 409, { error: "not_answerable" });
             replyAsJarvis(row).catch((error: Error) => console.error(`Jarvis hand-off reply uncaught: ${error.message}`));
@@ -2381,8 +2453,10 @@ function mboxDevApi() {
             const ifStatus = String(body.if_status ?? "");
             const result = await queryPostgres(
               `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
-               WHERE id = $5 AND ($6 = '' OR status = $6) RETURNING id::text`,
-              [String(body.status ?? ""), String(body.priority ?? ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1], ifStatus],
+               WHERE id = $5 AND ($6 = '' OR status = $6)
+                 AND (props->>'mbox_user_id' = $7 OR ($8::boolean AND NOT (props ? 'mbox_user_id')))
+               RETURNING id::text`,
+              [String(body.status ?? ""), String(body.priority ?? ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify({ ...body.props, mbox_user_id: String(sessionUser.id), mbox_owner: sessionUser.role === "owner" }) : null, inboxMatch[1], ifStatus, String(sessionUser.id), sessionUser.role === "owner"],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });
             if (!result.rows[0] && ifStatus) return sendJson(res, 409, { error: "status_changed" });
@@ -2399,13 +2473,18 @@ function mboxDevApi() {
           if (cancelMatch && req.method === "POST") {
             const controller = activeJarvisRequests.get(cancelMatch[1]);
             if (controller) controller.abort();
-            await queryPostgres("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [cancelMatch[1]]);
+            await queryPostgres(
+              `UPDATE agent_inbox SET status = 'done', updated_at = now()
+               WHERE id = $1 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))`,
+              [cancelMatch[1], String(sessionUser.id), sessionUser.role === "owner"],
+            );
             return sendJson(res, 200, { ok: true, aborted: Boolean(controller) });
           }
 
           if (url.pathname === "/api/mbox/agent/runs") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
+              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
               const result = await queryPostgres<Record<string, any>>(
                 `INSERT INTO agent_runs(project_id, todo_id, agent_name, status, goal, read_context, commands, touched_files, result, props)
                  VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'running'), $5, $6, $7, $8, $9, $10)
@@ -2434,8 +2513,10 @@ function mboxDevApi() {
                       pg_column_size(agent_runs)::int AS memory_bytes,
                       started_at::text, heartbeat_at::text, finished_at::text
                FROM agent_runs
+               WHERE $1::boolean OR project_id = ANY($2::bigint[])
                ORDER BY started_at DESC
                LIMIT 100`,
+              [devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { runs: result.rows });
           }
@@ -2469,6 +2550,7 @@ function mboxDevApi() {
           if (url.pathname === "/api/mbox/decisions") {
             if (req.method === "POST") {
               const body = await readBody<Record<string, unknown>>(req);
+              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
               const result = await queryPostgres(
                 `INSERT INTO decision_log(project_id, todo_id, agent_run_id, actor, title, decision, rationale, impact, props)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -2483,11 +2565,12 @@ function mboxDevApi() {
                       pg_column_size(decision_log)::int AS memory_bytes,
                       created_at::text
                FROM decision_log
-               WHERE $1 = '' OR actor ILIKE '%' || $1 || '%' OR title ILIKE '%' || $1 || '%' OR decision ILIKE '%' || $1 || '%'
-                  OR rationale ILIKE '%' || $1 || '%' OR impact ILIKE '%' || $1 || '%'
+               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+                 AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR title ILIKE '%' || $1 || '%' OR decision ILIKE '%' || $1 || '%'
+                  OR rationale ILIKE '%' || $1 || '%' OR impact ILIKE '%' || $1 || '%')
                ORDER BY created_at DESC
                LIMIT 200`,
-              [q],
+              [q, devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { decisions: result.rows });
           }
@@ -2531,6 +2614,7 @@ function mboxDevApi() {
           if (url.pathname === "/api/mbox/secrets") {
             if (req.method === "POST") {
               const body = await readBody<{ project_id?: string | null; title?: string; login?: string; password?: string; url?: string }>(req);
+              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
               const title = body.title?.trim() ?? "";
               const password = body.password ?? "";
               if (!title || !password) return sendJson(res, 400, { error: "title_and_password_required" });
@@ -2549,9 +2633,10 @@ function mboxDevApi() {
               `SELECT id::text, project_id::text, title, login, url, access_level, agent_share_state,
                       pg_column_size(protected_secrets)::int AS memory_bytes, approved_until::text, updated_at::text
                FROM protected_secrets
-               WHERE $1 = '' OR title ILIKE '%' || $1 || '%' OR login ILIKE '%' || $1 || '%' OR url ILIKE '%' || $1 || '%'
+               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+                 AND ($1 = '' OR title ILIKE '%' || $1 || '%' OR login ILIKE '%' || $1 || '%' OR url ILIKE '%' || $1 || '%')
                ORDER BY updated_at DESC LIMIT 100`,
-              [q],
+              [q, devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { secrets: result.rows });
           }
@@ -2559,6 +2644,7 @@ function mboxDevApi() {
           const secretMatch = url.pathname.match(/^\/api\/mbox\/secrets\/(\d+)$/);
           if (secretMatch && req.method === "PATCH") {
             const body = await readBody<{ project_id?: string | null; agent_share_state?: string; approved_until?: string | null; title?: string; login?: string; password?: string; url?: string }>(req);
+            if (body.project_id && !devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
             const title = body.title?.trim() ?? "";
             const login = typeof body.login === "string" ? body.login.trim() : null;
             const password = body.password ?? "";
@@ -2574,11 +2660,11 @@ function mboxDevApi() {
                    url = COALESCE($7, url),
                    secret_ciphertext = CASE WHEN NULLIF($8, '') IS NULL THEN secret_ciphertext ELSE pgp_sym_encrypt($8, $9) END,
                    updated_at = now()
-               WHERE id = $4
+               WHERE id = $4 AND ($11::boolean OR project_id = ANY($12::bigint[]))
                RETURNING id::text, project_id::text, title, login, url, access_level, agent_share_state,
                          pg_column_size(protected_secrets)::int AS memory_bytes,
                          approved_until::text, updated_at::text`,
-              [body.project_id || null, body.agent_share_state ?? "", body.approved_until || null, secretMatch[1], title, login, typeof body.url === "string" ? body.url.trim() : null, password, secretKey, hasApprovedUntil],
+              [body.project_id || null, body.agent_share_state ?? "", body.approved_until || null, secretMatch[1], title, login, typeof body.url === "string" ? body.url.trim() : null, password, secretKey, hasApprovedUntil, devScope.all, devScope.projectIds],
             );
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "secrets" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { secret: result.rows[0] } : { error: "not_found" });

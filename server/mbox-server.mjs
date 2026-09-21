@@ -15,6 +15,7 @@ import { UX_UI_SKILL_CATALOG } from "./ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
+import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
@@ -1047,33 +1048,7 @@ async function handleApiWithContext(req, res, url) {
   if (!user) return;
   const scope = await projectScope(user);
 
-  if (url.pathname === "/api/mbox/admin/users" && req.method === "POST") {
-    if (!isOwner(user)) return sendForbidden(res);
-    const body = await readBody(req);
-    const username = String(body.username || "").trim();
-    const password = String(body.password || "");
-    const projectId = String(body.project_id || "").trim();
-    if (!username || password.length < 8 || !/^\d+$/.test(projectId)) {
-      return sendJson(res, 400, { error: "username_password_and_project_required" });
-    }
-    const email = String(body.email || `${username.toLowerCase()}@mbox.local`).trim();
-    const created = await query(
-      `INSERT INTO users(email, username, password_hash, role)
-       VALUES ($1, $2, crypt($3, gen_salt('bf')), 'member')
-       ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'member'
-       RETURNING id::text, username, role`,
-      [email, username, password],
-    );
-    const member = created.rows[0];
-    const project = await query("SELECT id::text, name FROM projects WHERE id = $1", [projectId]);
-    if (!project.rows[0]) return sendJson(res, 404, { error: "project_not_found" });
-    await query(
-      `INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor')
-       ON CONFLICT (project_id, user_id) DO UPDATE SET role = 'editor'`,
-      [projectId, member.id],
-    );
-    return sendJson(res, 201, { user: member, project: project.rows[0] });
-  }
+  if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user })) return;
 
   if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
 
@@ -2428,11 +2403,16 @@ async function handleApiWithContext(req, res, url) {
     if (req.method === "POST") {
       const body = await readBody(req);
       if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
+      const inboxProps = {
+        ...(body.props && typeof body.props === "object" ? body.props : {}),
+        mbox_user_id: String(user.id),
+        mbox_owner: isOwner(user),
+      };
       const result = await query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
          RETURNING id::text`,
-        [body.project_id || null, String(body.agent_name || actorFromReq(req)), String(body.item_type || ""), String(body.title || "").trim(), String(body.body || ""), String(body.status || ""), String(body.priority || ""), Boolean(body.requires_human), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+        [body.project_id || null, String(body.agent_name || actorFromReq(req)), String(body.item_type || ""), String(body.title || "").trim(), String(body.body || ""), String(body.status || ""), String(body.priority || ""), Boolean(body.requires_human), JSON.stringify(inboxProps)],
       );
       broadcastChange(req, "create", "agent_inbox", String(body.title || "").trim());
       const senderName = String(body.agent_name || actorFromReq(req));
@@ -2453,8 +2433,11 @@ async function handleApiWithContext(req, res, url) {
         let allowChain = senderName === "Человек";
         if (!allowChain) {
           const recentChain = await query(
-            "SELECT agent_name FROM agent_inbox WHERE item_type IN ('question', 'answer') AND project_id IS NOT DISTINCT FROM $1 ORDER BY created_at DESC LIMIT 6",
-            [body.project_id || null],
+            `SELECT agent_name FROM agent_inbox
+             WHERE item_type IN ('question', 'answer') AND project_id IS NOT DISTINCT FROM $1
+               AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))
+             ORDER BY created_at DESC LIMIT 6`,
+            [body.project_id || null, String(user.id), isOwner(user)],
           );
           allowChain = recentChain.rows.some((row) => row.agent_name === "Человек");
         }
@@ -2466,7 +2449,7 @@ async function handleApiWithContext(req, res, url) {
             project_id: body.project_id || null,
             title: body.title,
             body: body.body,
-            props: { ...(body.props && typeof body.props === "object" ? body.props : {}), allowed_project_ids: scope.all ? null : scope.projectIds },
+            props: { ...inboxProps, allowed_project_ids: scope.all ? null : scope.projectIds },
           })
             .catch((error) => console.error(`Jarvis reply totally uncaught: ${error.message}`));
         } else {
@@ -2500,9 +2483,10 @@ async function handleApiWithContext(req, res, url) {
          AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%')
          AND (NULLIF($4, '') IS NULL OR id < NULLIF($4, '')::bigint)
          AND ($6::boolean OR project_id = ANY($7::bigint[]))
+         AND (props->>'mbox_user_id' = $8 OR ($9::boolean AND NOT (props ? 'mbox_user_id')))
        ORDER BY ${filtered ? "id DESC" : "updated_at DESC"}
        LIMIT $5`,
-      [agent, itemType, search, beforeId, limit, scope.all, scope.projectIds],
+      [agent, itemType, search, beforeId, limit, scope.all, scope.projectIds, String(user.id), isOwner(user)],
     );
     return sendJson(res, 200, { inbox: result.rows });
   }
@@ -2510,9 +2494,20 @@ async function handleApiWithContext(req, res, url) {
   const inboxMatch = url.pathname.match(/^\/api\/mbox\/agent\/inbox\/(\d+)$/);
   if (inboxMatch && req.method === "GET") {
     // Одно сообщение целиком: тело, props со следом инструментов, ответы на него и ошибки Джарвиса по нему.
-    const item = (await query(`SELECT ${INBOX_COLUMNS} FROM agent_inbox WHERE id = $1`, [inboxMatch[1]])).rows[0];
+    const item = (await query(
+      `SELECT ${INBOX_COLUMNS} FROM agent_inbox
+       WHERE id = $1 AND ($2::boolean OR project_id = ANY($3::bigint[]))
+         AND (props->>'mbox_user_id' = $4 OR ($5::boolean AND NOT (props ? 'mbox_user_id')))`,
+      [inboxMatch[1], scope.all, scope.projectIds, String(user.id), isOwner(user)],
+    )).rows[0];
     if (!item) return sendJson(res, 404, { error: "not_found" });
-    const replies = await query(`SELECT ${INBOX_COLUMNS} FROM agent_inbox WHERE props->>'re' = $1 OR props->>'in_reply_to' = $1 ORDER BY created_at`, [inboxMatch[1]]);
+    const replies = await query(
+      `SELECT ${INBOX_COLUMNS} FROM agent_inbox
+       WHERE (props->>'re' = $1 OR props->>'in_reply_to' = $1)
+         AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))
+       ORDER BY created_at`,
+      [inboxMatch[1], String(user.id), isOwner(user)],
+    );
     const errors = await query("SELECT id::text, source, tool_name, message, created_at::text FROM jarvis_errors WHERE inbox_id = $1 ORDER BY created_at", [inboxMatch[1]]);
     return sendJson(res, 200, { inbox_item: item, replies: replies.rows, errors: errors.rows });
   }
@@ -2526,9 +2521,10 @@ async function handleApiWithContext(req, res, url) {
     const row = (await query(
       `UPDATE agent_inbox SET status = 'doing', updated_at = now()
        WHERE id = $1 AND (item_type = 'question' OR (item_type = 'answer' AND agent_name = 'Человек' AND props->>'to' = $2))
+         AND (props->>'mbox_user_id' = $3 OR ($4::boolean AND NOT (props ? 'mbox_user_id')))
          AND (status = 'open' OR (status = 'doing' AND updated_at < now() - interval '10 minutes'))
        RETURNING id::text, project_id::text, title, body, props`,
-      [answerMatch[1], JARVIS_NAME],
+      [answerMatch[1], JARVIS_NAME, String(user.id), isOwner(user)],
     )).rows[0];
     if (!row) return sendJson(res, 409, { error: "not_answerable" });
     replyAsJarvis(row).catch((error) => console.error(`Jarvis hand-off reply uncaught: ${error.message}`));
@@ -2541,8 +2537,10 @@ async function handleApiWithContext(req, res, url) {
     const ifStatus = String(body.if_status || "");
     const result = await query(
       `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
-       WHERE id = $5 AND ($6 = '' OR status = $6) RETURNING id::text`,
-      [String(body.status || ""), String(body.priority || ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, inboxMatch[1], ifStatus],
+       WHERE id = $5 AND ($6 = '' OR status = $6)
+         AND (props->>'mbox_user_id' = $7 OR ($8::boolean AND NOT (props ? 'mbox_user_id')))
+       RETURNING id::text`,
+      [String(body.status || ""), String(body.priority || ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify({ ...body.props, mbox_user_id: String(user.id), mbox_owner: isOwner(user) }) : null, inboxMatch[1], ifStatus, String(user.id), isOwner(user)],
     );
     if (result.rows[0]) broadcastChange(req, "update", "agent_inbox", `#${inboxMatch[1]}`);
     if (!result.rows[0] && ifStatus) return sendJson(res, 409, { error: "status_changed" });
@@ -2561,7 +2559,11 @@ async function handleApiWithContext(req, res, url) {
     // на полпути, и помечаем сообщение done, чтобы резервный cron его не подобрал следом.
     const controller = activeJarvisRequests.get(cancelMatch[1]);
     if (controller) controller.abort();
-    await query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [cancelMatch[1]]);
+    await query(
+      `UPDATE agent_inbox SET status = 'done', updated_at = now()
+       WHERE id = $1 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))`,
+      [cancelMatch[1], String(user.id), isOwner(user)],
+    );
     return sendJson(res, 200, { ok: true, aborted: Boolean(controller) });
   }
 
@@ -2893,6 +2895,7 @@ setInterval(() => broadcastRealtime("server_tick"), 5000).unref();
 // вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».
 ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
 ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
+ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 
