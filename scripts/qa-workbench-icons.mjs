@@ -35,4 +35,4 @@ if (requestedTheme) {
   }, previousTheme);
 }
 console.log(JSON.stringify({ outputPath, icons }, null, 2));
-process.exit(icons.length === 9 && icons.every((icon) => icon.complete && icon.naturalWidth === 128 && icon.naturalHeight === 128) ? 0 : 1);
+process.exit(icons.length >= 9 && icons.every((icon) => icon.complete && icon.naturalWidth === 128 && icon.naturalHeight === 128) ? 0 : 1);

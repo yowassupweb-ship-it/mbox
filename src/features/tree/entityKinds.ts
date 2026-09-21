@@ -1,15 +1,16 @@
 export type ProjectEntityKind = "relations" | "properties" | "philosophy" | "deploy" | "stack" | "access" | "git" | "figma" | "memories" | "sources";
 
 const ICONS = "/assets/icons/icons";
+const SYSTEM = "/assets/icons/system";
 
 /** У каждой постоянной сущности проекта своё лицо: иконка и акцент. Иконки — растровые (см.
  * public/assets/icons/icons), не lucide: набор нарисован отдельно под MBOX. */
 export const projectEntityKinds: Record<ProjectEntityKind, { image: string; accent: string; label: string }> = {
-  git: { image: `${ICONS}/git.png`, accent: "#7ee2a8", label: "Git" },
-  figma: { image: `${ICONS}/figma.png`, accent: "#f24e1e", label: "Figma" },
-  relations: { image: `${ICONS}/связи.png`, accent: "#8ab4ff", label: "Связи" },
-  properties: { image: `${ICONS}/свойства.png`, accent: "#c9a6ff", label: "Свойства" },
-  philosophy: { image: `${ICONS}/философия.png`, accent: "#ffd479", label: "Философия" },
+  git: { image: `${SYSTEM}/git.png`, accent: "#7ee2a8", label: "Git" },
+  figma: { image: `${SYSTEM}/figma.png`, accent: "#f24e1e", label: "Figma" },
+  relations: { image: `${SYSTEM}/relations.png`, accent: "#8ab4ff", label: "Связи" },
+  properties: { image: `${SYSTEM}/properties.png`, accent: "#c9a6ff", label: "Свойства" },
+  philosophy: { image: `${SYSTEM}/philosophy.png`, accent: "#ffd479", label: "Философия" },
   deploy: { image: `${ICONS}/деплой.png`, accent: "#ff9f7a", label: "Деплой" },
   stack: { image: `${ICONS}/стек.png`, accent: "#7cd8e8", label: "Стек" },
   access: { image: `${ICONS}/дсотуп.png`, accent: "#f2a0c0", label: "Доступ" },

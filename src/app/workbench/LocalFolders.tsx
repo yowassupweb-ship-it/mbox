@@ -8,6 +8,7 @@ import { onLocalReveal } from "./agentTabs";
 import { askText } from "../../ui/askText";
 
 const ICONS = "/assets/icons/icons";
+const SYSTEM_ICONS = "/assets/icons/system";
 
 export function localFileKey(rootKey: string, rel: string) {
   return `local:${rootKey}:${rel}`;
@@ -27,7 +28,7 @@ export function gitLetter(change?: { index: string; worktree: string; untracked:
 
 function iconFor(entry: { name: string; type: string }) {
   if (entry.type === "dir") return `${ICONS}/папка.png`;
-  if (IMAGE_FILE.test(entry.name)) return `${ICONS}/figma.png`;
+  if (IMAGE_FILE.test(entry.name)) return `${SYSTEM_ICONS}/figma.png`;
   return /\.(md|mdx|markdown|txt|rst)$/i.test(entry.name) ? `${ICONS}/документы.png` : `${ICONS}/стек.png`;
 }
 

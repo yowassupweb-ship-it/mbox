@@ -13,6 +13,7 @@ import { folderIcon } from "./tabMeta";
 import { usePersistentState, type TabsApi } from "./tabs";
 
 const ICONS = "/assets/icons/icons";
+const SYSTEM_ICONS = "/assets/icons/system";
 const CLOSED_STATUSES = ["done", "archived"];
 
 type Props = {
@@ -145,7 +146,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
                   size={14}
                   onClick={(event) => { event.stopPropagation(); toggle(`${todosKey}:list`); }}
                 />
-                <img src={`${ICONS}/todo.png`} width={16} height={16} alt="" />
+                <img src={`${SYSTEM_ICONS}/todo.png`} width={16} height={16} alt="" />
                 <span className="wb-tree-label">Todo</span>
                 <span className="wb-tree-count">{active.length}</span>
               </div>

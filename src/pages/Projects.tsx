@@ -14,6 +14,7 @@ import { EmptyState } from "../ui";
 import { askText } from "../ui/askText";
 
 const ICONS = "/assets/icons/icons";
+const SYSTEM_ICONS = "/assets/icons/system";
 
 // Кроме постоянных сущностей у проекта могут быть свои папки: folder:<id>.
 type View = "todo" | ProjectEntityKind | `folder:${string}`;
@@ -298,7 +299,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
           style={{ ["--kind-accent" as string]: "#8ab4ff" }}
           onClick={() => go(project.id, "todo")}
         >
-          <img src={`${ICONS}/todo.png`} width={60} height={60} alt="" />
+          <img src={`${SYSTEM_ICONS}/todo.png`} width={60} height={60} alt="" />
           <b>Todo</b>
           <small>{activeTodos} активно</small>
         </button>

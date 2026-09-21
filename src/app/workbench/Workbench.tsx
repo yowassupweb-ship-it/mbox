@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Database, GitBranch, PanelBottom, PanelLeft, PanelRight, Settings, TerminalSquare, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Database, GitBranch, PanelBottom, PanelLeft, PanelRight, TerminalSquare, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { AgentChat } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -46,9 +46,14 @@ type ConsoleDock = "bottom" | "right";
 type PanelTab = "console" | "attention" | "journal";
 
 const ACTIVITY_ICONS = "/assets/icons/navigation";
+const SYSTEM_ICONS = "/assets/icons/system";
 
 function activityIcon(file: string) {
   return <img src={`${ACTIVITY_ICONS}/${file}`} alt="" draggable={false} />;
+}
+
+function systemIcon(file: string) {
+  return <img src={`${SYSTEM_ICONS}/${file}`} alt="" draggable={false} />;
 }
 
 export type WorkbenchRenderers = {
@@ -400,10 +405,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <ActivityButton label="SSH" icon={<TerminalSquare />} active={sidebarOpen && activity === "ssh"} onClick={() => showActivity("ssh")} />
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Консоль агентов">
-          <TerminalSquare aria-hidden="true" />
+          <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
           <span className="wb-activity-tip" role="tooltip">Консоль агентов</span>
         </button>
-        <ActivityButton label="Настройки" icon={<Settings />} active={tabs.active === "settings"} onClick={() => tabs.open("settings", true)} />
+        <ActivityButton label="Настройки" icon={systemIcon("settings.png")} active={tabs.active === "settings"} onClick={() => tabs.open("settings", true)} />
       </nav>
 
       <aside className="wb-sidebar" aria-label="Боковая панель" data-scroll-scope={`sidebar:${activity}`}>
