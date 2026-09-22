@@ -21,7 +21,7 @@ export type Note = { id: string; title: string; content?: string; tabs?: NoteTab
 type NoteVersion = { id: string; title: string; sha: string; size_bytes: number; author: string; source: string; created_at: string };
 type NoteVersionFull = NoteVersion & { content: string; tabs: NoteTab[] };
 
-const VERSION_SOURCE_LABEL: Record<string, string> = { mbox: "MBOX", share: "по ссылке", baseline: "начало" };
+const VERSION_SOURCE_LABEL: Record<string, string> = { mbox: "MBOX", agent: "агент", share: "по ссылке", baseline: "начало" };
 
 /** Текст всей заметки для сравнения. Вкладки разделяем заголовком — иначе правка во второй вкладке
  *  выглядела бы как правка первой, и дифф врал бы про то, что именно поменялось. */

@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import { createNote, listNotes, recordNoteVersion } from "./notes.mjs";
 import { describeWorkspaceError, findWorkspace, listVersions, listWorkspaces, requestWorkspaceOp } from "./workspaces.mjs";
 
 // Джарвис целиком: инструменты, агентный цикл, модели, источники данных. Раньше он жил в трёх копиях
@@ -348,6 +349,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
+  "create_note", "update_note",
   "create_project", "create_company", "create_artifact",
 ]);
 
@@ -911,6 +913,65 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_notes",
+      description: "Найти ЗАМЕТКИ человека по словам в заголовке или тексте. Заметка — это НЕ запись памяти: памятью агенты пишут факты себе, а заметки человек ведёт для себя, у них свои вкладки и история версий. Если просят что-то сделать «с заметкой» — искать здесь, а не через search_memory.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Слова для поиска; пусто — последние заметки" },
+          limit: { type: "number", description: "Сколько вернуть, по умолчанию 10" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_note",
+      description: "Прочитать заметку целиком по её ID, со всеми вкладками. ID берётся из search_notes.",
+      parameters: {
+        type: "object",
+        properties: { note_id: { type: "string", description: "Номер заметки (ID)" } },
+        required: ["note_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_note",
+      description: "Создать новую заметку человека с заголовком и текстом.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Заголовок заметки" },
+          content: { type: "string", description: "Текст заметки, markdown" },
+        },
+        required: ["content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_note",
+      description: "Изменить заметку человека по её ID: дописать текст в конец или заменить целиком, переименовать. Правка попадает в историю версий заметки с пометкой, что её сделал Джарвис, — человек увидит и сможет откатить.",
+      parameters: {
+        type: "object",
+        properties: {
+          note_id: { type: "string", description: "Номер заметки (ID) из search_notes" },
+          content: { type: "string", description: "Текст, необязательно" },
+          mode: { type: "string", enum: ["append", "replace"], description: "append — дописать в конец (по умолчанию), replace — заменить текст целиком" },
+          title: { type: "string", description: "Новый заголовок, необязательно" },
+        },
+        required: ["note_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1113,6 +1174,13 @@ export const TOOL_GROUPS = {
     label: "проекты: создать и удалить, стек, git, деплой, свойства карточки, связи проектов, файлы репозитория",
     match: /(проект|стек|git|гит|репозитор|деплой|свойств|карточк|связ|зависит от|файл|путь к)/,
     tools: ["create_project", "delete_project", "update_project_info", "link_projects", "find_file"],
+  },
+  notes: {
+    label: "заметки человека: найти, прочитать, создать, дописать или переписать",
+    // Заметка и запись памяти — разные сущности, и раньше «заметка» в запросе не включала ничего:
+    // группы notes не было, Джарвис брал search_memory и правил похоже названную запись памяти (#318).
+    match: /(заметк|заметок|заметке|заметку|заметки|запиш[иу] себе|блокнот)/,
+    tools: ["search_notes", "read_note", "create_note", "update_note"],
   },
   memory: {
     label: "уход за памятью: правка и удаление записей, уборка старых логов, связи и история записей",
@@ -2324,6 +2392,68 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
     );
     await recordMemoryAction({ memoryId: id, actor: JARVIS_NAME, action: "update", note: "memory updated via Jarvis tool" });
     return `обновлена запись памяти «${title}» (#${id})`;
+  }
+
+  // Заметки. Раньше их инструментов не было вовсе, и на просьбу «допиши в заметку» Джарвис находил
+  // похоже названную ЗАПИСЬ ПАМЯТИ, правил её и рапортовал об успехе — человек смотрел в заметку и
+  // ничего там не видел (todo #318: заметка #6 осталась нетронутой, текст ушёл в память #117).
+  if (name === "search_notes") {
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+    const rows = await listNotes(client.query.bind(client), String(args.query || "").trim(), limit);
+    if (!rows.length) return "заметок не нашлось";
+    return rows.map((row) => `#${row.id} «${row.title || "без заголовка"}» — ${String(row.snippet || "").replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
+  }
+
+  if (name === "read_note") {
+    const id = String(args.note_id || "").trim().replace(/^#/, "");
+    if (!/^\d+$/.test(id)) return "нужен числовой ID заметки — возьми его из search_notes";
+    const note = (await client.query("SELECT id::text, title, content, tabs FROM notes WHERE id = $1", [id])).rows[0];
+    if (!note) return `заметка #${id} не нашлась`;
+    const tabs = Array.isArray(note.tabs) && note.tabs.length ? note.tabs : [{ title: "Основная", content: note.content }];
+    const body = tabs.length === 1 ? tabs[0].content : tabs.map((tab) => `[вкладка ${tab.title}]\n${tab.content}`).join("\n\n");
+    return `заметка #${id} «${note.title}»\n\n${body}`;
+  }
+
+  if (name === "create_note") {
+    const content = String(args.content ?? "");
+    if (!content.trim()) return "нужен текст заметки";
+    const note = await createNote(client.query.bind(client), { title: String(args.title || "").trim(), content, author: JARVIS_NAME });
+    broadcastRealtime("entity_changed", { entity: "notes", action: "create", actor: JARVIS_NAME, detail: note.title, notification: `Агент ${JARVIS_NAME} создал заметку «${note.title}»` });
+    return `создана заметка «${note.title}» (#${note.id})`;
+  }
+
+  if (name === "update_note") {
+    const id = String(args.note_id || "").trim().replace(/^#/, "");
+    if (!/^\d+$/.test(id)) return "нужен числовой ID заметки — возьми его из search_notes";
+    const note = (await client.query("SELECT id::text, title, content, tabs FROM notes WHERE id = $1", [id])).rows[0];
+    if (!note) return `заметка #${id} не нашлась`;
+    const tabs = (Array.isArray(note.tabs) && note.tabs.length ? note.tabs : [{ id: "main", title: "Основная", content: note.content }]).map((tab) => ({ ...tab }));
+    let changed = false;
+    if (args.content !== undefined) {
+      const incoming = String(args.content);
+      // Дописываем в конец ПЕРВОЙ вкладки — это основной текст заметки, тот, что человек видит сразу.
+      tabs[0].content = args.mode === "replace" ? incoming : `${tabs[0].content ? `${tabs[0].content}\n\n` : ""}${incoming}`;
+      changed = true;
+    }
+    const title = args.title !== undefined ? String(args.title).trim() : note.title;
+    if (title !== note.title) changed = true;
+    if (!changed) return "нечего менять: не передан ни текст, ни заголовок";
+    await client.query(
+      "UPDATE notes SET title = $1, content = $2, tabs = $3::jsonb, updated_at = now() WHERE id = $4",
+      [title, tabs[0].content, JSON.stringify(tabs), id],
+    );
+    // Правка агента обязана попасть в историю версий — человек должен увидеть, что менял не он, и откатить.
+    await recordNoteVersion(client.query.bind(client), {
+      noteId: id,
+      title,
+      content: tabs[0].content,
+      tabs,
+      previous: { title: note.title, content: note.content, tabs: note.tabs, sha: "" },
+      author: JARVIS_NAME,
+      source: "agent",
+    }).catch(() => {});
+    broadcastRealtime("entity_changed", { entity: "notes", action: "update", actor: JARVIS_NAME, detail: title, notification: `Агент ${JARVIS_NAME} изменил заметку «${title}»` });
+    return `изменена заметка «${title}» (#${id})`;
   }
 
   if (name === "delete_memory") {
