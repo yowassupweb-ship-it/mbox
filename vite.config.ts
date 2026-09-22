@@ -1181,7 +1181,7 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/agent/ping" && req.method === "POST") {
-            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string; phase?: string }>(req);
+            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string; phase?: string; step?: Record<string, unknown>; inbox_id?: string }>(req);
             const name = String(body.agent || req.headers["x-mbox-agent"] || "Agent").trim() || "Agent";
             const started = body.event === "session_start";
             const result = await queryPostgres<{ agent_name: string; kind: string; client: string; scope: string; sessions: number; last_seen: string }>(
@@ -1200,6 +1200,11 @@ function mboxDevApi() {
             if (typeof body.phase === "string") {
               setAgentPhase(name, body.phase.trim());
               broadcastRealtime(realtimeClients, "agent_presence", { agent: name, event: "phase" });
+            }
+            // Зеркало прод-ручки: шаг работы уходит в эфир отдельным типом события, без записи
+            // в базу и без перечитывания ростера (см. server/mbox-server.mjs).
+            if (body.step && typeof body.step === "object") {
+              broadcastRealtime(realtimeClients, "agent_step", { agent: name, inbox_id: String(body.inbox_id || ""), step: body.step });
             }
             return sendJson(res, 200, { presence: result.rows[0] });
           }

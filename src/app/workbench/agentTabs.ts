@@ -22,7 +22,12 @@ export type OpenTabEvent = {
   quiet?: boolean;
 };
 
-export type OpenTabResult = { text: string; tone: "ok" | "warn" };
+export type OpenTabResult = {
+  text: string;
+  tone: "ok" | "warn";
+  /** Что можно сделать прямо из уведомления, когда открыть не вышло (подключить папку и повторить). */
+  action?: { label: string; run: () => Promise<OpenTabResult | void> };
+};
 
 /** Вкладка страницы навыка: skillpage:<навык>:<файл>. Кому уходит отправленное из формы — отдельно, по ключу. */
 export const skillPageKey = (skill: string, file: string) => `skillpage:${skill}:${file}`;
@@ -71,7 +76,23 @@ async function openLocalPath(path: string, tabs: TabsApi, showFolders: () => voi
   const root = roots
     .filter((item) => wanted === normalizePath(item.path) || wanted.startsWith(`${normalizePath(item.path)}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
-  if (!root) return { text: `Путь вне подключённых папок — подключите папку в «Папках»: ${path}`, tone: "warn" };
+  if (!root) {
+    // Раньше это был тупик: предупреждение без единого способа что-то сделать, и человек шёл
+    // подключать папку руками, теряя сам путь. Папку по-прежнему выбирает он сам, нативным
+    // диалогом — страница не может подсунуть произвольный каталог, — но теперь в один щелчок,
+    // и после подключения открытие повторяется тем же путём.
+    return {
+      text: `Путь вне подключённых папок: ${path}`,
+      tone: "warn",
+      action: {
+        label: "Подключить папку",
+        run: async () => {
+          await bridge.add();
+          return openLocalPath(path, tabs, showFolders);
+        },
+      },
+    };
+  }
   const rel = path.replace(/\\/g, "/").replace(/\/+$/, "").slice(root.path.replace(/\\/g, "/").replace(/\/+$/, "").length).replace(/^\/+/, "");
   const isDir = rel === "" || await bridge.list(root.key, rel).then(() => true, () => false);
   if (isDir) {

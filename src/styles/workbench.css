@@ -2811,6 +2811,20 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   cursor: pointer;
 }
 .wb-agent-toast.is-warn { border-color: color-mix(in srgb, var(--state-warn) 55%, transparent); }
+
+/* Действие прямо в уведомлении: подключить папку и повторить открытие — см. agentTabs.openLocalPath. */
+.wb-agent-toast-action {
+  margin-left: 10px;
+  padding: 3px 9px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--element-bg);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-agent-toast-action:hover { border-color: var(--accent-color); color: var(--accent-color); }
 .wb-doc-notice { color: var(--accent-color); font-size: var(--text-sm); white-space: nowrap; }
 
 /* Таблицы в просмотре markdown (renderDocument): широкая таблица листается сама, а не раздвигает документ. */

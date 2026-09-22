@@ -1119,6 +1119,13 @@ async function handleApiWithContext(req, res, url) {
       setAgentPhase(name, body.phase.trim());
       broadcastRealtime("agent_presence", { agent: name, event: "phase" });
     }
+    // Шаг работы агента — в эфир как есть, без записи в базу: это поток, а не состояние.
+    // Итоговая цепочка всё равно приедет в props ответа, а здесь важна только скорость.
+    // Отдельный тип события намеренно: agent_presence заставляет интерфейс перечитывать ростер,
+    // а шагов за ответ бывают десятки — перечитывать на каждый было бы дороже самой работы.
+    if (body.step && typeof body.step === "object") {
+      broadcastRealtime("agent_step", { agent: name, inbox_id: String(body.inbox_id || ""), step: body.step });
+    }
     return sendJson(res, 200, { presence: result.rows[0] });
   }
 

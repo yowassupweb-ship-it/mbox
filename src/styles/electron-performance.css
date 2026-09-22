@@ -45,6 +45,12 @@ html[data-mbox-desktop="true"] .wb-console-pane-body {
   content-visibility: auto;
 }
 
+/* Исключение: появление шагов растущей цепочки. Шаги приезжают по одному в реальном времени,
+   и возникновение рывком читается как дёрганье интерфейса. Общее правило выше их бы заглушило. */
+html[data-mbox-desktop="true"] .console-chain > li {
+  animation-duration: 260ms !important;
+}
+
 /* Исключение: бегущая полоса загрузки через сервер — единственный признак, что загрузка жива. */
 html[data-mbox-desktop="true"] .wb-upload.is-indeterminate i {
   animation-duration: 1.4s !important;

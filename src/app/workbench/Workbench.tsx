@@ -41,7 +41,7 @@ import { SearchView } from "./SearchView";
 import { tabMeta } from "./tabMeta";
 import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
-import { applyOpenTab, type OpenTabEvent } from "./agentTabs";
+import { applyOpenTab, type OpenTabEvent, type OpenTabResult } from "./agentTabs";
 import { SkillPageDocument } from "./SkillPageDocument";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
@@ -224,14 +224,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }
 
   // Агент открыл вкладку (MCP open_tab): показываем её и коротко говорим, кто и зачем.
-  const [agentNotice, setAgentNotice] = useState<{ text: string; tone: "ok" | "warn" } | null>(null);
+  const [agentNotice, setAgentNotice] = useState<{ text: string; tone: "ok" | "warn"; action?: OpenTabResult["action"] } | null>(null);
   const openTabHandler = useRef<(event: OpenTabEvent) => void>(() => undefined);
   openTabHandler.current = (event) => {
     void applyOpenTab(event, tabs, () => { setActivity("local"); setSidebarOpen(true); })
       .then((result) => {
         if (event.quiet && result.tone === "ok") return;
         const who = event.actor || "Агент";
-        setAgentNotice({ tone: result.tone, text: result.tone === "ok" ? `${who} открыл ${result.text}${event.note ? ` — ${event.note}` : ""}` : result.text });
+        setAgentNotice({ tone: result.tone, action: result.action, text: result.tone === "ok" ? `${who} открыл ${result.text}${event.note ? ` — ${event.note}` : ""}` : result.text });
       })
       .catch((cause) => setAgentNotice({ tone: "warn", text: `Не открылось: ${cause instanceof Error ? cause.message : String(cause)}` }));
   };
@@ -242,9 +242,22 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, []);
   useEffect(() => {
     if (!agentNotice) return;
-    const timer = window.setTimeout(() => setAgentNotice(null), 8000);
+    // С кнопкой уведомление живёт дольше: восемь секунд — это меньше, чем нужно, чтобы прочитать,
+    // решить и выбрать папку в системном диалоге.
+    const timer = window.setTimeout(() => setAgentNotice(null), agentNotice.action ? 40000 : 8000);
     return () => window.clearTimeout(timer);
   }, [agentNotice]);
+
+  /** Действие из уведомления (подключить папку и повторить открытие) — и сразу его результат. */
+  const runNoticeAction = useCallback(async (action: NonNullable<OpenTabResult["action"]>) => {
+    setAgentNotice(null);
+    try {
+      const result = await action.run();
+      if (result) setAgentNotice({ tone: result.tone, action: result.action, text: result.tone === "ok" ? `Открыто: ${result.text}` : result.text });
+    } catch (cause) {
+      setAgentNotice({ tone: "warn", text: `Не открылось: ${cause instanceof Error ? cause.message : String(cause)}` });
+    }
+  }, []);
 
   function closeTab(key: string) {
     if (dirty[key] && !window.confirm("Во вкладке несохранённые правки. Закрыть?")) return;
@@ -732,6 +745,15 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       {agentNotice && (
         <div className={agentNotice.tone === "warn" ? "wb-agent-toast is-warn" : "wb-agent-toast"} role="status" onClick={() => setAgentNotice(null)}>
           {agentNotice.text}
+          {agentNotice.action && (
+            <button
+              type="button"
+              className="wb-agent-toast-action"
+              onClick={(event) => { event.stopPropagation(); void runNoticeAction(agentNotice.action!); }}
+            >
+              {agentNotice.action.label}
+            </button>
+          )}
         </div>
       )}
 

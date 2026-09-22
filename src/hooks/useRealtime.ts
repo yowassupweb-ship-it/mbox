@@ -10,6 +10,13 @@ export type RealtimeNotice = { id: string; text: string; at: string };
  * через useMboxData: открытая заметка, документ файла. detail — имя сущности («notes») или "".
  */
 export const ENTITY_CHANGED_EVENT = "mbox:entity-changed";
+
+/**
+ * Шаг работы агента в реальном времени: агент прислал его через POST /agent/ping, сервер разослал
+ * сокетам. Данных в базе за этим нет и перечитывать по нему НЕЧЕГО — событие просто доезжает до
+ * чата, который дорисовывает цепочку. Итоговая цепочка приедет в props готового ответа.
+ */
+export const AGENT_STEP_EVENT = "mbox:agent-step";
 const URGENT_ENTITIES = new Set(["agent_inbox", "agent_presence"]);
 
 /** entity — какая сущность изменилась (или "agent_presence"); без неё — перечитать всё. */
@@ -85,6 +92,10 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
           if (message.type === "entity_changed") {
             scheduleReload(message.entity);
             announce(message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`);
+          }
+          if (message.type === "agent_step") {
+            window.dispatchEvent(new CustomEvent(AGENT_STEP_EVENT, { detail: message }));
+            return;
           }
           if (message.type === "agent_presence") {
             scheduleReload("agent_presence");

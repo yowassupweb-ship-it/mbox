@@ -10,6 +10,7 @@ import { usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
 import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
 import { serverOrigin } from "../../lib/serverOrigin";
+import { AGENT_STEP_EVENT } from "../../hooks/useRealtime";
 import { markOverlay } from "../../app/workbench/BrowserDocument";
 import { formatBytes } from "../../lib/format";
 
@@ -372,6 +373,64 @@ type JarvisCatalog = {
   defaultEffort: string;
 };
 
+/** Один шаг работы агента: вызов инструмента с аргументами и результатом либо реплика между шагами. */
+type ChainStep = {
+  kind: "tool" | "text";
+  name?: string;
+  hint?: string;
+  input?: string;
+  output?: string;
+  is_error?: boolean;
+  ms?: number;
+  text?: string;
+};
+
+/**
+ * Цепочка работы агента — то, что в Claude Code видно прямо в переписке: шаг, его аргументы и то,
+ * что инструмент вернул. Всё это приезжает из потока CLI (наблюдатель собирает props.steps).
+ *
+ * Чего здесь принципиально нет — текста размышления: блоки thinking приходят из CLI пустыми, сырую
+ * цепочку рассуждений API не отдаёт. Поэтому шагов «Thinking» тут нет вовсе, а сколько модель
+ * думала, видно строкой выше, в сводке хода работы.
+ */
+function ChainTimeline({ steps }: { steps: ChainStep[] }) {
+  // Длинная цепочка целиком забивает переписку, поэтому по умолчанию видны только последние шаги:
+  // они и есть «что происходит сейчас», а начало разворачивается по кнопке.
+  const [full, setFull] = useState(false);
+  const hidden = full ? 0 : Math.max(0, steps.length - VISIBLE_STEPS);
+  const shown = hidden ? steps.slice(hidden) : steps;
+  return (
+    <>
+      {hidden > 0 && (
+        <button type="button" className="console-chain-more" onClick={() => setFull(true)}>
+          ещё {hidden} {plural(hidden, "шаг", "шага", "шагов")} выше
+        </button>
+      )}
+      <ol className="console-chain">
+        {shown.map((step, index) => (
+          <li key={hidden + index} className={step.kind === "text" ? "is-text" : step.is_error ? "is-error" : undefined}>
+            {step.kind === "text" ? (
+              <p className="console-chain-say">{step.text}</p>
+            ) : (
+              /* Аргументы и вывод свёрнуты: в строке остаётся только что за шаг и сколько занял,
+                 а содержимое раскрывается щелчком по строке — иначе один Read забивает пол-экрана. */
+              <details className="console-chain-step">
+                <summary>
+                  <b>{step.name || "…"}</b>
+                  {step.hint && <span>{step.hint}</span>}
+                  {step.ms ? <time>{step.ms >= 1000 ? `${Math.round(step.ms / 1000)} с` : `${step.ms} мс`}</time> : null}
+                </summary>
+                {step.input && <pre className="console-chain-io" data-label="IN">{step.input}</pre>}
+                {step.output && <pre className="console-chain-io" data-label="OUT">{step.output}</pre>}
+              </details>
+            )}
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
 type PickerOption = { value: string; label: string; hint?: string };
 
 /**
@@ -460,6 +519,9 @@ function ComposerPicker({ label, value, onChange, options, placeholder, defaultV
   );
 }
 
+/** Сколько шагов цепочки показывать без разворота — остальные прячутся за кнопкой. */
+const VISIBLE_STEPS = 6;
+
 const EFFORT_LABEL: Record<string, string> = { low: "быстро", medium: "обычно", high: "тщательно" };
 
 /**
@@ -544,6 +606,8 @@ type LogLine = {
   };
   /** Ответ не получился: наблюдатель агента упал. Видно сразу, а не только в логе. */
   failed?: boolean;
+  /** Цепочка работы: шаги с аргументами и результатами (props.steps у локальных агентов). */
+  steps?: ChainStep[];
   highlights?: string[];
   actions?: MessageAction[];
   postBuilder?: PostPart[];
@@ -885,6 +949,13 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // Кого ждём. Раньше плашка «думает» была только у Джарвиса, и работа Claude шла совершенно молча:
   // фаза уходила в нижнюю панель, а в самой переписке не появлялось ничего.
   const [awaitingAgent, setAwaitingAgent] = useState(JARVIS_NAME);
+  /**
+   * Цепочка, которая растёт прямо во время работы: шаги приезжают по сокету отдельными событиями
+   * (agent_step), в базе их нет. Ключ — номер шага: результат инструмента приходит вторым событием
+   * и догоняет свой вызов. Когда придёт готовый ответ, у него будет своя полная цепочка в props,
+   * а эта, живая, станет не нужна.
+   */
+  const [liveSteps, setLiveSteps] = useState<ChainStep[]>([]);
   // Значение не читается — сам факт смены форсирует re-render, чтобы Date.now() в
   // awaitingJarvisSeconds ниже пересчитывался каждую секунду.
   const [, setElapsedTick] = useState(0);
@@ -1041,6 +1112,23 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return () => { cancelled = true; window.clearInterval(interval); };
   }, [awaitingJarvisId, awaitingAgent]);
 
+  useEffect(() => {
+    if (!awaitingJarvisId) { setLiveSteps([]); return; }
+    const listener = (event: Event) => {
+      const payload = (event as CustomEvent<{ inbox_id?: string; step?: ChainStep & { i?: number } }>).detail;
+      if (!payload?.step || String(payload.inbox_id || "") !== awaitingJarvisId) return;
+      const { i = 0, ...patch } = payload.step;
+      setLiveSteps((current) => {
+        const next = [...current];
+        while (next.length <= i) next.push({ kind: "tool" });
+        next[i] = { ...next[i], ...patch };
+        return next;
+      });
+    };
+    window.addEventListener(AGENT_STEP_EVENT, listener);
+    return () => window.removeEventListener(AGENT_STEP_EVENT, listener);
+  }, [awaitingJarvisId]);
+
   const awaitingPhase = useMemo(() => {
     if (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase()) return awaitingJarvisPhase;
     return agents.find((agent) => agent.name.toLowerCase() === awaitingAgent.toLowerCase())?.phase || null;
@@ -1182,6 +1270,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       work: item.props?.work && typeof item.props.work === "object"
         ? (item.props.work as LogLine["work"])
         : undefined,
+      steps: Array.isArray(item.props?.steps) ? (item.props.steps as ChainStep[]) : undefined,
       // Заметные действия (создано/удалено/объединено) — видны сразу, в отличие от trace выше.
       highlights: Array.isArray(item.props?.highlights)
         ? (item.props.highlights as unknown[]).filter((t): t is string => typeof t === "string")
@@ -1529,6 +1618,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         </button>
                       )}
                     </span>
+                    {/* Цепочка идёт до самого ответа и всегда развёрнута — это часть переписки,
+                        а не приложение к ней: сначала видно, что агент делал, потом что получилось. */}
+                    {!!line.steps?.length && (
+                      <div className="console-chain-block">
+                        <p className="console-chain-title">{workSummary(line.work) || `Ход работы · ${line.steps.length} шагов`}</p>
+                        <ChainTimeline steps={line.steps} />
+                      </div>
+                    )}
                     <div className={line.failed ? "console-bubble is-failed" : "console-bubble"}>
                     {quote && (
                       <button type="button" className="console-quote" onClick={() => jumpTo(quote.id)} title="Показать исходное сообщение">
@@ -1573,7 +1670,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         <div className="console-reasoning">{line.reasoning.map((text, index) => <p key={index}>{text}</p>)}</div>
                       </details>
                     )}
-                    {!!line.trace?.length && (
+                    {/* Цепочка шагов, как в Claude Code: что вызвано, с чем и что вернулось.
+                        Плоский trace остаётся запасным — его присылает Джарвис, у которого шагов нет. */}
+                    {!line.steps?.length && !!line.trace?.length && (
                       <details className="console-trace-details">
                         <summary>{workSummary(line.work) || `Подробности (${line.trace.length})`}</summary>
                         <pre className="console-trace">{line.trace.join("\n\n")}</pre>
@@ -1595,6 +1694,13 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 </div>
               );
             })}
+            {/* Цепочка растёт на глазах: шаги приезжают по сокету, пока агент работает, и стоят
+                там же, где потом встанет готовая — над ответом. */}
+            {awaitingJarvisId && liveSteps.length > 0 && (
+              <div className="console-chain-block is-live">
+                <ChainTimeline steps={liveSteps} />
+              </div>
+            )}
             {awaitingJarvisId && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />

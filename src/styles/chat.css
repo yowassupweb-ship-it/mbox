@@ -1478,3 +1478,120 @@
   padding-left: 8px;
   background: color-mix(in srgb, var(--state-danger) 8%, transparent);
 }
+
+/* ─── Цепочка работы агента (ChainTimeline): шаг, его аргументы и результат ───
+   Живёт прямо в переписке, до самого ответа, и всегда развёрнута: это часть разговора,
+   а не приложение к нему. Поэтому всё здесь компактнее обычного текста чата. */
+.console-chain-block { margin: 2px 0 6px; }
+.console-chain-title {
+  margin: 0 0 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.console-chain {
+  margin: 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+  /* Вертикальная нить, вдоль которой идут точки шагов. */
+  border-left: 1px solid var(--border-color);
+}
+.console-chain > li { position: relative; padding: 0 0 5px 12px; }
+.console-chain > li:last-child { padding-bottom: 0; }
+.console-chain > li::before {
+  content: "";
+  position: absolute;
+  left: -17px;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.console-chain > li.is-text::before { background: color-mix(in srgb, var(--accent-color) 70%, transparent); }
+.console-chain > li.is-error::before { background: var(--state-danger); }
+
+/* Шаг — одна строка; аргументы и вывод раскрываются щелчком по ней. Треугольник убран:
+   вся строка и есть кнопка, а лишний значок в плотном списке только шумит. */
+.console-chain-step > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.console-chain-step > summary::-webkit-details-marker { display: none; }
+.console-chain-step > summary::marker { content: ""; }
+.console-chain-step > summary:hover b { color: var(--accent-color); }
+.console-chain-step > summary b { color: var(--text-main); font-weight: 600; }
+.console-chain-step > summary span { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.console-chain-step > summary time { margin-left: auto; flex: none; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* Реплика агента между шагами: две строки, дальше — обрез. */
+.console-chain-say {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.console-chain-more {
+  margin: 0 0 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.console-chain-more:hover { color: var(--text-2); }
+
+/* Аргументы и результат шага: подпись IN/OUT слева, высота ограничена — вывод Read бывает длинным. */
+.console-chain-io {
+  position: relative;
+  margin: 5px 0 0;
+  padding: 6px 8px 6px 40px;
+  max-height: 108px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--code-block-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.console-chain-io::before {
+  content: attr(data-label);
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+}
+
+/* Живая цепочка: та же разметка, но пока агент работает — приглушена и с отступом под индикатор. */
+.console-chain-block.is-live { margin: 4px 0 2px; opacity: .85; }
+
+/* Появление шага: цепочка растёт по ходу работы, и новый шаг должен «приезжать», а не
+   возникать рывком. Анимация одноразовая — играет на монтировании элемента; уже показанный шаг
+   при обновлении (когда к вызову приезжает результат) заново не появляется. */
+@keyframes console-chain-step-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.console-chain > li { animation: console-chain-step-in 260ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .console-chain > li { animation: none; }
+}

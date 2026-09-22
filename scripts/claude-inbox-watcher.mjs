@@ -53,6 +53,75 @@ const CLAUDE_DEFAULT_MODEL = "sonnet";
 const CLAUDE_EFFORT_CHOICES = new Set(["low", "medium", "high", "xhigh", "max"]);
 const pickModel = (value) => (CLAUDE_MODEL_CHOICES.has(String(value || "")) ? String(value) : "");
 const pickEffort = (value) => (CLAUDE_EFFORT_CHOICES.has(String(value || "")) ? String(value) : "");
+// Сколько истории показывать агенту. Потолок на запись — против одного гигантского сообщения,
+// общий бюджет — против тридцати средних. Вместе держат промпт в рамках, не обрывая при этом
+// обычный развёрнутый ответ на полуслове.
+const CONTEXT_CHARS_PER_ENTRY = 6000;
+const CONTEXT_CHARS_TOTAL = 40000;
+// MCP агента должен смотреть на ТОТ ЖЕ сервер, что и наблюдатель. Глобальный конфиг в ~/.claude.json
+// нацелен на прод, и когда наблюдатель работает против другого адреса (локальный запуск, свой
+// сервер), инструменты вроде open_tab уходили в пустоту: окно человека подключено к одному серверу,
+// а агент стучится в другой, получает delivered: 0 и честно отвечает «окно не найдено».
+// Одноимённый сервер в --mcp-config перебивает глобальный; --strict-mcp-config НЕ используем,
+// иначе агент потеряет все остальные свои MCP. Пароль здесь тот же, что уже лежит в ~/.claude.json,
+// новой утечки файл не создаёт, но и класть его куда-то ещё не нужно — только во временный каталог.
+const mcpConfigPath = path.join(os.tmpdir(), `claude-inbox-watcher-mcp-${accountKey}-${agentName}.json`);
+function writeMcpConfig() {
+  const env = {
+    MBOX_URL: baseUrl,
+    MBOX_AGENT_NAME: agentName,
+    MBOX_AGENT_CLIENT: "claude-inbox-watcher",
+    ...(accessToken ? { MBOX_TOKEN: accessToken } : { MBOX_USERNAME: username, MBOX_PASSWORD: password }),
+  };
+  const config = { mcpServers: { "mbox-prod": { command: "node", args: [path.resolve(__dirname, "mbox-mcp-server.mjs")], env } } };
+  try {
+    fs.writeFileSync(mcpConfigPath, JSON.stringify(config));
+    return true;
+  } catch (error) {
+    console.error(`${logPrefix} не удалось записать MCP-конфиг: ${error.message}`);
+    return false;
+  }
+}
+const mcpConfigReady = writeMcpConfig();
+
+// Цепочка шагов уезжает в props инбокса (JSONB), поэтому у неё должен быть потолок: вывод
+// одного Read большого файла — это десятки килобайт, а таких шагов за ответ бывает под сотню.
+// Режем каждый кусок и общее число шагов; в чате у обрезанного видно «…».
+const MAX_STEP_INPUT = 700;
+const MAX_STEP_OUTPUT = 1500;
+const MAX_STEP_TEXT = 700;
+const MAX_STEPS = 60;
+
+function clip(value, limit) {
+  const text = String(value ?? "");
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+/** Аргументы инструмента человекочитаемо: одиночная строка как есть, остальное — JSON. */
+function stringifyInput(input) {
+  if (input === null || input === undefined) return "";
+  if (typeof input === "string") return input;
+  const keys = Object.keys(input);
+  if (keys.length === 1 && typeof input[keys[0]] === "string") return input[keys[0]];
+  try { return JSON.stringify(input, null, 1); } catch { return String(input); }
+}
+
+/** content у tool_result бывает строкой, а бывает массивом блоков — нужен текст. */
+function toolResultText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => (typeof part === "string" ? part : part?.text || "")).filter(Boolean).join("\n");
+  }
+  if (content && typeof content === "object") { try { return JSON.stringify(content); } catch { return ""; } }
+  return "";
+}
+
+/** Добавить шаг в цепочку. Сверх потолка не растим: важнее начало работы, чем её хвост. */
+function addStep(state, step) {
+  if (state.steps.length >= MAX_STEPS) return null;
+  state.steps.push(step);
+  return step;
+}
 
 let cookie = "";
 let stopping = false;
@@ -207,11 +276,20 @@ async function mboxFetch(apiPath, init = {}) {
 }
 
 /** phase — живая строка «чем занят» для чата: сервер кладёт её в agent_presence и шлёт вебсокетом. */
-async function ping(event, phase) {
+async function ping(event, phase, extra) {
   await mboxFetch("/api/mbox/agent/ping", {
     method: "POST",
-    body: JSON.stringify({ agent: agentName, event, kind: "local_watcher", client: "claude-inbox-watcher", scope: "agent_inbox", ...(phase === undefined ? {} : { phase }) }),
+    body: JSON.stringify({ agent: agentName, event, kind: "local_watcher", client: "claude-inbox-watcher", scope: "agent_inbox", ...(phase === undefined ? {} : { phase }), ...(extra || {}) }),
   });
+}
+
+/**
+ * Шаг работы — сразу в эфир, чтобы цепочка в чате росла по ходу дела, а не появлялась целиком
+ * в конце. В базу не пишем: итоговая цепочка всё равно уедет в props ответа, здесь важна скорость.
+ * `i` — номер шага: результат инструмента приходит отдельным событием и догоняет свой вызов по нему.
+ */
+function streamStep(inboxId, index, step) {
+  ping("heartbeat", undefined, { inbox_id: String(inboxId), step: { i: index, ...step } }).catch(() => {});
 }
 
 async function newInboxItems() {
@@ -282,6 +360,9 @@ async function handleInboxItem(item) {
         // «сколько думал / сколько заняло». Текста размышления у CLI нет — см. spawnStreaming.
         tools_used: outcome.toolsUsed,
         trace: outcome.trace,
+        // Цепочка шагов, как в Claude Code: что вызвано, с чем и что вернулось, по порядку.
+        // Последняя реплика агента совпадает с самим ответом — в цепочке она была бы дублем.
+        steps: outcome.steps.filter((step) => !(step.kind === "text" && step.text && outcome.text.startsWith(step.text.replace(/…$/, "")))),
         work: outcome.stats,
         ...(worthShowingLimit(outcome.rateLimit) ? { rate_limit: claudeRateLimit(outcome.rateLimit) } : {}),
       },
@@ -399,9 +480,21 @@ async function recentConversationContext(item) {
     .slice(-contextLimit);
 
   if (!rows.length) return "";
+  // Свежее важнее старого: набираем историю с конца, пока укладываемся в общий бюджет символов,
+  // и только потом переворачиваем обратно. Раньше бюджета не было вовсе, зато КАЖДАЯ запись резалась
+  // до 900 символов — и агент читал свои же прошлые ответы оборванными на полуслове, после чего
+  // решал, что это чат их обрезал, и переписывал ответ заново.
+  const lines = [];
+  let budget = CONTEXT_CHARS_TOTAL;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const line = formatContextLine(rows[i]);
+    if (lines.length && line.length > budget) break;
+    lines.unshift(line);
+    budget -= line.length;
+  }
   return [
     "Recent MBOX console context, oldest to newest:",
-    ...rows.map(formatContextLine),
+    ...lines,
   ].join("\n");
 }
 
@@ -411,7 +504,7 @@ function formatContextLine(entry) {
   const to = entry.props?.to ? ` -> ${entry.props.to}` : "";
   const re = entry.props?.re || entry.props?.in_reply_to ? `, reply to #${entry.props.re || entry.props.in_reply_to}` : "";
   const text = String([entry.title, entry.body].filter(Boolean).join(" — ")).replace(/\s+/g, " ").trim();
-  const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  const clipped = text.length > CONTEXT_CHARS_PER_ENTRY ? `${text.slice(0, CONTEXT_CHARS_PER_ENTRY)}...` : text;
   return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}${re}): ${clipped}`;
 }
 
@@ -460,8 +553,9 @@ async function runClaude(item) {
   const wantedEffort = pickEffort(item.props?.effort);
   if (wantedModel) args.push("--model", wantedModel);
   if (wantedEffort) args.push("--effort", wantedEffort);
+  if (mcpConfigReady) args.push("--mcp-config", mcpConfigPath);
 
-  return await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt);
+  return await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt, item.id);
 }
 
 /** 1300 -> «1,3k»: в живой строке важен порядок величины, а не точное число. */
@@ -485,7 +579,7 @@ function toolHint(input) {
  * токенов ушло на размышление, во что обошёлся ответ и где сейчас лимиты подписки. Пока агент
  * работает, то же самое уходит в MBOX фазой (POST /agent/ping), и чат показывает её живой строкой.
  */
-function spawnStreaming(command, args, options, input = "") {
+function spawnStreaming(command, args, options, input = "", inboxId = "") {
   return new Promise((resolve, reject) => {
     // windowsHide: наблюдатель сам работает без консоли, и без флага Windows открывала CLI агента
     // в отдельном видимом окне. claude на Windows — это claude.cmd, его запускает только cmd.exe.
@@ -493,7 +587,10 @@ function spawnStreaming(command, args, options, input = "") {
       ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].join(" ")}"`], { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
       : spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
 
-    const state = { text: "", toolsUsed: [], trace: [], thinkingTokens: 0, rateLimit: null, stats: null, failure: "" };
+    // steps — цепочка шагов для чата: что вызвано, с чем и что вернулось, в порядке событий.
+    // pendingTools связывает вызов с его результатом: они приходят разными событиями потока.
+    const state = { text: "", toolsUsed: [], trace: [], steps: [], thinkingTokens: 0, rateLimit: null, stats: null, failure: "" };
+    const pendingTools = new Map();
     // Claude Code стартует несколько секунд (грузит MCP и навыки) и до первого события молчит —
     // без этой строки человек всё это время видел бы пустоту там, где агент уже занят.
     ping("heartbeat", "Запускается").catch(() => {});
@@ -524,15 +621,51 @@ function spawnStreaming(command, args, options, input = "") {
       }
       if (event.type === "assistant" && Array.isArray(event.message?.content)) {
         for (const block of event.message.content) {
+          if (block.type === "text") {
+            // Реплика между шагами («сейчас проверю тесты») — часть цепочки, а не сам ответ.
+            const text = String(block.text || "").trim();
+            if (text) {
+              const index = state.steps.length;
+              if (addStep(state, { kind: "text", text: clip(text, MAX_STEP_TEXT) })) {
+                streamStep(inboxId, index, { kind: "text", text: clip(text, MAX_STEP_TEXT) });
+              }
+            }
+            continue;
+          }
           if (block.type !== "tool_use") continue;
           const name = String(block.name || "?");
           const hint = toolHint(block.input);
           if (!state.toolsUsed.includes(name)) state.toolsUsed.push(name);
           state.trace.push(`${state.trace.length + 1}. ${name}${hint ? `\n   ${hint}` : ""}`);
-          console.log(`${logPrefix}   ${name}${hint ? ` · ${hint}` : ""}`);
-          // В чате — просто «Работает»: там нужен признак жизни, а не имя инструмента. Подробности
-          // (что и с чем вызывалось) уходят в trace и видны под готовым ответом.
+          const index = state.steps.length;
+          const step = addStep(state, { kind: "tool", name, hint, input: clip(stringifyInput(block.input), MAX_STEP_INPUT), at: Date.now() });
+          if (step) {
+            step.i = index;
+            if (block.id) pendingTools.set(block.id, step);
+            // Вызов уходит в чат сразу, не дожидаясь результата: в потоке шаг должен появиться
+            // в тот момент, когда он начался, иначе «живой» цепочки не получится.
+            streamStep(inboxId, index, { kind: "tool", name, hint, input: step.input });
+          }
+          console.log(`${logPrefix}   ${name}${hint ? " · " + hint : ""}`);
+          // В чате — просто «Работает»: там нужен признак жизни, а не имя инструмента. Что и с чем
+          // вызывалось, видно в цепочке шагов под готовым ответом.
           pushPhase("Работает");
+        }
+        return;
+      }
+      // Результат инструмента приходит отдельным событием роли user. Без него в цепочке была бы
+      // только половина шага: что запустили, но не что вернулось.
+      if (event.type === "user" && Array.isArray(event.message?.content)) {
+        for (const block of event.message.content) {
+          if (block.type !== "tool_result") continue;
+          const step = pendingTools.get(block.tool_use_id);
+          if (!step) continue;
+          pendingTools.delete(block.tool_use_id);
+          step.output = clip(toolResultText(block.content), MAX_STEP_OUTPUT);
+          step.is_error = Boolean(block.is_error);
+          step.ms = step.at ? Date.now() - step.at : 0;
+          delete step.at;
+          streamStep(inboxId, step.i, { output: step.output, is_error: step.is_error, ms: step.ms });
         }
         return;
       }
@@ -558,11 +691,21 @@ function spawnStreaming(command, args, options, input = "") {
         const trimmed = line.trim();
         if (!trimmed) continue;
         if (!trimmed.startsWith("{")) { plain += `${trimmed}\n`; console.log(`${logPrefix} ${trimmed}`); continue; }
+        // Разбор и обработку разводим намеренно: общий catch глотал и ошибки обработчика, из-за
+        // чего поломка в нём выглядела как «шаги просто не собрались», без следа в логе.
+        let event = null;
         try {
-          handle(JSON.parse(trimmed));
+          event = JSON.parse(trimmed);
         } catch {
           // Строка потока не разобралась — она не должна ронять ответ; держим её как обычный вывод.
           plain += `${trimmed}\n`;
+        }
+        if (event) {
+          try {
+            handle(event);
+          } catch (error) {
+            console.error(`${logPrefix} сбой разбора события ${event.type}: ${error.message}`);
+          }
         }
       }
     });
