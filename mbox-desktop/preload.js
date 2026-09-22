@@ -70,6 +70,14 @@ const desktopApi = {
     hide: (key) => ipcRenderer.invoke("mbox-desktop:browser-hide", key),
     close: (key) => ipcRenderer.invoke("mbox-desktop:browser-close", key),
     act: (key, command, payload) => ipcRenderer.invoke("mbox-desktop:browser-act", key, command, payload),
+    bookmarks: () => ipcRenderer.invoke("mbox-desktop:browser-bookmarks"),
+    addBookmark: (bookmark) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-add", bookmark),
+    removeBookmark: (url) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-remove", url),
+    chromeProfiles: () => ipcRenderer.invoke("mbox-desktop:browser-chrome-profiles"),
+    importBookmarks: (profile) => ipcRenderer.invoke("mbox-desktop:browser-import-bookmarks", profile),
+    importPasswords: () => ipcRenderer.invoke("mbox-desktop:browser-import-passwords"),
+    credentials: (url) => ipcRenderer.invoke("mbox-desktop:browser-credentials", url),
+    fillPassword: (key, username) => ipcRenderer.invoke("mbox-desktop:browser-fill-password", key, username),
     onEvent: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on("mbox-desktop:browser", listener);

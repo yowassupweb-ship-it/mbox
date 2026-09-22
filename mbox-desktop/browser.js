@@ -10,13 +10,11 @@
 // Вход в сайты сохраняется между запусками: общий раздел сессии persist:mbox-browser. Он намеренно
 // отдельный от сессии самого MBOX — у сайтов не должно быть ни куки MBOX, ни моста к диску и агентам.
 
-const { WebContentsView, session, shell } = require("electron");
+const { WebContentsView, session } = require("electron");
+const chromeImport = require("./import-chrome");
 
 const PARTITION = "persist:mbox-browser";
 const HOME = "about:blank";
-
-/** Разрешения, которые чужой сайт может получить без вопросов. Остальное отклоняем молча. */
-const ALLOWED_PERMISSIONS = new Set(["fullscreen", "clipboard-sanitized-write"]);
 
 const tabs = new Map();
 let window = null;
@@ -82,13 +80,11 @@ function create(key) {
   // Новое окно сайта — новая вкладка MBOX, а не отдельное окно Chromium мимо интерфейса.
   contents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) emit({ type: "open", url });
-    else if (/^(mailto|tel):/i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
   contents.on("will-navigate", (event, url) => {
     if (/^https?:/i.test(url) || /^about:blank$/i.test(url)) return;
     event.preventDefault();
-    if (/^(mailto|tel):/i.test(url)) void shell.openExternal(url);
   });
 
   window.contentView.addChildView(view);
@@ -170,6 +166,34 @@ function act(key, command, payload) {
   return stateOf(key);
 }
 
+async function fillPassword(key, username) {
+  const tab = tabs.get(key);
+  if (!tab) return { ok: false, error: "Вкладка закрыта" };
+  const contents = tab.view.webContents;
+  const pageUrl = contents.getURL();
+  const entries = chromeImport.credentialsFor(pageUrl);
+  const entry = entries.find((item) => item.username === username);
+  if (!entry) return { ok: false, error: "Для этого сайта пароль не найден" };
+  const script = `(() => {
+    if (location.origin !== ${JSON.stringify(new URL(pageUrl).origin)}) return false;
+    const password = document.querySelector('input[type="password"]');
+    if (!password) return false;
+    const username = document.querySelector('input[autocomplete="username"], input[type="email"], input[name*="user" i]');
+    const set = (element, value) => {
+      if (!element) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    set(username, ${JSON.stringify(entry.username)});
+    set(password, ${JSON.stringify(entry.password)});
+    return true;
+  })()`;
+  const filled = await contents.executeJavaScript(script, true);
+  return filled ? { ok: true } : { ok: false, error: "На странице нет поля пароля" };
+}
+
 /**
  * Подключает браузер к окну MBOX. Вызывается один раз при создании окна: виды живут внутри окна и
  * пересоздаются вместе с ним.
@@ -181,14 +205,14 @@ function attach(mainWindow, sendToUi) {
   };
 
   const browserSession = session.fromPartition(PARTITION);
-  // Камеру, микрофон, геолокацию и уведомления чужие сайты не получают: это первая версия браузера,
-  // разрешения будут спрашиваться у человека отдельной задачей.
-  browserSession.setPermissionRequestHandler((_contents, permission, callback) => callback(ALLOWED_PERMISSIONS.has(permission)));
-  browserSession.setPermissionCheckHandler((_contents, permission) => ALLOWED_PERMISSIONS.has(permission));
+  // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
+  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  browserSession.setPermissionCheckHandler(() => false);
+  browserSession.on("will-download", (event) => event.preventDefault());
 
   // Масштаб интерфейса меняется — прямоугольник в пикселях окна становится другим.
   mainWindow.webContents.on("zoom-changed", () => { for (const tab of tabs.values()) applyBounds(tab); });
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, state: stateOf, PARTITION };
+module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, fillPassword, state: stateOf, PARTITION };

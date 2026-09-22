@@ -1426,6 +1426,25 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-address svg { flex: none; }
 .wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: 12.5px; }
 
+.wb-browser-bookmarks { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 2px 12px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
+.wb-browser-bookmarks > svg { flex: none; }
+.wb-browser-bookmarks > span { font-size: 11px; }
+.wb-browser-bookmarks button { flex: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); padding: 5px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+.wb-browser-bookmarks button:hover, .wb-browser-bookmarks button:focus-visible { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-bookmarks button:focus-visible, .wb-browser-tools button:focus-visible, .wb-browser-tools select:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-browser-folder-menu { display: flex; flex-wrap: wrap; gap: 4px; max-height: 180px; overflow-y: auto; padding: 8px 12px; border-bottom: 1px solid var(--wb-line); background: var(--wb-surface); }
+.wb-browser-folder-menu button { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); padding: 6px 9px; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.wb-browser-folder-menu button:hover, .wb-browser-folder-menu button:focus-visible { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-folder-menu button:focus-visible { outline: 2px solid var(--accent-color); }
+.wb-browser-tools { display: grid; gap: 10px; padding: 12px; border-bottom: 1px solid var(--wb-line); background: var(--wb-surface); }
+.wb-browser-tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.wb-browser-tools-row > span, .wb-browser-tools-row > label { min-width: 110px; }
+.wb-browser-tools-row select, .wb-browser-tools-row button { border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); padding: 6px 9px; font: inherit; cursor: pointer; }
+.wb-browser-tools-row select:hover:not(:disabled), .wb-browser-tools-row button:hover:not(:disabled) { background: var(--wb-hover); }
+.wb-browser-tools-row select:disabled, .wb-browser-tools-row button:disabled { opacity: .5; cursor: default; }
+.wb-browser-tools-row small { color: var(--text-muted); }
+.wb-browser-tools-message { color: var(--text-2); font-size: 12px; }
+
 .wb-browser-stage { flex: 1 1 0; min-height: 0; background: var(--surface-deep); }
 
 .wb-pdf-view { height: 100%; min-height: 0; padding: 8px; background: var(--surface-deep); }

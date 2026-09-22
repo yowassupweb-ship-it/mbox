@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, cli
 const { autoUpdater } = require("electron-updater");
 const localUi = require("./localUi");
 const browser = require("./browser");
+const chromeImport = require("./import-chrome");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -628,8 +629,12 @@ ipcMain.handle("mbox-desktop:check-updates", async () => checkForUpdates(true));
 
 // Встроенный браузер. Страница интерфейса называет вкладку своим ключом и присылает прямоугольник,
 // куда положить сайт; адрес, заголовок и кнопки «назад/вперёд» возвращаются обратно событиями.
-ipcMain.handle("mbox-desktop:browser-open", async (_event, key, url) => browser.open(String(key), String(url || "")));
-ipcMain.handle("mbox-desktop:browser-bounds", async (_event, key, bounds) => {
+function assertBrowserHost(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Недоступно для сайта");
+}
+ipcMain.handle("mbox-desktop:browser-open", async (event, key, url) => { assertBrowserHost(event); return browser.open(String(key), String(url || "")); });
+ipcMain.handle("mbox-desktop:browser-bounds", async (event, key, bounds) => {
+  assertBrowserHost(event);
   browser.setBounds(String(key), {
     x: Number(bounds?.x) || 0,
     y: Number(bounds?.y) || 0,
@@ -638,10 +643,32 @@ ipcMain.handle("mbox-desktop:browser-bounds", async (_event, key, bounds) => {
   });
   return { ok: true };
 });
-ipcMain.handle("mbox-desktop:browser-show", async (_event, key) => { browser.show(key ? String(key) : null); return { ok: true }; });
-ipcMain.handle("mbox-desktop:browser-hide", async (_event, key) => { browser.hide(String(key)); return { ok: true }; });
-ipcMain.handle("mbox-desktop:browser-close", async (_event, key) => { browser.close(String(key)); return { ok: true }; });
-ipcMain.handle("mbox-desktop:browser-act", async (_event, key, command, payload) => browser.act(String(key), String(command), payload));
+ipcMain.handle("mbox-desktop:browser-show", async (event, key) => { assertBrowserHost(event); browser.show(key ? String(key) : null); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-hide", async (event, key) => { assertBrowserHost(event); browser.hide(String(key)); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrowserHost(event); browser.close(String(key)); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
+ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => { assertBrowserHost(event); return chromeImport.getBookmarks(); });
+ipcMain.handle("mbox-desktop:browser-bookmark-add", async (event, bookmark) => { assertBrowserHost(event); return chromeImport.setBookmark(bookmark || {}); });
+ipcMain.handle("mbox-desktop:browser-bookmark-remove", async (event, url) => { assertBrowserHost(event); return chromeImport.removeBookmark(String(url || "")); });
+ipcMain.handle("mbox-desktop:browser-chrome-profiles", async (event) => { assertBrowserHost(event); return chromeImport.chromeProfiles(); });
+ipcMain.handle("mbox-desktop:browser-import-bookmarks", async (event, profile) => {
+  assertBrowserHost(event);
+  return chromeImport.importFromChrome({ profile: String(profile || "Default"), bookmarks: true, history: false });
+});
+ipcMain.handle("mbox-desktop:browser-import-passwords", async (event) => {
+  assertBrowserHost(event);
+  const choice = await dialog.showOpenDialog(mainWindow, { title: "Импорт паролей из Chrome", properties: ["openFile"], filters: [{ name: "CSV", extensions: ["csv"] }] });
+  if (choice.canceled || !choice.filePaths[0]) return { canceled: true };
+  return chromeImport.importPasswordsCsv(choice.filePaths[0]);
+});
+ipcMain.handle("mbox-desktop:browser-credentials", async (event, url) => {
+  assertBrowserHost(event);
+  return chromeImport.credentialsFor(String(url || "")).map((entry) => ({ username: entry.username }));
+});
+ipcMain.handle("mbox-desktop:browser-fill-password", async (event, key, username) => {
+  assertBrowserHost(event);
+  return browser.fillPassword(String(key), String(username));
+});
 ipcMain.handle("mbox-desktop:install-update", async () => {
   autoUpdater.quitAndInstall(false, true);
   return { ok: true };
