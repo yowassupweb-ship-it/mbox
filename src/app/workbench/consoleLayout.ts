@@ -26,7 +26,7 @@ const newId = (prefix: string) => `${prefix}~${Date.now().toString(36)}${(seq++)
 export const isChatPane = (id: string) => id === CHAT || id.startsWith(`${CHAT}~`);
 
 /** С кем можно вести отдельный чат. Сообщения в нём уходят этому агенту без @ (props.to). */
-export const CHAT_PEERS = ["Джарвис", "Claude", "Codex"];
+export const CHAT_PEERS = ["Джарвис", "Claude", "ChatGPT"];
 
 /** Чат с одним агентом — панель chat~<агент>~<id>; общий чат — chat или chat~<id>. */
 export function chatPeer(id: string) {

@@ -198,10 +198,11 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   const [diskContent, setDiskContent] = useState("");
   const [draft, setDraft, discardDraft] = useDraft(draftKey, diskContent);
   const isHtml = /\.html?$/i.test(path);
-  const [mdMode, setMdMode] = usePersistentState<"edit" | "preview">("mbox.localFile.markdownMode", "preview");
+  const [autoMdMode, setAutoMdMode] = useState<"edit" | "preview">("edit");
+  const [mdMode, setMdMode] = usePersistentState<"edit" | "preview" | null>(`mbox.localFile.markdownMode:${rootKey}:${path}`, null);
   const [htmlMode, setHtmlMode] = usePersistentState<"edit" | "preview">("mbox.localFile.htmlMode", "preview");
   const [viewport, setViewport] = usePersistentState<"desktop" | "mobile">("mbox.file.viewport", "desktop");
-  const mode = isMarkdown ? mdMode : isHtml ? htmlMode : "edit";
+  const mode = isMarkdown ? (mdMode ?? autoMdMode) : isHtml ? htmlMode : "edit";
   const setMode = isHtml ? setHtmlMode : setMdMode;
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -241,6 +242,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
       const next = await bridge.read(rootKey, path);
       setFile(next);
       setDiskContent(next.content);
+      if (isMarkdown) setAutoMdMode(next.content.trim() ? "preview" : "edit");
       // Несохранённая правка с прошлого запуска остаётся в редакторе; без неё — берём текст с диска.
       if (!hasDraft(draftKey)) discardDraft(next.content);
       setConflict(false);
@@ -250,7 +252,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
       // Файл пропал из-под открытой вкладки — показываем честное «его больше нет» вместо старого текста.
       if (/ENOENT|no such file/i.test(cleanError(cause)) && !dirtyRef.current) setFile(null);
     }
-  }, [bridge, rootKey, path]);
+  }, [bridge, rootKey, path, isMarkdown]);
 
   const loadHistory = useCallback(async () => {
     setVersions(await fetchVersions(rootKey, path).catch(() => []));
@@ -423,7 +425,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
       ) : mode === "preview" && isMarkdown ? (
         <div ref={previewRef} className="wb-reading" onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}><div className="wb-memory-body" onDoubleClick={() => setMode("edit")}>{renderDocument(draft, { onToggleTask: (line) => setDraft(toggleTask(draft, line)) })}</div></div>
       ) : (
-        <CodeEditor textareaRef={editorRef} value={draft} onChange={setDraft} language={languageOf(path)} onKeyDown={(event) => { if (isMarkdown && markdownShortcut(event)) return; onEditorKey(event); }} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)} />
+        <CodeEditor textareaRef={editorRef} value={draft} onChange={setDraft} language={isMarkdown ? "markdown" : languageOf(path)} onKeyDown={(event) => { if (isMarkdown && markdownShortcut(event)) return; onEditorKey(event); }} onContextMenu={(event) => openDocumentMenu(event, setContextMenu)} />
       )}
       <div className="wb-doc-foot">{formatBytes(file.size)} · изменён {formatDateTime(new Date(file.mtime).toISOString())}</div>
       <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={editorRef} previewRef={previewRef} onFind={find.openFind} markdown={isMarkdown} />

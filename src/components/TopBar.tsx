@@ -1,7 +1,8 @@
-import { AlertTriangle, Download, FolderOpen, LogOut, PanelLeft, Play, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Download, FolderOpen, LogOut, PanelLeft, Play, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
+import { markOverlay } from "../app/workbench/BrowserDocument";
 
 // Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
 // полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
@@ -38,6 +39,8 @@ type TopBarProps = {
   roster?: AgentRosterEntry[];
   attentionTodos?: AttentionTodo[];
   onOpenTodo?: (todoId: string) => void;
+  /** Галочка на карточке «Требует внимания» — закрыть задачу, не открывая её. */
+  onResolveTodo?: (todoId: string) => void;
   onLogout?: () => void;
   /** Загрузка данных, работа агента, раздумья Джарвиса — любой признак активности приложения:
    * лого-осьминог в шапке начинает шевелить щупальцами вместо статичной позы. */
@@ -98,6 +101,7 @@ export function TopBar({
   roster = [],
   attentionTodos = [],
   onOpenTodo,
+  onResolveTodo,
   onLogout,
   busy = false,
 }: TopBarProps) {
@@ -120,7 +124,7 @@ export function TopBar({
   const stack = (online.length ? online : roster).slice(0, 3);
   const logoFrame = useWorkingFrame(busy || logoBurst);
   const desktop = desktopApi;
-  const codexLive = desktopRows.some((row) => row.agent === "Codex");
+  const chatgptLive = desktopRows.some((row) => row.agent === "ChatGPT" || row.agent === "Codex");
   const claudeLive = desktopRows.some((row) => row.agent === "Claude");
 
   async function refreshDesktop() {
@@ -135,6 +139,19 @@ export function TopBar({
 
   useEffect(() => {
     desktopOpenRef.current = desktopOpen;
+  }, [desktopOpen]);
+
+  // Страница встроенного браузера рисуется главным процессом поверх всего окна, поэтому попапы
+  // шапки уходили под неё. Пока попап открыт — страница прячется (тот же приём, что у WbMenu).
+  useEffect(() => {
+    if (!open) return;
+    markOverlay(true);
+    return () => markOverlay(false);
+  }, [open]);
+  useEffect(() => {
+    if (!desktopOpen) return;
+    markOverlay(true);
+    return () => markOverlay(false);
   }, [desktopOpen]);
 
   async function desktopAction(action: () => Promise<unknown>) {
@@ -237,7 +254,7 @@ export function TopBar({
       <div className={isDesktopShell || desktopApi ? "desktop-slot is-desktop-shell" : "desktop-slot"}>
         {desktop ? (
           <button
-            className={`desktop-pill ${codexLive && claudeLive ? "active" : ""}`}
+            className={`desktop-pill ${chatgptLive && claudeLive ? "active" : ""}`}
             type="button"
             onClick={() => { setDesktopOpen((value) => !value); void refreshDesktop(); }}
             aria-expanded={desktopOpen}
@@ -245,7 +262,7 @@ export function TopBar({
           >
             <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
             <strong>Desktop</strong>
-            <span>{codexLive && claudeLive ? "2" : desktopRows.length ? String(desktopRows.length) : "0"}</span>
+            <span>{chatgptLive && claudeLive ? "2" : desktopRows.length ? String(desktopRows.length) : "0"}</span>
           </button>
         ) : isDesktopShell ? (
           <button className="desktop-pill bridge-missing" type="button" disabled title="MBOX Desktop IPC не подключился">
@@ -268,8 +285,8 @@ export function TopBar({
               </button>
             </div>
             <div className="desktop-agent-list">
-              {["Codex", "Claude"].map((name) => {
-                const row = desktopRows.find((item) => item.agent === name);
+              {["ChatGPT", "Claude"].map((name) => {
+                const row = desktopRows.find((item) => item.agent === name || (name === "ChatGPT" && item.agent === "Codex"));
                 return (
                   <div className="desktop-agent-row" key={name}>
                     <span className={row ? "desktop-dot live" : "desktop-dot"} />
@@ -338,6 +355,17 @@ export function TopBar({
                         <span className="attention-meta">{todo.projectName} · {attentionStatusLabel[todo.status] || todo.status}</span>
                       </span>
                     </button>
+                    {onResolveTodo && (
+                      <button
+                        type="button"
+                        className="attention-done"
+                        title="Отметить готовой"
+                        aria-label={`Отметить готовой: ${todo.title}`}
+                        onClick={() => onResolveTodo(todo.id)}
+                      >
+                        <Check size={14} />
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

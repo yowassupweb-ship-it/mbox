@@ -167,8 +167,11 @@
    Раньше пилюля просто показывала число без единого способа что-то с ним сделать. */
 .attention-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 
-.attention-list button {
-  width: 100%;
+/* Только карточка задачи: рядом в строке стоит ещё кнопка-галочка, и общее правило на button
+   растягивало её тоже на всю ширину — карточка сплющивалась, заголовок обрезался в «Шаблоны н…». */
+.attention-list li > button:first-child {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -180,7 +183,25 @@
   transition: background var(--duration-fast) var(--ease-out);
 }
 
-.attention-list button:hover { background: rgba(255, 176, 0, .14); }
+.attention-list li > button:first-child:hover { background: rgba(255, 176, 0, .14); }
+
+/* Галочка «готово» прямо в попапе шапки — закрыть задачу, не открывая её. */
+.attention-list li { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.attention-done {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: rgba(255, 176, 0, .07);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.attention-done:hover { background: rgba(63, 160, 106, .18); color: var(--state-ok, #3fa06a); }
 
 .attention-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--state-warn); }
 .attention-dot.status-blocked { background: var(--state-danger); }

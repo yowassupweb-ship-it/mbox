@@ -181,7 +181,8 @@ export function useDesktopSessions() {
     sessions,
     outsideAgents: outside,
     get: (id: string) => store.sessions.get(id),
-    startAgent: async (name: "Codex" | "Claude" | "All") => { await bridge()?.start(name); void refreshAgents(); },
+    startAgent: async (name: "ChatGPT" | "Codex" | "Claude" | "All") => { await bridge()?.start(name === "ChatGPT" ? "Codex" : name); void refreshAgents(); },
+    stopAgent: async (name: string) => { await bridge()?.stop(name); void refreshAgents(); },
     restartAgent: async (name: string) => { await bridge()?.restartAgent?.(name); void refreshAgents(); },
     startSsh: async (target: string) => {
       const api = bridge();

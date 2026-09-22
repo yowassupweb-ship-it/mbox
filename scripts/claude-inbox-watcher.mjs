@@ -14,7 +14,9 @@ const accessToken = String(process.env.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(process.env.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
 const agentName = process.env.MBOX_AGENT_NAME || "Claude";
 const project = process.env.MBOX_PROJECT || "MBOX";
-const pollMs = Number(process.env.MBOX_WATCH_POLL_MS || 15000);
+// 15 с ожидания до того, как наблюдатель вообще увидит сообщение, плюс холодный старт CLI — человек
+// это чувствует как «не дошло». Пять секунд заметно живее и всё ещё дёшево: два лёгких запроса за тик.
+const pollMs = Number(process.env.MBOX_WATCH_POLL_MS || 5000);
 const includeUnaddressed = !["0", "false", "no"].includes(String(process.env.MBOX_WATCH_UNADDRESSED || "true").toLowerCase());
 const startGraceMs = Number(process.env.MBOX_WATCH_START_GRACE_MS || 15 * 60 * 1000);
 const includeBacklog = ["1", "true", "yes"].includes(String(process.env.MBOX_WATCH_BACKLOG || "").toLowerCase());
@@ -37,6 +39,20 @@ const claudeModel = process.env.CLAUDE_WATCH_MODEL || "";
 const workdir = process.env.CLAUDE_WATCH_WORKDIR || path.resolve(__dirname, "..");
 const autoRespond = !["0", "false", "no"].includes(String(process.env.MBOX_WATCH_AUTORESPOND || "true").toLowerCase());
 const contextLimit = Number(process.env.MBOX_WATCH_CONTEXT_LIMIT || 30);
+
+// ВНИМАНИЕ: главный цикл этого файла (`while (!stopping)`) работает на верхнем уровне модуля и
+// никогда не завершается, поэтому до объявлений НИЖЕ него исполнение просто не доходит. Функции
+// поднимаются и работают, а `const` остаётся в temporal dead zone: обращение к нему из обработчика
+// падает с «Cannot access ... before initialization». Всё, что нужно обработчикам константой,
+// объявляем здесь, до цикла.
+// Из сообщения приходит чужой ввод — в аргументы командной строки он попадает только из этих
+// списков, никогда как есть.
+const CLAUDE_MODEL_CHOICES = new Set(["fable", "opus", "sonnet", "haiku"]);
+// Модель по умолчанию — та же, что сервер показывает в поле ввода (см. jarvisModels).
+const CLAUDE_DEFAULT_MODEL = "sonnet";
+const CLAUDE_EFFORT_CHOICES = new Set(["low", "medium", "high", "xhigh", "max"]);
+const pickModel = (value) => (CLAUDE_MODEL_CHOICES.has(String(value || "")) ? String(value) : "");
+const pickEffort = (value) => (CLAUDE_EFFORT_CHOICES.has(String(value || "")) ? String(value) : "");
 
 let cookie = "";
 let stopping = false;
@@ -190,10 +206,11 @@ async function mboxFetch(apiPath, init = {}) {
   return response.json();
 }
 
-async function ping(event) {
+/** phase — живая строка «чем занят» для чата: сервер кладёт её в agent_presence и шлёт вебсокетом. */
+async function ping(event, phase) {
   await mboxFetch("/api/mbox/agent/ping", {
     method: "POST",
-    body: JSON.stringify({ agent: agentName, event, kind: "local_watcher", client: "claude-inbox-watcher", scope: "agent_inbox" }),
+    body: JSON.stringify({ agent: agentName, event, kind: "local_watcher", client: "claude-inbox-watcher", scope: "agent_inbox", ...(phase === undefined ? {} : { phase }) }),
   });
 }
 
@@ -250,13 +267,24 @@ async function handleInboxItem(item) {
   const run = await createRun(item);
   const startedAt = Date.now();
   try {
-    const answer = await runClaude(item);
+    const outcome = await runClaude(item);
+    const answer = outcome.text;
     await createInboxItem({
       title: `Claude ответил на #${item.id}: ${item.title || ""}`,
       body: answer || "Готово.",
       item_type: "agent_response",
       priority: "normal",
-      props: { in_reply_to: item.id, to: item.agent_name || "Человек", source: "claude-inbox-watcher" },
+      props: {
+        in_reply_to: item.id,
+        to: item.agent_name || "Человек",
+        source: "claude-inbox-watcher",
+        // След работы для чата: чипы инструментов, раскрывающийся список шагов и строка
+        // «сколько думал / сколько заняло». Текста размышления у CLI нет — см. spawnStreaming.
+        tools_used: outcome.toolsUsed,
+        trace: outcome.trace,
+        work: outcome.stats,
+        ...(worthShowingLimit(outcome.rateLimit) ? { rate_limit: claudeRateLimit(outcome.rateLimit) } : {}),
+      },
     });
     await patchInbox(item.id, {
       status: "done",
@@ -284,6 +312,29 @@ async function handleInboxItem(item) {
     });
     await finishRun(run?.id, "failed", message, Date.now() - startedAt);
   }
+}
+
+/**
+ * Лимиты подписки Claude из события потока — в ту же форму, что чат уже рисует для Джарвиса.
+ * utilization приходит долей (0.5 = половина окна израсходована), resetsAt — unix-секунды.
+ */
+/** Плашку о лимите показываем не всегда: на половине окна она была бы шумом в каждом ответе. */
+function worthShowingLimit(info) {
+  if (!info) return false;
+  if (/reject|block|exceed/i.test(String(info.status || ""))) return true;
+  return (Number(info.utilization) || 0) >= 0.8;
+}
+
+function claudeRateLimit(info) {
+  const resetsAt = Number(info.resetsAt) || 0;
+  const window = info.rateLimitType === "seven_day" ? "недельное окно" : "пятичасовое окно";
+  return {
+    provider: "claude",
+    model: "подписка Claude Code",
+    used_percent: Math.round((Number(info.utilization) || 0) * 100),
+    wait_seconds: resetsAt ? Math.max(0, resetsAt - Math.floor(Date.now() / 1000)) : 0,
+    detail: `${window}${info.isUsingOverage ? ", идёт перерасход" : ""}`,
+  };
 }
 
 /** Захват сообщения: false, если его уже взял другой наблюдатель (сервер вернул 409 на if_status). */
@@ -395,10 +446,138 @@ async function runClaude(item) {
     `Body:\n${item.body || ""}`,
   ].join("\n");
 
-  const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "text", "--input-format", "text"];
-  if (claudeModel) args.push("--model", claudeModel);
+  // stream-json вместо text: в человеке важен не только финальный ответ, но и то, что агент сейчас
+  // делает. Текста размышления CLI не отдаёт ни при каких флагах (блоки thinking приходят пустыми,
+  // сырую цепочку рассуждений API не возвращает), но отдаёт счётчик потраченных на размышление
+  // токенов, перечень вызванных инструментов и состояние лимитов подписки — этого хватает на живую
+  // строку «Думает · 1,3k токенов» в чате, как в VS Code.
+  // --include-partial-messages не нужен: события system/thinking_tokens приходят и без него,
+  // а с ним поток раздувается в двадцать раз на тех же данных (проверено).
+  const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--input-format", "text"];
+  // Модель и «усилие» человек выбирает рядом с полем ввода в MBOX (см. jarvisModels на сервере);
+  // не выбрал — остаётся то, что настроено переменными окружения, а дальше умолчание самого CLI.
+  const wantedModel = pickModel(item.props?.model) || claudeModel || CLAUDE_DEFAULT_MODEL;
+  const wantedEffort = pickEffort(item.props?.effort);
+  if (wantedModel) args.push("--model", wantedModel);
+  if (wantedEffort) args.push("--effort", wantedEffort);
 
-  return await spawnCaptured(claudeCommand, args, { cwd: workdir, env: process.env }, prompt);
+  return await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt);
+}
+
+/** 1300 -> «1,3k»: в живой строке важен порядок величины, а не точное число. */
+function formatTokens(count) {
+  if (!count) return "0";
+  return count >= 1000 ? `${(count / 1000).toFixed(1).replace(".", ",")}k` : String(count);
+}
+
+/** Чем занят инструмент — одной короткой подписью из его аргументов. */
+function toolHint(input) {
+  if (!input || typeof input !== "object") return "";
+  const raw = input.file_path || input.path || input.command || input.pattern || input.query || input.url || input.prompt || "";
+  const value = String(raw).split(/[\\/]/).pop() || String(raw);
+  return value.length > 48 ? `${value.slice(0, 48)}…` : value;
+}
+
+/**
+ * Запуск CLI агента с разбором потока событий.
+ *
+ * Возвращает не только текст ответа, но и след работы: какие инструменты вызывались, сколько
+ * токенов ушло на размышление, во что обошёлся ответ и где сейчас лимиты подписки. Пока агент
+ * работает, то же самое уходит в MBOX фазой (POST /agent/ping), и чат показывает её живой строкой.
+ */
+function spawnStreaming(command, args, options, input = "") {
+  return new Promise((resolve, reject) => {
+    // windowsHide: наблюдатель сам работает без консоли, и без флага Windows открывала CLI агента
+    // в отдельном видимом окне. claude на Windows — это claude.cmd, его запускает только cmd.exe.
+    const child = process.platform === "win32"
+      ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].join(" ")}"`], { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
+      : spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+
+    const state = { text: "", toolsUsed: [], trace: [], thinkingTokens: 0, rateLimit: null, stats: null, failure: "" };
+    // Claude Code стартует несколько секунд (грузит MCP и навыки) и до первого события молчит —
+    // без этой строки человек всё это время видел бы пустоту там, где агент уже занят.
+    ping("heartbeat", "Запускается").catch(() => {});
+    let buffer = "";
+    let plain = "";
+    let stderr = "";
+    let lastPhaseAt = 0;
+
+    // Фаза уходит на сервер не чаще раза в три секунды. Чаще незачем и вредно: каждая фаза — это
+    // broadcast по вебсокету, а на него интерфейс перечитывает список агентов. Раз в три секунды
+    // строка всё ещё читается как живая, но не дёргает клиент десятки раз в минуту.
+    const pushPhase = (phase) => {
+      const now = Date.now();
+      if (now - lastPhaseAt < 3000) return;
+      lastPhaseAt = now;
+      ping("heartbeat", phase).catch(() => {});
+    };
+
+    const handle = (event) => {
+      if (event.type === "system" && event.subtype === "thinking_tokens") {
+        state.thinkingTokens = Math.max(state.thinkingTokens, Number(event.estimated_tokens) || 0);
+        pushPhase("Думает");
+        return;
+      }
+      if (event.type === "rate_limit_event" && event.rate_limit_info) {
+        state.rateLimit = event.rate_limit_info;
+        return;
+      }
+      if (event.type === "assistant" && Array.isArray(event.message?.content)) {
+        for (const block of event.message.content) {
+          if (block.type !== "tool_use") continue;
+          const name = String(block.name || "?");
+          const hint = toolHint(block.input);
+          if (!state.toolsUsed.includes(name)) state.toolsUsed.push(name);
+          state.trace.push(`${state.trace.length + 1}. ${name}${hint ? `\n   ${hint}` : ""}`);
+          console.log(`${logPrefix}   ${name}${hint ? ` · ${hint}` : ""}`);
+          // В чате — просто «Работает»: там нужен признак жизни, а не имя инструмента. Подробности
+          // (что и с чем вызывалось) уходят в trace и видны под готовым ответом.
+          pushPhase("Работает");
+        }
+        return;
+      }
+      if (event.type === "result") {
+        state.text = String(event.result || "").trim();
+        // total_cost_usd CLI считает по тарифам API, но отвечает-то он по подписке — показывать
+        // эти доллары человеку значит врать о том, чего он не платит. Не берём.
+        state.stats = {
+          thinking_tokens: event.usage?.output_tokens_details?.thinking_tokens ?? state.thinkingTokens,
+          duration_ms: Number(event.duration_ms) || 0,
+          turns: Number(event.num_turns) || 0,
+        };
+        // Провал приходит успешным кодом выхода — причина только здесь, в самом событии.
+        if (event.is_error) state.failure = state.text || String(event.subtype || "CLI вернул ошибку");
+      }
+    };
+
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (!trimmed.startsWith("{")) { plain += `${trimmed}\n`; console.log(`${logPrefix} ${trimmed}`); continue; }
+        try {
+          handle(JSON.parse(trimmed));
+        } catch {
+          // Строка потока не разобралась — она не должна ронять ответ; держим её как обычный вывод.
+          plain += `${trimmed}\n`;
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => { stderr += chunk; process.stderr.write(chunk); });
+    if (input) child.stdin?.end(input);
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      ping("heartbeat", "").catch(() => {});
+      if (code !== 0) { reject(describeCliFailure(command, code, `${plain}\n${state.text}`, stderr)); return; }
+      if (state.failure) { const error = new Error(state.failure); error.cliFailure = true; reject(error); return; }
+      console.log(`${logPrefix} готово: ${formatTokens(state.stats?.thinking_tokens || 0)} токенов размышления, инструментов ${state.toolsUsed.length}`);
+      resolve(state);
+    });
+  });
 }
 
 function spawnCaptured(command, args, options, input = "") {

@@ -64,6 +64,6 @@ export function agentFamily(name: string): { key: string; label: string } | null
   const key = name.toLowerCase();
   if (key.includes("джарвис") || key.includes("jarvis")) return { key: "jarvis", label: "Джарвис" };
   if (key.includes("claude") || key.includes("anthropic")) return { key: "claude", label: "Claude" };
-  if (key.includes("codex") || key.includes("chatgpt") || key.includes("gpt") || key.includes("openai")) return { key: "codex", label: "Codex" };
+  if (key.includes("codex") || key.includes("chatgpt") || key.includes("gpt") || key.includes("openai")) return { key: "codex", label: "ChatGPT" };
   return null;
 }

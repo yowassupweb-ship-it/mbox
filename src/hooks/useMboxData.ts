@@ -45,6 +45,7 @@ const ENTITY_KEYS: Record<string, Key[]> = {
 
 // Между перечитываниями — не чаще, чем раз в столько; события за это время копятся в одну пачку.
 const MIN_GAP_MS = 1500;
+const URGENT_ENTITIES = new Set(["agent_inbox", "agent_presence"]);
 
 function urlFor(key: Key, qs: string) {
   switch (key) {
@@ -57,7 +58,7 @@ function urlFor(key: Key, qs: string) {
     case "history": return `/api/mbox/history${qs}`;
     case "agents": return "/api/mbox/agents";
     case "edges": return "/api/mbox/graph/edges";
-    case "inbox": return "/api/mbox/agent/inbox";
+    case "inbox": return "/api/mbox/agent/inbox?limit=120";
     case "runs": return "/api/mbox/agent/runs";
     case "decisions": return `/api/mbox/decisions${qs}`;
   }
@@ -179,7 +180,7 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
     const keys = typeof entity === "string" ? ENTITY_KEYS[entity] ?? ALL_KEYS : ALL_KEYS;
     keys.forEach((key) => pump.current.pending.add(key));
     // Явное «перечитать» (после сохранения, кнопка) — сразу; паузой сглаживаем только поток событий.
-    if (typeof entity !== "string") pump.current.lastStart = 0;
+    if (typeof entity !== "string" || URGENT_ENTITIES.has(entity)) pump.current.lastStart = 0;
     void run();
   }, [run]);
 

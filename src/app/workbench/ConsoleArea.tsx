@@ -177,8 +177,9 @@ export function ConsoleArea({ renderChat, onReveal, agentGoals = {}, agentsOnlin
   const allPanes = state.groups.flatMap((item) => item.columns.flat());
   const totalPanes = allPanes.length;
   const running = desktop.sessions.filter((session) => session.status === "running");
-  const agentInConsole = (name: string) => running.some((session) => session.id === `agent:${name}`);
-  const agentOutside = (name: string) => desktop.outsideAgents.some((row) => row.agent === name);
+  const agentAliases = (name: string) => name === "ChatGPT" ? ["ChatGPT", "Codex"] : [name];
+  const agentInConsole = (name: string) => agentAliases(name).some((alias) => running.some((session) => session.id === `agent:${alias}`));
+  const agentOutside = (name: string) => agentAliases(name).some((alias) => desktop.outsideAgents.some((row) => row.agent === alias));
   // Мало места — список сам сворачивается в значки, совсем мало — прячется (сохранённый выбор не меняем).
   const [bodyWidth, setBodyWidth] = useState(0);
   const [gridSize, setGridSize] = useState({ width: 0, height: 0 });
@@ -284,15 +285,16 @@ export function ConsoleArea({ renderChat, onReveal, agentGoals = {}, agentsOnlin
         {desktop.supported ? (
           <>
             <span className="wb-console-label">Агенты</span>
-            {(["Claude", "Codex"] as const).map((name) => {
+            {(["Claude", "ChatGPT"] as const).map((name) => {
               const inConsole = agentInConsole(name);
               const outside = !inConsole && agentOutside(name);
+              const paneAgent = agentAliases(name).find((alias) => running.some((session) => session.id === `agent:${alias}`)) || name;
               return (
                 <button
                   key={name}
                   type="button"
                   className={[inConsole ? "is-live" : "", outside ? "is-outside" : ""].filter(Boolean).join(" ") || undefined}
-                  onClick={() => (inConsole || outside ? consoleLayout.reveal(`agent:${name}`) : void desktop.startAgent(name))}
+                  onClick={() => (inConsole || outside ? consoleLayout.reveal(`agent:${paneAgent}`) : void desktop.startAgent(name))}
                   title={inConsole ? `${name} работает — показать вывод` : outside ? `${name} запущен вне MBOX — открыть перезапуск внутри приложения` : `Запустить ${name} внутри приложения`}
                 >
                   {inConsole ? <i className="wb-dot is-live" /> : outside ? <i className="wb-dot is-outside" /> : <Play size={11} />}{name}
@@ -593,7 +595,7 @@ function PaneHeader({ paneId, props, labels, draggable, onMenu, actions, collaps
         </button>
       )}
       {paneId.startsWith("agent:") ? (
-        <AgentPaneTitle paneId={paneId} session={session} goal={props.agentGoals[paneId.slice(6)]} online={Boolean(props.agentsOnline[paneId.slice(6)])} />
+        <AgentPaneTitle paneId={paneId} session={session} online={Boolean(props.agentsOnline[paneId.slice(6)])} />
       ) : (
         <>
           <PaneIcon paneId={paneId} session={session} />
@@ -661,19 +663,18 @@ export function ConsolePaneDocument({ paneId, renderChat, agentGoals = {}, agent
 
 type DesktopApi = ReturnType<typeof useDesktopSessions>;
 
-function AgentPaneTitle({ paneId, session, goal, online }: { paneId: string; session?: Session; goal?: string; online: boolean }) {
+function AgentPaneTitle({ paneId, session, online }: { paneId: string; session?: Session; online: boolean }) {
   const agent = paneId.slice(6);
   // Без локальной сессии судим по присутствию на сервере, а не считаем агента запущенным.
   const status = session?.status ?? (online ? "running" : "stopped");
   const verb = session
     ? status === "running" ? "отвечает" : status === "failed" ? "ошибка" : status === "stopped" ? "остановлен" : "завершён"
     : online ? "на связи" : "не запущен";
-  const detail = goal || (session ? session.title : online ? "работает вне этого окна" : "наблюдатель");
+  const detail = session ? session.title : online ? "работает вне этого окна" : "наблюдатель";
   return (
     <div className="wb-agent-pane-title" title={`${agent}: ${verb} — ${detail}`}>
       <AgentAvatar name={agent} status={status} live={status === "running"} size={22} />
       <strong>{agent}: {verb}</strong>
-      <span>— {detail}</span>
     </div>
   );
 }
@@ -689,7 +690,7 @@ function PaneActions({ paneId, session, desktop }: { paneId: string; session?: S
         <button type="button" className="wb-icon-btn" onClick={() => void desktop.stop(session.id)} title="Остановить"><Square size={12} /></button>
       ) : (
         <>
-          {agent && <button type="button" className="wb-icon-btn" onClick={() => void desktop.startAgent(agent as "Codex" | "Claude")} title="Запустить снова"><RotateCcw size={12} /></button>}
+          {agent && <button type="button" className="wb-icon-btn" onClick={() => void desktop.startAgent(agent as "ChatGPT" | "Codex" | "Claude")} title="Запустить снова"><RotateCcw size={12} /></button>}
           {session.kind === "ssh" && <button type="button" className="wb-icon-btn" onClick={() => void desktop.startSsh(session.title.replace(/^SSH · /, "")).catch(() => undefined)} title="Подключиться снова"><RotateCcw size={12} /></button>}
           <button type="button" className="wb-icon-btn" onClick={() => void desktop.remove(session.id)} title="Убрать сессию"><Trash2 size={12} /></button>
         </>
@@ -741,7 +742,7 @@ function SessionView({ id, session, desktop, online, visibleKey }: { id: string;
         ) : agent ? (
           <>
             <p>{agent} не запущен.</p>
-            <button type="button" onClick={() => void desktop.startAgent(agent as "Codex" | "Claude")}><Play size={13} /> Запустить</button>
+            <button type="button" onClick={() => void desktop.startAgent(agent as "ChatGPT" | "Codex" | "Claude")}><Play size={13} /> Запустить</button>
           </>
         ) : <p>Сессия завершена и убрана. Выбери другую в списке выше.</p>}
       </div>

@@ -12,11 +12,13 @@
 
 const { WebContentsView, session } = require("electron");
 const chromeImport = require("./import-chrome");
+const serverState = require("./server-state");
 
 const PARTITION = "persist:mbox-browser";
 const HOME = "about:blank";
 
 const tabs = new Map();
+const visibleKeys = new Set();
 let window = null;
 let emit = () => {};
 
@@ -43,6 +45,7 @@ function stateOf(key) {
     canGoBack: contents.navigationHistory.canGoBack(),
     canGoForward: contents.navigationHistory.canGoForward(),
     error: tab.error || "",
+    zoom: Math.round((contents.getZoomFactor() || 1) * 100),
   };
 }
 
@@ -70,10 +73,23 @@ function create(key) {
     contents.on(event, () => publish(key));
   }
   contents.on("did-start-loading", () => { tab.error = ""; });
+  // История пишется на сервер — она общая для всех машин (см. server-state.js). Заголовок к моменту
+  // did-navigate ещё не пришёл, поэтому отмечаем переход и на смене заголовка: запись одна, по адресу.
+  contents.on("did-navigate", (_event, url) => serverState.recordVisit(url, contents.getTitle()));
+  contents.on("page-title-updated", (_event, title) => serverState.recordVisit(contents.getURL(), title));
   contents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
     // -3 = ERR_ABORTED: пользователь сам ушёл со страницы, это не ошибка.
     if (!isMainFrame || code === -3) return;
     tab.error = `${description || "не удалось открыть"} (${code}) · ${url}`;
+    publish(key);
+  });
+
+  // Ctrl+колесо над страницей. Сам Chromium масштаб при этом не меняет (visual zoom выключен),
+  // но сообщает направление — переводим его в шаг масштаба, как в обычном браузере.
+  contents.on("zoom-changed", (_event, direction) => {
+    const current = contents.getZoomFactor() || 1;
+    const next = direction === "in" ? current * 1.1 : current / 1.1;
+    contents.setZoomFactor(Math.min(3, Math.max(0.25, next)));
     publish(key);
   });
 
@@ -118,11 +134,13 @@ function setBounds(key, bounds) {
   applyBounds(tab);
 }
 
-/** Показываем страницу только у активной вкладки: WebContentsView рисуется поверх интерфейса и
- *  иначе перекрыл бы собой заметки, чат и всё остальное. */
+/** Показываем страницы только у видимых вкладок. В split-режиме браузеров может быть два:
+ *  активная вкладка и документ во второй области. */
 function show(key) {
+  if (key) visibleKeys.add(key);
+  else visibleKeys.clear();
   for (const [current, tab] of tabs) {
-    const visible = current === key;
+    const visible = visibleKeys.has(current);
     if (tab.visible === visible) continue;
     tab.visible = visible;
     tab.view.setVisible(visible);
@@ -134,9 +152,28 @@ function hideAll() {
   show(null);
 }
 
+/**
+ * Снимок видимой страницы в PNG (data:URL).
+ *
+ * Пока открыто меню или попап MBOX, страницу приходится прятать — она рисуется поверх всего окна.
+ * Раньше на её месте зияла пустота; теперь интерфейс кладёт туда этот снимок, и подложка под меню
+ * выглядит как была.
+ */
+async function capture(key) {
+  const tab = tabs.get(key);
+  if (!tab || !tab.visible) return "";
+  try {
+    const image = await tab.view.webContents.capturePage();
+    return image.isEmpty() ? "" : image.toDataURL();
+  } catch {
+    return "";
+  }
+}
+
 /** Скрыть одну вкладку, не трогая остальные: вкладку MBOX увели, а какая станет активной — решит она сама. */
 function hide(key) {
   const tab = tabs.get(key);
+  visibleKeys.delete(key);
   if (!tab || !tab.visible) return;
   tab.visible = false;
   tab.view.setVisible(false);
@@ -146,6 +183,7 @@ function close(key) {
   const tab = tabs.get(key);
   if (!tab) return;
   tabs.delete(key);
+  visibleKeys.delete(key);
   try {
     window?.contentView.removeChildView(tab.view);
     tab.view.webContents.close();
@@ -163,6 +201,9 @@ function act(key, command, payload) {
   if (command === "reload") contents.reload();
   if (command === "stop") contents.stop();
   if (command === "navigate") return open(key, payload);
+  if (command === "zoom-reset") contents.setZoomFactor(1);
+  if (command === "zoom-in") contents.setZoomFactor(Math.min(3, (contents.getZoomFactor() || 1) * 1.1));
+  if (command === "zoom-out") contents.setZoomFactor(Math.max(0.25, (contents.getZoomFactor() || 1) / 1.1));
   return stateOf(key);
 }
 
@@ -215,4 +256,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, fillPassword, state: stateOf, PARTITION };
+module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, fillPassword, state: stateOf, PARTITION };

@@ -322,7 +322,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
                       type="button"
                       className={server.agent_write ? "wb-agent-toggle is-on" : "wb-agent-toggle"}
                       onClick={(event) => { event.stopPropagation(); void ws.setAgentWrite(root.key, !server.agent_write); }}
-                      title={server.agent_write ? "Агенты (Джарвис, Claude, Codex) могут править файлы — нажми, чтобы запретить" : "Агентам запрещено править файлы — нажми, чтобы разрешить"}
+                      title={server.agent_write ? "Агенты (Джарвис, Claude, ChatGPT) могут править файлы — нажми, чтобы запретить" : "Агентам запрещено править файлы — нажми, чтобы разрешить"}
                     >
                       <Bot size={13} />
                     </button>

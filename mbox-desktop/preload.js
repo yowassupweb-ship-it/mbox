@@ -69,8 +69,11 @@ const desktopApi = {
     show: (key) => ipcRenderer.invoke("mbox-desktop:browser-show", key),
     hide: (key) => ipcRenderer.invoke("mbox-desktop:browser-hide", key),
     close: (key) => ipcRenderer.invoke("mbox-desktop:browser-close", key),
+    capture: (key) => ipcRenderer.invoke("mbox-desktop:browser-capture", key),
     act: (key, command, payload) => ipcRenderer.invoke("mbox-desktop:browser-act", key, command, payload),
     bookmarks: () => ipcRenderer.invoke("mbox-desktop:browser-bookmarks"),
+    history: (search, limit) => ipcRenderer.invoke("mbox-desktop:browser-history", search, limit),
+    clearHistory: (url) => ipcRenderer.invoke("mbox-desktop:browser-history-clear", url),
     addBookmark: (bookmark) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-add", bookmark),
     removeBookmark: (url) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-remove", url),
     chromeProfiles: () => ipcRenderer.invoke("mbox-desktop:browser-chrome-profiles"),
@@ -184,12 +187,12 @@ function mountDesktopControl(topbar, search, existingSlot) {
 
   async function refresh() {
     const rows = await desktopApi.status();
-    const codex = rows.some((row) => row.agent === "Codex");
+    const codex = rows.some((row) => row.agent === "Codex" || row.agent === "ChatGPT");
     const claude = rows.some((row) => row.agent === "Claude");
     pill.classList.toggle("active", codex && claude);
     summary.textContent = codex && claude ? "агенты слушают" : rows.length ? "частично" : "тихо";
-    list.innerHTML = ["Codex", "Claude"].map((name) => {
-      const row = rows.find((item) => item.agent === name);
+    list.innerHTML = ["ChatGPT", "Claude"].map((name) => {
+      const row = rows.find((item) => item.agent === name || (name === "ChatGPT" && item.agent === "Codex"));
       return `<div class="desktop-agent-row"><span class="${row ? "desktop-dot live" : "desktop-dot"}"></span><div><strong>${name}</strong><span>${row ? `pid ${row.pid}` : "не запущен"}</span></div></div>`;
     }).join("");
   }

@@ -88,6 +88,99 @@ const GROQ_MODEL_JUNIOR = process.env.GROQ_MODEL_JUNIOR || "openai/gpt-oss-20b";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
+/**
+ * Каталог моделей для чата и «усилие» рассуждения.
+ *
+ * Раньше модель была жёстко одна (Gemini, при её отказе — Groq), и повлиять на выбор из интерфейса
+ * было нельзя: лёгкий вопрос шёл тем же маршрутом, что и разбор большого массива. Теперь сообщение
+ * может нести `props.model` и `props.effort`, а список допустимого лежит здесь — и отдаётся
+ * интерфейсу ручкой `/api/mbox/agent/models`, чтобы он не догадывался о ключах и названиях.
+ *
+ * `effort` у обоих провайдеров означает одно и то же — сколько модели думать перед ответом:
+ * у Groq это параметр `reasoning_effort`, у Gemini — бюджет токенов на размышление.
+ */
+export const JARVIS_EFFORTS = [
+  { id: "low", label: "Быстро", hint: "минимум размышления — короткие вопросы и правки" },
+  { id: "medium", label: "Обычно", hint: "поведение по умолчанию" },
+  { id: "high", label: "Тщательно", hint: "думает дольше — разбор, планирование, сложные цепочки" },
+];
+const DEFAULT_EFFORT = "medium";
+// Бюджет размышления Gemini в токенах. -1 — «решай сам», 0 — не думать вовсе.
+const GEMINI_THINKING_BUDGET = { low: 0, medium: -1, high: 24576 };
+
+/**
+ * Модели агента Claude — это алиасы Claude Code CLI (`claude --model`), а не ключи в окружении
+ * сервера: отвечает Claude не отсюда, а наблюдателем на машине владельца
+ * (scripts/claude-inbox-watcher.mjs), который получает выбор в `props.model` сообщения.
+ * Поэтому список фиксированный и без проверки доступности — что реально доступно, решает подписка
+ * на той машине. Пустой выбор = модель по умолчанию у самого CLI.
+ */
+const CLAUDE_MODELS = [
+  { id: "sonnet", provider: "claude-code", label: "Sonnet 5", role: "по умолчанию" },
+  { id: "opus", provider: "claude-code", label: "Opus 5", role: "самая способная" },
+  { id: "haiku", provider: "claude-code", label: "Haiku 4.5", role: "самая быстрая" },
+];
+/** Чем отвечает Claude, если модель не выбрали. Алиас CLI, а не полное имя: последняя в линейке. */
+const CLAUDE_DEFAULT_MODEL = "sonnet";
+
+/**
+ * Модели Codex — это значения для `codex exec -m` на машине владельца. Доступность решает локальный
+ * CLI/подписка, как и у Claude Code; MBOX только передаёт выбранный id в props.model.
+ */
+const CODEX_MODELS = [
+  { id: "gpt-5.1-codex-max", provider: "codex-cli", label: "GPT-5.1 ChatGPT Max", role: "самая способная" },
+  { id: "gpt-5.1-codex", provider: "codex-cli", label: "GPT-5.1 ChatGPT", role: "по умолчанию" },
+  { id: "gpt-5.1", provider: "codex-cli", label: "GPT-5.1", role: "универсальная" },
+  { id: "gpt-5", provider: "codex-cli", label: "GPT-5", role: "совместимость" },
+];
+const CODEX_DEFAULT_MODEL = "gpt-5.1-codex";
+
+export function jarvisModels() {
+  const models = [];
+  if (GEMINI_API_KEY) models.push({ id: GEMINI_MODEL, agent: JARVIS_NAME, provider: "gemini", label: `${GEMINI_MODEL} (Gemini)`, role: "основная", available: true });
+  if (GROQ_API_KEY) {
+    models.push({ id: GROQ_MODEL, agent: JARVIS_NAME, provider: "groq", label: `${GROQ_MODEL} (Groq)`, role: "резерв", available: true });
+    models.push({ id: GROQ_MODEL_JUNIOR, agent: JARVIS_NAME, provider: "groq", label: `${GROQ_MODEL_JUNIOR} (Groq, младшая)`, role: "мелкие задачи", available: true });
+  }
+  for (const model of CLAUDE_MODELS) models.push({ ...model, agent: "Claude", available: true });
+  for (const model of CODEX_MODELS) models.push({ ...model, agent: "ChatGPT", available: true });
+  return { models, efforts: JARVIS_EFFORTS, default_model: CLAUDE_DEFAULT_MODEL, default_effort: DEFAULT_EFFORT };
+}
+
+/** Какому провайдеру принадлежит id модели; неизвестная — как будто не выбирали. */
+function providerOfModel(model) {
+  if (!model) return "";
+  if (model === GEMINI_MODEL) return "gemini";
+  if (model === GROQ_MODEL || model === GROQ_MODEL_JUNIOR) return "groq";
+  return "";
+}
+
+function normalizeEffort(effort) {
+  return JARVIS_EFFORTS.some((item) => item.id === effort) ? effort : DEFAULT_EFFORT;
+}
+
+/**
+ * Лимит провайдера человеческими словами.
+ *
+ * Раньше упор в квоту доходил до чата одной строкой «Не получилось ответить: groq 429: ...» с
+ * сырым телом ошибки — по ней нельзя было понять ни какой лимит кончился, ни когда пробовать
+ * снова. Провайдеры пишут это по-разному: Groq кладёт «try again in 22.7s» в тело, дневную квоту
+ * называет TPD, Gemini отдаёт Retry-After заголовком.
+ */
+export function describeRateLimit(info, prefix = "Упёрлись в лимит модели") {
+  if (!info) return "";
+  const where = `${info.provider === "gemini" ? "Gemini" : "Groq"}${info.model ? ` · ${info.model}` : ""}`;
+  const wait = info.wait_seconds > 0
+    ? info.wait_seconds >= 3600
+      ? `освободится примерно через ${Math.round(info.wait_seconds / 3600)} ч`
+      : info.wait_seconds >= 60
+        ? `освободится примерно через ${Math.ceil(info.wait_seconds / 60)} мин`
+        : `освободится через ${info.wait_seconds} с`
+    : "когда освободится — провайдер не сообщил";
+  const daily = /TPD|per day|дневн/i.test(info.detail || "") ? " Похоже на суточную квоту — до конца суток лучше выбрать другую модель." : "";
+  return `${prefix}. ${where}: ${wait}.${daily}`;
+}
+
 // Сжатие истории диалога перед отправкой Прорабу (см. cloudflareSummarize ниже, todo #195) —
 // третий, независимый провайдер: Cloudflare Workers AI, не Groq/Gemini. Опционально: если оба
 // значения не заданы, сжатие просто не включается и история идёт как раньше, без деградации.
@@ -106,11 +199,16 @@ export const activeJarvisRequests = new Map();
 /** Бесплатный тир Groq режет по запросам в минуту — при живом чате (несколько шагов цикла подряд,
  * несколько тиков cron) 429 не редкость. Раньше первая же 429 роняла весь ответ Джарвиса без единой
  * повторной попытки. Retry-After Groq присылает в секундах — уважаем его, если есть. */
-export async function groqComplete(messages, tools, purpose = "reply", signal, attempt = 0, model = GROQ_MODEL) {
+export async function groqComplete(messages, tools, purpose = "reply", signal, attempt = 0, model = GROQ_MODEL, effort = DEFAULT_EFFORT) {
+  // gpt-oss умеет отдавать ход рассуждения отдельным полем (reasoning_format: "parsed") и принимать
+  // «усилие» — сколько думать перед ответом. Человек хочет видеть и то и другое (см. jarvisModels).
+  const reasoningParams = /gpt-oss/.test(model)
+    ? { reasoning_effort: normalizeEffort(effort), reasoning_format: "parsed" }
+    : {};
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${GROQ_API_KEY}` },
-    body: JSON.stringify({ model, messages, temperature: 0.2, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, ...reasoningParams, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
     signal,
   });
   if (response.status === 429) {
@@ -130,9 +228,15 @@ export async function groqComplete(messages, tools, purpose = "reply", signal, a
     const waitSec = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader
       : Number.isFinite(bodyWaitSec) && bodyWaitSec > 0 ? bodyWaitSec
       : 3 * (attempt + 1);
-    if (waitSec > 60 || attempt >= 2) throw new Error(`groq 429: лимит исчерпан, ждать ${Math.ceil(waitSec)}с — ${bodyText.slice(0, 300)}`);
+    if (waitSec > 60 || attempt >= 2) {
+      const error = new Error(`groq 429: лимит исчерпан, ждать ${Math.ceil(waitSec)}с — ${bodyText.slice(0, 300)}`);
+      // Подробности лимита нужны не только в логе: человек должен увидеть в чате, какой именно
+      // лимит уперся и когда отпустит, а не «не получилось ответить».
+      error.rateLimit = { provider: "groq", model, wait_seconds: Math.ceil(waitSec), detail: bodyText.slice(0, 300) };
+      throw error;
+    }
     await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSec * 1000) + 500));
-    return groqComplete(messages, tools, purpose, signal, attempt + 1, model);
+    return groqComplete(messages, tools, purpose, signal, attempt + 1, model, effort);
   }
   if (!response.ok) throw new Error(`groq ${response.status}: ${await response.text()}`);
   const data = await response.json();
@@ -143,7 +247,10 @@ export async function groqComplete(messages, tools, purpose = "reply", signal, a
     "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
     [purpose, model, usage.prompt_tokens || 0, usage.completion_tokens || 0, usage.total_tokens || 0],
   ).catch((error) => console.error(`groq_usage insert failed: ${error.message}`));
-  return data.choices?.[0]?.message ?? { content: "" };
+  const message = data.choices?.[0]?.message ?? { content: "" };
+  // reasoning приходит отдельным полем и в историю диалога НЕ кладётся — это показ, не контекст.
+  if (message.reasoning) message.reasoning = String(message.reasoning);
+  return message;
 }
 
 /** JSON Schema (lowercase-типы OpenAI style) -> Gemini functionDeclarations (типы UPPERCASE). */
@@ -208,36 +315,59 @@ async function skillComplete(messages, purpose, signal) {
   return groqComplete(messages, null, purpose, signal, 0, GROQ_MODEL_JUNIOR);
 }
 
-export async function geminiComplete(messages, tools, purpose = "reply", signal) {
+/** Модели, которые ответили 400 на thinkingConfig: больше им его не шлём (см. geminiComplete). */
+const geminiNoThinking = new Set();
+
+export async function geminiComplete(messages, tools, purpose = "reply", signal, effort = DEFAULT_EFFORT, model = GEMINI_MODEL, withThinking = true) {
   const systemText = messages.find((m) => m.role === "system")?.content || "";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+  // includeThoughts возвращает выжимку размышления отдельными частями (part.thought === true) —
+  // её мы показываем в чате, но НЕ кладём обратно в историю: это не контекст, а объяснение.
+  // Бюджет 0 («быстро») означает «не думать»: выжимки в этом случае и не будет, просить её незачем.
+  const budget = GEMINI_THINKING_BUDGET[normalizeEffort(effort)];
+  const thinking = withThinking && !geminiNoThinking.has(model)
+    ? { thinkingConfig: { includeThoughts: budget !== 0, thinkingBudget: budget } }
+    : {};
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
     body: JSON.stringify({
       contents: toGeminiContents(messages),
       ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
       ...(tools ? { tools: toGeminiTools(tools) } : {}),
-      generationConfig: { temperature: 0.2 },
+      generationConfig: { temperature: 0.2, ...thinking },
     }),
     signal,
   });
   if (!response.ok) {
-    const error = new Error(`gemini ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    const bodyText = (await response.text()).slice(0, 300);
+    // Не всякая модель Gemini принимает thinkingConfig. Отказ по нему — не повод терять ответ и
+    // уходить на резервную модель: запоминаем и переспрашиваем ту же модель без него.
+    if (response.status === 400 && thinking.thinkingConfig && /think/i.test(bodyText)) {
+      geminiNoThinking.add(model);
+      return geminiComplete(messages, tools, purpose, signal, effort, model, false);
+    }
+    const error = new Error(`gemini ${response.status}: ${bodyText}`);
     error.status = response.status;
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      error.rateLimit = { provider: "gemini", model, wait_seconds: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 0, detail: bodyText };
+    }
     throw error;
   }
   const data = await response.json();
   const usage = data.usageMetadata || {};
   query(
     "INSERT INTO groq_usage(purpose, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5)",
-    [purpose, GEMINI_MODEL, usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, usage.totalTokenCount || 0],
+    [purpose, model, usage.promptTokenCount || 0, usage.candidatesTokenCount || 0, usage.totalTokenCount || 0],
   ).catch((error) => console.error(`gemini usage insert failed: ${error.message}`));
   const parts = data.candidates?.[0]?.content?.parts || [];
   const functionParts = parts.filter((p) => p.functionCall);
-  const text = parts.filter((p) => p.text).map((p) => p.text).join("");
-  if (!functionParts.length) return { content: text };
+  const reasoning = parts.filter((p) => p.thought && p.text).map((p) => p.text).join("\n").trim();
+  const text = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("");
+  if (!functionParts.length) return { content: text, ...(reasoning ? { reasoning } : {}) };
   return {
     content: text,
+    ...(reasoning ? { reasoning } : {}),
     tool_calls: functionParts.map((p, index) => ({
       id: p.functionCall.id || `gem_${Date.now()}_${index}`,
       thoughtSignature: p.thoughtSignature,
@@ -2858,17 +2988,29 @@ export async function replyAsJarvis(item) {
       ...historyMessages,
     ];
     let reply = "";
+    // Человек мог выбрать модель и «усилие» прямо в поле ввода (см. jarvisModels и чат).
+    // Не выбрал — прежнее поведение: основная Gemini, резерв Groq, среднее усилие.
+    const wantedModel = String(item.props?.model || "");
+    const wantedProvider = providerOfModel(wantedModel);
+    const effort = normalizeEffort(item.props?.effort);
+    // Выжимка размышления модели: показываем её в чате отдельным блоком, в историю не кладём.
+    const reasoningLog = [];
+    // Куда упёрлись по лимитам — уходит в props ответа, чтобы чат показал это словами.
+    let rateLimit = null;
     // Прораб — Gemini; при первой же ошибке (429, недоступность, отсутствие ключа) переключаемся
     // на Groq gpt-oss-120b и остаёмся на нём до конца ЭТОГО ответа — не мечемся между провайдерами
     // внутри одного цикла (у Gemini уже могли накопиться tool_calls с thoughtSignature, которые Groq
     // не поймёт, а начинать заново значит повторно выполнить уже отработавшие инструменты).
-    let provider = GEMINI_API_KEY ? "gemini" : "groq";
+    let provider = wantedProvider || (GEMINI_API_KEY ? "gemini" : "groq");
+    const groqModel = wantedProvider === "groq" ? wantedModel : GROQ_MODEL;
     async function complete(msgs) {
       if (provider === "gemini") {
         try {
-          return await geminiComplete(msgs, toolsForGroups(activeGroups), "reply", controller.signal);
+          return await geminiComplete(msgs, toolsForGroups(activeGroups), "reply", controller.signal, effort, wantedProvider === "gemini" ? wantedModel : GEMINI_MODEL);
         } catch (error) {
+          if (error.rateLimit) rateLimit = error.rateLimit;
           jlog(item.id, `Gemini недоступен (${error.message}) — переключаюсь на Groq до конца этого ответа`);
+          if (error.rateLimit) detailedTrace.push(describeRateLimit(error.rateLimit, "Gemini упёрся в лимит, дальше отвечает резервная модель Groq"));
           provider = "groq";
         }
       }
@@ -2883,13 +3025,14 @@ export async function replyAsJarvis(item) {
       const groqMsgs = msgs[0]?.role === "system" ? [{ role: "system", content: groqSystem }, ...msgs.slice(1)] : msgs;
       const trimmed = trimHistoryForGroq(groqMsgs);
       if (trimmed.length < groqMsgs.length) jlog(item.id, `история урезана для Groq: ${groqMsgs.length} -> ${trimmed.length} сообщений (лимит TPM 8000)`);
-      return groqComplete(trimmed, groqTools, "reply", controller.signal);
+      return groqComplete(trimmed, groqTools, "reply", controller.signal, 0, groqModel, effort);
     }
     jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
     for (let step = 0; step < 12; step += 1) {
       jlog(item.id, `шаг ${step}: запрос к ${provider} (${messages.length} сообщений в контексте)`);
       setPhase(item.id, "Подбирает инструмент/навык");
       const message = await complete(messages);
+      if (message.reasoning) reasoningLog.push(String(message.reasoning).trim());
       if (!message.tool_calls?.length) {
         reply = message.content || "";
         jlog(item.id, `шаг ${step}: без tool_calls, финальный текст (${reply.length} символов)`);
@@ -2936,7 +3079,7 @@ export async function replyAsJarvis(item) {
     await client.query(
       `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
        VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights, ...(skillArtifactId ? { artifact_id: skillArtifactId } : {}), ...replyIdentity })],
+      [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, reply, JSON.stringify({ to: "Человек", re: item.id, tools_used: toolsUsed, trace: detailedTrace, highlights, reasoning: reasoningLog, model: wantedProvider === "gemini" ? (wantedModel || GEMINI_MODEL) : provider === "gemini" ? GEMINI_MODEL : groqModel, effort, ...(rateLimit ? { rate_limit: rateLimit } : {}), ...(skillArtifactId ? { artifact_id: skillArtifactId } : {}), ...replyIdentity })],
     );
     await client.query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
     broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: reply.slice(0, 120), notification: `Агент ${JARVIS_NAME} ответил` });
@@ -2954,7 +3097,15 @@ export async function replyAsJarvis(item) {
         await query(
           `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
            VALUES ($1, $2, 'answer', $3, $4, 'open', 'normal', false, $5)`,
-          [item.project_id || null, JARVIS_NAME, `Ответ: ${String(item.title || "").slice(0, 100)}`, `Не получилось ответить: ${String(error.message || error).slice(0, 200)}. Попробуй ещё раз.`, JSON.stringify({ to: "Человек", re: item.id, tools_used: [], failed: true, ...replyIdentity })],
+          [
+            item.project_id || null,
+            JARVIS_NAME,
+            `Ответ: ${String(item.title || "").slice(0, 100)}`,
+            error.rateLimit
+              ? `${describeRateLimit(error.rateLimit)} Можно подождать или выбрать другую модель прямо в поле ввода.`
+              : `Не получилось ответить: ${String(error.message || error).slice(0, 200)}. Попробуй ещё раз.`,
+            JSON.stringify({ to: "Человек", re: item.id, tools_used: [], failed: true, ...(error.rateLimit ? { rate_limit: error.rateLimit } : {}), ...replyIdentity }),
+          ],
         );
         await query("UPDATE agent_inbox SET status = 'done', updated_at = now() WHERE id = $1", [item.id]);
         broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: JARVIS_NAME, detail: "не получилось ответить", notification: `Агент ${JARVIS_NAME} споткнулся` });

@@ -9,12 +9,14 @@ import { Client, Pool } from "pg";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   groqComplete, geminiComplete, bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms,
+  jarvisModels,
 } from "./jarvis.mjs";
 import { WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
+import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
@@ -1087,6 +1089,9 @@ async function handleApiWithContext(req, res, url) {
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all })) return;
   if (await handleStorageApi({ req, res, url, query, readBody, sendJson, allowed: scope.all, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+  // Закладки, история и куки встроенного браузера — на сервере, чтобы сессия была сквозной
+  // между машинами (см. server/browser-state.mjs).
+  if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: scope.all, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
@@ -1168,6 +1173,12 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
   }
 
+  // Какие модели и «усилия» доступны чату: список собирает jarvis.mjs по наличию ключей —
+  // интерфейсу не нужно знать ни про ключи, ни про названия моделей.
+  if (url.pathname === "/api/mbox/agent/models" && req.method === "GET") {
+    return sendJson(res, 200, jarvisModels());
+  }
+
   if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {
     const result = await query(
       `SELECT
@@ -1230,6 +1241,37 @@ async function handleApiWithContext(req, res, url) {
       [String(body.source || "reply"), String(body.tool_name || ""), body.inbox_id || null, body.project_id || null, String(body.message || "").slice(0, 2000)],
     );
     return sendJson(res, 200, { ok: true });
+  }
+
+  const agentMatch = url.pathname.match(/^\/api\/mbox\/agents\/(.+)$/);
+  if (agentMatch && ["PATCH", "DELETE"].includes(req.method)) {
+    const agentName = decodeURIComponent(agentMatch[1] || "").trim();
+    if (!agentName) return sendJson(res, 400, { error: "agent_name_required" });
+    const body = req.method === "PATCH" ? await readBody(req) : {};
+    const closeResult = await query(
+      `UPDATE agent_runs
+       SET status = 'abandoned',
+           finished_at = COALESCE(finished_at, now()),
+           props = COALESCE(props, '{}'::jsonb) || jsonb_build_object(
+             'closed_by_user', true,
+             'closed_reason', COALESCE(NULLIF($2, ''), 'agent_control'),
+             'closed_at', now()
+           )
+       WHERE agent_name = $1
+         AND finished_at IS NULL
+         AND status IN ('running', 'doing')
+       RETURNING id::text`,
+      [agentName, String(body.reason || "")],
+    );
+    let forgotten = 0;
+    if (req.method === "DELETE" || body.action === "forget") {
+      const deleteResult = await query("DELETE FROM agent_presence WHERE agent_name = $1", [agentName]);
+      forgotten = deleteResult.rowCount || 0;
+      setAgentPhase(agentName, "");
+    }
+    broadcastRealtime("agent_presence", { agent: agentName, event: req.method === "DELETE" ? "removed" : "updated" });
+    broadcastChange(req, req.method === "DELETE" ? "delete" : "update", "agent_presence", agentName);
+    return sendJson(res, 200, { ok: true, agent: agentName, closed_runs: closeResult.rows, forgotten });
   }
 
   if (url.pathname === "/api/mbox/agents") {
@@ -2529,7 +2571,7 @@ async function handleApiWithContext(req, res, url) {
       if (addressedTo === "Claude" && result.rows[0]) {
         console.log(`[claude-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
       }
-      if (addressedTo === "Codex" && result.rows[0]) {
+      if ((addressedTo === "Codex" || addressedTo === "ChatGPT") && result.rows[0]) {
         console.log(`[codex-ping] #${result.rows[0].id} ${String(body.title || "").replace(/\s+/g, " ").slice(0, 200)}`);
       }
       return sendJson(res, 201, { inbox_item: result.rows[0] });
@@ -2998,6 +3040,7 @@ releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.mess
 // вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».
 ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
 ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
+ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
 ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));

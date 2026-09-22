@@ -6,7 +6,7 @@ import { z } from "zod";
 const MBOX_URL = process.env.MBOX_URL;
 const MBOX_USERNAME = process.env.MBOX_USERNAME || "Admin";
 const MBOX_PASSWORD = process.env.MBOX_PASSWORD;
-const MBOX_AGENT_NAME = process.env.MBOX_AGENT_NAME || "Codex";
+const MBOX_AGENT_NAME = process.env.MBOX_AGENT_NAME || "ChatGPT";
 const MBOX_PROJECT = process.env.GDOCS_MBOX_PROJECT || "MBOX";
 const SERVICE_ACCOUNT_SECRET_TITLE =
   process.env.GDOCS_SERVICE_ACCOUNT_SECRET_TITLE || "Google Docs service account";

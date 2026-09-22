@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, GitCompare, History, Link2, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
+import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
 import { askText } from "../../ui/askText";
@@ -281,20 +282,46 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     }
   }, [noteId, absorbRemote]);
 
+  /** Перечитать заметку с сервера. `force` — по кнопке: берём текст, даже если updated_at совпал. */
+  const pullRemote = useCallback(async (force = false) => {
+    if (savingRef.current) return;
+    try {
+      const { note: remote } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`);
+      if (force || remote.updated_at !== baseUpdatedRef.current) absorbRemote(remote);
+    } catch {
+      // нет сети — попробуем в следующий раз
+    }
+  }, [noteId, absorbRemote]);
+
   // Правки по ссылке появляются здесь сами, пока заметка открыта и видна.
   useEffect(() => {
     if (!visible || !note) return;
-    const timer = window.setInterval(async () => {
-      if (document.hidden || savingRef.current) return;
-      try {
-        const { note: remote } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`);
-        if (remote.updated_at !== baseUpdatedRef.current) absorbRemote(remote);
-      } catch {
-        // нет сети — попробуем в следующий раз
-      }
-    }, 5000);
+    const timer = window.setInterval(() => { if (!document.hidden) void pullRemote(); }, 5000);
     return () => window.clearInterval(timer);
-  }, [visible, note?.id, noteId, absorbRemote]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible, note?.id, pullRemote]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Правка агента приходит вебсокетом (`entity_changed`, сущность notes) — раньше по ней
+   * обновлялся только список слева, а открытая заметка ждала следующего пятисекундного опроса
+   * или не обновлялась вовсе. Теперь сигнал доходит и до документа.
+   * Заодно перечитываем при возврате к окну и когда вкладку снова делают активной.
+   */
+  useEffect(() => {
+    if (!note) return;
+    const onEntity = (event: Event) => {
+      const entity = (event as CustomEvent<string>).detail;
+      if (!entity || entity === "notes") void pullRemote();
+    };
+    const onFocus = () => void pullRemote();
+    window.addEventListener(ENTITY_CHANGED_EVENT, onEntity);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener(ENTITY_CHANGED_EVENT, onEntity);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [note?.id, pullRemote]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (visible && note) void pullRemote(); }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Автосохранение: заметки пишутся на ходу, кнопка «Сохранить» только мешала бы.
   useEffect(() => {
@@ -455,6 +482,16 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
           <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)}{shared && <span className="wb-shared-note-label">расшарена</span>} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}{mergeNotice && <span className="wb-save-state is-pending"> {mergeNotice}</span>}</span>
           {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
           <div className="wb-doc-actions">
+            {/* Заметку правят ещё и агенты, и владелец ссылки. Кнопка — на случай, когда ждать
+                автоподхвата не хочется или сеть моргнула. */}
+            <button
+              type="button"
+              onClick={() => void pullRemote(true)}
+              title="Перечитать заметку с сервера"
+              aria-label="Перечитать заметку с сервера"
+            >
+              <RefreshCw size={14} />
+            </button>
             <select className="wb-bar-select" value={note.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} title="Проект">
               <option value="">без проекта</option>
               {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}

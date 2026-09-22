@@ -39,6 +39,7 @@ import { bootstrapSeen, loadSeen } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
 import { Workbench } from "./app/workbench/Workbench";
+import { RAIL_GROUPS, setRailHidden, useRailHidden, type RailItemId } from "./app/workbench/rail";
 import type {
   AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, DecisionEntry, FolderRow,
   GraphEdge, GroqUsage, Me, Memory, Project,
@@ -187,6 +188,10 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
             roster={agentRoster}
             attentionTodos={attentionTodos}
             onOpenTodo={openTodo}
+            onResolveTodo={async (todoId) => {
+              await saveEntity("/api/mbox/todos", todoId, { status: "done" });
+              data.reload();
+            }}
             onLogout={async () => {
               await fetch("/api/mbox/auth/logout", { method: "POST" });
               onLogout();
@@ -650,6 +655,49 @@ function AppearanceSettings({ theme, onChange }: { theme: AppTheme; onChange: (t
         })}
       </div>
       <p className="appearance-note">Inter используется для интерфейса и документов. Моноширинный шрифт остаётся только в коде, терминале и технических данных.</p>
+      <RailSettings />
+    </section>
+  );
+}
+
+/** Какие разделы показывать в левой полосе. Состав и порядок — в app/workbench/rail.ts. */
+function RailSettings() {
+  const hidden = useRailHidden();
+  const toggle = (id: RailItemId, show: boolean) =>
+    setRailHidden(show ? hidden.filter((item) => item !== id) : [...hidden.filter((item) => item !== id), id]);
+  return (
+    <section className="rail-settings" aria-labelledby="rail-title">
+      <header className="appearance-heading">
+        <div>
+          <p>Боковые вкладки</p>
+          <h2 id="rail-title">Разделы в левой полосе</h2>
+        </div>
+        <span>Сохраняется на этом устройстве</span>
+      </header>
+      <div className="rail-groups">
+        {RAIL_GROUPS.map((group) => (
+          <div className="rail-group" key={group.id}>
+            <h3>{group.title}</h3>
+            {group.items.map((item) => {
+              const shown = !hidden.includes(item.id);
+              return (
+                <label className="rail-option" key={item.id}>
+                  <input
+                    type="checkbox"
+                    checked={shown}
+                    disabled={item.required}
+                    onChange={(event) => toggle(item.id, event.target.checked)}
+                  />
+                  <img src={item.icon} alt="" width={20} height={20} />
+                  <span>{item.label.replace(/\s*\([^)]*\)$/, "")}</span>
+                  {item.required && <small>всегда виден</small>}
+                  {item.desktopOnly && <small>только в приложении</small>}
+                </label>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -851,7 +899,7 @@ function ResponderAccess({ username }: { username: string }) {
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => fetchJson<{ tokens: AccountToken[] }>("/api/mbox/account/tokens").then((result) => setTokens(result.tokens)), []);
   useEffect(() => { void load(); }, [load]);
-  const agentName = `Codex-${username.replace(/\s+/g, "-")}`;
+  const agentName = `ChatGPT-${username.replace(/\s+/g, "-")}`;
   const command = token ? [
     `$env:MBOX_URL='https://mbox.shar-os.ru'`,
     `$env:MBOX_USERNAME='${username.replace(/'/g, "''")}'`,
@@ -876,7 +924,7 @@ function ResponderAccess({ username }: { username: string }) {
   return (
     <Panel title="Responder в VS Code" icon={Zap}>
       <div className="responder-access">
-        <p>Персональный ключ подключает Codex/Claude и MBOX MCP к вашему аккаунту. Он видит только ваши сообщения и назначенные проекты.</p>
+        <p>Персональный ключ подключает ChatGPT/Claude и MBOX MCP к вашему аккаунту. Он видит только ваши сообщения и назначенные проекты.</p>
         <button className="primary-action" type="button" disabled={busy} onClick={() => void createToken()}><KeyRound size={16} />{busy ? "Создаю…" : "Создать ключ VS Code"}</button>
         {token && (
           <div className="responder-token">

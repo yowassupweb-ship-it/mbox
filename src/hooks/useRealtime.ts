@@ -5,6 +5,13 @@ import { serverOrigin } from "../lib/serverOrigin";
 export type RealtimeState = "connecting" | "connected" | "thinking" | "working" | "offline";
 export type RealtimeNotice = { id: string; text: string; at: string };
 
+/**
+ * Событие окна с тем же смыслом, что и `onEntityChanged`, — для компонентов, которые не ходят
+ * через useMboxData: открытая заметка, документ файла. detail — имя сущности («notes») или "".
+ */
+export const ENTITY_CHANGED_EVENT = "mbox:entity-changed";
+const URGENT_ENTITIES = new Set(["agent_inbox", "agent_presence"]);
+
 /** entity — какая сущность изменилась (или "agent_presence"); без неё — перечитать всё. */
 export function useRealtime(onEntityChanged: (entity?: string) => void) {
   const [pulse, setPulse] = useState(0);
@@ -31,6 +38,9 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
     const changed = new Set<string>();
     let reloadAll = false;
     function scheduleReload(entity?: string) {
+      // Общие данные перечитывает useMboxData, но открытые документы (заметка, файл) живут своим
+      // состоянием и о правке агента иначе не узнают — им нужен тот же сигнал.
+      window.dispatchEvent(new CustomEvent(ENTITY_CHANGED_EVENT, { detail: entity || "" }));
       if (entity) changed.add(entity);
       else reloadAll = true;
       window.clearTimeout(reloadTimer);
@@ -39,7 +49,7 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
         else changed.forEach((item) => onEntityChangedRef.current(item));
         changed.clear();
         reloadAll = false;
-      }, 120);
+      }, entity && URGENT_ENTITIES.has(entity) ? 0 : 120);
     }
 
     function announce(toast: string) {

@@ -461,6 +461,7 @@
   display: flex;
   flex-direction: column;
   background: var(--bg-color);
+  overflow: visible;
 }
 
 .agent-chat-shell.console .console-bar,
@@ -1063,8 +1064,10 @@
 .console-composer {
   position: relative;
   padding: 8px 12px 10px;
-  border-top: 1px solid var(--border-color);
-  background: var(--surface-chrome);
+  /* Ни подложки, ни отбивки сверху: поле ввода просто висит над перепиской, обозначенное
+     одной рамкой. Полоса-разделитель возвращала ощущение приклеенной панели. */
+  border-top: 0;
+  background: transparent;
 }
 
 .console-input-row {
@@ -1075,14 +1078,20 @@
   padding: 7px;
   border: 1px solid color-mix(in srgb, var(--text-main) 14%, var(--border-color));
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--element-bg) 88%, var(--bg-color));
-  box-shadow: 0 1px 0 color-mix(in srgb, white 4%, transparent) inset;
-  transition: border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease, background-color var(--duration-fast) ease;
+  /* Без заливки: поле ввода обозначено рамкой, а сплошная подложка читалась лишним слоем,
+     наложенным поверх переписки. Фон переписки просто просвечивает. */
+  background: transparent;
+  transition: border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
 }
-.console-input-row:focus-within { border-color: color-mix(in srgb, var(--accent-color) 58%, var(--border-color)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 10%, transparent); background: var(--element-bg); }
+.console-input-row:focus-within { border-color: color-mix(in srgb, var(--accent-color) 58%, var(--border-color)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 10%, transparent); }
 .console-input-body { min-width: 0; display: grid; gap: 5px; }
 .console-recipient { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 12%, transparent); color: var(--accent-color); font-size: 10px; font-weight: var(--weight-medium); }
-.console-input-hints { min-width: 0; display: flex; align-items: center; gap: 9px; overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 9.5px; line-height: 1; white-space: nowrap; }
+/* Строка под вводом: слева подсказки (обрезаются на узком окне), справа пикеры. Разделены,
+   потому что overflow: hidden у подсказок срезал раскрытое меню пикера. */
+.console-input-meta { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.console-input-hints { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 9.5px; line-height: 1; white-space: nowrap; }
+.console-input-pickers { flex: none; display: flex; align-items: center; gap: 6px; }
+.console-input-pickers .console-picker:last-child .console-picker-menu { left: auto; right: 0; }
 .console-input-hints b { color: var(--text-2); font-weight: var(--weight-medium); }
 .console-input-newline { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
 .console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--surface-chrome); color: var(--text-muted); font: inherit; text-align: center; }
@@ -1353,3 +1362,119 @@
 /* Ссылки в сообщениях: на MBOX открывают вкладку, наружу — браузер. */
 .console-log-link { color: var(--accent-color); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-color) 45%, transparent); text-underline-offset: 2px; overflow-wrap: anywhere; }
 .console-log-link:hover { text-decoration-color: var(--accent-color); }
+
+/* ─── Модель и «усилие» у поля ввода, ход мысли и лимиты в ответе (см. AgentChat) ─── */
+/* Свой выпадающий список вместо нативного <select> — см. ComposerPicker в AgentChat. */
+.console-picker { position: relative; }
+
+.console-picker-btn {
+  max-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+.console-picker-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-picker-btn > svg { flex: none; opacity: .7; transition: transform var(--duration-fast) var(--ease-out); }
+.console-picker-btn:hover { color: var(--text-2); background: var(--element-bg); }
+.console-picker-btn.is-open {
+  color: var(--text-main);
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  background: var(--element-bg);
+}
+.console-picker-btn.is-open > svg { transform: rotate(180deg); }
+
+/* Раскрывается вверх: поле ввода стоит у нижнего края окна. */
+.console-picker-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 230px;
+  max-width: calc(100vw - 24px);
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised, var(--container-bg));
+  box-shadow: var(--float);
+  animation: console-picker-in var(--duration-fast) var(--ease-out);
+}
+
+@keyframes console-picker-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.console-picker-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.console-picker-menu button > span { display: grid; gap: 1px; min-width: 0; }
+.console-picker-menu button strong { font-size: 12.5px; font-weight: 500; color: var(--text-main); }
+.console-picker-menu button small { font-size: 11px; color: var(--text-muted); }
+.console-picker-menu button > svg { flex: none; color: var(--accent-color); }
+.console-picker-menu button:hover { background: var(--element-bg); }
+.console-picker-menu button.is-current { background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+
+.console-trace-details.is-reasoning > summary { display: flex; align-items: center; gap: 5px; }
+.console-reasoning {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent-color) 45%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--code-bg);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.console-reasoning p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.console-reasoning p:last-child { margin-bottom: 0; }
+
+.console-rate-limit {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 5px 0 0;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 176, 0, .12);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.console-rate-limit svg { flex: none; margin-top: 2px; color: var(--state-warn); }
+
+/* «Ход работы» без инструментов — та же приглушённая строка, что и заголовок раскрывашки. */
+.console-work-line {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+/* Ответ агента, который не состоялся (item_type agent_error): видно сразу, без похода в логи. */
+.console-bubble.is-failed {
+  border-left: 2px solid var(--state-danger);
+  padding-left: 8px;
+  background: color-mix(in srgb, var(--state-danger) 8%, transparent);
+}

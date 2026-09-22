@@ -151,20 +151,34 @@ function resolve(scope: Element, path: string): HTMLElement | null {
 
 // Разбор корзины на каждый кадр с изменениями DOM (чат обновляется часто) — дорого; держим копию в памяти.
 let scrollCache: Bucket<{ top: number; left: number }> | null = null;
+/**
+ * Ключи, которые ещё не удалось применить.
+ *
+ * Раньше на каждое изменение DOM перебирались ВСЕ сохранённые ключи (их до 400) по всем областям,
+ * и для каждого читались clientHeight/scrollHeight — то есть браузер принудительно считал раскладку
+ * десятки раз подряд, пока в чате бежали сообщения. Отсюда и «мини-фризы». Теперь ключ выбывает из
+ * работы, как только применён (или стало ясно, что область его не ждёт), а когда выбыли все —
+ * восстановление не делает вообще ничего.
+ */
+let pendingScrollKeys: Set<string> | null = null;
 
 function restoreAll() {
-  if (!scrollCache) scrollCache = readBucket<{ top: number; left: number }>("mbox.ui.scroll");
+  if (!scrollCache) { scrollCache = readBucket<{ top: number; left: number }>("mbox.ui.scroll"); pendingScrollKeys = null; }
   const saved = scrollCache;
-  const keys = Object.keys(saved);
-  if (!keys.length) return;
-  document.querySelectorAll<HTMLElement>("[data-scroll-scope]").forEach((scope) => {
+  if (!pendingScrollKeys) pendingScrollKeys = new Set(Object.keys(saved));
+  const pending = pendingScrollKeys;
+  if (!pending.size) return;
+  const scopes = document.querySelectorAll<HTMLElement>("[data-scroll-scope]");
+  if (!scopes.length) return;
+  scopes.forEach((scope) => {
     const prefix = `${scope.dataset.scrollScope}|`;
-    for (const key of keys) {
+    for (const key of pending) {
       if (!key.startsWith(prefix)) continue;
       const el = resolve(scope, key.slice(prefix.length));
-      if (!el || restored.has(el)) continue;
+      if (!el) continue;
+      if (restored.has(el)) { pending.delete(key); continue; }
       // Ключ мог сохраниться до того, как область пометили исключением (лог чата, терминал) — не трогаем.
-      if (!scrollKey(el)) { restored.add(el); continue; }
+      if (!scrollKey(el)) { restored.add(el); pending.delete(key); continue; }
       if (!el.clientHeight && !el.clientWidth) continue; // скрытая вкладка — восстановим, когда покажут
       const { top, left } = saved[key].v;
       // Содержимое ещё догружается — дождёмся следующего изменения DOM.
@@ -172,6 +186,7 @@ function restoreAll() {
       el.scrollTop = top;
       el.scrollLeft = left;
       restored.add(el);
+      pending.delete(key);
     }
   });
 }
@@ -196,14 +211,16 @@ export function installScrollMemory() {
   }, true);
 
   // Списки и документы догружаются асинхронно, вкладки показываются снятием hidden — пробуем
-  // на изменениях DOM, не чаще раза в кадр. Работа — только по сохранённым ключам.
-  let frame = 0;
+  // после того, как правки DOM улеглись. Раньше это был requestAnimationFrame, то есть работа
+  // с раскладкой в каждом кадре, пока в чате идут сообщения; задержка в 200 мс незаметна глазу,
+  // а кадр во время прокрутки освобождает целиком.
+  let timer = 0;
   const schedule = () => {
-    if (frame) return;
-    frame = window.requestAnimationFrame(() => {
-      frame = 0;
+    if (timer) return;
+    timer = window.setTimeout(() => {
+      timer = 0;
       restoreAll();
-    });
+    }, 200);
   };
   new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
   schedule();

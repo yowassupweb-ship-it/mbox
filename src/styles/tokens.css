@@ -86,6 +86,10 @@
 
   --eyebrow: #88bdff;
   --code-bg: rgba(255, 255, 255, 0.06);
+  /* Цвет кода был вписан числом (#b9f5ec, #c9d6d2) — бледная мята поверх белого листа в светлой
+     теме читалась почти как пустое место, особенно псевдографика в ```-блоках. Теперь токен. */
+  --code-text: #b9f5ec;
+  --code-block-text: #c9d6d2;
 
   --note-red: #ff6b6b;
   --note-orange: #ff9f43;
@@ -194,6 +198,8 @@
   --state-live: #007aff;
   --eyebrow: #0066cc;
   --code-bg: rgba(22, 24, 29, 0.055);
+  --code-text: #0b6b63;
+  --code-block-text: #1f2937;
 }
 
 :root[data-theme="black"] {

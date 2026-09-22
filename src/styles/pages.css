@@ -1900,3 +1900,13 @@ time {
   background: var(--state-warn);
   border-color: var(--state-warn);
 }
+
+/* Настройки → Интерфейс → какие разделы показывать в левой полосе (см. app/workbench/rail.ts). */
+.rail-settings { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line-soft, rgba(128, 128, 128, 0.22)); }
+.rail-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px 26px; margin-top: 16px; }
+.rail-group h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.rail-option { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 13px; cursor: pointer; }
+.rail-option input { width: 15px; height: 15px; accent-color: var(--accent-color); cursor: pointer; }
+.rail-option input:disabled { cursor: default; }
+.rail-option img { flex: none; }
+.rail-option small { margin-left: auto; font-size: 11px; color: var(--text-muted); }

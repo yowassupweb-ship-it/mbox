@@ -225,6 +225,10 @@ body.wb-resizing * {
   background: var(--wb-surface);
 }
 
+/* Группы разделов: тонкая черта между ними вместо сплошного столбика из тринадцати иконок. */
+.wb-activity-group { display: flex; flex-direction: column; align-items: stretch; }
+.wb-activity-group + .wb-activity-group { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--wb-line); }
+
 .wb-activity {
   position: relative;
   height: 42px;
@@ -444,6 +448,15 @@ body.wb-resizing * {
 .wb-sash.is-horizontal { top: -3px; left: 0; right: 0; height: 6px; cursor: ns-resize; }
 .wb-sash:hover,
 .wb-sash:active { background: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+/* Сош между группами редактора — сам ячейка сетки нулевой ширины, а не наложение на соседа:
+   у .wb-groups нет позиционированного предка, к которому можно прижаться абсолютом. */
+.wb-groups.is-split > .wb-sash {
+  position: relative;
+  inset: auto;
+  width: 6px;
+  margin: 0 -3px;
+  cursor: ew-resize;
+}
 
 /* ─── Дерево проводника ─────────────────────────────── */
 
@@ -661,9 +674,27 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-agent-list li.is-live { background: color-mix(in srgb, var(--state-live) 7%, transparent); }
-.wb-agent-list li > div { min-width: 0; display: grid; }
+.wb-agent-list li.is-stale { opacity: .72; }
+.wb-agent-main { min-width: 0; display: grid; flex: 1; }
 .wb-agent-list strong { color: var(--text-main); font-size: var(--text-sm); }
 .wb-agent-list span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-agent-main small { overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-agent-actions { flex: none; display: flex; align-items: center; gap: 3px; }
+.wb-agent-actions button {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.wb-agent-actions button:hover:not(:disabled) { color: var(--text-main); background: var(--wb-hover); }
+.wb-agent-actions button:disabled { opacity: .42; cursor: default; }
+.wb-agent-actions button.is-danger:hover:not(:disabled) { color: var(--state-danger); border-color: color-mix(in srgb, var(--state-danger) 55%, var(--wb-line)); background: color-mix(in srgb, var(--state-danger) 9%, transparent); }
 
 /* ─── Центр: вкладки и документы ────────────────────── */
 
@@ -675,11 +706,19 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   grid-template-rows: minmax(0, 1fr) var(--wb-panel);
 }
 
+/* Центр может быть разделён на две группы редактора: слева обычные вкладки, справа — один
+   документ (браузер и заметка рядом). Ширину делит --wb-split, её тянет тот же сош, что и панели. */
+.wb-groups { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.wb-groups.is-split { grid-template-columns: var(--wb-split, 50%) 0 minmax(0, 1fr); }
+
 .wb-editor {
+  min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: 32px minmax(0, 1fr);
 }
+.wb-editor.is-split { border-left: 1px solid var(--wb-line); }
+.wb-editor.is-split .wb-tab { cursor: default; }
 
 .wb-tabs {
   display: flex;
@@ -905,7 +944,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-memory-body h4.level-1 { font-size: var(--text-xl); }
 .wb-memory-body h4.level-3,
 .wb-memory-body h4.level-4 { font-size: var(--text-md); color: var(--eyebrow); }
-.wb-memory-body code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: #b9f5ec; font-size: 0.92em; }
+.wb-memory-body code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); font-size: 0.92em; }
 
 .wb-memory-body pre {
   margin: 0.5em 0;
@@ -913,7 +952,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   overflow: auto;
   border: 1px solid var(--wb-line);
   border-radius: var(--radius-sm);
-  background: var(--wb-surface);
+  /* --wb-surface в светлой теме листа совпадает с самим листом: блок кода сливался с текстом.
+     --code-bg — подложка, заданная под каждую тему отдельно. */
+  background: var(--code-bg);
   font-size: var(--text-sm);
   line-height: 1.5;
 }
@@ -1051,6 +1092,28 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-attention button:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-attention-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-attention-meta { flex: none; color: var(--text-muted); font-size: var(--text-xs); }
+
+/* Галочка «готово» рядом с карточкой: появляется по наведению, чтобы не мельтешить в списке. */
+.wb-attention li { display: flex; align-items: center; gap: 2px; }
+.wb-attention li > button:first-child { flex: 1; min-width: 0; }
+.wb-attention-done {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+.wb-attention li:hover .wb-attention-done,
+.wb-attention-done:focus-visible { opacity: 1; }
+.wb-attention-done:hover { background: var(--wb-hover); color: var(--state-ok, #3fa06a); }
 
 /* Консоль агентов, встроенная в панель: без плавающей кнопки, фиксированного позиционирования и рамки. */
 .wb .agent-chat.is-embedded {
@@ -1219,7 +1282,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-spec { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: var(--text-sm); }
 .wb-spec dt { color: var(--text-muted); }
 .wb-spec dd { margin: 0; color: var(--text-main); line-height: 1.55; overflow-wrap: anywhere; }
-.wb-spec code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: #b9f5ec; }
+.wb-spec code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
 .wb-spec a,
 .wb-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-color); text-decoration: none; }
 .wb-links { display: flex; flex-wrap: wrap; gap: 14px; }
@@ -1255,7 +1318,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-command-label { color: var(--text-main); }
-.wb-command code { overflow: hidden; color: #b9f5ec; font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.wb-command code { overflow: hidden; color: var(--code-text); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .wb-command-actions { display: flex; gap: 6px; }
 
 .wb-command-actions button {
@@ -1342,7 +1405,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   user-select: none;
 }
 
-.wb-code-view pre { margin: 0; padding: 12px 16px 24px; overflow: visible; color: #d9e7e3; white-space: pre; tab-size: 2; }
+.wb-code-view pre { margin: 0; padding: 12px 16px 24px; overflow: visible; color: var(--code-block-text); white-space: pre; tab-size: 2; }
 
 .wb-code-editor {
   width: 100%;
@@ -1354,7 +1417,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   outline: none;
   resize: none;
   background: var(--bg-color);
-  color: #d9e7e3;
+  color: var(--code-block-text);
   font: inherit;
   font-size: 12.5px;
   line-height: 1.6;
@@ -1366,7 +1429,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-code-wrap { position: relative; flex: 1; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-color); }
 .wb-code-layer,
 .wb-code-editor.is-layered { position: absolute; inset: 0; margin: 0; padding: 12px 16px; border: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre; tab-size: 2; letter-spacing: normal; word-spacing: normal; }
-.wb-code-layer { overflow: hidden; color: #d9e7e3; pointer-events: none; }
+.wb-code-layer { overflow: hidden; color: var(--code-block-text); pointer-events: none; }
 .wb-code-editor.is-layered { height: 100%; min-height: 0; background: transparent; color: transparent; caret-color: #eef4f1; overflow: auto; }
 .wb-code-editor.is-layered::selection { background: rgba(41, 224, 214, .28); color: transparent; }
 .wb-code-editor.is-layered::placeholder { color: var(--text-muted); }
@@ -1445,7 +1508,22 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-tools-row small { color: var(--text-muted); }
 .wb-browser-tools-message { color: var(--text-2); font-size: 12px; }
 
-.wb-browser-stage { flex: 1 1 0; min-height: 0; background: var(--surface-deep); }
+/* История браузера: список общий с другими машинами, лежит на сервере (server/browser-state.mjs). */
+.wb-browser-history { display: flex; flex-direction: column; max-height: 46vh; border-bottom: 1px solid var(--wb-line); background: var(--wb-surface); }
+.wb-browser-history-head { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--wb-line); }
+.wb-browser-history-head input { flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: 12px; }
+.wb-browser-history-head button { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.wb-browser-history-head button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-history ul { flex: 1; min-height: 0; margin: 0; padding: 6px; overflow: auto; list-style: none; }
+.wb-browser-history li > button { width: 100%; display: grid; gap: 1px; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.wb-browser-history li > button:hover { background: var(--wb-hover); }
+.wb-browser-history-title { overflow: hidden; color: var(--text-main); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-browser-history-url { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.wb-browser-zoom { min-width: 42px; padding: 0 6px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.wb-browser-stage { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--surface-deep); }
+/* Замороженный снимок страницы, пока она спрятана под меню — см. BrowserDocument. */
+.wb-browser-frozen { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; pointer-events: none; }
 
 .wb-pdf-view { height: 100%; min-height: 0; padding: 8px; background: var(--surface-deep); }
 .wb-pdf-view iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: #fff; }
@@ -1689,7 +1767,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   flex: 1;
   overflow: auto;
   padding: 8px 12px 16px;
-  color: #d9e7e3;
+  color: var(--code-block-text);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -1808,10 +1886,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-banner button.is-on { border-color: var(--accent-color); color: var(--accent-color); }
 
 .wb-version-view { min-height: 100%; }
-.wb-version-text { margin: 0; padding: 12px 16px 24px; color: #d9e7e3; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-version-text { margin: 0; padding: 12px 16px 24px; color: var(--code-block-text); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .wb-diff { padding: 8px 0 24px; font-size: 12px; line-height: 1.55; }
-.wb-diff-line { padding: 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: #c9d6d2; }
+.wb-diff-line { padding: 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--code-block-text); }
 /* Только значок «+»/«−» в начале строки. Раньше правило било по любому прямому span внутри строки,
    и подсветка слов разложила текст в столбик по 16 пикселей. */
 .wb-diff-line > .wb-diff-mark { display: inline-block; width: 16px; color: var(--text-muted); user-select: none; }
@@ -2013,7 +2091,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb pre,
 .wb code,
 .wb kbd { font-family: var(--font-mono); }
-.wb-memory-body pre { color: #c9d6d2; }
+.wb-memory-body pre { color: var(--code-block-text); }
 .wb .console-log { font-size: 12px; line-height: 1.6; }
 .wb .console-log-text { font-weight: var(--weight-text); }
 .wb .console-log-actor { font-weight: 600; }
@@ -2074,6 +2152,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   --wb-surface: var(--doc-light-bg);
   --wb-surface-2: #ffffff;
   --code-bg: var(--doc-light-code);
+  --code-text: #0b6b63;
+  --code-block-text: #1f2937;
 }
 .doc-theme-graphite {
   --doc-bg: var(--doc-graphite-bg);
@@ -2084,6 +2164,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   --wb-surface: var(--doc-graphite-bg);
   --wb-surface-2: #2c2d32;
   --code-bg: var(--doc-graphite-code);
+  --code-text: #b9f5ec;
+  --code-block-text: #c9d6d2;
 }
 .doc-theme-black {
   --doc-bg: var(--doc-black-bg);
@@ -2094,6 +2176,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   --wb-surface: var(--doc-black-bg);
   --wb-surface-2: #101013;
   --code-bg: var(--doc-black-code);
+  --code-text: #b9f5ec;
+  --code-block-text: #c9d6d2;
 }
 .wb-note-surface > .wb-note-edit,
 .wb-note-surface > .wb-reading { min-height: 0; background: var(--doc-bg); }
@@ -2232,7 +2316,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-howto { margin-top: 8px; padding: 14px 18px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
 .wb-howto h3 { margin: 0 0 8px; font-size: 13px; }
 .wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
-.wb-howto code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); color: #b9f5ec; }
+.wb-howto code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
 .wb-howto i { color: var(--text-main); font-style: normal; }
 
 /* ─── Доска задач и задача ──────────────────────────── */
@@ -2489,6 +2573,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
     border-top: 1px solid var(--wb-line);
   }
 
+  /* На телефоне полоса лежит горизонтально: группы идут в строку, разделитель — вертикальный. */
+  .wb-activity-group { flex: 1; flex-direction: row; }
+  .wb-activity-group + .wb-activity-group { margin: 0; padding: 0 0 0 5px; border-top: 0; border-left: 1px solid var(--wb-line); }
   .wb-activity { flex: 1; height: 52px; border-left: 0; border-top: 2px solid transparent; }
   .wb-activity img { width: 31px; height: 31px; }
   .wb-activity-tip {

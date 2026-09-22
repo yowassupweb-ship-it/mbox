@@ -12,6 +12,7 @@ import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
+import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
@@ -20,7 +21,7 @@ import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
-  bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, type TourSheetItem,
+  bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, jarvisModels, type TourSheetItem,
 } from "./server/jarvis.mjs";
 
 function loadLocalEnv() {
@@ -958,6 +959,7 @@ function mboxDevApi() {
       });
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
+      ensureBrowserStateSchema(queryPostgres).catch((error: Error) => console.error(`browser state schema: ${error.message}`));
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
       ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
@@ -1091,6 +1093,8 @@ function mboxDevApi() {
           const devActor = actor || await resolveRequestActor(req);
           if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: ownerOnly })) return;
           if (await handleStorageApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+          // Зеркало прод-ручек состояния встроенного браузера (см. server/browser-state.mjs).
+          if (await handleBrowserStateApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, userId: sessionUser.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
           if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
 
           if (url.pathname === "/api/mbox/agent/structure") {
@@ -1254,6 +1258,11 @@ function mboxDevApi() {
               .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
               .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
             return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
+          }
+
+          // Зеркало прод-ручки: список моделей и «усилий» для чата (см. server/jarvis.mjs).
+          if (url.pathname === "/api/mbox/agent/models" && req.method === "GET") {
+            return sendJson(res, 200, jarvisModels());
           }
 
           if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {

@@ -13,7 +13,7 @@ const baseUrl = requireValue(config.MBOX_URL, "MBOX_URL");
 const username = config.MBOX_USERNAME || "Admin";
 const accessToken = String(config.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
-const agentName = config.MBOX_AGENT_NAME || "Codex";
+const agentName = config.MBOX_AGENT_NAME || "ChatGPT";
 const project = config.MBOX_PROJECT || "MBOX";
 const pollMs = Number(config.MBOX_WATCH_POLL_MS || 5000);
 const startGraceMs = Number(config.MBOX_WATCH_START_GRACE_MS || 15 * 60 * 1000);
@@ -24,7 +24,11 @@ const codexCommand = resolveCodexCommand(config.CODEX_COMMAND || "codex");
 const codexModel = config.CODEX_WATCH_MODEL || "";
 const workdir = config.CODEX_WATCH_WORKDIR || root;
 const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 30);
-const aliases = (config.CODEX_CHAT_ALIASES || "codex,Codex,кодекс,Кодекс")
+const CODEX_MODEL_CHOICES = new Set(["gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1", "gpt-5", "gpt-5.5"]);
+const CODEX_EFFORT_CHOICES = new Set(["low", "medium", "high", "xhigh"]);
+const pickModel = (value) => (CODEX_MODEL_CHOICES.has(String(value || "")) ? String(value) : "");
+const pickEffort = (value) => (CODEX_EFFORT_CHOICES.has(String(value || "")) ? String(value) : "");
+const aliases = (config.CODEX_CHAT_ALIASES || "codex,Codex,chatgpt,ChatGPT,кодекс,Кодекс")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
@@ -248,7 +252,7 @@ async function mboxFetch(apiPath, init = {}) {
   return response.json();
 }
 
-async function ping(event) {
+async function ping(event, phase) {
   await mboxFetch("/api/mbox/agent/ping", {
     method: "POST",
     body: JSON.stringify({
@@ -257,6 +261,7 @@ async function ping(event) {
       kind: "local_watcher",
       client: "codex-chat-watcher",
       scope: "project_chat_mentions,codex_exec",
+      ...(phase === undefined ? {} : { phase }),
     }),
   });
 }
@@ -304,14 +309,24 @@ async function handleMention(item) {
   const run = await createRun(item);
   const startedAt = Date.now();
   try {
-    const answer = await runCodex(item);
+    const outcome = await runCodex(item);
+    const answer = outcome.text;
     await createInboxItem({
       project_id: item.project_id || null,
-      title: `Codex: ответ на #${item.id}`,
+      title: `ChatGPT: ответ на #${item.id}`,
       body: answer || "Готово.",
       item_type: "agent_response",
       priority: "normal",
-      props: { in_reply_to: item.id, to: item.agent_name || "Человек", source: "codex-chat-watcher" },
+      props: {
+        in_reply_to: item.id,
+        to: item.agent_name || "Человек",
+        source: "codex-chat-watcher",
+        tools_used: outcome.toolsUsed,
+        trace: outcome.trace,
+        work: outcome.stats,
+        model: outcome.model,
+        effort: outcome.effort,
+      },
     });
     await patchInbox(item.id, {
       status: "done",
@@ -322,7 +337,7 @@ async function handleMention(item) {
     const message = error.cliFailure ? error.message : error.stack || error.message;
     await createInboxItem({
       project_id: item.project_id || null,
-      title: `Codex не смог ответить на #${item.id}`,
+      title: `ChatGPT не смог ответить на #${item.id}`,
       body: message,
       item_type: "agent_error",
       priority: "high",
@@ -446,27 +461,49 @@ async function runCodex(item) {
     workdir,
     "--sandbox",
     "danger-full-access",
+    "--json",
     "--output-last-message",
     outputFile,
   ];
-  if (codexModel) args.push("-m", codexModel);
+  const wantedModel = pickModel(item.props?.model) || codexModel;
+  const wantedEffort = pickEffort(item.props?.effort);
+  if (wantedModel) args.push("-m", wantedModel);
+  if (wantedEffort) args.push("-c", `model_reasoning_effort="${wantedEffort}"`);
   args.push(prompt);
 
-  await spawnChecked(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName } });
+  const outcome = await spawnCodex(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName } });
   const answer = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8").trim() : "";
   fs.rmSync(outputFile, { force: true });
-  return answer;
+  return { ...outcome, text: answer || outcome.text, model: wantedModel || "codex default", effort: wantedEffort || "" };
 }
 
-function spawnChecked(command, args, options) {
+function spawnCodex(command, args, options) {
   return new Promise((resolve, reject) => {
     // windowsHide: без него Windows открывала CLI агента в отдельном видимом окне консоли.
     const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const startedAt = Date.now();
+    const state = { text: "", toolsUsed: [], trace: [], stats: null, failure: "" };
     let stderr = "";
     let stdout = "";
+    let buffer = "";
+    let lastPhaseAt = 0;
+
+    ping("heartbeat", "Запускается").catch(() => {});
+
+    const pushPhase = (phase) => {
+      const now = Date.now();
+      if (now - lastPhaseAt < 3000) return;
+      lastPhaseAt = now;
+      ping("heartbeat", phase).catch(() => {});
+    };
+
     child.stdout.on("data", (chunk) => {
       stdout = `${stdout}${chunk}`.slice(-8000);
       process.stdout.write(chunk);
+      buffer += chunk;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handleCodexLine(line, state, startedAt, pushPhase);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
@@ -474,10 +511,116 @@ function spawnChecked(command, args, options) {
     });
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0) resolve();
+      if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase);
+      ping("heartbeat", "").catch(() => {});
+      if (code === 0) {
+        if (!state.stats) state.stats = { duration_ms: Date.now() - startedAt };
+        if (state.failure) {
+          const error = new Error(state.failure);
+          error.cliFailure = true;
+          reject(error);
+          return;
+        }
+        console.log(`${logPrefix} готово: ${formatTokens(totalWorkTokens(state.stats))} токенов, инструментов ${state.toolsUsed.length}`);
+        resolve(state);
+      }
       else reject(describeCliFailure(command, code, stdout, stderr));
     });
   });
+}
+
+function handleCodexLine(line, state, startedAt, pushPhase) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed || !trimmed.startsWith("{")) return;
+  let event;
+  try {
+    event = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  if (event.type === "turn.started") {
+    pushPhase("Думает");
+    return;
+  }
+  if (event.type === "turn.completed") {
+    state.stats = codexStats(event.usage, event.duration_ms || Date.now() - startedAt);
+    pushPhase("Готовит ответ");
+    return;
+  }
+  if (event.type === "item.completed" && event.item) {
+    const item = event.item;
+    if (item.type === "agent_message" && item.text) {
+      state.text = String(item.text || "").trim();
+      return;
+    }
+    const tool = codexToolName(item);
+    if (tool) {
+      const hint = toolHint(item);
+      if (!state.toolsUsed.includes(tool)) state.toolsUsed.push(tool);
+      state.trace.push(`${state.trace.length + 1}. ${tool}${hint ? `\n   ${hint}` : ""}`);
+      pushPhase("Работает");
+    }
+    return;
+  }
+  if ((event.type === "exec_command" || event.type === "apply_patch") && event.cmd) {
+    addCodexTool(state, event.type, event, pushPhase);
+    return;
+  }
+  if (event.type === "error" || event.type === "turn.failed") {
+    state.failure = String(event.message || event.error || event.reason || "Codex CLI вернул ошибку");
+  }
+}
+
+function codexStats(usage, durationMs) {
+  const inputTokens = Number(usage?.input_tokens) || 0;
+  const cachedInputTokens = Number(usage?.cached_input_tokens) || 0;
+  const outputTokens = Number(usage?.output_tokens) || 0;
+  const reasoningOutputTokens = Number(usage?.reasoning_output_tokens) || 0;
+  return {
+    input_tokens: inputTokens,
+    cached_input_tokens: cachedInputTokens,
+    output_tokens: outputTokens,
+    reasoning_output_tokens: reasoningOutputTokens,
+    thinking_tokens: reasoningOutputTokens,
+    total_tokens: inputTokens + outputTokens,
+    duration_ms: Number(durationMs) || 0,
+    turns: 1,
+  };
+}
+
+function codexToolName(item) {
+  const type = String(item.type || "");
+  if (type === "agent_message") return "";
+  if (item.name || item.tool_name) return String(item.name || item.tool_name).trim();
+  if (item.command || item.cmd) return "shell_command";
+  if (/patch/i.test(type)) return "apply_patch";
+  if (/exec|command|shell/i.test(type)) return "shell_command";
+  if (/tool|call|mcp|function/i.test(type)) return type;
+  return "";
+}
+
+function toolHint(item) {
+  const raw = item.input || item.arguments || item.command || item.cmd || item.path || item.file_path || item.status || "";
+  const value = typeof raw === "string" ? raw : raw && typeof raw === "object" ? raw.command || raw.path || raw.file_path || raw.query || "" : "";
+  const text = String(value).split(/[\\/]/).pop() || String(value);
+  return text.length > 48 ? `${text.slice(0, 48)}...` : text;
+}
+
+function addCodexTool(state, name, item, pushPhase) {
+  const tool = name === "exec_command" ? "shell_command" : name;
+  const hint = toolHint(item);
+  if (!state.toolsUsed.includes(tool)) state.toolsUsed.push(tool);
+  state.trace.push(`${state.trace.length + 1}. ${tool}${hint ? `\n   ${hint}` : ""}`);
+  pushPhase("Работает");
+}
+
+function totalWorkTokens(stats) {
+  return (Number(stats?.input_tokens) || 0) + (Number(stats?.output_tokens) || 0);
+}
+
+function formatTokens(count) {
+  if (!count) return "0";
+  return count >= 1000 ? `${(count / 1000).toFixed(1).replace(".", ",")}k` : String(count);
 }
 
 /** Почему CLI агента упал — человеческим текстом. Claude и Codex пишут причину («You've hit your

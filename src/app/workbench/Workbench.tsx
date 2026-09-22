@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Database, GitBranch, PanelBottom, PanelLeft, PanelRight, TerminalSquare, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Columns2, Database, GitBranch, MessageSquare, PanelBottom, PanelLeft, PanelRight, Power, RotateCcw, TerminalSquare, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { AgentChat } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -19,6 +19,7 @@ import { ConsoleArea, ConsolePaneDocument, PANE_MIME, TERMINAL_TAB } from "./Con
 import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
+import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
 import { BrowserDocument, browserBridge } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
@@ -26,7 +27,7 @@ import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { ExplorerView } from "./ExplorerView";
 import { FileDocument, FilesView } from "./Files";
-import { recentlyActiveAgent } from "./desktopSessions";
+import { recentlyActiveAgent, useDesktopSessions } from "./desktopSessions";
 import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
 import { SshView } from "./SshView";
@@ -43,6 +44,7 @@ import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent } from "./agentTabs";
 import { SkillPageDocument } from "./SkillPageDocument";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
 
 type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
@@ -102,9 +104,22 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const tabs = useTabs();
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   useEffect(() => {
-    const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    let frame = 0;
+    const onResize = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        setViewport((current) => {
+          const next = { width: window.innerWidth, height: window.innerHeight };
+          return current.width === next.width && current.height === next.height ? current : next;
+        });
+      });
+    };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
   useEffect(() => { installScrollMemory(); }, []);
   const [activity, setActivity] = usePersistentState<Activity>("mbox.wb.activity", "explorer");
@@ -115,6 +130,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const [panelMaximized, setPanelMaximized] = usePersistentState("mbox.wb.panelMaximized", false);
   const [panelTab, setPanelTab] = usePersistentState<PanelTab>("mbox.wb.panelTab", "console");
   const [consoleDock, setConsoleDock] = usePersistentState<ConsoleDock>("mbox.wb.consoleDock", "bottom");
+  // Сплит центральной части: вторая группа редактора справа от основной. Держит ровно одну
+  // вкладку (браузер слева — заметка справа, и наоборот), поэтому хватает одного ключа и доли ширины.
+  const [splitKey, setSplitKey] = usePersistentState<string | null>("mbox.wb.splitKey", null);
+  const [splitRatio, setSplitRatio] = usePersistentState("mbox.wb.splitRatio", 0.5);
   const [rightOpen, setRightOpen] = usePersistentState("mbox.wb.rightOpen", true);
   const [rightWidth, setRightWidth] = usePersistentState("mbox.wb.rightWidth", 460);
   const [searchFocus, setSearchFocus] = useState(0);
@@ -151,6 +170,29 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     if (window.matchMedia("(max-width: 720px)").matches) setPanelOpen(false);
     if (next === "search") setSearchFocus((value) => value + 1);
   }
+
+  // Разделы, которые открываются не боковой панелью, а вкладкой документа.
+  const RAIL_TABS: Partial<Record<RailItemId, string>> = { storage: "storage", history: "history", browser: "web:" };
+  const hasBrowser = Boolean(browserBridge());
+  const railHidden = useRailHidden();
+
+  function railActive(id: RailItemId) {
+    const tabKey = RAIL_TABS[id];
+    if (tabKey) return id === "browser" ? tabs.active.startsWith("web:") : tabs.active === tabKey;
+    return sidebarOpen && activity === (id as Activity);
+  }
+
+  function openRail(id: RailItemId) {
+    const tabKey = RAIL_TABS[id];
+    if (tabKey) tabs.open(tabKey, true);
+    else showActivity(id as Activity);
+  }
+
+  /** Галочка на карточке «Требует внимания»: задача уходит в «Готово» без открытия. */
+  const resolveTodo = useCallback(async (todoId: string) => {
+    await saveEntity("/api/mbox/todos", todoId, { status: "done" });
+    data.reload();
+  }, [data]);
 
   const openSearch = useCallback(() => {
     setActivity("search");
@@ -206,7 +248,20 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
   function closeTab(key: string) {
     if (dirty[key] && !window.confirm("Во вкладке несохранённые правки. Закрыть?")) return;
+    if (key === splitKey) setSplitKey(null);
     tabs.close(key);
+  }
+
+  /** Отправить вкладку во вторую область. Активной она при этом быть не может — иначе в основной
+   *  группе не останется документа, и левая половина будет пустой. */
+  function splitTab(key: string) {
+    // Делить нечего, если вкладка одна: слева осталась бы пустота вместо документа.
+    if (!key || tabs.tabs.length < 2) return;
+    setSplitKey(key);
+    if (tabs.active === key) {
+      const neighbour = tabs.tabs.find((tab) => tab.key !== key);
+      if (neighbour) tabs.open(neighbour.key);
+    }
   }
 
   useEffect(() => {
@@ -215,6 +270,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       const key = event.key.toLowerCase();
       if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); openSearch(); }
       else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openSearch(); }
+      else if (mod && event.code === "Backslash") { event.preventDefault(); if (splitKey) setSplitKey(null); else splitTab(tabs.active); }
       else if (mod && event.shiftKey && event.code === "KeyE") { event.preventDefault(); setActivity("explorer"); setSidebarOpen(true); }
       else if (mod && !event.shiftKey && event.code === "KeyB") { event.preventDefault(); setSidebarOpen((value) => !value); }
       else if (mod && !event.shiftKey && event.code === "KeyJ") { event.preventDefault(); setPanelOpen((value) => !value); }
@@ -233,6 +289,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const resizeRight = useDrag(useCallback((event: PointerEvent) => {
     setRightWidth(Math.min(Math.round(window.innerWidth * 0.6), Math.max(300, window.innerWidth - event.clientX)));
   }, [setRightWidth]));
+
+  const groupsRef = useRef<HTMLDivElement | null>(null);
+  const resizeSplit = useDrag(useCallback((event: PointerEvent) => {
+    const rect = groupsRef.current?.getBoundingClientRect();
+    if (!rect || rect.width < 200) return;
+    setSplitRatio(Math.min(0.8, Math.max(0.2, (event.clientX - rect.left) / rect.width)));
+  }, [setSplitRatio]));
 
   const resizePanel = useDrag(useCallback((event: PointerEvent) => {
     const rect = centerRef.current?.getBoundingClientRect();
@@ -278,10 +341,31 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, [titles, skillsCatalog.data.skills, toolsCatalog.data.tools]);
   const activeTabMeta = tabMeta(tabs.active, data, catalogTitles);
 
+  /**
+   * Открытые вкладки остаются в DOM, чтобы не терять прокрутку и состояние редакторов. Но при
+   * любом обновлении данных React пересобирал их все, включая скрытые — отсюда подтормаживания
+   * при живом потоке событий. Готовый элемент скрытой вкладки переиспользуется как есть: React
+   * видит тот же объект и пропускает её поддерево целиком, а пересобирается только видимое.
+   * Скрытая вкладка догонит данные в тот момент, когда её снова покажут.
+   */
+  const renderedDocs = useRef(new Map<string, ReactNode>());
+  function docNode(key: string, active: boolean): ReactNode {
+    const cached = renderedDocs.current.get(key);
+    if (!active && cached !== undefined) return cached;
+    const node = renderTab(key);
+    renderedDocs.current.set(key, node);
+    return node;
+  }
+  useEffect(() => {
+    const live = new Set(tabs.tabs.map((tab) => tab.key));
+    for (const key of renderedDocs.current.keys()) if (!live.has(key)) renderedDocs.current.delete(key);
+  }, [tabs.tabs]);
+
   function renderTab(key: string): ReactNode {
     const [kind, first, second] = key.split(":");
     const rest = key.split(":").slice(2).join(":");
     const project = data.projects.find((item) => item.id === first);
+    const documentVisible = key === tabs.active || key === splitKey;
     const lost = (text: string) => <div className="wb-doc-missing">{text}</div>;
     switch (kind) {
       case "welcome":
@@ -320,20 +404,20 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         const owner = data.projects.find((item) => item.todos.some((todo) => todo.id === first));
         const todo = owner?.todos.find((item) => item.id === first);
         if (!owner || !todo) return lost(data.loading ? "Загрузка…" : `Todo #${first} не найдено.`);
-        return <TodoDocument project={owner} todo={todo} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} onSaved={data.reload} />;
+        return <TodoDocument project={owner} todo={todo} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} onSaved={data.reload} />;
       }
       case "note":
-        return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
+        return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
       case "web":
-        return <BrowserDocument tabKey={key} visible={tabs.active === key} tabs={tabs} onTitle={onTitle} />;
+        return <BrowserDocument tabKey={key} visible={documentVisible} tabs={tabs} onTitle={onTitle} />;
       case "local":
         return IMAGE_FILE.test(rest)
           ? <LocalImageDocument rootKey={first} path={rest} />
           : OFFICE_FILE.test(rest)
-            ? <LocalOfficeDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />
-          : <LocalFileDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
+            ? <LocalOfficeDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />
+          : <LocalFileDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "gitdiff":
         return <GitDiffDocument rootKey={first} path={rest} tabs={tabs} />;
       case "commit":
@@ -347,11 +431,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "tool":
         return <ToolDocument toolId={first} tabs={tabs} />;
       case "file":
-        return <FileDocument fileId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
+        return <FileDocument fileId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "term":
         return <ConsolePaneDocument paneId={key.slice(TERMINAL_TAB.length)} tabs={tabs} agentGoals={agentGoals} agentsOnline={agentsOnline} renderChat={(paneId) => renderChat(tabs.active === key, paneId)} onReveal={() => toggleConsole(true)} />;
       case "memory":
-        return <MemoryDocument memoryId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onTitle={onTitle} onDirty={onDirty} />;
+        return <MemoryDocument memoryId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onTitle={onTitle} onDirty={onDirty} />;
       default:
         return lost("Неизвестная вкладка");
     }
@@ -400,20 +484,26 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       })}</div>
 
       <nav className="wb-activitybar" aria-label="Разделы">
-        <ActivityButton label="Проекты (Ctrl+Shift+E)" icon={activityIcon("projects.png")} active={sidebarOpen && activity === "explorer"} onClick={() => showActivity("explorer")} />
-        <ActivityButton label="Заметки (Ctrl+Alt+N — новая)" icon={activityIcon("notes.png")} active={sidebarOpen && activity === "notes"} onClick={() => showActivity("notes")} />
-        <ActivityButton label="Папки (локальные файлы и git)" icon={activityIcon("folders.png")} active={sidebarOpen && activity === "local"} onClick={() => showActivity("local")} />
-        <ActivityButton label="Артефакты" icon={activityIcon("artifacts.png")} active={sidebarOpen && activity === "files"} onClick={() => showActivity("files")} />
-        <ActivityButton label="Хранилище S3" icon={activityIcon("storage.png")} active={tabs.active === "storage"} onClick={() => tabs.open("storage", true)} />
-        {/* Браузер живёт только в приложении: сайт показывает главный процесс Electron. В вебе рядом
-            есть настоящий браузер, кнопка там не нужна. */}
-        {browserBridge() && <ActivityButton label="Браузер" icon={<img src="/assets/icons/files/browser-file.png" alt="" draggable={false} />} active={tabs.active.startsWith("web:")} onClick={() => tabs.open("web:", true)} />}
-        <ActivityButton label="Поиск по памяти (Ctrl+K)" icon={activityIcon("memory.png")} active={sidebarOpen && activity === "search"} onClick={() => showActivity("search")} />
-        <ActivityButton label="История" icon={systemIcon("history.png")} active={tabs.active === "history"} onClick={() => tabs.open("history", true)} />
-        <ActivityButton label="Агенты" icon={activityIcon("agents.png")} active={sidebarOpen && activity === "agents"} onClick={() => showActivity("agents")} badge={needsHuman.length} />
-        <ActivityButton label="Навыки" icon={activityIcon("skills.png")} active={sidebarOpen && activity === "skills"} onClick={() => showActivity("skills")} />
-        <ActivityButton label="Инструменты" icon={activityIcon("tools.png")} active={sidebarOpen && activity === "tools"} onClick={() => showActivity("tools")} />
-        <ActivityButton label="SSH" icon={<img src="/assets/icons/project/ssh.png" alt="" draggable={false} />} active={sidebarOpen && activity === "ssh"} onClick={() => showActivity("ssh")} />
+        {/* Состав и порядок — в rail.ts: группы разделены чертой, лишнее выключается в настройках.
+            Браузер живёт только в приложении: сайт показывает главный процесс Electron. */}
+        {RAIL_GROUPS.map((group) => {
+          const items = group.items.filter((item) => !railHidden.includes(item.id) && (!item.desktopOnly || hasBrowser));
+          if (!items.length) return null;
+          return (
+            <div className="wb-activity-group" key={group.id} role="group" aria-label={group.title}>
+              {items.map((item) => (
+                <ActivityButton
+                  key={item.id}
+                  label={item.label}
+                  icon={<img src={item.icon} alt="" draggable={false} />}
+                  active={railActive(item.id)}
+                  onClick={() => openRail(item.id)}
+                  badge={item.id === "agents" ? needsHuman.length : undefined}
+                />
+              ))}
+            </div>
+          );
+        })}
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Консоль агентов">
           <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
@@ -436,6 +526,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       </aside>
 
       <div className="wb-center" ref={centerRef}>
+        <div className={splitKey ? "wb-groups is-split" : "wb-groups"} ref={groupsRef} style={{ ["--wb-split" as string]: `${Math.round(splitRatio * 100)}%` }}>
         <section className="wb-editor" aria-label="Вкладки">
           <div
             className="wb-tabs"
@@ -451,7 +542,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               tabs.open(`${TERMINAL_TAB}${pane}`, true);
             }}
           >
-            {tabs.tabs.map((tab) => {
+            {tabs.tabs.filter((tab) => tab.key !== splitKey).map((tab) => {
               const meta = tabMeta(tab.key, data, catalogTitles);
               const active = tab.key === tabs.active;
               const isFileTab = tab.key.startsWith("file:") || tab.key.startsWith("local:");
@@ -494,13 +585,42 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                 </dl>
               </div>
             )}
-            {tabs.tabs.filter((tab) => visited.has(tab.key) || tab.key === tabs.active).map((tab) => (
+            {tabs.tabs.filter((tab) => (visited.has(tab.key) || tab.key === tabs.active) && tab.key !== splitKey).map((tab) => (
               <div key={tab.key} className="wb-doc" hidden={tab.key !== tabs.active} data-scroll-scope={`tab:${tab.key}`}>
-                {renderTab(tab.key)}
+                {docNode(tab.key, tab.key === tabs.active)}
               </div>
             ))}
           </div>
         </section>
+
+        {/* Вторая группа: один документ рядом с основным — браузер и заметка одновременно.
+            Документ живёт только здесь, из основной группы он на это время исключён. */}
+        {splitKey && (
+          <>
+            <div className="wb-sash is-vertical is-left" onPointerDown={resizeSplit} role="separator" aria-orientation="vertical" aria-label="Ширина второй области" />
+            <section className="wb-editor is-split" aria-label="Вторая область">
+              <div className="wb-tabs" role="tablist">
+                {(() => {
+                  const meta = tabMeta(splitKey, data, catalogTitles);
+                  const isFileTab = splitKey.startsWith("file:") || splitKey.startsWith("local:");
+                  return (
+                    <div className="wb-tab is-active" role="tab" aria-selected title={meta.hint}>
+                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={meta.icon} width={18} height={18} alt="" />}
+                      <span className="wb-tab-title">{meta.title}</span>
+                      <button type="button" className="wb-tab-close" onClick={() => setSplitKey(null)} aria-label="Закрыть вторую область">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="wb-docs">
+                <div className="wb-doc" data-scroll-scope={`split:${splitKey}`}>{docNode(splitKey, true)}</div>
+              </div>
+            </section>
+          </>
+        )}
+        </div>
 
         <section className="wb-panel" aria-label="Нижняя панель">
           <div className="wb-sash is-horizontal" onPointerDown={resizePanel} role="separator" aria-orientation="horizontal" aria-label="Высота нижней панели" />
@@ -530,6 +650,16 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                           <span className={`wb-status-dot status-${todo.status}`} />
                           <span className="wb-attention-title">{todo.title}</span>
                           <span className="wb-attention-meta">{project.name} · {todoStatusLabel(todo.status)}</span>
+                        </button>
+                        {/* Галочка прямо на карточке: снять задачу с внимания, не открывая её. */}
+                        <button
+                          type="button"
+                          className="wb-attention-done"
+                          title="Отметить готовой"
+                          aria-label={`Отметить готовой: ${todo.title}`}
+                          onClick={() => void resolveTodo(todo.id)}
+                        >
+                          <Check size={14} />
                         </button>
                       </li>
                     ))}
@@ -587,6 +717,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         </button>
         <button type="button" className="wb-status-item" onClick={() => setSidebarOpen((value) => !value)} title="Боковая панель (Ctrl+B)"><PanelLeft size={12} /></button>
         <button type="button" className="wb-status-item" onClick={() => setPanelOpen((value) => !value)} title="Нижняя панель (Ctrl+J)"><PanelBottom size={12} /></button>
+        <button
+          type="button"
+          className={splitKey ? "wb-status-item is-on" : "wb-status-item"}
+          onClick={() => { if (splitKey) setSplitKey(null); else splitTab(tabs.active); }}
+          title={splitKey ? "Убрать вторую область (Ctrl+\)" : "Разделить на две области (Ctrl+\)"}
+        >
+          <Columns2 size={12} />
+        </button>
         <button type="button" className="wb-status-item" onClick={() => dockConsole(consoleDock === "right" ? "bottom" : "right")} title={consoleDock === "right" ? "Консоль вниз" : "Консоль справа"}><PanelRight size={12} /></button>
         <span className="wb-status-item is-static">{user.username}</span>
       </footer>
@@ -602,6 +740,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <button type="button" role="menuitem" onClick={() => { closeTab(tabMenu.key); setTabMenu(null); }}>Закрыть</button>
           <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}>Закрыть остальные</button>
           <button type="button" role="menuitem" onClick={() => { tabs.pin(tabMenu.key); setTabMenu(null); }}>Закрепить</button>
+          <button type="button" role="menuitem" onClick={() => { splitTab(tabMenu.key); setTabMenu(null); }}>Открыть во второй области</button>
+          {splitKey && <button type="button" role="menuitem" onClick={() => { setSplitKey(null); setTabMenu(null); }}>Убрать вторую область</button>}
           <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}>Копировать ссылку</button>
         </WbMenu>
       )}
@@ -649,12 +789,68 @@ const STALE_AGENT_MS = 24 * 60 * 60 * 1000;
 
 function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
   const [showStale, setShowStale] = usePersistentState("mbox.agents.showStale", false);
+  const [busy, setBusy] = useState("");
+  const desktop = useDesktopSessions();
   const sorted = [...data.agents].sort((a, b) => Number(isAgentWorking(b, data.runs)) - Number(isAgentWorking(a, data.runs)));
   // Разовые сессии («vs-code-session», старый «VS Code») висели в команде неделями отключёнными.
   const isStale = (agent: (typeof sorted)[number]) => !isAgentWorking(agent, data.runs) && effectiveStatus(agent) !== "active" && (!agent.last_seen || Date.now() - Date.parse(agent.last_seen) > STALE_AGENT_MS);
   const stale = sorted.filter(isStale);
   const agents = showStale ? sorted : sorted.filter((agent) => !isStale(agent));
   const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
+  const agentSession = (name: string) => desktop.sessions.find((session) => session.id === `agent:${name}` && session.status === "running");
+  const isOutside = (name: string) => desktop.outsideAgents.some((row) => row.agent === name);
+  const canStart = (name: string) => ["Claude", "ChatGPT"].includes(agentFamily(name)?.label || "");
+  const openChat = (name: string) => {
+    const pane = consoleLayout.newChatId(agentFamily(name)?.label || name);
+    tabs.open(`${TERMINAL_TAB}${pane}`, true);
+  };
+  const closeRuns = async (name: string) => {
+    setBusy(`close:${name}`);
+    try {
+      await fetchJson(`/api/mbox/agents/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "manual_close_from_agents_view" }),
+      });
+      data.reload("agent_presence");
+    } finally {
+      setBusy("");
+    }
+  };
+  const forgetAgent = async (name: string) => {
+    setBusy(`forget:${name}`);
+    try {
+      await fetchJson(`/api/mbox/agents/${encodeURIComponent(name)}`, { method: "DELETE" });
+      data.reload("agent_presence");
+    } finally {
+      setBusy("");
+    }
+  };
+  const stopAgent = async (name: string) => {
+    setBusy(`stop:${name}`);
+    try {
+      await desktop.stopAgent(name);
+      await fetchJson(`/api/mbox/agents/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "manual_stop_from_agents_view" }),
+      });
+      data.reload("agent_presence");
+    } finally {
+      setBusy("");
+    }
+  };
+  const startAgent = async (name: string) => {
+    const label = agentFamily(name)?.label;
+    if (label !== "Claude" && label !== "ChatGPT") return;
+    setBusy(`start:${name}`);
+    try {
+      await desktop.startAgent(label);
+      data.reload("agent_presence");
+    } finally {
+      setBusy("");
+    }
+  };
   return (
     <div className="wb-view">
       <header className="wb-view-head">
@@ -674,12 +870,42 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
               const status = effectiveStatus(agent);
               const live = isAgentWorking(agent, data.runs);
               const run = liveRunOf(data.runs, agent.name);
+              const session = agentSession(agent.name);
+              const outside = isOutside(agent.name);
+              const staleAgent = isStale(agent);
+              const runningRuns = data.runs.filter((item) => item.agent_name === agent.name && !item.finished_at && ["running", "doing"].includes(item.status));
+              const stateText = live
+                ? run?.goal || "в работе"
+                : `${agentStatusLabels[status] || status} · ${formatSince(agent.last_seen)}`;
               return (
-                <li key={agent.id} className={live ? "is-live" : undefined}>
+                <li key={agent.id} className={[live ? "is-live" : "", staleAgent ? "is-stale" : ""].filter(Boolean).join(" ")}>
                   <AgentAvatar name={agent.name} status={status} live={live} size={28} />
-                  <div>
+                  <div className="wb-agent-main">
                     <strong>{agent.name}</strong>
-                    <span>{live ? run?.goal || "в работе" : `${agentStatusLabels[status] || status} · ${formatSince(agent.last_seen)}`}</span>
+                    <span>{stateText}</span>
+                    <small>{agent.client || agent.kind}{agent.runs ? ` · ${agent.runs} запусков` : ""}{outside && !session ? " · вне этого окна" : ""}</small>
+                  </div>
+                  <div className="wb-agent-actions">
+                    <button type="button" onClick={() => openChat(agent.name)} title="Открыть чат">
+                      <MessageSquare size={12} />
+                    </button>
+                    {session || outside ? (
+                      <button type="button" onClick={() => void stopAgent(agent.name)} disabled={busy === `stop:${agent.name}`} title="Остановить локальный процесс">
+                        <Power size={12} />
+                      </button>
+                    ) : canStart(agent.name) ? (
+                      <button type="button" onClick={() => void startAgent(agent.name)} disabled={busy === `start:${agent.name}`} title="Запустить responder">
+                        <RotateCcw size={12} />
+                      </button>
+                    ) : null}
+                    {runningRuns.length > 0 && (
+                      <button type="button" onClick={() => void closeRuns(agent.name)} disabled={busy === `close:${agent.name}`} title="Завершить зависшие запуски">
+                        <Check size={12} />
+                      </button>
+                    )}
+                    <button type="button" className="is-danger" onClick={() => void forgetAgent(agent.name)} disabled={busy === `forget:${agent.name}`} title="Убрать из списка">
+                      <Trash2 size={12} />
+                    </button>
                   </div>
                 </li>
               );

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, clipboard } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const localUi = require("./localUi");
+const serverState = require("./server-state");
 const browser = require("./browser");
 const chromeImport = require("./import-chrome");
 const { spawn, execFile } = require("child_process");
@@ -211,6 +212,15 @@ function createWindow() {
   // после создания и умирает вместе с ним.
   browser.attach(mainWindow, (payload) => mainWindow.webContents.send("mbox-desktop:browser", payload));
 
+  // Сквозная сессия: забираем с сервера куки сайтов (до того, как человек откроет первую вкладку),
+  // и дальше досылаем изменения. Проверка доступности — она же проверка, что вход в MBOX есть.
+  serverState.configure(mboxUrl);
+  void serverState.probe().then(async (on) => {
+    if (!on) return;
+    await serverState.restoreCookies(browser.PARTITION).catch(() => {});
+    serverState.watchCookies(browser.PARTITION);
+  });
+
   mainWindow.setMenuBarVisibility(false);
   if (saved.maximized) mainWindow.maximize();
   for (const event of ["resize", "move", "maximize", "unmaximize"]) mainWindow.on(event, saveWindowState);
@@ -282,11 +292,11 @@ function setMenu() {
     {
       label: "Агенты",
       submenu: [
-        { label: "Запустить Codex", click: () => startResponder("Codex") },
+        { label: "Запустить ChatGPT", click: () => startResponder("Codex") },
         { label: "Запустить Claude", click: () => startResponder("Claude") },
         { label: "Запустить обоих", click: () => startResponders() },
         { type: "separator" },
-        { label: "Остановить Codex", click: () => stopResponder("Codex") },
+        { label: "Остановить ChatGPT", click: () => stopResponder("Codex") },
         { label: "Остановить Claude", click: () => stopResponder("Claude") },
         { label: "Остановить обоих", click: () => stopResponders() },
         { type: "separator" },
@@ -422,7 +432,7 @@ function readProcessStatus() {
         const result = rows.map((row) => ({
           pid: row.ProcessId,
           commandLine: row.CommandLine,
-          agent: /codex-chat-watcher/i.test(row.CommandLine || "") ? "Codex" : "Claude"
+          agent: /codex-chat-watcher/i.test(row.CommandLine || "") ? "ChatGPT" : "Claude"
         }));
         processStatusCache = { at: Date.now(), rows: result };
         resolve(result);
@@ -646,14 +656,61 @@ ipcMain.handle("mbox-desktop:browser-bounds", async (event, key, bounds) => {
 ipcMain.handle("mbox-desktop:browser-show", async (event, key) => { assertBrowserHost(event); browser.show(key ? String(key) : null); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-hide", async (event, key) => { assertBrowserHost(event); browser.hide(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrowserHost(event); browser.close(String(key)); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-capture", async (event, key) => { assertBrowserHost(event); return browser.capture(String(key)); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
-ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => { assertBrowserHost(event); return chromeImport.getBookmarks(); });
-ipcMain.handle("mbox-desktop:browser-bookmark-add", async (event, bookmark) => { assertBrowserHost(event); return chromeImport.setBookmark(bookmark || {}); });
-ipcMain.handle("mbox-desktop:browser-bookmark-remove", async (event, url) => { assertBrowserHost(event); return chromeImport.removeBookmark(String(url || "")); });
+// Закладки, история и куки живут на сервере (server/browser-state.mjs) — так они одни и те же на
+// всех компьютерах. Локальный файл остаётся запасным: без сети браузер обязан работать.
+ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => {
+  assertBrowserHost(event);
+  if (serverState.isOn()) {
+    try { return await serverState.bookmarks(); } catch { /* сеть моргнула — отдаём локальные */ }
+  }
+  return chromeImport.getBookmarks();
+});
+ipcMain.handle("mbox-desktop:browser-history", async (event, search, limit) => {
+  assertBrowserHost(event);
+  if (!serverState.isOn()) return [];
+  try { return await serverState.history(String(search || ""), Number(limit) || 300); } catch { return []; }
+});
+ipcMain.handle("mbox-desktop:browser-history-clear", async (event, url) => {
+  assertBrowserHost(event);
+  if (serverState.isOn()) await serverState.clearHistory(String(url || "")).catch(() => {});
+  return { ok: true };
+});
+// Закладки одни на всё приложение, а панель закладок рисует каждая вкладка браузера своим списком.
+// Поэтому после правки рассылаем новый список всем вкладкам сразу, а не ждём их следующего открытия.
+function publishBookmarks(list) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("mbox-desktop:browser", { type: "bookmarks", bookmarks: list });
+  return list;
+}
+ipcMain.handle("mbox-desktop:browser-bookmark-add", async (event, bookmark) => {
+  assertBrowserHost(event);
+  // Локальную копию ведём всегда: она же список на случай потери связи с MBOX.
+  const local = chromeImport.setBookmark(bookmark || {});
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.addBookmark(bookmark || {})); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+});
+ipcMain.handle("mbox-desktop:browser-bookmark-remove", async (event, url) => {
+  assertBrowserHost(event);
+  const local = chromeImport.removeBookmark(String(url || ""));
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.removeBookmark(String(url || ""))); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+});
 ipcMain.handle("mbox-desktop:browser-chrome-profiles", async (event) => { assertBrowserHost(event); return chromeImport.chromeProfiles(); });
 ipcMain.handle("mbox-desktop:browser-import-bookmarks", async (event, profile) => {
   assertBrowserHost(event);
-  return chromeImport.importFromChrome({ profile: String(profile || "Default"), bookmarks: true, history: false });
+  const result = chromeImport.importFromChrome({ profile: String(profile || "Default"), bookmarks: true, history: false });
+  const local = chromeImport.getBookmarks();
+  // Импорт с этой машины тоже уезжает на сервер: на втором компьютере повторять его не придётся.
+  if (serverState.isOn()) {
+    try { publishBookmarks(await serverState.importBookmarks(local)); return result; } catch { /* ниже отдадим локальные */ }
+  }
+  publishBookmarks(local);
+  return result;
 });
 ipcMain.handle("mbox-desktop:browser-import-passwords", async (event) => {
   assertBrowserHost(event);

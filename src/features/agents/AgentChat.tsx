@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowUp, AtSign, CornerDownRight, DollarSign, FileText, Hash, Paperclip, Reply, Slash, Terminal, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AtSign, Brain, Check, ChevronDown, CornerDownRight, DollarSign, FileText, Hash, Paperclip, Reply, Slash, Terminal, Wrench, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
@@ -10,9 +10,12 @@ import { usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
 import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
 import { serverOrigin } from "../../lib/serverOrigin";
+import { markOverlay } from "../../app/workbench/BrowserDocument";
 import { formatBytes } from "../../lib/format";
 
 const JARVIS_NAME = "Джарвис";
+const CHAT_HISTORY_LIMIT = 50;
+const CHAT_RENDER_LIMIT = 70;
 
 const SLASH_COMMANDS = [
   { value: "help", hint: "эта справка" },
@@ -233,7 +236,10 @@ function activeToken(value: string, cursor: number): { trigger: "@" | "/" | "$" 
 
 const HUMAN = "Человек";
 const READ_KEY = "mbox.chat.readAt";
-const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_response", "chat"]);
+// agent_error здесь не случайно: когда наблюдатель агента спотыкается, ошибка ложилась в инбокс,
+// но в переписке не показывалась вообще — человек сидел перед пустым чатом и считал, что «ничего
+// не происходит», хотя ответ давно провалился. Молчание неотличимо от работы, и это хуже ошибки.
+const CONVERSATION = new Set(["question", "answer", "agent_message", "agent_response", "chat", "agent_error"]);
 
 /** На какое сообщение отвечает запись: кнопка «Ответить» пишет props.re, наблюдатели агентов — in_reply_to. */
 function repliedId(item: AgentInboxItem) {
@@ -251,9 +257,10 @@ function snippet(text: string, max = 140) {
  */
 function belongsToPeer(item: AgentInboxItem, peer: string) {
   const name = peer.toLowerCase();
+  const names = name === "chatgpt" ? new Set(["chatgpt", "codex"]) : new Set([name]);
   const to = String(item.props?.to ?? "").toLowerCase();
-  if (item.agent_name === HUMAN) return to ? to === name : parseMention(item.body || item.title).toLowerCase() === name;
-  return item.agent_name.toLowerCase() === name && (!to || to === name || to === HUMAN.toLowerCase());
+  if (item.agent_name === HUMAN) return to ? names.has(to) : names.has(parseMention(item.body || item.title).toLowerCase());
+  return names.has(item.agent_name.toLowerCase()) && (!to || names.has(to) || to === HUMAN.toLowerCase());
 }
 
 /**
@@ -356,15 +363,187 @@ function randomThinkingVerb(exclude?: string) {
 
 type MessageAction = { label: string; value: string };
 
+/** Что сервер разрешает выбрать в поле ввода — см. jarvisModels в server/jarvis.mjs. */
+type JarvisCatalog = {
+  models: Array<{ id: string; label: string; provider: string; role: string; agent?: string }>;
+  efforts: Array<{ id: string; label: string; hint: string }>;
+  /** Что сработает, если человек ничего не выбрал — показываем это же в поле ввода. */
+  defaultModel: string;
+  defaultEffort: string;
+};
+
+type PickerOption = { value: string; label: string; hint?: string };
+
+/**
+ * Выпадающий список у поля ввода.
+ *
+ * Нативный <select> здесь не годился: Chromium рисует его список силами системы — белый на тёмной
+ * теме, с нечитаемыми пунктами, без места под пояснение к варианту, и он выпадает за пределы окна
+ * (а значит и поверх встроенного браузера его не положить). Свой список решает всё сразу: тема,
+ * подписи-пояснения и markOverlay, который убирает страницу браузера, пока список открыт.
+ * Раскрывается вверх — поле ввода стоит у нижнего края.
+ */
+function ComposerPicker({ label, value, onChange, options, placeholder, defaultValue = "" }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: PickerOption[];
+  placeholder: string;
+  /** Вариант, который сработает сам собой: он и есть строка «по умолчанию», в списке не повторяется. */
+  defaultValue?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const current = options.find((item) => item.value === value);
+  const rest = options.filter((item) => item.value !== defaultValue);
+
+  useEffect(() => {
+    if (!open) return;
+    markOverlay(true);
+    const onDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      markOverlay(false);
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+
+  const pick = (next: string) => { onChange(next); setOpen(false); };
+
+  return (
+    <div className="console-picker" ref={rootRef}>
+      <button
+        type="button"
+        className={open ? "console-picker-btn is-open" : "console-picker-btn"}
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+      >
+        <span>{current ? current.label : placeholder}</span>
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div className="console-picker-menu" role="listbox" aria-label={label}>
+          <button type="button" role="option" aria-selected={!value} className={!value ? "is-current" : undefined} onClick={() => pick("")}>
+            <span>
+              <strong>{placeholder}</strong>
+              <small>по умолчанию</small>
+            </span>
+            {!value && <Check size={13} />}
+          </button>
+          {rest.map((item) => (
+            <button
+              type="button"
+              key={item.value}
+              role="option"
+              aria-selected={item.value === value}
+              className={item.value === value ? "is-current" : undefined}
+              onClick={() => pick(item.value)}
+            >
+              <span>
+                <strong>{item.label}</strong>
+                {item.hint && <small>{item.hint}</small>}
+              </span>
+              {item.value === value && <Check size={13} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const EFFORT_LABEL: Record<string, string> = { low: "быстро", medium: "обычно", high: "тщательно" };
+
+/**
+ * «Ход работы · 1,3k токенов размышления · 12 с».
+ *
+ * У Claude Code текста размышления не получить — API не возвращает сырую цепочку рассуждений, а
+ * блоки thinking приходят из CLI пустыми. Зато честно отдаётся, СКОЛЬКО он думал, сколько это
+ * заняло и во сколько обошлось; вместе со списком инструментов ниже это и есть «что он делал».
+ */
+function workSummary(work: LogLine["work"]) {
+  if (!work) return "";
+  const parts: string[] = [];
+  const total = Number(work.total_tokens) || ((Number(work.input_tokens) || 0) + (Number(work.output_tokens) || 0));
+  if (total) parts.push(`${formatWorkTokens(total)} токенов`);
+  const input = Number(work.input_tokens) || 0;
+  if (input) parts.push(`вход ${formatWorkTokens(input)}`);
+  const cached = Number(work.cached_input_tokens) || 0;
+  if (cached) parts.push(`кэш ${formatWorkTokens(cached)}`);
+  const output = Number(work.output_tokens) || 0;
+  if (output) parts.push(`выход ${formatWorkTokens(output)}`);
+  const thinking = Number(work.thinking_tokens) || 0;
+  if (thinking && !total) parts.push(`${formatWorkTokens(thinking)} токенов размышления`);
+  else if (thinking) parts.push(`размышление ${formatWorkTokens(thinking)}`);
+  const seconds = Math.round((Number(work.duration_ms) || 0) / 1000);
+  if (seconds) parts.push(seconds >= 60 ? `${Math.floor(seconds / 60)} мин ${seconds % 60} с` : `${seconds} с`);
+  return parts.length ? `Ход работы · ${parts.join(" · ")}` : "";
+}
+
+function formatWorkTokens(count: number) {
+  return count >= 1000 ? `${(count / 1000).toFixed(1).replace(".", ",")}k` : String(count);
+}
+
+/** Квота провайдера словами: сколько ждать и что делать. Тот же смысл, что describeRateLimit на сервере. */
+function rateLimitText(info: NonNullable<LogLine["rateLimit"]>) {
+  // У Claude лимит не провайдерский, а подписочный: важно не «сколько ждать», а сколько окна съедено.
+  if (info.provider === "claude") {
+    const used = Number(info.used_percent) || 0;
+    const hours = Math.round((Number(info.wait_seconds) || 0) / 3600);
+    const when = hours >= 24 ? `обновится через ${Math.round(hours / 24)} сут` : hours ? `обновится через ${hours} ч` : "";
+    return `Лимит подписки Claude Code: израсходовано ${used}%${info.detail ? ` (${info.detail})` : ""}${when ? `, ${when}` : ""}.`;
+  }
+  const where = `${info.provider === "gemini" ? "Gemini" : "Groq"}${info.model ? ` · ${info.model}` : ""}`;
+  const wait = !info.wait_seconds
+    ? "когда освободится — провайдер не сообщил"
+    : info.wait_seconds >= 3600
+      ? `освободится примерно через ${Math.round(info.wait_seconds / 3600)} ч`
+      : info.wait_seconds >= 60
+        ? `освободится примерно через ${Math.ceil(info.wait_seconds / 60)} мин`
+        : `освободится через ${info.wait_seconds} с`;
+  return `Лимит модели ${where}: ${wait}. Можно подождать или выбрать другую модель рядом с полем ввода.`;
+}
+
 type LogLine = {
   id: string;
   kind: "in" | "out" | "sys" | "cmd";
   actor: string;
   text: string;
+  renderedText?: ReactNode;
   at: string;
   pending?: "sending" | "sent" | "failed";
   toolsUsed?: string[];
   trace?: string[];
+  /** Выжимка размышления модели перед ответом — показываем, сколько отдал провайдер. */
+  reasoning?: string[];
+  /** Чем отвечено: модель и «усилие». */
+  model?: string;
+  effort?: string;
+  /** Упёрлись в квоту провайдера — отдельная заметная плашка, а не строчка в тексте. */
+  rateLimit?: { provider?: string; model?: string; wait_seconds?: number; detail?: string; used_percent?: number };
+  /** Сколько стоила работа: размышление, время, деньги. У Claude это всё, что отдаёт его CLI. */
+  // Стоимости здесь намеренно нет: Claude отвечает по подписке, а доллары из CLI считаются по
+  // тарифам API — цифра выглядела бы как счёт, которого человек не платит.
+  work?: {
+    thinking_tokens?: number;
+    input_tokens?: number;
+    cached_input_tokens?: number;
+    output_tokens?: number;
+    reasoning_output_tokens?: number;
+    total_tokens?: number;
+    duration_ms?: number;
+    turns?: number;
+  };
+  /** Ответ не получился: наблюдатель агента упал. Видно сразу, а не только в логе. */
+  failed?: boolean;
   highlights?: string[];
   actions?: MessageAction[];
   postBuilder?: PostPart[];
@@ -659,7 +838,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   artifacts: Artifact[];
   projectId?: string;
   currentProjectName?: string;
-  onSaved: () => void;
+  onSaved: (entity?: string) => void;
   /** Встроена в нижнюю панель рабочего места: без своей кнопки, пристыковки и ресайза. */
   embedded?: boolean;
   visible?: boolean;
@@ -676,13 +855,24 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // У каждого разговора свой черновик: недописанное Claude не должно всплыть в чате с Codex.
   const [text, setText] = useDraft(peer ? `chat:input:${peer}` : "chat:input", "");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
+  // Чем отвечать: модель и «усилие» размышления. Пусто — как было, решает сервер (см. jarvisModels).
+  const [model, setModel] = usePersistentState("mbox.chat.model", "");
+  const [effort, setEffort] = usePersistentState("mbox.chat.effort", "");
+  const [catalog, setCatalog] = useState<JarvisCatalog>({ models: [], efforts: [], defaultModel: "", defaultEffort: "" });
+  useEffect(() => {
+    let alive = true;
+    fetchJson<JarvisCatalog & { default_model?: string; default_effort?: string }>("/api/mbox/agent/models")
+      .then((data) => { if (alive) setCatalog({ models: data.models || [], efforts: data.efforts || [], defaultModel: data.default_model || "", defaultEffort: data.default_effort || "" }); })
+      .catch(() => { /* старый сервер без этой ручки — просто нет выбора, как раньше */ });
+    return () => { alive = false; };
+  }, []);
   const [cursor, setCursor] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [history, setHistory] = usePersistentState<string[]>("mbox.chat.history", []);
   const [historyPos, setHistoryPos] = useState(-1);
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
-  const [pending, setPending] = useState<Array<{ id: string; body: string; sent?: boolean; failed?: boolean; attachments?: Attachment[] }>>([]);
+  const [pending, setPending] = useState<Array<{ id: string; body: string; at: string; inboxId?: string; sent?: boolean; failed?: boolean; attachments?: Attachment[] }>>([]);
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
   const [dragFiles, setDragFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -692,12 +882,29 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [awaitingJarvisSince, setAwaitingJarvisSince] = useState<number | null>(null);
   const [awaitingJarvisPhase, setAwaitingJarvisPhase] = useState<string | null>(null);
   const [awaitingJarvisVerb, setAwaitingJarvisVerb] = useState("думает");
+  // Кого ждём. Раньше плашка «думает» была только у Джарвиса, и работа Claude шла совершенно молча:
+  // фаза уходила в нижнюю панель, а в самой переписке не появлялось ничего.
+  const [awaitingAgent, setAwaitingAgent] = useState(JARVIS_NAME);
   // Значение не читается — сам факт смены форсирует re-render, чтобы Date.now() в
   // awaitingJarvisSeconds ниже пересчитывался каждую секунду.
   const [, setElapsedTick] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastComposerHeightRef = useRef(0);
   const liveMention = parseMention(text);
+  // Модели у агентов разные: у Джарвиса это Gemini/Groq на сервере, у Claude — алиасы его CLI на
+  // машине владельца. Показываем набор того, кому сейчас пишут; адресат не выбран — все подряд.
+  const addressee = (liveMention || peer || "").toLowerCase();
+  const shownModels = addressee
+    ? catalog.models.filter((item) => {
+      const agent = (item.agent || "").toLowerCase();
+      return agent === addressee || (addressee === "chatgpt" && agent === "codex") || (addressee === "codex" && agent === "chatgpt");
+    })
+    : catalog.models;
+  const modelAllowed = !model || shownModels.some((item) => item.id === model);
+  const effectiveModel = modelAllowed ? model : "";
+  const shownDefaultModel = shownModels.some((item) => item.id === catalog.defaultModel) ? catalog.defaultModel : (shownModels[0]?.id || "");
+  const defaultModelLabel = shownModels.find((item) => item.id === shownDefaultModel)?.label || shownModels[0]?.label || "по умолчанию";
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -705,14 +912,40 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     window.requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   }, []);
 
-  // field-sizing: content не работает в Safari/Firefox — растим textarea вручную по scrollHeight,
-  // это единственный способ, который реально работает везде.
-  useLayoutEffect(() => {
+  const resizeComposer = useCallback(() => {
     const el = composerRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [text]);
+    // Measure from a neutral height, otherwise Chromium can accumulate a few px
+    // when the picker/recipient row changes width and text wraps differently.
+    el.style.height = "0px";
+    const next = Math.min(Math.max(el.scrollHeight, 24), 220);
+    if (next !== lastComposerHeightRef.current) {
+      el.style.height = `${next}px`;
+      lastComposerHeightRef.current = next;
+    } else {
+      el.style.height = `${next}px`;
+    }
+  }, []);
+
+  // field-sizing: content is not available everywhere, so textarea growth is manual.
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [text, liveMention, peer, replyTo, drafts.length, shownModels.length, resizeComposer]);
+
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    const parent = el?.parentElement;
+    if (!el || !parent || typeof ResizeObserver === "undefined") return;
+    let lastWidth = parent.getBoundingClientRect().width;
+    const resize = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? parent.getBoundingClientRect().width;
+      if (Math.abs(width - lastWidth) < 0.5) return;
+      lastWidth = width;
+      resizeComposer();
+    });
+    resize.observe(parent);
+    return () => resize.disconnect();
+  }, [resizeComposer]);
 
   // Подсказки по вводу: @агент, /команда, $проект, #артефакт — набор символов, о котором просили
   // не тратить контекст на постоянное "MBOX"/"Джарвис" целиком, а выбирать мышью/стрелками.
@@ -757,13 +990,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     () => [...inbox]
       .filter((item) => CONVERSATION.has(item.item_type) && (!peer || belongsToPeer(item, peer)))
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .slice(-80),
+      .slice(-CHAT_HISTORY_LIMIT),
     [inbox, peer],
   );
   const inboxById = useMemo(() => new Map(inbox.map((item) => [String(item.id), item])), [inbox]);
 
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
-  const stillPending = pending.filter((item) => item.failed || !arrived.has(item.body.trim()));
+  const arrivedIds = useMemo(() => new Set(conversation.map((item) => String(item.id))), [conversation]);
+  const stillPending = pending.filter((item) => item.failed || !(item.inboxId ? arrivedIds.has(item.inboxId) : arrived.has(item.body.trim())));
 
   // "Ответ приходит резко" — раньше не было вообще никакого признака, что Джарвис работает над
   // ответом (в отличие от "печатает" у сессионных агентов ниже, у него нет agent_runs). Плашка
@@ -772,20 +1006,30 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // самостоятельным сообщением позже).
   useEffect(() => {
     if (!awaitingJarvisId) return;
-    if (conversation.some((item) => item.agent_name === JARVIS_NAME && String(item.props?.re ?? "") === awaitingJarvisId)) {
+    const answered = conversation.some((item) =>
+      item.agent_name.toLowerCase() === awaitingAgent.toLowerCase()
+      && [String(item.props?.re ?? ""), String(item.props?.in_reply_to ?? "")].includes(awaitingJarvisId));
+    if (answered) {
       setAwaitingJarvisId(null);
       setAwaitingJarvisSince(null);
       setAwaitingJarvisPhase(null);
       return;
     }
-    const timeout = window.setTimeout(() => { setAwaitingJarvisId(null); setAwaitingJarvisSince(null); setAwaitingJarvisPhase(null); }, 25000);
+    // Джарвис отвечает секунды, и если инлайн-путь не сработал, плашку надо снять быстро. Claude
+    // через Claude Code работает минутами — обрывать его на 25-й секунде значило бы врать, что он
+    // не работает, ровно тогда, когда он работает.
+    const isJarvis = awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase();
+    const timeout = window.setTimeout(() => { setAwaitingJarvisId(null); setAwaitingJarvisSince(null); setAwaitingJarvisPhase(null); }, isJarvis ? 25000 : 20 * 60 * 1000);
     return () => window.clearTimeout(timeout);
-  }, [awaitingJarvisId, conversation]);
+  }, [awaitingJarvisId, awaitingAgent, conversation]);
 
   // Раньше "думает…" висело одним и тем же текстом весь ответ — жалоба: непонятно, застрял агент
   // или реально работает. Опрашиваем ту же фазу, что сервер пишет в jarvisPhase (см. server/vite).
   useEffect(() => {
     if (!awaitingJarvisId) { setAwaitingJarvisPhase(null); return; }
+    // Фаза Джарвиса привязана к сообщению (он отвечает внутри сервера), фаза локального агента —
+    // к нему самому: наблюдатель шлёт её через POST /agent/ping, и она приезжает в списке агентов.
+    if (awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase()) return;
     let cancelled = false;
     const poll = () => {
       fetchJson<{ phase: string | null }>(`/api/mbox/agent/inbox/${awaitingJarvisId}/phase`)
@@ -795,7 +1039,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     poll();
     const interval = window.setInterval(poll, 1500);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [awaitingJarvisId]);
+  }, [awaitingJarvisId, awaitingAgent]);
+
+  const awaitingPhase = useMemo(() => {
+    if (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase()) return awaitingJarvisPhase;
+    return agents.find((agent) => agent.name.toLowerCase() === awaitingAgent.toLowerCase())?.phase || null;
+  }, [awaitingAgent, awaitingJarvisPhase, agents]);
 
   // Секунды в "думает…" — раньше плашка просто висела без обратной связи, сколько ещё ждать.
   useEffect(() => {
@@ -897,8 +1146,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   useEffect(() => {
     if (!pending.length) return;
-    setPending((current) => current.filter((item) => item.failed || !arrived.has(item.body.trim())));
-  }, [arrived, pending.length]);
+    setPending((current) => current.filter((item) => item.failed || !(item.inboxId ? arrivedIds.has(item.inboxId) : arrived.has(item.body.trim()))));
+  }, [arrived, arrivedIds, pending.length]);
 
   // Единый лог: реальная переписка + оптимистичные отправки + локальные команды, всё по времени.
   const lines = useMemo<LogLine[]>(() => {
@@ -907,6 +1156,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       kind: item.agent_name === HUMAN ? "out" : "in",
       actor: item.agent_name,
       text: parseAttachments(item.props?.attachments) ? withoutAttachmentList(item.body || item.title) : item.body || item.title,
+      renderedText: renderMarkdownLite(parseAttachments(item.props?.attachments) ? withoutAttachmentList(item.body || item.title) : item.body || item.title),
       attachments: parseAttachments(item.props?.attachments),
       at: item.created_at,
       // Инструменты, реально вызванные при формировании ответа — бейджами под самим сообщением,
@@ -920,12 +1170,25 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       trace: Array.isArray(item.props?.trace)
         ? (item.props.trace as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
+      // Ход мысли модели: Gemini отдаёт выжимку (includeThoughts), gpt-oss — поле reasoning.
+      reasoning: Array.isArray(item.props?.reasoning)
+        ? (item.props.reasoning as unknown[]).filter((t): t is string => typeof t === "string" && t.trim() !== "")
+        : undefined,
+      model: typeof item.props?.model === "string" ? item.props.model : undefined,
+      effort: typeof item.props?.effort === "string" ? item.props.effort : undefined,
+      rateLimit: item.props?.rate_limit && typeof item.props.rate_limit === "object"
+        ? (item.props.rate_limit as LogLine["rateLimit"])
+        : undefined,
+      work: item.props?.work && typeof item.props.work === "object"
+        ? (item.props.work as LogLine["work"])
+        : undefined,
       // Заметные действия (создано/удалено/объединено) — видны сразу, в отличие от trace выше.
       highlights: Array.isArray(item.props?.highlights)
         ? (item.props.highlights as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
       actions: parseActions(item.props?.actions),
       postBuilder: parsePostBuilder(item.props?.post_builder),
+      failed: item.item_type === "agent_error",
       inboxId: String(item.id),
       replyTo: (() => {
         const original = inboxById.get(repliedId(item));
@@ -937,12 +1200,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       kind: "out",
       actor: "Ты",
       text: item.attachments ? withoutAttachmentList(item.body) : item.body,
+      renderedText: renderMarkdownLite(item.attachments ? withoutAttachmentList(item.body) : item.body),
       attachments: item.attachments,
-      at: new Date().toISOString(),
+      at: item.at,
       pending: item.failed ? "failed" : item.sent ? "sent" : "sending",
+      inboxId: item.inboxId,
     }));
     return [...fromConversation, ...fromPending, ...localLines].sort((a, b) => a.at.localeCompare(b.at));
   }, [conversation, stillPending, localLines, inboxById]);
+  const visibleLines = useMemo(() => lines.slice(-CHAT_RENDER_LIMIT), [lines]);
 
   // Чат прилипает к низу, как в мессенджере. Прокрутка только на новое сообщение не спасала: если лог в
   // этот момент был скрыт (другая группа консоли, свёрнутая панель, неактивная вкладка), браузер её
@@ -979,7 +1245,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     if (!open) return;
     stickToBottomRef.current = true;
     scrollToBottom();
-  }, [open, lines.length, awaitingJarvisId, working.length, scrollToBottom]);
+  }, [open, visibleLines.length, awaitingJarvisId, working.length, scrollToBottom]);
 
   function pushLocal(kind: "sys" | "cmd", text: string) {
     setLocalLines((current) => [...current, { id: `local-${Date.now()}-${Math.random()}`, kind, actor: kind === "cmd" ? "Ты" : "mbox", text, at: new Date().toISOString() }]);
@@ -1025,7 +1291,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       }
       case "who": {
         const found = states.find(({ agent }) => agent.name.toLowerCase() === arg.toLowerCase());
-        if (!found) { pushLocal("sys", arg ? `агент «${arg}» не найден` : "укажи имя: /who Codex"); return; }
+        if (!found) { pushLocal("sys", arg ? `агент «${arg}» не найден` : "укажи имя: /who ChatGPT"); return; }
         pushLocal("sys", `${found.agent.name}: ${found.state.label}${found.state.detail ? " — " + found.state.detail : ""} · ${found.agent.kind}${found.agent.client ? " · " + found.agent.client : ""}`);
         return;
       }
@@ -1067,7 +1333,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     // Адресат: явное @Имя, иначе собеседник этого чата, иначе автор сообщения, на которое отвечаем.
     const mentionTarget = parseMention(raw) || peer || (replying && replying.actor !== HUMAN ? replying.actor : "");
     const localId = `local-${Date.now()}`;
-    setPending((current) => [...current, { id: localId, body, sent: false, attachments: files.length ? files : undefined }]);
+    const localAt = new Date().toISOString();
+    setPending((current) => [...current, { id: localId, body, at: localAt, sent: false, attachments: files.length ? files : undefined }]);
 
     try {
       const messageProps: Record<string, unknown> = {};
@@ -1077,6 +1344,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         messageProps.in_reply_to = replying.id;
       }
       if (currentProjectName) messageProps.current_project_name = currentProjectName;
+      // Модель и «усилие» выбираются рядом с полем ввода; пустое значение = как было (по умолчанию).
+      if (effectiveModel) messageProps.model = effectiveModel;
+      if (effort) messageProps.effort = effort;
       if (files.length) messageProps.attachments = files;
       const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
         method: "POST",
@@ -1093,16 +1363,18 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         }),
       });
       // Джарвис отвечает и на нетегнутые сообщения (см. scripts/mbox-archivist.mjs), поэтому
-      // индикатор "думает" уместен если адресат не указан или это явно он.
-      if ((!mentionTarget || mentionTarget.toLowerCase() === JARVIS_NAME.toLowerCase()) && result.inbox_item?.id) {
+      // без адресата ждём его; с адресатом — того, кому написали (Claude, Codex).
+      const waitingFor = mentionTarget || JARVIS_NAME;
+      if (result.inbox_item?.id) {
+        setAwaitingAgent(waitingFor);
         setAwaitingJarvisId(result.inbox_item.id);
         setAwaitingJarvisSince(Date.now());
         setAwaitingJarvisVerb(randomThinkingVerb());
       }
       // Помечаем отправленным сразу. Ждать onSaved нельзя: он тянет одиннадцать ручек
       // через туннель к боевой базе, и «отправляется» висело бы секундами.
-      setPending((current) => current.map((item) => item.id === localId ? { ...item, sent: true } : item));
-      onSaved();
+      setPending((current) => current.map((item) => item.id === localId ? { ...item, sent: true, inboxId: result.inbox_item?.id } : item));
+      onSaved("agent_inbox");
     } catch {
       setPending((current) => current.map((item) => item.id === localId ? { ...item, failed: true } : item));
     }
@@ -1231,13 +1503,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-log-text">{peer ? `Чат с ${peer}: сообщения уходят только ему, @ писать не нужно.` : "mbox консоль готова. /help — список команд."}</span>
               </div>
             )}
-            {lines.map((line, index) => {
+            {lines.length > visibleLines.length && (
+              <div className="console-log-sep">Показаны последние {visibleLines.length} сообщений</div>
+            )}
+            {visibleLines.map((line, index) => {
               const day = line.at.slice(0, 10);
               const showDay = day !== lastDay;
               lastDay = day;
               const time = new Date(line.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
               // Цитата нужна, когда исходное сообщение не стоит прямо над ответом, — иначе она лишь повторяет строку выше.
-              const quote = line.replyTo && lines[index - 1]?.inboxId !== line.replyTo.id ? line.replyTo : null;
+              const quote = line.replyTo && visibleLines[index - 1]?.inboxId !== line.replyTo.id ? line.replyTo : null;
               return (
                 <div key={line.id}>
                   {showDay && <div className="console-log-sep">{day}</div>}
@@ -1254,7 +1529,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         </button>
                       )}
                     </span>
-                    <div className="console-bubble">
+                    <div className={line.failed ? "console-bubble is-failed" : "console-bubble"}>
                     {quote && (
                       <button type="button" className="console-quote" onClick={() => jumpTo(quote.id)} title="Показать исходное сообщение">
                         <CornerDownRight size={11} />
@@ -1263,7 +1538,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                       </button>
                     )}
                     <span className="console-log-text">
-                      {renderMarkdownLite(line.text)}
+                      {line.renderedText || renderMarkdownLite(line.text)}
                       {line.pending === "sending" && <em className="console-log-status"> отправляется…</em>}
                       {line.pending === "failed" && <em className="console-log-status failed"> не отправлено</em>}
                     </span>
@@ -1283,9 +1558,24 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         ))}
                       </div>
                     )}
+                    {!line.trace?.length && workSummary(line.work) && (
+                      <p className="console-work-line">{workSummary(line.work)}</p>
+                    )}
+                    {line.rateLimit && (
+                      <p className="console-rate-limit" role="status">
+                        <AlertTriangle size={12} />
+                        {rateLimitText(line.rateLimit)}
+                      </p>
+                    )}
+                    {!!line.reasoning?.length && (
+                      <details className="console-trace-details is-reasoning">
+                        <summary><Brain size={11} /> Ход мысли{line.model ? ` · ${line.model}` : ""}{line.effort ? ` · ${EFFORT_LABEL[line.effort] || line.effort}` : ""}</summary>
+                        <div className="console-reasoning">{line.reasoning.map((text, index) => <p key={index}>{text}</p>)}</div>
+                      </details>
+                    )}
                     {!!line.trace?.length && (
                       <details className="console-trace-details">
-                        <summary>Подробности ({line.trace.length})</summary>
+                        <summary>{workSummary(line.work) || `Подробности (${line.trace.length})`}</summary>
                         <pre className="console-trace">{line.trace.join("\n\n")}</pre>
                       </details>
                     )}
@@ -1310,10 +1600,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-log-time" />
                 <span className="console-thinking-row">
                   <ThinkingSpinner />
-                  <span className="console-log-text">{JARVIS_NAME}: {awaitingJarvisPhase || awaitingJarvisVerb}… {awaitingJarvisSeconds}с</span>
-                  <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
-                    <X size={11} />
-                  </button>
+                  {/* Шуточные глаголы — это голос Джарвиса. Для остальных агентов нужен простой
+                      признак жизни, а не «прячется в чернильное облако от смущения». */}
+                  <span className="console-log-text">{awaitingAgent}: {awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} {awaitingJarvisSeconds}с</span>
+                  {/* Прервать умеет только Джарвис: он отвечает внутри сервера. У локального агента
+                      крутится свой CLI на машине владельца, и кнопка врала бы, что его можно остановить. */}
+                  {awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() && (
+                    <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
+                      <X size={11} />
+                    </button>
+                  )}
                 </span>
               </div>
             )}
@@ -1387,9 +1683,39 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                   autoComplete="off"
                   rows={1}
                 />
-                <div className="console-input-hints" aria-hidden="true">
-                  <span><b>@</b> агент</span><span><b>/</b> команда</span><span><b>$</b> проект</span><span><b>#</b> артефакт</span>
-                  <span className="console-input-newline"><kbd>Shift</kbd><kbd>Enter</kbd> новая строка</span>
+                <div className="console-input-meta">
+                  <div className="console-input-hints" aria-hidden="true">
+                    <span><b>@</b> агент</span><span><b>/</b> команда</span><span><b>$</b> проект</span><span><b>#</b> артефакт</span>
+                    <span className="console-input-newline"><kbd>Shift</kbd><kbd>Enter</kbd> новая строка</span>
+                  </div>
+                  {/* Пикеры вынесены из строки подсказок: у неё overflow: hidden ради обрезки текста
+                      на узком окне, и он срезал раскрытое меню целиком. */}
+                  <div className="console-input-pickers">
+                  {/* Чем отвечать. Список приходит с сервера (какие ключи есть), «как обычно» —
+                      прежнее поведение: основная модель, при её отказе резервная. */}
+                  {shownModels.length > 0 && (
+                    <ComposerPicker
+                      label="Чем отвечать"
+                      value={effectiveModel}
+                      onChange={setModel}
+                      // Пустой выбор — не «ничего», а модель по умолчанию: показываем её саму,
+                      // чтобы в поле ввода всегда было видно, кто будет отвечать.
+                      placeholder={defaultModelLabel}
+                      defaultValue={shownDefaultModel}
+                      options={shownModels.map((item) => ({ value: item.id, label: item.label, hint: item.role }))}
+                    />
+                  )}
+                  {catalog.efforts.length > 0 && (
+                    <ComposerPicker
+                      label="Как долго думать перед ответом"
+                      value={effort}
+                      onChange={setEffort}
+                      placeholder={catalog.efforts.find((item) => item.id === catalog.defaultEffort)?.label || "Обычно"}
+                      defaultValue={catalog.defaultEffort}
+                      options={catalog.efforts.map((item) => ({ value: item.id, label: item.label, hint: item.hint }))}
+                    />
+                  )}
+                  </div>
                 </div>
               </div>
               <button type="submit" className="console-send-btn" disabled={(!text.trim() && !readyFiles.length) || uploadingFiles} aria-label="Отправить" title={uploadingFiles ? "Дождитесь загрузки файлов" : "Отправить (Enter)"}>
