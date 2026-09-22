@@ -14,7 +14,7 @@ function activeTheme() {
     || "graphite";
 }
 
-type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:write-files" | "mbox:files" | "mbox:email-check"; id: number; path?: string; content?: string; message?: string; html?: string; files?: Array<{ path: string; content: string; message?: string }> };
+type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:write-files" | "mbox:files" | "mbox:email-check" | "mbox:agents" | "mbox:send"; id: number; path?: string; content?: string; message?: string; html?: string; text?: string; to?: string; files?: Array<{ path: string; content: string; message?: string }> };
 
 /**
  * Страница из пакета навыка на сервере (skills/<навык>/<файл>): HTML-форма или markdown. Открывает её агент
@@ -22,7 +22,7 @@ type BridgeCall = { type: "mbox:read" | "mbox:write" | "mbox:write-files" | "mbo
  *
  * HTML идёт в iframe без allow-same-origin: у страницы нет доступа к сессии MBOX. Связь — через window.mbox,
  * который вставляется в страницу:
- *   mbox.send(text) — отправить результат в чат MBOX агенту, открывшему вкладку;
+ *   mbox.agents() — подключённые агенты; mbox.send(text, to?) — отправить задание выбранному агенту;
  *   mbox.close()    — закрыть вкладку;
  *   mbox.read(path), mbox.write(path, content, message), mbox.writeFiles(files, message), mbox.files() — файлы своего навыка на сервере (с историей версий);
  *   mbox.emailCheck(html) — внешняя проверка готового HTML через Email Checker на сервере MBOX;
@@ -85,10 +85,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
         try { window.localStorage.setItem(storageKey, JSON.stringify(data.items)); } catch { /* без памяти */ }
       }
       if (data?.type === "mbox:close") tabs.close(tabKey);
-      if (data?.type === "mbox:send" && typeof data.text === "string" && data.text.trim()) {
-        void sendToChat(data.text.trim());
-      }
-      if (data?.type === "mbox:read" || data?.type === "mbox:write" || data?.type === "mbox:write-files" || data?.type === "mbox:files" || data?.type === "mbox:email-check") void answer(data as BridgeCall);
+      if (data?.type === "mbox:read" || data?.type === "mbox:write" || data?.type === "mbox:write-files" || data?.type === "mbox:files" || data?.type === "mbox:email-check" || data?.type === "mbox:agents" || data?.type === "mbox:send") void answer(data as BridgeCall);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -99,6 +96,16 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
     const reply = (payload: { ok: boolean; result?: unknown; error?: string }) => frameRef.current?.contentWindow?.postMessage({ type: "mbox:reply", id: call.id, ...payload }, "*");
     const base = `/api/mbox/agent/skills/packages/${encodeURIComponent(skill)}`;
     try {
+      if (call.type === "mbox:agents") {
+        const data = await fetchJson<{ agents: Array<{ name: string; status: string; kind: string; client: string }> }>("/api/mbox/agents");
+        reply({ ok: true, result: data.agents.filter((agent) => agent.status === "active" && agent.kind !== "human").map(({ name, kind, client }) => ({ name, kind, client })) });
+        return;
+      }
+      if (call.type === "mbox:send") {
+        if (!call.text?.trim()) throw new Error("Задание пустое");
+        reply({ ok: true, result: await sendToChat(call.text.trim(), call.to?.trim()) });
+        return;
+      }
       if (call.type === "mbox:email-check") {
         const data = await fetchJson<{ check: unknown }>("/api/mbox/email/check", {
           method: "POST",
@@ -142,8 +149,13 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
     }
   }
 
-  async function sendToChat(text: string) {
+  async function sendToChat(text: string, requestedTo?: string) {
     try {
+      if (requestedTo) {
+        const data = await fetchJson<{ agents: Array<{ name: string; status: string }> }>("/api/mbox/agents");
+        if (!data.agents.some((agent) => agent.name === requestedTo && agent.status === "active")) throw new Error("Агент уже отключился — обновите список");
+      }
+      const target = requestedTo || replyTo;
       await fetchJson("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -155,21 +167,24 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
           body: text,
           priority: "high",
           requires_human: false,
-          props: { to: replyTo, source: "skill-page", skill, file },
+          props: { to: target, source: "skill-page", skill, file },
         }),
       });
-      setNotice(`Отправлено ${replyTo} в чат MBOX`);
-    } catch {
+      setNotice(`Отправлено ${target} в чат MBOX`);
+      window.setTimeout(() => setNotice(""), 6000);
+      return { to: target };
+    } catch (cause) {
       setNotice("Не отправилось — проверьте связь с MBOX и нажмите ещё раз");
+      window.setTimeout(() => setNotice(""), 6000);
+      throw cause;
     }
-    window.setTimeout(() => setNotice(""), 6000);
   }
 
   return (
     <DocShell
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">Навык {skill} › {file}{isHtml && <span className="wb-tree-hint"> · отправка из формы уходит {replyTo}</span>}</span>
+          <span className="wb-doc-crumbs">Навык {skill} › {file}{isHtml && <span className="wb-tree-hint"> · {skill === "route-compressor-corp" ? "агент выбирается в форме" : `отправка из формы уходит ${replyTo}`}</span>}</span>
           <div className="wb-doc-actions">
             {notice && <span className="wb-doc-notice">{notice}</span>}
             {isHtml && (
@@ -215,7 +230,8 @@ var seq=0,waiting={};
 function call(type,payload){return new Promise(function(resolve,reject){var id=++seq;waiting[id]={resolve:resolve,reject:reject};parent.postMessage(Object.assign({type:type,id:id},payload),"*");});}
 window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d)return;if(d.type==="mbox:theme"){document.documentElement.dataset.theme=d.theme||"graphite";return;}if(d.type!=="mbox:reply"||!waiting[d.id])return;var w=waiting[d.id];delete waiting[d.id];d.ok?w.resolve(d.result):w.reject(new Error(d.error||"MBOX"));});
 window.mbox={embedded:true,skill:${JSON.stringify(skill)},
-send:function(text){parent.postMessage({type:"mbox:send",text:String(text)},"*");},
+agents:function(){return call("mbox:agents",{});},
+send:function(text,to){return call("mbox:send",{text:String(text),to:String(to||"")});},
 close:function(){parent.postMessage({type:"mbox:close"},"*");},
 read:function(path){return call("mbox:read",{path:String(path)});},
 write:function(path,content,message){return call("mbox:write",{path:String(path),content:String(content),message:String(message||"")});},

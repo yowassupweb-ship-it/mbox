@@ -40,7 +40,7 @@
     * { box-sizing: border-box; }
     html, body { min-height: 100%; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); }
-    button, input, textarea { font: inherit; }
+    button, input, select, textarea { font: inherit; }
     button { color: inherit; }
     .shell { width: min(100% - 40px, 920px); margin: 0 auto; padding: 34px 0 56px; }
     .intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: end; margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
@@ -55,12 +55,15 @@
     .field + .field { margin-top: 16px; }
     label { color: var(--text-2); font-size: 12px; font-weight: 500; }
     label span { color: var(--text-muted); font-weight: 400; }
-    input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); outline: none; }
-    input { min-height: 36px; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); outline: none; }
+    input, select { min-height: 36px; }
     textarea { min-height: 116px; resize: vertical; line-height: 1.5; }
     input::placeholder, textarea::placeholder { color: var(--text-muted); }
-    input:focus, textarea:focus { border-color: var(--accent); background: var(--surface-3); }
-    input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--surface-3); }
+    input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .agent-row { display: flex; align-items: center; gap: 8px; }
+    .agent-row select { flex: 1; min-width: 0; }
+    .agent-row button { flex: none; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; margin-top: 8px; }
     .chips:empty { display: none; }
     .chip { padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--selected); font: 12px var(--font-mono); }
@@ -104,6 +107,14 @@
         <label for="notes">Пожелания <span>необязательно</span></label>
         <input id="notes" autocomplete="off" placeholder="Например: сделай короче второй день, подчеркни гастрономию">
       </div>
+      <div class="field" id="agent-field">
+        <label for="agent">Агент <span>подключён сейчас</span></label>
+        <div class="agent-row">
+          <select id="agent" required><option value="">Загрузка агентов…</option></select>
+          <button class="button secondary" type="button" id="refresh-agents">Обновить</button>
+        </div>
+        <p class="hint" id="agent-hint">Показываются подключённые агенты. Задание получит выбранный агент.</p>
+      </div>
       <div class="actions">
         <button class="button primary" type="submit" id="send" disabled>Запустить</button>
         <button class="button secondary" type="button" id="copy">Скопировать задание</button>
@@ -117,6 +128,8 @@
   <script>
     const tours = document.querySelector('#tours');
     const notes = document.querySelector('#notes');
+    const agent = document.querySelector('#agent');
+    const agentHint = document.querySelector('#agent-hint');
     const chips = document.querySelector('#chips');
     const preview = document.querySelector('#preview');
     const send = document.querySelector('#send');
@@ -132,22 +145,52 @@
         'Когда страницы готовы — открой мне папку out/ready через MBOX (open_tab), назови номера артефактов в «Маршрутах» и коротко перечисли спорные места.',
       ].filter(Boolean).join('\n');
     };
-    const store = () => { try { localStorage.setItem(storageKey, JSON.stringify({ tours: tours.value, notes: notes.value })); } catch { /* без хранилища */ } };
+    const store = () => { try { localStorage.setItem(storageKey, JSON.stringify({ tours: tours.value, notes: notes.value, agent: agent.value })); } catch { /* без хранилища */ } };
     const update = () => {
       const list = ids();
       chips.replaceChildren(...list.map((id) => Object.assign(document.createElement('span'), { className: 'chip', textContent: id })));
       preview.textContent = list.length ? task() : 'Добавьте хотя бы один номер тура.';
-      send.disabled = !list.length;
+      send.disabled = !list.length || (Boolean(window.mbox) && !agent.value);
       store();
     };
-    try { const saved = JSON.parse(localStorage.getItem(storageKey) || localStorage.getItem('route-to-operator-launch') || 'null'); if (saved) { tours.value = saved.tours || ''; notes.value = saved.notes || ''; } } catch { /* без хранилища */ }
+    let preferredAgent = '';
+    try { const saved = JSON.parse(localStorage.getItem(storageKey) || localStorage.getItem('route-to-operator-launch') || 'null'); if (saved) { tours.value = saved.tours || ''; notes.value = saved.notes || ''; preferredAgent = saved.agent || ''; } } catch { /* без хранилища */ }
+
+    async function loadAgents() {
+      if (!window.mbox?.agents) {
+        document.querySelector('#agent-field').hidden = true;
+        return;
+      }
+      agent.disabled = true;
+      agent.replaceChildren(new Option('Загрузка агентов…', ''));
+      try {
+        const connected = await window.mbox.agents();
+        agent.replaceChildren(new Option('Выберите агента', ''), ...connected.map((item) => new Option(item.name, item.name)));
+        const wanted = agent.dataset.selected || preferredAgent;
+        if (connected.some((item) => item.name === wanted)) agent.value = wanted;
+        else if (connected.length === 1) agent.value = connected[0].name;
+        agent.disabled = connected.length === 0;
+        agentHint.textContent = connected.length ? 'Задание получит выбранный подключённый агент.' : 'Сейчас нет подключённых агентов. Запустите агента и обновите список.';
+      } catch {
+        agent.replaceChildren(new Option('Не удалось получить список агентов', ''));
+        agentHint.textContent = 'Проверьте связь с MBOX и обновите список.';
+      }
+      update();
+    }
 
     const flash = (text) => { notice.textContent = text; setTimeout(() => { notice.textContent = ''; }, 4000); };
     document.querySelector('#form').addEventListener('input', update);
-    document.querySelector('#form').addEventListener('submit', (event) => {
+    document.querySelector('#refresh-agents').addEventListener('click', () => { agent.dataset.selected = agent.value; void loadAgents(); });
+    document.querySelector('#form').addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!ids().length) return;
-      if (window.mbox) { window.mbox.send(task()); flash('Задание отправлено в чат MBOX — ответ придёт в консоли.'); }
+      if (window.mbox) {
+        if (!agent.value) { flash('Выберите подключённого агента.'); return; }
+        send.disabled = true;
+        try { await window.mbox.send(task(), agent.value); flash(`Задание отправлено ${agent.value} — ответ придёт в консоли.`); }
+        catch (error) { flash(error?.message || 'Не удалось отправить задание. Обновите список агентов.'); await loadAgents(); }
+        finally { update(); }
+      }
       else { navigator.clipboard?.writeText(task()); flash('Не в MBOX: задание скопировано, вставьте его в чат агента.'); }
     });
     document.querySelector('#copy').addEventListener('click', async () => {
@@ -155,6 +198,7 @@
     });
     if (!window.mbox) send.textContent = 'Скопировать и запустить';
     update();
+    void loadAgents();
   </script>
 </body>
 </html>
