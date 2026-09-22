@@ -8,6 +8,7 @@ const MENU = "/assets/icons/bottom-menu";
 const NAVIGATION = "/assets/icons/navigation";
 const SYSTEM = "/assets/icons/system";
 const PROJECT = "/assets/icons/project";
+const FILES = "/assets/icons/files";
 
 export type TabMeta = { title: string; hint: string; icon: string };
 
@@ -67,6 +68,12 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: `Коммит ${key.split(":").slice(2).join(":").slice(0, 7)}`, hint: "git show", icon: `${SYSTEM}/history.png` };
     case "skill":
       return { title: titles[key] ?? first, hint: "Навык", icon: `${NAVIGATION}/skills.png` };
+    case "web": {
+      // Пока сайт не загрузился, заголовка нет — показываем домен, он уже в ключе вкладки.
+      const address = key.slice(4);
+      const host = address.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+      return { title: titles[key] || host || "Браузер", hint: address || "Встроенный браузер", icon: `${FILES}/browser-file.png` };
+    }
     case "tool":
       return { title: titles[key] ?? first, hint: "Инструмент", icon: `${NAVIGATION}/tools.png` };
     case "file": {

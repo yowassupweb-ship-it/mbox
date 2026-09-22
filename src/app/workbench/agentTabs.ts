@@ -1,4 +1,5 @@
 import { workspaceBridge } from "./localWorkspace";
+import { browserBridge, browserTabKey } from "./BrowserDocument";
 import type { TabsApi } from "./tabs";
 
 /**
@@ -103,7 +104,9 @@ export async function applyOpenTab(event: OpenTabEvent, tabs: TabsApi, showFolde
     case "path":
       return event.path ? openLocalPath(event.path, tabs, showFolders) : { text: "Агент не указал путь", tone: "warn" };
     case "url":
-      if (event.url) window.open(event.url, "_blank", "noopener");
+      // В приложении ссылка открывается вкладкой встроенного браузера, в вебе — соседней вкладкой.
+      if (event.url && browserBridge()) tabs.open(browserTabKey(event.url), true);
+      else if (event.url) window.open(event.url, "_blank", "noopener");
       return { text: event.title || event.url || "ссылку", tone: "ok" };
     case "tab":
       if (event.key) tabs.open(event.key, true);

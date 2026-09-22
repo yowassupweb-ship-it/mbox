@@ -86,12 +86,12 @@
       <div>
         <p class="eyebrow">route-compressor-corp</p>
         <h1>Корпоративная программа тура</h1>
-        <p class="lead">Добавьте номера туров. Агент возьмёт программы из менеджерки, сократит их по редакционным правилам и откроет готовые HTML-страницы.</p>
+        <p class="lead">Добавьте номера туров. Агент возьмёт программы из менеджерки, сократит их по редакционным правилам и отдаст готовую страницу, Word-версию и документ в «Маршрутах» MBOX.</p>
       </div>
       <ol class="steps" aria-label="Этапы подготовки программы">
         <li><b>01</b><span>Указать туры</span></li>
         <li><b>02</b><span>Сжать текст</span></li>
-        <li><b>03</b><span>Открыть HTML</span></li>
+        <li><b>03</b><span>Страница, Word, MBOX</span></li>
       </ol>
     </header>
     <form class="card" id="form">
@@ -112,7 +112,7 @@
       <span class="preview-label">Задание агенту</span>
       <pre id="preview"></pre>
     </form>
-    <p class="hint">Готовые страницы появятся в <code>out/ready</code> рабочей папки навыка — агент откроет их в MBOX.</p>
+    <p class="hint">Готовые страницы и Word-версии появятся в <code>out/ready</code> рабочей папки навыка, а каждый тур — документом в разделе «Маршруты» файлов MBOX. Агент откроет результат сам.</p>
   </main>
   <script>
     const tours = document.querySelector('#tours');
@@ -129,7 +129,7 @@
       return [
         `Используй навык route-compressor-corp: корпоративная версия программы для туров ${list.join(', ')}.`,
         notes.value.trim() ? `Пожелания: ${notes.value.trim()}.` : '',
-        'Когда страницы готовы — открой мне папку out/ready через MBOX (open_tab) и коротко перечисли спорные места.',
+        'Когда страницы готовы — открой мне папку out/ready через MBOX (open_tab), назови номера артефактов в «Маршрутах» и коротко перечисли спорные места.',
       ].filter(Boolean).join('\n');
     };
     const store = () => { try { localStorage.setItem(storageKey, JSON.stringify({ tours: tours.value, notes: notes.value })); } catch { /* без хранилища */ } };

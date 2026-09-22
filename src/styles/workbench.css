@@ -480,6 +480,11 @@ body.wb-resizing * {
 .wb-tree-row img,
 .wb-tree-row .wb-file-type-icon { width: 20px; height: 20px; flex: none; image-rendering: auto; }
 
+/* Папка рисуется PNG с широкими полями: сам глиф занимает 64% картинки, а иконки файлов (lucide) —
+   около 83% бокса. В одинаковом боксе 20px папка выглядела ощутимо мельче файлов рядом. Бокс крупнее,
+   поля отрицательные — строка дерева остаётся прежней высоты (todo #321). */
+.wb-tree-row img.wb-folder-icon { width: 26px; height: 26px; margin: -3px; }
+
 .wb-tree-project { color: var(--text-main); font-weight: var(--weight-medium); }
 li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-color); }
 
@@ -764,7 +769,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   padding: 16px 24px 48px;
 }
 
-.wb-doc-page.is-narrow { max-width: 920px; }
+/* Узкая страница (навык, инструмент, каталог) стоит посередине холста, как колонка чтения в заметках
+   (.wb-reading): по бокам есть место — значит блок центрируется, а не липнет к левому краю. На узкой
+   вкладке max-width не срабатывает и auto-поля схлопываются в ноль (todo #321). */
+.wb-doc-page.is-narrow { max-width: 920px; margin-inline: auto; }
 
 .wb-doc-header {
   display: flex;
@@ -1402,6 +1410,23 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-html-preview { height: 100%; display: flex; justify-content: center; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
 .wb-html-preview iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: 4px; background: #fff; }
 .wb-html-preview.is-mobile iframe { width: 390px; max-width: 100%; }
+
+/* Встроенный браузер. Сайт рисует главный процесс Electron поверх окна, поэтому здесь только панель
+   адреса и пустая площадка: её координаты уезжают в приложение, и по ним кладётся страница. Ничего
+   поверх площадки рисовать нельзя — настоящая страница всё равно окажется выше. */
+.wb-browser { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.wb-browser > .wb-doc-bar { gap: 8px; }
+.wb-browser-nav { display: flex; align-items: center; gap: 2px; flex: none; }
+.wb-browser-nav button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); cursor: pointer; }
+.wb-browser-nav button:hover:not(:disabled) { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-nav button:disabled { opacity: 0.35; cursor: default; }
+
+.wb-browser-address { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--element-bg); color: var(--text-muted); }
+.wb-browser-address:focus-within { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.wb-browser-address svg { flex: none; }
+.wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: 12.5px; }
+
+.wb-browser-stage { flex: 1 1 0; min-height: 0; background: var(--surface-deep); }
 
 .wb-pdf-view { height: 100%; min-height: 0; padding: 8px; background: var(--surface-deep); }
 .wb-pdf-view iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: #fff; }
@@ -2638,9 +2663,16 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-image-stage.is-panning { cursor: grabbing; }
 .wb-image-canvas { display: grid; place-items: center; }
 .wb-image-canvas img { max-width: none; display: block; box-shadow: 0 0 0 1px var(--wb-line); }
-.wb-image-stage.is-dark { background: #0b0c0e; }
-.wb-image-stage.is-light { background: #f4f5f2; }
+/* Картинка ещё читается: та же подложка и та же область, что у готовой картинки — при переборе
+   картинок в дереве вкладка не мигает белым и не прыгает (todo #321). */
+.wb-image-doc.is-loading { display: grid; place-items: center; }
+
+.wb-image-stage.is-dark,
+.wb-image-doc.is-loading.is-dark { background: #0b0c0e; }
+.wb-image-stage.is-light,
+.wb-image-doc.is-loading.is-light { background: #f4f5f2; }
 .wb-image-stage.is-checker,
+.wb-image-doc.is-loading.is-checker,
 .wb-image-swatch.is-checker {
   background-color: #1a1c1f;
   background-image:

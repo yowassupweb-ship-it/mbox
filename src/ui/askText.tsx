@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { markOverlay } from "../app/workbench/BrowserDocument";
 import { createRoot } from "react-dom/client";
 
 type AskOptions = { title: string; value?: string; placeholder?: string; confirmLabel?: string; hint?: string; validate?: (value: string) => string };
@@ -26,6 +27,12 @@ function AskDialog({ title, value = "", placeholder = "", confirmLabel = "Гот
   const [text, setText] = useState(value);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Диалог рисуется поверх документа — страница встроенного браузера на это время убирается.
+  useEffect(() => {
+    markOverlay(true);
+    return () => markOverlay(false);
+  }, []);
 
   useEffect(() => {
     const input = inputRef.current;

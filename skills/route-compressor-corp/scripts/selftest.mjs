@@ -18,7 +18,7 @@ const statePath = path.join(root, "out", "work", `tour-${ID}.state.json`);
 const htmlPath = path.join(root, "out", "ready", `tour-${ID}.html`);
 
 fs.mkdirSync(path.join(root, "scripts"));
-for (const file of ["route.mjs", "convert-corp.mjs", "fetch-tour.mjs"]) fs.copyFileSync(path.join(SCRIPTS, file), path.join(root, "scripts", file));
+for (const file of ["route.mjs", "convert-corp.mjs", "fetch-tour.mjs", "publish.mjs"]) fs.copyFileSync(path.join(SCRIPTS, file), path.join(root, "scripts", file));
 fs.mkdirSync(path.join(root, "out", "work"), { recursive: true });
 
 // Синтетический тур в формате fetch-tour.mjs.
@@ -62,7 +62,8 @@ function run(text, { keepState = false } = {}) {
   if (!keepState) fs.rmSync(statePath, { force: true });
   fs.rmSync(htmlPath, { force: true });
   fs.writeFileSync(textPath, text);
-  const result = spawnSync(process.execPath, [path.join(root, "scripts", "route.mjs"), ID, "--no-fetch"], { encoding: "utf8", env: { ...process.env, ROUTE_COMPRESSOR_CORP_HOME: root } });
+  // MBOX намеренно отключён: самопроверка не должна класть выдуманный тур в боевые артефакты.
+  const result = spawnSync(process.execPath, [path.join(root, "scripts", "route.mjs"), ID, "--no-fetch"], { encoding: "utf8", env: { ...process.env, ROUTE_COMPRESSOR_CORP_HOME: root, MBOX_URL: "", MBOX_PASSWORD: "" } });
   return { code: result.status, output: `${result.stdout || ""}${result.stderr || ""}` };
 }
 
@@ -84,6 +85,7 @@ const cases = [
   ["нет истории изменений", () => run(good.split("**История изменений**")[0]), 1, /История изменений/],
   ["текст изменён без записи в истории", () => { run(good); return run(good.replace("Обед в кафе.", "Обед в кафе города."), { keepState: true }); }, 1, /история изменений — нет/],
   ["текст изменён с записью в истории", () => { run(good); return run(good.replace("Обед в кафе.", "Обед в кафе города.").replace("**История изменений**\n\n", "**История изменений**\n\n- 02.01.2026 — правка.\n"), { keepState: true }); }, 0, /правила соблюдены/],
+  ["без доступа к MBOX сборка не падает", () => run(good), 0, /Артефакт MBOX и Word не сохранены/],
   ["практическое первым — предупреждение", () => run(good.replace("Город основан в 1152 году. Собор XIII века покрыт резьбой, среди узоров есть слон. Возьмите удобную обувь.", "Возьмите удобную обувь. Город основан в 1152 году.")), 0, /Практическое перевешивает мотивацию/],
 ];
 

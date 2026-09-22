@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Code2, Copy, Download, Eye, FilePlus2, Monitor, Pencil, RefreshCw, Save, Smartphone, Trash2, Upload, X } from "lucide-react";
+import { Code2, Copy, Download, Eye, FilePlus2, FileText, Monitor, Pencil, RefreshCw, Save, Smartphone, Trash2, Upload, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
@@ -199,7 +199,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                         <li key={category.name}>
                           <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(key)}>
                             <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
-                            <img src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />
+                            <img className="wb-folder-icon" src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />
                             <span className="wb-tree-label">{category.name}</span>
                             <span className="wb-tree-count">{category.files.length}</span>
                           </div>
@@ -263,6 +263,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
   const [draft, setDraft, discardDraft] = useDraft<Draft>(draftKey, file ? draftOf(file) : EMPTY_DRAFT);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
   const [copied, setCopied] = useState(false);
+  const [wordState, setWordState] = useState<"idle" | "loading" | "error">("idle");
   const kind = file ? fileKind(file) : fileKind({ name: draft.name, content: draft.content, category: draft.category });
   const [mode, setMode] = usePersistentState<"preview" | "code">(`mbox.file.mode.${kind}`, kind === "html" || kind === "markdown" ? "preview" : "code");
   const [viewport, setViewport] = usePersistentState<"desktop" | "mobile">("mbox.file.viewport", "desktop");
@@ -341,6 +342,29 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  /**
+   * Word-версию собирает сервер (server/docx.mjs): конвертер один и тот же и для этой кнопки, и для
+   * навыков, которые кладут свой результат в артефакты — документ в MBOX и документ у человека на
+   * диске получаются одинаковыми.
+   */
+  async function downloadWord() {
+    if (!file) return;
+    setWordState("loading");
+    try {
+      const response = await fetch(`/api/mbox/artifacts/${file.id}/docx`);
+      if (!response.ok) throw new Error(`request_failed:${response.status}`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${file.name.replace(/\.[a-z0-9]+$/i, "") || `file-${file.id}`}.docx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setWordState("idle");
+    } catch {
+      setWordState("error");
+    }
+  }
+
   async function copyContent() {
     if (!file) return;
     await navigator.clipboard.writeText(file.content);
@@ -405,6 +429,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
             <>
               <button type="button" onClick={() => void copyContent()} title="Скопировать содержимое"><Copy size={14} />{copied ? " Скопировано" : ""}</button>
               <button type="button" onClick={download} title="Скачать"><Download size={14} /></button>
+              <button type="button" onClick={() => void downloadWord()} disabled={wordState === "loading"} title="Скачать в Word (.docx)"><FileText size={14} /> {wordState === "error" ? "Не вышло" : "Word"}</button>
               <button type="button" onClick={startEdit}><Pencil size={14} /> Править</button>
               <button type="button" className="is-danger" onClick={() => void remove()} title="Удалить файл"><Trash2 size={14} /></button>
             </>

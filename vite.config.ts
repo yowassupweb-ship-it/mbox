@@ -16,6 +16,7 @@ import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
+import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
@@ -1726,6 +1727,24 @@ function mboxDevApi() {
               [q, devScope.all, devScope.projectIds],
             );
             return sendJson(res, 200, { artifacts: result.rows });
+          }
+
+          // Скачать документ в Word: тот же конвертер, что у боевого сервера (server/docx.mjs).
+          const artifactDocxMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)\/docx$/);
+          if (artifactDocxMatch && req.method === "GET") {
+            const row = (await queryPostgres<{ name: string; content: string; project_id: string | null }>(
+              "SELECT name, content, project_id::text FROM artifacts WHERE id = $1",
+              [artifactDocxMatch[1]],
+            )).rows[0];
+            if (!row) return sendJson(res, 404, { error: "not_found" });
+            if (!devHasProjectAccess(devScope, row.project_id)) return sendJson(res, 403, { error: "forbidden" });
+            const file = documentToDocx({ content: row.content || "", name: row.name });
+            res.writeHead(200, {
+              "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "content-length": file.length,
+              "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(docxFileName(row.name))}`,
+            });
+            return res.end(file);
           }
 
           const artifactMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)$/);

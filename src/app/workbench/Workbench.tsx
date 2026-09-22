@@ -20,6 +20,7 @@ import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { LocalImageDocument } from "./LocalImageDocument";
+import { BrowserDocument, browserBridge } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
@@ -325,6 +326,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={tabs.active === key} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
+      case "web":
+        return <BrowserDocument tabKey={key} visible={tabs.active === key} tabs={tabs} onTitle={onTitle} />;
       case "local":
         return IMAGE_FILE.test(rest)
           ? <LocalImageDocument rootKey={first} path={rest} />
@@ -402,6 +405,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <ActivityButton label="Папки (локальные файлы и git)" icon={activityIcon("folders.png")} active={sidebarOpen && activity === "local"} onClick={() => showActivity("local")} />
         <ActivityButton label="Артефакты" icon={activityIcon("artifacts.png")} active={sidebarOpen && activity === "files"} onClick={() => showActivity("files")} />
         <ActivityButton label="Хранилище S3" icon={activityIcon("storage.png")} active={tabs.active === "storage"} onClick={() => tabs.open("storage", true)} />
+        {/* Браузер живёт только в приложении: сайт показывает главный процесс Electron. В вебе рядом
+            есть настоящий браузер, кнопка там не нужна. */}
+        {browserBridge() && <ActivityButton label="Браузер" icon={<img src="/assets/icons/files/browser-file.png" alt="" draggable={false} />} active={tabs.active.startsWith("web:")} onClick={() => tabs.open("web:", true)} />}
         <ActivityButton label="Поиск по памяти (Ctrl+K)" icon={activityIcon("memory.png")} active={sidebarOpen && activity === "search"} onClick={() => showActivity("search")} />
         <ActivityButton label="История" icon={systemIcon("history.png")} active={tabs.active === "history"} onClick={() => tabs.open("history", true)} />
         <ActivityButton label="Агенты" icon={activityIcon("agents.png")} active={sidebarOpen && activity === "agents"} onClick={() => showActivity("agents")} badge={needsHuman.length} />

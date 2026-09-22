@@ -307,7 +307,10 @@ export function PhilosophyPanel({ project, onSaved }: { project: Project; onSave
     <div className="entity-panel philosophy-panel">
       {saved.philosophy || principleList.length ? (
         <>
-          {saved.philosophy && <div className="philosophy-text">{saved.philosophy.split(/\n{2,}/).map((block, index) => <p key={index}>{block}</p>)}</div>}
+          {/* Философию пишут markdown-ом — у MBOX это целый документ с заголовками, списками и
+              цитатами. Раньше текст просто резался по пустым строкам на <p>, и решётки со звёздочками
+              оставались на экране как есть (todo #319). */}
+          {saved.philosophy && <MarkdownText text={saved.philosophy} className="philosophy-text" />}
           {principleList.length > 0 && (
             <ul className="principle-list">
               {principleList.map((line) => <li key={line}><Check size={14} />{line}</li>)}

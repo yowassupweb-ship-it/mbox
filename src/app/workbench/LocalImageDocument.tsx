@@ -8,6 +8,25 @@ import { useRemembered } from "./uiMemory";
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 16;
 
+/**
+ * Последние открытые картинки. Одиночный клик в дереве подменяет вкладку-предпросмотр: ключ вкладки
+ * меняется, документ пересоздаётся с пустым состоянием — и при переборе картинок одну за другой на
+ * их месте мигала надпись «Открываю …». Из кэша уже просмотренная картинка рисуется сразу, а новая
+ * ждёт молча, не ломая раскладку (todo #321).
+ */
+const CACHE_LIMIT = 12;
+const cache = new Map<string, ImageRead>();
+const cacheKey = (rootKey: string, path: string) => `${rootKey}:${path}`;
+
+function remember(key: string, image: ImageRead) {
+  cache.delete(key);
+  cache.set(key, image);
+  for (const oldest of cache.keys()) {
+    if (cache.size <= CACHE_LIMIT) break;
+    cache.delete(oldest);
+  }
+}
+
 type View = { fit: boolean; zoom: number; background: "checker" | "dark" | "light" };
 
 /**
@@ -17,7 +36,9 @@ type View = { fit: boolean; zoom: number; background: "checker" | "dark" | "ligh
  */
 export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: string }) {
   const bridge = workspaceBridge();
-  const [image, setImage] = useState<ImageRead | null>(null);
+  const key = cacheKey(rootKey, path);
+  const [image, setImage] = useState<ImageRead | null>(() => cache.get(key) ?? null);
+  const [slow, setSlow] = useState(false);
   const [error, setError] = useState("");
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [view, setView] = useRemembered<View>(`image:${rootKey}:${path}`, { fit: true, zoom: 1, background: "checker" });
@@ -28,7 +49,9 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
   const load = useCallback(async () => {
     if (!bridge?.readImage) return;
     try {
-      setImage(await bridge.readImage(rootKey, path));
+      const read = await bridge.readImage(rootKey, path);
+      remember(cacheKey(rootKey, path), read);
+      setImage(read);
       setError("");
     } catch (cause) {
       setError(String((cause as Error)?.message || cause).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
@@ -36,6 +59,20 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
   }, [bridge, rootKey, path]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Картинку открыли в уже живущей вкладке — показываем сразу ту, что лежит в кэше, и заново меряем размер.
+  useEffect(() => {
+    setImage(cache.get(key) ?? null);
+    setNatural(null);
+  }, [key]);
+
+  // Надпись «Открываю …» появляется, только если чтение затянулось: локальный файл читается быстрее,
+  // и при переборе картинок человек видит смену картинки, а не мигающий текст.
+  useEffect(() => {
+    if (image) { setSlow(false); return; }
+    const timer = window.setTimeout(() => setSlow(true), 200);
+    return () => window.clearTimeout(timer);
+  }, [image, key]);
   useEffect(() => onWorkspaceChange((key, paths) => { if (key === rootKey && paths.includes(path)) void load(); }), [rootKey, path, load]);
 
   useEffect(() => {
@@ -120,7 +157,8 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
   if (!bridge) return <div className="wb-doc-missing">Локальные файлы открываются в приложении MBOX Desktop.</div>;
   if (!bridge.readImage) return <div className="wb-doc-missing">Эта версия MBOX Desktop не умеет показывать картинки — перезапусти или обнови приложение.</div>;
   if (error && !image) return <div className="wb-doc-missing">{/ENOENT|no such file/i.test(error) ? `Файла «${path}» больше нет.` : error}</div>;
-  if (!image) return <div className="wb-doc-missing">Открываю {path}…</div>;
+  // Пустая область вместо текста: пока картинка читается, раскладка вкладки не прыгает.
+  if (!image) return <div className={`wb-image-doc is-loading is-${view.background}`}>{slow && <div className="wb-doc-missing">Открываю {path}…</div>}</div>;
 
   const letter = gitLetter(gitStatusOf(rootKey, path));
   const shownWidth = natural ? Math.round(natural.width * zoom) : 0;

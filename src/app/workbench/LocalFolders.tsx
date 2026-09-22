@@ -247,7 +247,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
           >
             {entry.type === "dir" ? <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} /> : <span className="wb-chevron-space" />}
             {entry.type === "dir"
-              ? <img src={`${PROJECT_ICONS}/folder.png`} width={20} height={20} alt="" />
+              ? <img className="wb-folder-icon" src={`${PROJECT_ICONS}/folder.png`} width={20} height={20} alt="" />
               : <FileTypeIcon name={entry.name} />}
             <span className="wb-tree-label">{entry.name}</span>
             {letter && <span className={`wb-git-letter is-${letter}`}>{letter}</span>}

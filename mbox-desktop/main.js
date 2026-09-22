@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, clipboard } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const localUi = require("./localUi");
+const browser = require("./browser");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -204,6 +205,10 @@ function createWindow() {
       sandbox: false
     }
   });
+
+  // Встроенный браузер: его страницы живут поверх окна, поэтому он привязывается к окну сразу
+  // после создания и умирает вместе с ним.
+  browser.attach(mainWindow, (payload) => mainWindow.webContents.send("mbox-desktop:browser", payload));
 
   mainWindow.setMenuBarVisibility(false);
   if (saved.maximized) mainWindow.maximize();
@@ -620,6 +625,23 @@ ipcMain.handle("mbox-desktop:remove-app-autostart", async () => removeAppAutosta
 ipcMain.handle("mbox-desktop:open-repo", async () => shell.openPath(repoRoot));
 ipcMain.handle("mbox-desktop:open-path", async (_event, targetPath) => openAllowedPath(targetPath));
 ipcMain.handle("mbox-desktop:check-updates", async () => checkForUpdates(true));
+
+// Встроенный браузер. Страница интерфейса называет вкладку своим ключом и присылает прямоугольник,
+// куда положить сайт; адрес, заголовок и кнопки «назад/вперёд» возвращаются обратно событиями.
+ipcMain.handle("mbox-desktop:browser-open", async (_event, key, url) => browser.open(String(key), String(url || "")));
+ipcMain.handle("mbox-desktop:browser-bounds", async (_event, key, bounds) => {
+  browser.setBounds(String(key), {
+    x: Number(bounds?.x) || 0,
+    y: Number(bounds?.y) || 0,
+    width: Number(bounds?.width) || 0,
+    height: Number(bounds?.height) || 0,
+  });
+  return { ok: true };
+});
+ipcMain.handle("mbox-desktop:browser-show", async (_event, key) => { browser.show(key ? String(key) : null); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-hide", async (_event, key) => { browser.hide(String(key)); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-close", async (_event, key) => { browser.close(String(key)); return { ok: true }; });
+ipcMain.handle("mbox-desktop:browser-act", async (_event, key, command, payload) => browser.act(String(key), String(command), payload));
 ipcMain.handle("mbox-desktop:install-update", async () => {
   autoUpdater.quitAndInstall(false, true);
   return { ok: true };

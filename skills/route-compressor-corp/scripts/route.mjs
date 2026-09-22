@@ -14,6 +14,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { SKILL_DIR, READY_DIR, WORK_DIR, ANNOUNCEMENT, loadTour, buildDraft, renderDraft } from "./convert-corp.mjs";
+import { publishTour } from "./publish.mjs";
 
 const args = process.argv.slice(2);
 const flags = new Set(args.filter((arg) => arg.startsWith("--")));
@@ -473,10 +474,17 @@ for (const id of ids) {
     continue;
   }
   const htmlPath = path.join(READY_DIR, `tour-${id}.html`);
-  fs.writeFileSync(htmlPath, page(tourSection(id, parsed, draft), `${parsed.route} — тур ${id}`));
+  const html = page(tourSection(id, parsed, draft), `${parsed.route} — тур ${id}`);
+  fs.writeFileSync(htmlPath, html);
   fs.writeFileSync(statePath, `${JSON.stringify({ text: hash(body), history: hash(history) }, null, 2)}\n`);
   pages.push(htmlPath);
   console.log(`Тур ${id}: ${parsed.route} — дней ${parsed.blocks.filter((block) => DAY_HEADING.test(block.title)).length}, правила соблюдены → ${htmlPath}`);
+
+  // Документ живёт в MBOX, а не только в папке на диске: тур уходит артефактом в «Маршруты», оттуда
+  // же берётся Word-версия. Нет связи с MBOX — остаётся HTML, об этом говорится вслух.
+  const published = await publishTour({ id, route: parsed.route, html, readyDir: READY_DIR });
+  if (published.skipped) console.log(`  Артефакт MBOX и Word не сохранены: ${published.skipped}`);
+  else console.log(`  MBOX: ${published.updated ? "обновлён" : "создан"} артефакт «Маршруты» #${published.artifactId}, Word → ${published.docxPath}`);
   if (lengthNotes.length) {
     console.log(`  Длиннее ориентира — сократи второстепенное, если есть; отличительные детали (конфессия, век, материал, имя) не вырезай:`);
     for (const note of lengthNotes) console.log(`    - ${note}`);

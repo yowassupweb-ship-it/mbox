@@ -439,7 +439,7 @@
 
   .git-link { width: 100%; flex-wrap: wrap; }
 
-  .philosophy-text p { font-size: var(--text-sm); }
+  .philosophy-text { font-size: var(--text-sm); }
 
   /* Карта. Панель инструментов не влезает в строку — пусть прокручивается, а не рвёт вёрстку. */
   .map-tools {

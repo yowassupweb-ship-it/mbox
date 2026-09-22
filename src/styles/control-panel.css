@@ -857,8 +857,9 @@
 
 /* Философия */
 
-.philosophy-text { display: grid; gap: var(--space-3); max-width: 68ch; }
-.philosophy-text p { margin: 0; font-size: var(--text-md); line-height: var(--leading-normal); }
+/* Философия выводится markdown-ом (MarkdownText): интервалы задаёт сам документ распорками
+   .is-gap внутри .wb-memory-body, поэтому своей сетки с gap здесь быть не должно — отступы двоились. */
+.philosophy-text { max-width: 68ch; font-size: var(--text-md); line-height: var(--leading-normal); }
 
 .principle-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; max-width: 68ch; }
 

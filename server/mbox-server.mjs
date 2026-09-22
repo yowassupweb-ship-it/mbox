@@ -19,6 +19,7 @@ import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
+import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -907,6 +908,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/decisions"
     || pathname === "/api/mbox/todos"
     || pathname === "/api/mbox/agent/inbox"
+    || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
     || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
 
@@ -1730,6 +1732,23 @@ async function handleApiWithContext(req, res, url) {
       [q, scope.all, scope.projectIds],
     );
     return sendJson(res, 200, { artifacts: result.rows });
+  }
+
+  // Любой текстовый документ MBOX скачивается в Word одной ссылкой: артефакт → .docx. Кнопка
+  // «Скачать в Word» в просмотрщике файлов и навыки (route-compressor-corp сохраняет tour-<ID>.docx)
+  // ходят сюда, чтобы конвертер был один на всех.
+  const artifactDocxMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)\/docx$/);
+  if (artifactDocxMatch && req.method === "GET") {
+    const row = (await query("SELECT name, content, project_id::text FROM artifacts WHERE id = $1", [artifactDocxMatch[1]])).rows[0];
+    if (!row) return sendJson(res, 404, { error: "not_found" });
+    if (!hasProjectAccess(scope, row.project_id)) return sendForbidden(res);
+    const file = documentToDocx({ content: row.content || "", name: row.name });
+    res.writeHead(200, {
+      "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "content-length": file.length,
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(docxFileName(row.name))}`,
+    });
+    return res.end(file);
   }
 
   const artifactMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)$/);

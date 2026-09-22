@@ -61,6 +61,21 @@ const desktopApi = {
     ipcRenderer.on("mbox-desktop:session", listener);
     return () => ipcRenderer.removeListener("mbox-desktop:session", listener);
   },
+  // Встроенный браузер: страница управляет вкладкой по её ключу и получает обратно только адрес,
+  // заголовок и состояние кнопок. Содержимое чужого сайта интерфейсу MBOX недоступно.
+  browser: {
+    open: (key, url) => ipcRenderer.invoke("mbox-desktop:browser-open", key, url),
+    setBounds: (key, bounds) => ipcRenderer.invoke("mbox-desktop:browser-bounds", key, bounds),
+    show: (key) => ipcRenderer.invoke("mbox-desktop:browser-show", key),
+    hide: (key) => ipcRenderer.invoke("mbox-desktop:browser-hide", key),
+    close: (key) => ipcRenderer.invoke("mbox-desktop:browser-close", key),
+    act: (key, command, payload) => ipcRenderer.invoke("mbox-desktop:browser-act", key, command, payload),
+    onEvent: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("mbox-desktop:browser", listener);
+      return () => ipcRenderer.removeListener("mbox-desktop:browser", listener);
+    }
+  },
   // Локальные рабочие папки: ключ папки + путь внутри неё, абсолютные пути страница не передаёт.
   workspace: {
     info: () => ipcRenderer.invoke("mbox-desktop:ws-info"),
