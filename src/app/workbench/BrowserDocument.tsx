@@ -101,6 +101,20 @@ function pointerPoint(x: number, y: number, menu: { width: number; height: numbe
   };
 }
 
+function bookmarkLabel(item: BrowserBookmark) {
+  const title = String(item.title || "").trim();
+  if (!title || /^https?:\/\//i.test(title)) return "";
+  try {
+    const parsed = new URL(item.url);
+    const compactUrl = `${parsed.hostname}${parsed.pathname}${parsed.search}`.replace(/\/$/, "");
+    const compactTitle = title.replace(/^www\./i, "").replace(/\/$/, "");
+    if (compactTitle === parsed.href.replace(/\/$/, "") || compactTitle === compactUrl.replace(/^www\./i, "")) return "";
+  } catch {
+    // If the URL is malformed, keep a non-empty human title rather than hiding too much.
+  }
+  return title;
+}
+
 export function Favicon({ url, tabKey, size = 14 }: { url?: string; tabKey?: string; size?: number }) {
   const [src, setSrc] = useState(() => cachedBrowserFavicon(tabKey, url || ""));
   useEffect(() => {
@@ -412,12 +426,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
       </div>
       <div className="wb-browser-bookmarks" aria-label="Панель закладок">
         <Bookmark size={14} aria-hidden="true" />
-        {bar.map((item) => (
+        {bar.map((item) => {
+          const label = bookmarkLabel(item);
+          return (
           <button
             type="button"
             key={item.url}
             className={dropUrl === item.url ? "is-drop-target" : undefined}
-            title={item.title ? `${item.title}
+            title={label ? `${label}
 ${item.url}` : item.url}
             draggable
             onDragStart={(event) => { setDragUrl(item.url); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/uri-list", item.url); }}
@@ -444,9 +460,10 @@ ${item.url}` : item.url}
           >
             <Favicon url={item.url} />
             {/* Без названия остаётся одна фавиконка — правило CSS :not(:has(span)) поджимает отступы. */}
-            {item.title && <span>{item.title}</span>}
+            {label && <span>{label}</span>}
           </button>
-        ))}
+          );
+        })}
         {!bar.length && !folders.length && !hasOther && <span>Добавьте страницу звёздочкой или импортируйте закладки Chrome</span>}
         {folders.map((name) => (
           <button
@@ -492,11 +509,13 @@ ${item.url}` : item.url}
 
       {folderOpen && (
         <div className="wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} aria-label={`Закладки: ${folderOpen.name}`}>
-          {folderItems.map((item) => (
+          {folderItems.map((item) => {
+            const label = bookmarkLabel(item);
+            return (
             <button
               type="button"
               key={`${item.source}:${item.url}`}
-              title={item.title ? `${item.title}
+              title={label ? `${label}
 ${item.url}` : item.url}
               onClick={() => { setFolderOpen(null); void bridge.act(tabKey, "navigate", item.url); }}
               onContextMenu={(event) => {
@@ -506,9 +525,10 @@ ${item.url}` : item.url}
               }}
             >
               <Favicon url={item.url} />
-              {item.title && <span>{item.title}</span>}
+              {label && <span>{label}</span>}
             </button>
-          ))}
+            );
+          })}
           {!folderItems.length && <button type="button" disabled><span>Папка пуста</span></button>}
         </div>
       )}
