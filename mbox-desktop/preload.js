@@ -79,6 +79,7 @@ const desktopApi = {
     removeBookmark: (url) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-remove", url),
     moveBookmark: (url, beforeUrl) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-move", url, beforeUrl),
     openBookmarkFolder: (key, name, x, y) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-folder-popup", key, name, x, y),
+    openBookmarkMenu: (key, bookmark, x, y) => ipcRenderer.invoke("mbox-desktop:browser-bookmark-popup", key, bookmark, x, y),
     chromeProfiles: () => ipcRenderer.invoke("mbox-desktop:browser-chrome-profiles"),
     importBookmarks: (profile) => ipcRenderer.invoke("mbox-desktop:browser-import-bookmarks", profile),
     importPasswords: () => ipcRenderer.invoke("mbox-desktop:browser-import-passwords"),

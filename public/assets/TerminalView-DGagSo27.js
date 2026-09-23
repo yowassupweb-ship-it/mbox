@@ -1,4 +1,4 @@
-import{r as et,i as Yr,h as Xr,j as jr,k as Gr}from"./index-D5neS1b_.js";/**
+import{r as et,i as Yr,h as Xr,j as jr,k as Gr}from"./index-vzWAz4wf.js";/**
  * Copyright (c) 2014-2024 The xterm.js authors. All rights reserved.
  * @license MIT
  *

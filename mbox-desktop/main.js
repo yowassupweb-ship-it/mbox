@@ -668,6 +668,101 @@ ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => {
   }
   return chromeImport.getBookmarks();
 });
+async function setBrowserBookmark(bookmark) {
+  const local = chromeImport.setBookmark(bookmark || {});
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.addBookmark(bookmark || {})); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+}
+async function removeBrowserBookmark(url) {
+  const local = chromeImport.removeBookmark(String(url || ""));
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.removeBookmark(String(url || ""))); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+}
+function bookmarkMenuLabel(item) {
+  const title = String(item?.title || "").trim();
+  if (title && !/^https?:\/\//i.test(title)) return title;
+  try { return new URL(String(item?.url || "")).hostname || String(item?.url || ""); }
+  catch { return String(item?.url || ""); }
+}
+function promptBookmarkTitle(currentTitle) {
+  return new Promise((resolve) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return resolve(null);
+    const promptWindow = new BrowserWindow({
+      width: 420,
+      height: 170,
+      parent: mainWindow,
+      modal: true,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      show: false,
+      title: "Переименовать закладку",
+      webPreferences: {
+        contextIsolation: false,
+        nodeIntegration: true,
+      },
+    });
+    const cleanTitle = String(currentTitle || "");
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; padding: 18px; font: 13px system-ui, -apple-system, Segoe UI, sans-serif; color: #1f2328; background: #fff; }
+    label { display: block; font-weight: 600; margin-bottom: 8px; }
+    input { box-sizing: border-box; width: 100%; height: 34px; padding: 6px 9px; border: 1px solid #c8ccd0; border-radius: 6px; font: inherit; }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    button { height: 30px; padding: 0 12px; border: 1px solid #c8ccd0; border-radius: 6px; background: #f6f8fa; font: inherit; }
+    button.primary { border-color: #0969da; background: #0969da; color: #fff; }
+  </style>
+</head>
+<body>
+  <form>
+    <label for="title">Название закладки</label>
+    <input id="title" value="${cleanTitle.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}" spellcheck="false">
+    <div class="actions">
+      <button type="button" id="cancel">Отмена</button>
+      <button type="submit" class="primary">Готово</button>
+    </div>
+  </form>
+  <script>
+    const { ipcRenderer } = require("electron");
+    const input = document.getElementById("title");
+    document.querySelector("form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      ipcRenderer.send("bookmark-title-result", input.value.trim());
+    });
+    document.getElementById("cancel").addEventListener("click", () => ipcRenderer.send("bookmark-title-result", null));
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") ipcRenderer.send("bookmark-title-result", null);
+    });
+    input.focus();
+    input.select();
+  </script>
+</body>
+</html>`;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener("bookmark-title-result", onResult);
+      if (!promptWindow.isDestroyed()) promptWindow.close();
+      resolve(value);
+    };
+    const onResult = (event, value) => {
+      if (event.sender !== promptWindow.webContents) return;
+      finish(value);
+    };
+    ipcMain.on("bookmark-title-result", onResult);
+    promptWindow.once("closed", () => finish(null));
+    promptWindow.once("ready-to-show", () => promptWindow.show());
+    promptWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => finish(null));
+  });
+}
 ipcMain.handle("mbox-desktop:browser-bookmark-folder-popup", async (event, key, name, x, y) => {
   assertBrowserHost(event);
   const folderName = String(name || "");
@@ -698,6 +793,46 @@ ipcMain.handle("mbox-desktop:browser-bookmark-folder-popup", async (event, key, 
   });
   return { ok: true };
 });
+ipcMain.handle("mbox-desktop:browser-bookmark-popup", async (event, key, bookmark, x, y) => {
+  assertBrowserHost(event);
+  const item = {
+    title: String(bookmark?.title || ""),
+    url: String(bookmark?.url || ""),
+    folder: bookmark?.folder ? String(bookmark.folder) : undefined,
+    source: bookmark?.source ? String(bookmark.source) : undefined,
+    imported: Boolean(bookmark?.imported),
+  };
+  if (!item.url) return { ok: false, error: "Пустой адрес закладки" };
+  const template = [
+    {
+      label: "Открыть",
+      click: () => browser.act(String(key), "navigate", item.url),
+    },
+    {
+      label: "Открыть в новой вкладке",
+      click: () => mainWindow?.webContents.send("mbox-desktop:browser", { type: "open", url: item.url }),
+    },
+    { type: "separator" },
+    {
+      label: "Переименовать",
+      click: async () => {
+        const nextTitle = await promptBookmarkTitle(item.title || bookmarkMenuLabel(item));
+        if (!nextTitle || nextTitle === item.title) return;
+        await setBrowserBookmark({ ...item, title: nextTitle });
+      },
+    },
+    {
+      label: "Удалить",
+      click: () => { void removeBrowserBookmark(item.url); },
+    },
+  ];
+  Menu.buildFromTemplate(template).popup({
+    window: mainWindow,
+    x: Math.max(0, Math.round(Number(x) || 0)),
+    y: Math.max(0, Math.round(Number(y) || 0)),
+  });
+  return { ok: true };
+});
 ipcMain.handle("mbox-desktop:browser-history", async (event, search, limit) => {
   assertBrowserHost(event);
   if (!serverState.isOn()) return [];
@@ -717,11 +852,7 @@ function publishBookmarks(list) {
 ipcMain.handle("mbox-desktop:browser-bookmark-add", async (event, bookmark) => {
   assertBrowserHost(event);
   // Локальную копию ведём всегда: она же список на случай потери связи с MBOX.
-  const local = chromeImport.setBookmark(bookmark || {});
-  if (serverState.isOn()) {
-    try { return publishBookmarks(await serverState.addBookmark(bookmark || {})); } catch { /* ниже отдадим локальные */ }
-  }
-  return publishBookmarks(local);
+  return setBrowserBookmark(bookmark || {});
 });
 ipcMain.handle("mbox-desktop:browser-bookmark-move", async (event, url, beforeUrl) => {
   assertBrowserHost(event);
@@ -731,11 +862,7 @@ ipcMain.handle("mbox-desktop:browser-bookmark-move", async (event, url, beforeUr
 });
 ipcMain.handle("mbox-desktop:browser-bookmark-remove", async (event, url) => {
   assertBrowserHost(event);
-  const local = chromeImport.removeBookmark(String(url || ""));
-  if (serverState.isOn()) {
-    try { return publishBookmarks(await serverState.removeBookmark(String(url || ""))); } catch { /* ниже отдадим локальные */ }
-  }
-  return publishBookmarks(local);
+  return removeBrowserBookmark(String(url || ""));
 });
 ipcMain.handle("mbox-desktop:browser-chrome-profiles", async (event) => { assertBrowserHost(event); return chromeImport.chromeProfiles(); });
 ipcMain.handle("mbox-desktop:browser-import-bookmarks", async (event, profile) => {
