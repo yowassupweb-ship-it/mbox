@@ -24,12 +24,27 @@ function chromeProfileDir(profile = "Default") {
   return path.join(chromeUserDataDir(), profile);
 }
 
+/**
+ * Где Chrome держит закладки профиля.
+ *
+ * Раньше искали единственный файл `Bookmarks` — так было, пока закладки жили только локально.
+ * Chrome с включённой синхронизацией аккаунта кладёт их в `AccountBookmarks`, и у такого профиля
+ * файла `Bookmarks` может не быть вовсе: профиль считался «без закладок» и пропадал из списка,
+ * а человек видел «Профили не найдены» при установленном Chrome с сотней закладок.
+ * Структура у файлов одинаковая (roots: bookmark_bar / other / synced), поэтому читаем оба.
+ */
+function bookmarkFiles(profileDir) {
+  return ["Bookmarks", "AccountBookmarks"]
+    .map((name) => path.join(profileDir, name))
+    .filter((file) => fs.existsSync(file));
+}
+
 function chromeProfiles() {
   const root = chromeUserDataDir();
   if (!fs.existsSync(root)) return [];
   return fs.readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^(Default|Profile \d+)$/.test(entry.name))
-    .filter((entry) => fs.existsSync(path.join(root, entry.name, "Bookmarks")))
+    .filter((entry) => bookmarkFiles(path.join(root, entry.name)).length > 0)
     .map((entry) => entry.name);
 }
 
@@ -46,11 +61,28 @@ function collectBookmarks(node, trail, out, source, isRoot = false) {
 }
 
 function importBookmarks(profile = "Default") {
-  const file = path.join(chromeProfileDir(profile), "Bookmarks");
-  if (!fs.existsSync(file)) return { ok: false, error: "У Chrome нет файла закладок для этого профиля" };
-  const roots = JSON.parse(fs.readFileSync(file, "utf8")).roots || {};
+  const files = bookmarkFiles(chromeProfileDir(profile));
+  if (!files.length) return { ok: false, error: "У Chrome нет файла закладок для этого профиля" };
   const out = [];
-  for (const key of ["bookmark_bar", "other", "synced"]) collectBookmarks(roots[key], [], out, key, true);
+  // Локальные и аккаунтные закладки могут лежать рядом и частично совпадать — берём оба файла
+  // и отсеиваем повторы по адресу, иначе одна и та же страница попала бы в список дважды.
+  const seen = new Set();
+  for (const file of files) {
+    let roots;
+    try {
+      roots = JSON.parse(fs.readFileSync(file, "utf8")).roots || {};
+    } catch {
+      continue; // один битый файл не должен ронять импорт из второго
+    }
+    const found = [];
+    for (const key of ["bookmark_bar", "other", "synced"]) collectBookmarks(roots[key], [], found, key, true);
+    for (const item of found) {
+      if (seen.has(item.url)) continue;
+      seen.add(item.url);
+      out.push(item);
+    }
+  }
+  if (!out.length) return { ok: false, error: "В закладках Chrome этого профиля ничего нет" };
   return { ok: true, items: out };
 }
 

@@ -1,8 +1,8 @@
-version: 0.1.29
+version: 0.1.30
 files:
-  - url: mbox-desktop-setup-0.1.29.exe
-    sha512: zxhzVWBcvuVdIP6BcXM0/N5xyVO+PpuuDH/+GVjGlhfsCDKDlTxBlp8N1T6Ejg+bMTApHQzYa2Uefasc9OWGIw==
-    size: 87640937
-path: mbox-desktop-setup-0.1.29.exe
-sha512: zxhzVWBcvuVdIP6BcXM0/N5xyVO+PpuuDH/+GVjGlhfsCDKDlTxBlp8N1T6Ejg+bMTApHQzYa2Uefasc9OWGIw==
-releaseDate: '2026-09-22T23:15:15.280Z'
+  - url: mbox-desktop-setup-0.1.30.exe
+    sha512: 4VPWT4TtY87/NkvdfA0ZVjOp/4vbrLucgWXeL29ywxFSUgLcXU/ByKiyZP+ysSYAaYCpDtefDyrqXlGCd6KMDg==
+    size: 87641514
+path: mbox-desktop-setup-0.1.30.exe
+sha512: 4VPWT4TtY87/NkvdfA0ZVjOp/4vbrLucgWXeL29ywxFSUgLcXU/ByKiyZP+ysSYAaYCpDtefDyrqXlGCd6KMDg==
+releaseDate: '2026-09-23T07:45:24.105Z'
