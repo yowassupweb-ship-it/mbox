@@ -33,6 +33,7 @@ type BrowserBridge = {
   capture?: (key: string) => Promise<string>;
   favicon?: (url: string) => Promise<string>;
   moveBookmark?: (url: string, beforeUrl: string) => Promise<BrowserBookmark[]>;
+  openBookmarkFolder?: (key: string, name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
   act: (key: string, command: string, payload?: string) => Promise<BrowserState | null>;
   bookmarks: () => Promise<BrowserBookmark[]>;
   /** История переходов — общая, лежит на сервере MBOX (см. server/browser-state.mjs). */
@@ -349,6 +350,18 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
     setBookmarkMenu({ item, x: point.x, y: point.y, title: item.title || "" });
   }
 
+  function openBookmarkFolder(name: string, x: number, y: number) {
+    setToolsOpen(false);
+    setBookmarkMenu(null);
+    setFolderOpen(null);
+    if (bridge!.openBookmarkFolder) {
+      void bridge!.openBookmarkFolder(tabKey, name, x, y).catch((error) => setMessage(String(error)));
+      return;
+    }
+    const point = pointerPoint(x, y, { width: 360, height: Math.min(window.innerHeight * 0.6, 420) });
+    setFolderOpen({ name, x: point.x, y: point.y });
+  }
+
   async function toggleBookmark() {
     if (!/^https?:\/\//i.test(pageUrl)) return;
     try {
@@ -463,11 +476,9 @@ ${item.url}` : item.url}
             key={name}
             aria-expanded={folderOpen?.name === name}
             onClick={(event) => {
-              setToolsOpen(false);
-              setBookmarkMenu(null);
               const rect = event.currentTarget.getBoundingClientRect();
-              const point = floatingPoint(rect, { width: 360, height: Math.min(window.innerHeight * 0.6, 420) });
-              setFolderOpen(folderOpen?.name === name ? null : { name, x: point.x, y: point.y });
+              if (folderOpen?.name === name) setFolderOpen(null);
+              else openBookmarkFolder(name, rect.left, rect.bottom + 4);
             }}
           >
             <Folder size={13} />
@@ -480,11 +491,9 @@ ${item.url}` : item.url}
             className="wb-bookmark-folder"
             aria-expanded={folderOpen?.name === "Другие"}
             onClick={(event) => {
-              setToolsOpen(false);
-              setBookmarkMenu(null);
               const rect = event.currentTarget.getBoundingClientRect();
-              const point = floatingPoint(rect, { width: 360, height: Math.min(window.innerHeight * 0.6, 420) });
-              setFolderOpen(folderOpen?.name === "Другие" ? null : { name: "Другие", x: point.x, y: point.y });
+              if (folderOpen?.name === "Другие") setFolderOpen(null);
+              else openBookmarkFolder("Другие", rect.left, rect.bottom + 4);
             }}
           >
             <Folder size={13} />

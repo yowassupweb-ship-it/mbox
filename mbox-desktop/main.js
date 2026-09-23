@@ -668,6 +668,36 @@ ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => {
   }
   return chromeImport.getBookmarks();
 });
+ipcMain.handle("mbox-desktop:browser-bookmark-folder-popup", async (event, key, name, x, y) => {
+  assertBrowserHost(event);
+  const folderName = String(name || "");
+  const all = serverState.isOn()
+    ? await serverState.bookmarks().catch(() => chromeImport.getBookmarks())
+    : chromeImport.getBookmarks();
+  const items = all.filter((item) => {
+    if (folderName === "Другие") return item.source !== "bookmark_bar";
+    return item.source === "bookmark_bar" && String(item.folder || "").split(" / ")[0] === folderName;
+  });
+  const labelOf = (item) => {
+    const title = String(item.title || "").trim();
+    if (title && !/^https?:\/\//i.test(title)) return title;
+    try { return new URL(String(item.url || "")).hostname || String(item.url || ""); }
+    catch { return String(item.url || ""); }
+  };
+  const template = items.length
+    ? items.map((item) => ({
+      label: labelOf(item),
+      toolTip: String(item.url || ""),
+      click: () => browser.act(String(key), "navigate", String(item.url || "")),
+    }))
+    : [{ label: "Папка пуста", enabled: false }];
+  Menu.buildFromTemplate(template).popup({
+    window: mainWindow,
+    x: Math.max(0, Math.round(Number(x) || 0)),
+    y: Math.max(0, Math.round(Number(y) || 0)),
+  });
+  return { ok: true };
+});
 ipcMain.handle("mbox-desktop:browser-history", async (event, search, limit) => {
   assertBrowserHost(event);
   if (!serverState.isOn()) return [];
