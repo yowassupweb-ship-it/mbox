@@ -36,6 +36,9 @@ const accountKey = username.replace(/[^a-z0-9_-]+/gi, "_");
 const seenPath = path.join(os.tmpdir(), `codex-chat-watcher-seen-${accountKey}-${agentName}-${project}.json`);
 const lockPath = path.join(os.tmpdir(), `codex-chat-watcher-${accountKey}-${agentName}-${project}.lock`);
 const logPrefix = `[${agentName} chat]`;
+const MAX_STEP_INPUT = 700;
+const MAX_STEP_OUTPUT = 1500;
+const MAX_STEPS = 60;
 
 let cookie = "";
 let stopping = false;
@@ -252,7 +255,7 @@ async function mboxFetch(apiPath, init = {}) {
   return response.json();
 }
 
-async function ping(event, phase) {
+async function ping(event, phase, extra) {
   await mboxFetch("/api/mbox/agent/ping", {
     method: "POST",
     body: JSON.stringify({
@@ -262,8 +265,33 @@ async function ping(event, phase) {
       client: "codex-chat-watcher",
       scope: "project_chat_mentions,codex_exec",
       ...(phase === undefined ? {} : { phase }),
+      ...(extra || {}),
     }),
   });
+}
+
+function clip(value, limit) {
+  const text = String(value ?? "");
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+
+function stringifyInput(input) {
+  if (input === null || input === undefined) return "";
+  if (typeof input === "string") return input;
+  const keys = Object.keys(input);
+  if (keys.length === 1 && typeof input[keys[0]] === "string") return input[keys[0]];
+  try { return JSON.stringify(input, null, 1); } catch { return String(input); }
+}
+
+function addStep(state, step) {
+  if (state.steps.length >= MAX_STEPS) return null;
+  state.steps.push(step);
+  return step;
+}
+
+function streamStep(inboxId, index, step) {
+  if (!inboxId) return;
+  ping("heartbeat", undefined, { inbox_id: String(inboxId), step: { i: index, ...step } }).catch(() => {});
 }
 
 async function targetProject() {
@@ -323,6 +351,7 @@ async function handleMention(item) {
         source: "codex-chat-watcher",
         tools_used: outcome.toolsUsed,
         trace: outcome.trace,
+        steps: outcome.steps,
         work: outcome.stats,
         model: outcome.model,
         effort: outcome.effort,
@@ -471,18 +500,18 @@ async function runCodex(item) {
   if (wantedEffort) args.push("-c", `model_reasoning_effort="${wantedEffort}"`);
   args.push(prompt);
 
-  const outcome = await spawnCodex(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName } });
+  const outcome = await spawnCodex(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName } }, item.id);
   const answer = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8").trim() : "";
   fs.rmSync(outputFile, { force: true });
   return { ...outcome, text: answer || outcome.text, model: wantedModel || "codex default", effort: wantedEffort || "" };
 }
 
-function spawnCodex(command, args, options) {
+function spawnCodex(command, args, options, inboxId = "") {
   return new Promise((resolve, reject) => {
     // windowsHide: без него Windows открывала CLI агента в отдельном видимом окне консоли.
     const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const startedAt = Date.now();
-    const state = { text: "", toolsUsed: [], trace: [], stats: null, failure: "" };
+    const state = { text: "", toolsUsed: [], trace: [], steps: [], stats: null, failure: "" };
     let stderr = "";
     let stdout = "";
     let buffer = "";
@@ -503,7 +532,7 @@ function spawnCodex(command, args, options) {
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
-      for (const line of lines) handleCodexLine(line, state, startedAt, pushPhase);
+      for (const line of lines) handleCodexLine(line, state, startedAt, pushPhase, inboxId);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
@@ -511,7 +540,7 @@ function spawnCodex(command, args, options) {
     });
     child.on("error", reject);
     child.on("close", (code) => {
-      if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase);
+      if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase, inboxId);
       ping("heartbeat", "").catch(() => {});
       if (code === 0) {
         if (!state.stats) state.stats = { duration_ms: Date.now() - startedAt };
@@ -529,7 +558,7 @@ function spawnCodex(command, args, options) {
   });
 }
 
-function handleCodexLine(line, state, startedAt, pushPhase) {
+function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
   const trimmed = String(line || "").trim();
   if (!trimmed || !trimmed.startsWith("{")) return;
   let event;
@@ -558,12 +587,22 @@ function handleCodexLine(line, state, startedAt, pushPhase) {
       const hint = toolHint(item);
       if (!state.toolsUsed.includes(tool)) state.toolsUsed.push(tool);
       state.trace.push(`${state.trace.length + 1}. ${tool}${hint ? `\n   ${hint}` : ""}`);
+      const index = state.steps.length;
+      const step = {
+        kind: "tool",
+        name: tool,
+        hint,
+        input: clip(stringifyInput(codexToolInput(item)), MAX_STEP_INPUT),
+        output: clip(codexToolOutput(item), MAX_STEP_OUTPUT),
+        is_error: codexToolError(item),
+      };
+      if (addStep(state, step)) streamStep(inboxId, index, step);
       pushPhase("Работает");
     }
     return;
   }
   if ((event.type === "exec_command" || event.type === "apply_patch") && event.cmd) {
-    addCodexTool(state, event.type, event, pushPhase);
+    addCodexTool(state, event.type, event, pushPhase, inboxId);
     return;
   }
   if (event.type === "error" || event.type === "turn.failed") {
@@ -606,11 +645,30 @@ function toolHint(item) {
   return text.length > 48 ? `${text.slice(0, 48)}...` : text;
 }
 
-function addCodexTool(state, name, item, pushPhase) {
+function codexToolInput(item) {
+  return item.input || item.arguments || item.params || item.command || item.cmd || item.path || item.file_path || "";
+}
+
+function codexToolOutput(item) {
+  const raw = item.output || item.result || item.content || item.text || item.status || "";
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw.map((part) => (typeof part === "string" ? part : part?.text || "")).filter(Boolean).join("\n");
+  if (raw && typeof raw === "object") { try { return JSON.stringify(raw, null, 1); } catch { return ""; } }
+  return "";
+}
+
+function codexToolError(item) {
+  return Boolean(item.is_error || item.error || item.status === "failed" || item.exit_code);
+}
+
+function addCodexTool(state, name, item, pushPhase, inboxId = "") {
   const tool = name === "exec_command" ? "shell_command" : name;
   const hint = toolHint(item);
   if (!state.toolsUsed.includes(tool)) state.toolsUsed.push(tool);
   state.trace.push(`${state.trace.length + 1}. ${tool}${hint ? `\n   ${hint}` : ""}`);
+  const index = state.steps.length;
+  const step = { kind: "tool", name: tool, hint, input: clip(stringifyInput(codexToolInput(item)), MAX_STEP_INPUT) };
+  if (addStep(state, step)) streamStep(inboxId, index, step);
   pushPhase("Работает");
 }
 
