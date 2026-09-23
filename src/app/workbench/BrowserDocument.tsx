@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Folder, Globe, History, RotateCw, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Folder, Globe, History, Pencil, RotateCw, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
 
 /**
@@ -31,7 +31,8 @@ type BrowserBridge = {
   hide: (key: string) => Promise<unknown>;
   close: (key: string) => Promise<unknown>;
   capture?: (key: string) => Promise<string>;
-  favicon?: (key: string, url?: string) => Promise<string>;
+  favicon?: (url: string) => Promise<string>;
+  moveBookmark?: (url: string, beforeUrl: string) => Promise<BrowserBookmark[]>;
   act: (key: string, command: string, payload?: string) => Promise<BrowserState | null>;
   bookmarks: () => Promise<BrowserBookmark[]>;
   /** История переходов — общая, лежит на сервере MBOX (см. server/browser-state.mjs). */
@@ -95,7 +96,21 @@ export function Favicon({ url, tabKey, size = 14 }: { url?: string; tabKey?: str
       if (sameKey || sameOrigin) setSrc(detail.favicon);
     };
     window.addEventListener(BROWSER_FAVICON_EVENT, listener);
-    return () => window.removeEventListener(BROWSER_FAVICON_EVENT, listener);
+    // Закладка — это адрес, который может быть ни разу не открыт, и ждать события от вкладки
+    // бессмысленно: иконки бы не появились никогда. Спрашиваем её у приложения сами.
+    const bridge = browserBridge();
+    let alive = true;
+    if (url && !cachedBrowserFavicon(tabKey, url) && bridge?.favicon) {
+      void bridge.favicon(url).then((icon) => {
+        if (!alive || !icon) return;
+        publishFavicon({ url, favicon: icon });
+        setSrc(icon);
+      }).catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+      window.removeEventListener(BROWSER_FAVICON_EVENT, listener);
+    };
   }, [tabKey, url]);
   if (!src) return <Globe size={size} aria-hidden="true" />;
   return <img className="wb-browser-favicon" src={src} width={size} height={size} alt="" draggable={false} onError={() => setSrc("")} />;
@@ -146,7 +161,10 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
   const [editing, setEditing] = useState(false);
   const [bookmarks, setBookmarks] = useState<BrowserBookmark[]>([]);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [folderOpen, setFolderOpen] = useState<string | null>(null);
+  // Меню папки и меню закладки — плавающие: рисуются по координатам кнопки, а не раздвигают панель.
+  const [folderOpen, setFolderOpen] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [bookmarkMenu, setBookmarkMenu] = useState<{ item: BrowserBookmark; x: number; y: number; title: string } | null>(null);
+  const [dragUrl, setDragUrl] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<BrowserHistoryEntry[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -201,7 +219,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
 
   useEffect(() => {
     if (!bridge?.favicon) return;
-    void bridge.favicon(tabKey, state?.url || url).then((favicon) => {
+    void bridge.favicon(state?.url || url).then((favicon) => {
       if (favicon) publishFavicon({ key: tabKey, url: state?.url || url, favicon });
     }).catch(() => undefined);
   }, [bridge, tabKey, state?.url, url]);
@@ -232,7 +250,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
   // Пока страница спрятана под меню, на её месте держим последний снимок — иначе под попапом
   // зияет пустое место и кажется, что вкладка перезагрузилась.
   const [frozen, setFrozen] = useState("");
-  const hidden = Boolean(overlay || toolsOpen || folderOpen || historyOpen);
+  const hidden = Boolean(overlay || toolsOpen || folderOpen || historyOpen || bookmarkMenu);
 
   useEffect(() => {
     if (!bridge || !visible) return;
@@ -286,7 +304,21 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
   const bar = bookmarks.filter((item) => item.source === "bookmark_bar" && !item.folder);
   const folders = [...new Set(bookmarks.filter((item) => item.source === "bookmark_bar" && item.folder).map((item) => item.folder!.split(" / ")[0]))];
   const hasOther = bookmarks.some((item) => item.source !== "bookmark_bar");
-  const folderItems = bookmarks.filter((item) => folderOpen === "Другие" ? item.source !== "bookmark_bar" : item.source === "bookmark_bar" && item.folder?.split(" / ")[0] === folderOpen);
+  const folderItems = bookmarks.filter((item) => folderOpen?.name === "Другие" ? item.source !== "bookmark_bar" : item.source === "bookmark_bar" && item.folder?.split(" / ")[0] === folderOpen?.name);
+
+  /** Переименование идёт тем же addBookmark: адрес тот же, заголовок новый. */
+  async function renameBookmark(item: BrowserBookmark, title: string) {
+    const next = title.trim();
+    if (!next || next === item.title) return;
+    try { setBookmarks(await bridge!.addBookmark({ title: next, url: item.url })); }
+    catch (error) { setMessage(String(error)); }
+  }
+
+  async function dropBookmark(url: string, beforeUrl: string) {
+    if (!url || url === beforeUrl || !bridge!.moveBookmark) return;
+    try { setBookmarks(await bridge!.moveBookmark(url, beforeUrl)); }
+    catch (error) { setMessage(String(error)); }
+  }
 
   async function toggleBookmark() {
     if (!/^https?:\/\//i.test(pageUrl)) return;
@@ -357,33 +389,124 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
       <div className="wb-browser-bookmarks" aria-label="Панель закладок">
         <Bookmark size={14} aria-hidden="true" />
         {bar.map((item) => (
-          <button type="button" key={item.url} title={item.url} onClick={() => void bridge.act(tabKey, "navigate", item.url)}>
+          <button
+            type="button"
+            key={item.url}
+            title={item.title ? `${item.title}
+${item.url}` : item.url}
+            draggable
+            onDragStart={() => setDragUrl(item.url)}
+            onDragOver={(event) => { if (dragUrl) event.preventDefault(); }}
+            onDrop={(event) => { event.preventDefault(); void dropBookmark(dragUrl, item.url); setDragUrl(""); }}
+            onDragEnd={() => setDragUrl("")}
+            onClick={() => void bridge.act(tabKey, "navigate", item.url)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setFolderOpen(null);
+              setBookmarkMenu({ item, x: event.clientX, y: event.clientY, title: item.title || "" });
+            }}
+          >
             <Favicon url={item.url} />
-            <span>{item.title}</span>
+            {/* Без названия остаётся одна фавиконка — правило CSS :not(:has(span)) поджимает отступы. */}
+            {item.title && <span>{item.title}</span>}
           </button>
         ))}
         {!bar.length && !folders.length && !hasOther && <span>Добавьте страницу звёздочкой или импортируйте закладки Chrome</span>}
         {folders.map((name) => (
-          <button type="button" key={name} aria-expanded={folderOpen === name} onClick={() => { setToolsOpen(false); setFolderOpen(folderOpen === name ? null : name); }}>
+          <button
+            type="button"
+            className="wb-bookmark-folder"
+            key={name}
+            aria-expanded={folderOpen?.name === name}
+            onClick={(event) => {
+              setToolsOpen(false);
+              const rect = event.currentTarget.getBoundingClientRect();
+              setFolderOpen(folderOpen?.name === name ? null : { name, x: rect.left, y: rect.bottom + 4 });
+            }}
+          >
             <Folder size={13} />
             <span>{name}</span>
           </button>
         ))}
         {hasOther && (
-          <button type="button" aria-expanded={folderOpen === "Другие"} onClick={() => { setToolsOpen(false); setFolderOpen(folderOpen === "Другие" ? null : "Другие"); }}>
+          <button
+            type="button"
+            className="wb-bookmark-folder"
+            aria-expanded={folderOpen?.name === "Другие"}
+            onClick={(event) => {
+              setToolsOpen(false);
+              const rect = event.currentTarget.getBoundingClientRect();
+              setFolderOpen(folderOpen?.name === "Другие" ? null : { name: "Другие", x: rect.left, y: rect.bottom + 4 });
+            }}
+          >
             <Folder size={13} />
             <span>Другие</span>
           </button>
         )}
       </div>
-      {folderOpen && <div className="wb-browser-folder-menu" aria-label={`Закладки: ${folderOpen}`}>
-        {folderItems.map((item) => (
-          <button type="button" key={`${item.source}:${item.url}`} title={item.url} onClick={() => { setFolderOpen(null); void bridge.act(tabKey, "navigate", item.url); }}>
-            <Favicon url={item.url} />
-            <span>{item.title}</span>
+
+      {/* Плавающие меню: подложка ловит клик мимо и закрывает их, как было в оригинале. */}
+      {(folderOpen || bookmarkMenu) && (
+        <div className="wb-bookmark-scrim" onClick={() => { setFolderOpen(null); setBookmarkMenu(null); }} onContextMenu={(event) => { event.preventDefault(); setFolderOpen(null); setBookmarkMenu(null); }} />
+      )}
+
+      {folderOpen && (
+        <div className="wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} aria-label={`Закладки: ${folderOpen.name}`}>
+          {folderItems.map((item) => (
+            <button
+              type="button"
+              key={`${item.source}:${item.url}`}
+              title={item.title ? `${item.title}
+${item.url}` : item.url}
+              onClick={() => { setFolderOpen(null); void bridge.act(tabKey, "navigate", item.url); }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setFolderOpen(null);
+                setBookmarkMenu({ item, x: event.clientX, y: event.clientY, title: item.title || "" });
+              }}
+            >
+              <Favicon url={item.url} />
+              {item.title && <span>{item.title}</span>}
+            </button>
+          ))}
+          {!folderItems.length && <button type="button" disabled><span>Папка пуста</span></button>}
+        </div>
+      )}
+
+      {bookmarkMenu && (
+        <div className="wb-bookmark-menu" style={{ left: bookmarkMenu.x, top: bookmarkMenu.y }} role="menu" aria-label="Закладка">
+          <input
+            value={bookmarkMenu.title}
+            onChange={(event) => setBookmarkMenu({ ...bookmarkMenu, title: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { void renameBookmark(bookmarkMenu.item, bookmarkMenu.title); setBookmarkMenu(null); }
+              if (event.key === "Escape") setBookmarkMenu(null);
+            }}
+            placeholder="Название"
+            aria-label="Название закладки"
+            autoFocus
+          />
+          <button type="button" role="menuitem" onClick={() => { void renameBookmark(bookmarkMenu.item, bookmarkMenu.title); setBookmarkMenu(null); }}>
+            <Pencil size={13} /> Переименовать
           </button>
-        ))}
-      </div>}
+          <button type="button" role="menuitem" onClick={() => { const url = bookmarkMenu.item.url; setBookmarkMenu(null); tabs.open(browserTabKey(url), true); }}>
+            <ExternalLink size={13} /> Открыть в новой вкладке
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="is-danger"
+            onClick={() => {
+              const url = bookmarkMenu.item.url;
+              setBookmarkMenu(null);
+              void bridge.removeBookmark(url).then(setBookmarks).catch((error) => setMessage(String(error)));
+            }}
+          >
+            <Trash2 size={13} /> Удалить
+          </button>
+        </div>
+      )}
+
       {historyOpen && (
         <div className="wb-browser-history" aria-label="История браузера">
           <div className="wb-browser-history-head">

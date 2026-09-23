@@ -212,68 +212,59 @@ function act(key, command, payload) {
   return stateOf(key);
 }
 
-function favicon(key, url) {
-  const tab = tabs.get(key);
-  if (tab?.favicon) return tab.favicon;
-  let origin = "";
-  try { origin = new URL(String(url || "")).origin; } catch {}
-  if (!origin) return "";
-  for (const current of tabs.values()) {
-    if (!current.favicon) continue;
-    try {
-      if (new URL(current.view.webContents.getURL()).origin === origin) return current.favicon;
-    } catch {}
-  }
-  return "";
-}
-
-async function fillPassword(key, username) {
-  const tab = tabs.get(key);
-  if (!tab) return { ok: false, error: "Вкладка закрыта" };
-  const contents = tab.view.webContents;
-  const pageUrl = contents.getURL();
-  const entries = chromeImport.credentialsFor(pageUrl);
-  const entry = entries.find((item) => item.username === username);
-  if (!entry) return { ok: false, error: "Для этого сайта пароль не найден" };
-  const script = `(() => {
-    if (location.origin !== ${JSON.stringify(new URL(pageUrl).origin)}) return false;
-    const password = document.querySelector('input[type="password"]');
-    if (!password) return false;
-    const username = document.querySelector('input[autocomplete="username"], input[type="email"], input[name*="user" i]');
-    const set = (element, value) => {
-      if (!element) return;
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-      setter.call(element, value);
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    set(username, ${JSON.stringify(entry.username)});
-    set(password, ${JSON.stringify(entry.password)});
-    return true;
-  })()`;
-  const filled = await contents.executeJavaScript(script, true);
-  return filled ? { ok: true } : { ok: false, error: "На странице нет поля пароля" };
-}
-
 /**
- * Подключает браузер к окну MBOX. Вызывается один раз при создании окна: виды живут внутри окна и
- * пересоздаются вместе с ним.
+ * Иконка сайта для произвольного адреса — нужна панели закладок и выпадающим папкам, где вкладки
+ * может не быть вовсе. Раньше искали только среди открытых вкладок, поэтому у закладок иконок не
+ * было никогда: сайт, который ни разу не открывали, взять их неоткуда.
+ *
+ * Порядок: уже известная иконка открытой вкладки того же сайта (бесплатно и точно), иначе
+ * /favicon.ico самого сайта через тот же раздел сессии, что и сам браузер. Запрос идёт к сайту
+ * напрямую, без посредников вроде сервиса иконок Google — у MBOX нет причин рассказывать третьей
+ * стороне, какие сайты лежат в закладках.
+ *
+ * Результат кешируется по origin, включая отрицательный: иначе панель закладок долбила бы десятки
+ * сайтов на каждую перерисовку.
  */
-function attach(mainWindow, sendToUi) {
-  window = mainWindow;
-  emit = (payload) => {
-    if (mainWindow && !mainWindow.isDestroyed()) sendToUi(payload);
-  };
+const faviconCache = new Map();
+const MAX_FAVICON_BYTES = 256 * 1024;
 
-  const browserSession = session.fromPartition(PARTITION);
-  // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
-  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  browserSession.setPermissionCheckHandler(() => false);
-  browserSession.on("will-download", (event) => event.preventDefault());
+function originOf(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return /^https?:$/.test(parsed.protocol) ? parsed.origin : "";
+  } catch {
+    return "";
+  }
+}
 
-  // Масштаб интерфейса меняется — прямоугольник в пикселях окна становится другим.
-  mainWindow.webContents.on("zoom-changed", () => { for (const tab of tabs.values()) applyBounds(tab); });
-  mainWindow.on("closed", () => { tabs.clear(); window = null; });
+async function favicon(url) {
+  const origin = originOf(url);
+  if (!origin) return "";
+  if (faviconCache.has(origin)) return faviconCache.get(origin);
+
+  for (const tab of tabs.values()) {
+    if (!tab.favicon) continue;
+    if (originOf(tab.view.webContents.getURL()) === origin) {
+      faviconCache.set(origin, tab.favicon);
+      return tab.favicon;
+    }
+  }
+
+  let result = "";
+  try {
+    const response = await session.fromPartition(PARTITION).fetch(`${origin}/favicon.ico`);
+    const type = response.headers.get("content-type") || "";
+    if (response.ok && /^image\//i.test(type)) {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length && buffer.length <= MAX_FAVICON_BYTES) {
+        result = `data:${type.split(";")[0]};base64,${buffer.toString("base64")}`;
+      }
+    }
+  } catch {
+    // сайт недоступен или не отдаёт иконку — запомним пустой результат, чтобы не ходить повторно
+  }
+  faviconCache.set(origin, result);
+  return result;
 }
 
 module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, state: stateOf, PARTITION };

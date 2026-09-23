@@ -195,6 +195,22 @@ function setBookmark({ title, url }) {
   return items;
 }
 
+/**
+ * Перетащили закладку на место другой — меняем порядок. Порядок хранения и есть порядок показа
+ * в панели, отдельного поля для него нет: список короткий, массив — честное представление.
+ * beforeUrl пустой — закладка уходит в конец.
+ */
+function moveBookmark(url, beforeUrl) {
+  const items = getBookmarks();
+  const from = items.findIndex((item) => item.url === url);
+  if (from < 0) return items;
+  const [moved] = items.splice(from, 1);
+  const to = beforeUrl ? items.findIndex((item) => item.url === beforeUrl) : -1;
+  items.splice(to < 0 ? items.length : to, 0, moved);
+  writeJson("bookmarks.json", { savedAt: Date.now(), items });
+  return items;
+}
+
 function removeBookmark(url) {
   const items = getBookmarks().filter((item) => item.url !== url);
   writeJson("bookmarks.json", { savedAt: Date.now(), items });
@@ -235,5 +251,6 @@ module.exports = {
   getBookmarks,
   setBookmark,
   removeBookmark,
+  moveBookmark,
   credentialsFor,
 };

@@ -657,7 +657,7 @@ ipcMain.handle("mbox-desktop:browser-show", async (event, key) => { assertBrowse
 ipcMain.handle("mbox-desktop:browser-hide", async (event, key) => { assertBrowserHost(event); browser.hide(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrowserHost(event); browser.close(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-capture", async (event, key) => { assertBrowserHost(event); return browser.capture(String(key)); });
-ipcMain.handle("mbox-desktop:browser-favicon", async (event, key, url) => { assertBrowserHost(event); return browser.favicon(String(key), String(url || "")); });
+ipcMain.handle("mbox-desktop:browser-favicon", async (event, url) => { assertBrowserHost(event); return browser.favicon(String(url || "")); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
 // Закладки, история и куки живут на сервере (server/browser-state.mjs) — так они одни и те же на
 // всех компьютерах. Локальный файл остаётся запасным: без сети браузер обязан работать.
@@ -692,6 +692,12 @@ ipcMain.handle("mbox-desktop:browser-bookmark-add", async (event, bookmark) => {
     try { return publishBookmarks(await serverState.addBookmark(bookmark || {})); } catch { /* ниже отдадим локальные */ }
   }
   return publishBookmarks(local);
+});
+ipcMain.handle("mbox-desktop:browser-bookmark-move", async (event, url, beforeUrl) => {
+  assertBrowserHost(event);
+  // Порядок ведём в локальном файле: на сервере у закладок его нет, а панель должна слушаться
+  // перетаскивания сразу. Серверный список остаётся источником состава, локальный — порядка.
+  return publishBookmarks(chromeImport.moveBookmark(String(url || ""), String(beforeUrl || "")));
 });
 ipcMain.handle("mbox-desktop:browser-bookmark-remove", async (event, url) => {
   assertBrowserHost(event);
