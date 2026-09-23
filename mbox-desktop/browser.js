@@ -46,6 +46,7 @@ function stateOf(key) {
     canGoForward: contents.navigationHistory.canGoForward(),
     error: tab.error || "",
     zoom: Math.round((contents.getZoomFactor() || 1) * 100),
+    favicon: tab.favicon || "",
   };
 }
 
@@ -65,7 +66,7 @@ function create(key) {
       spellcheck: false,
     },
   });
-  const tab = { view, bounds: null, visible: false, error: "", pending: "" };
+  const tab = { view, bounds: null, visible: false, error: "", pending: "", favicon: "" };
   tabs.set(key, tab);
 
   const contents = view.webContents;
@@ -73,6 +74,10 @@ function create(key) {
     contents.on(event, () => publish(key));
   }
   contents.on("did-start-loading", () => { tab.error = ""; });
+  contents.on("page-favicon-updated", (_event, favicons) => {
+    tab.favicon = Array.isArray(favicons) ? favicons.find(Boolean) || "" : "";
+    publish(key);
+  });
   // История пишется на сервер — она общая для всех машин (см. server-state.js). Заголовок к моменту
   // did-navigate ещё не пришёл, поэтому отмечаем переход и на смене заголовка: запись одна, по адресу.
   contents.on("did-navigate", (_event, url) => serverState.recordVisit(url, contents.getTitle()));
@@ -207,6 +212,21 @@ function act(key, command, payload) {
   return stateOf(key);
 }
 
+function favicon(key, url) {
+  const tab = tabs.get(key);
+  if (tab?.favicon) return tab.favicon;
+  let origin = "";
+  try { origin = new URL(String(url || "")).origin; } catch {}
+  if (!origin) return "";
+  for (const current of tabs.values()) {
+    if (!current.favicon) continue;
+    try {
+      if (new URL(current.view.webContents.getURL()).origin === origin) return current.favicon;
+    } catch {}
+  }
+  return "";
+}
+
 async function fillPassword(key, username) {
   const tab = tabs.get(key);
   if (!tab) return { ok: false, error: "Вкладка закрыта" };
@@ -256,4 +276,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, fillPassword, state: stateOf, PARTITION };
+module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, state: stateOf, PARTITION };

@@ -657,6 +657,7 @@ ipcMain.handle("mbox-desktop:browser-show", async (event, key) => { assertBrowse
 ipcMain.handle("mbox-desktop:browser-hide", async (event, key) => { assertBrowserHost(event); browser.hide(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrowserHost(event); browser.close(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-capture", async (event, key) => { assertBrowserHost(event); return browser.capture(String(key)); });
+ipcMain.handle("mbox-desktop:browser-favicon", async (event, key, url) => { assertBrowserHost(event); return browser.favicon(String(key), String(url || "")); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
 // Закладки, история и куки живут на сервере (server/browser-state.mjs) — так они одни и те же на
 // всех компьютерах. Локальный файл остаётся запасным: без сети браузер обязан работать.

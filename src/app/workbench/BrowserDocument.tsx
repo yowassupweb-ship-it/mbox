@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Globe, History, RotateCw, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Folder, Globe, History, RotateCw, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
 
 /**
@@ -21,6 +21,7 @@ type BrowserState = {
   error: string;
   /** Масштаб страницы в процентах — меняется Ctrl+колесом над самой страницей. */
   zoom?: number;
+  favicon?: string;
 };
 
 type BrowserBridge = {
@@ -30,6 +31,7 @@ type BrowserBridge = {
   hide: (key: string) => Promise<unknown>;
   close: (key: string) => Promise<unknown>;
   capture?: (key: string) => Promise<string>;
+  favicon?: (key: string, url?: string) => Promise<string>;
   act: (key: string, command: string, payload?: string) => Promise<BrowserState | null>;
   bookmarks: () => Promise<BrowserBookmark[]>;
   /** История переходов — общая, лежит на сервере MBOX (см. server/browser-state.mjs). */
@@ -55,6 +57,49 @@ export function browserBridge(): BrowserBridge | undefined {
 /** Адрес вкладки: ключ вида «web:https://example.com». */
 export const browserTabKey = (url: string) => `web:${url}`;
 export const browserTabUrl = (key: string) => key.slice(4);
+
+export const BROWSER_FAVICON_EVENT = "mbox:browser-favicon";
+export type BrowserFaviconDetail = { key?: string; url?: string; favicon: string };
+
+const faviconByOrigin = new Map<string, string>();
+const faviconByKey = new Map<string, string>();
+
+export function browserFaviconOrigin(url: string): string {
+  try { return new URL(url).origin; } catch { return ""; }
+}
+
+function rememberFavicon(detail: BrowserFaviconDetail) {
+  if (!detail.favicon) return;
+  if (detail.key) faviconByKey.set(detail.key, detail.favicon);
+  const origin = detail.url ? browserFaviconOrigin(detail.url) : "";
+  if (origin) faviconByOrigin.set(origin, detail.favicon);
+}
+
+export function cachedBrowserFavicon(key?: string, url?: string): string {
+  return (key && faviconByKey.get(key)) || (url && faviconByOrigin.get(browserFaviconOrigin(url))) || "";
+}
+
+function publishFavicon(detail: BrowserFaviconDetail) {
+  rememberFavicon(detail);
+  window.dispatchEvent(new CustomEvent<BrowserFaviconDetail>(BROWSER_FAVICON_EVENT, { detail }));
+}
+
+export function Favicon({ url, tabKey, size = 14 }: { url?: string; tabKey?: string; size?: number }) {
+  const [src, setSrc] = useState(() => cachedBrowserFavicon(tabKey, url || ""));
+  useEffect(() => {
+    setSrc(cachedBrowserFavicon(tabKey, url || ""));
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<BrowserFaviconDetail>).detail;
+      const sameKey = tabKey && detail.key === tabKey;
+      const sameOrigin = url && detail.url && browserFaviconOrigin(detail.url) === browserFaviconOrigin(url);
+      if (sameKey || sameOrigin) setSrc(detail.favicon);
+    };
+    window.addEventListener(BROWSER_FAVICON_EVENT, listener);
+    return () => window.removeEventListener(BROWSER_FAVICON_EVENT, listener);
+  }, [tabKey, url]);
+  if (!src) return <Globe size={size} aria-hidden="true" />;
+  return <img className="wb-browser-favicon" src={src} width={size} height={size} alt="" draggable={false} onError={() => setSrc("")} />;
+}
 
 /**
  * Меню и диалоги MBOX рисуются поверх документа, а страница браузера лежит поверх всего окна и
@@ -128,7 +173,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
     if (!bridge) return;
     const timer = pendingClose.get(tabKey);
     if (timer) { window.clearTimeout(timer); pendingClose.delete(tabKey); }
-    void bridge.open(tabKey, url).then((next) => next && setState(next));
+    void bridge.open(tabKey, url).then((next) => {
+      if (!next) return;
+      setState(next);
+      if (next.favicon) publishFavicon({ key: tabKey, url: next.url || url, favicon: next.favicon });
+    });
     return () => {
       pendingClose.set(tabKey, window.setTimeout(() => { pendingClose.delete(tabKey); void bridge.close(tabKey); }, 400));
     };
@@ -143,11 +192,19 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
       if (payload.type === "bookmarks") { setBookmarks(payload.bookmarks || []); return; }
       if (payload.type !== "state" || payload.key !== tabKey) return;
       setState(payload as BrowserState);
+      if (payload.favicon) publishFavicon({ key: tabKey, url: payload.url || url, favicon: payload.favicon });
       // Заголовок вкладки MBOX — заголовок сайта: иначе во вкладке остаётся один домен.
       if (payload.title) onTitle(tabKey, payload.title);
       if (!editing && payload.url) setAddress(payload.url);
     });
-  }, [bridge, tabKey, editing, tabs, onTitle]);
+  }, [bridge, tabKey, url, editing, tabs, onTitle]);
+
+  useEffect(() => {
+    if (!bridge?.favicon) return;
+    void bridge.favicon(tabKey, state?.url || url).then((favicon) => {
+      if (favicon) publishFavicon({ key: tabKey, url: state?.url || url, favicon });
+    }).catch(() => undefined);
+  }, [bridge, tabKey, state?.url, url]);
 
   // Куда положить страницу. Позиция меняется не только от размера окна: двигаются боковая панель,
   // консоль, строка вкладок — поэтому прямоугольник проверяется по таймеру, а отправляется только
@@ -217,7 +274,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
   function submit(event: FormEvent) {
     event.preventDefault();
     setEditing(false);
-    void bridge!.act(tabKey, "navigate", address).then((next) => next && setState(next));
+    void bridge!.act(tabKey, "navigate", address).then((next) => {
+      if (!next) return;
+      setState(next);
+      if (next.favicon) publishFavicon({ key: tabKey, url: next.url || address, favicon: next.favicon });
+    });
   }
 
   const pageUrl = state?.url || url;
@@ -265,7 +326,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
           </button>
         </div>
         <form className="wb-browser-address" onSubmit={submit}>
-          <Globe size={13} />
+          <Favicon tabKey={tabKey} url={pageUrl} size={13} />
           <input
             value={address}
             spellCheck={false}
@@ -295,13 +356,33 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
       </div>
       <div className="wb-browser-bookmarks" aria-label="Панель закладок">
         <Bookmark size={14} aria-hidden="true" />
-        {bar.map((item) => <button type="button" key={item.url} title={item.url} onClick={() => void bridge.act(tabKey, "navigate", item.url)}>{item.title}</button>)}
+        {bar.map((item) => (
+          <button type="button" key={item.url} title={item.url} onClick={() => void bridge.act(tabKey, "navigate", item.url)}>
+            <Favicon url={item.url} />
+            <span>{item.title}</span>
+          </button>
+        ))}
         {!bar.length && !folders.length && !hasOther && <span>Добавьте страницу звёздочкой или импортируйте закладки Chrome</span>}
-        {folders.map((name) => <button type="button" key={name} aria-expanded={folderOpen === name} onClick={() => { setToolsOpen(false); setFolderOpen(folderOpen === name ? null : name); }}>{name}</button>)}
-        {hasOther && <button type="button" aria-expanded={folderOpen === "Другие"} onClick={() => { setToolsOpen(false); setFolderOpen(folderOpen === "Другие" ? null : "Другие"); }}>Другие</button>}
+        {folders.map((name) => (
+          <button type="button" key={name} aria-expanded={folderOpen === name} onClick={() => { setToolsOpen(false); setFolderOpen(folderOpen === name ? null : name); }}>
+            <Folder size={13} />
+            <span>{name}</span>
+          </button>
+        ))}
+        {hasOther && (
+          <button type="button" aria-expanded={folderOpen === "Другие"} onClick={() => { setToolsOpen(false); setFolderOpen(folderOpen === "Другие" ? null : "Другие"); }}>
+            <Folder size={13} />
+            <span>Другие</span>
+          </button>
+        )}
       </div>
       {folderOpen && <div className="wb-browser-folder-menu" aria-label={`Закладки: ${folderOpen}`}>
-        {folderItems.map((item) => <button type="button" key={`${item.source}:${item.url}`} title={item.url} onClick={() => { setFolderOpen(null); void bridge.act(tabKey, "navigate", item.url); }}>{item.title}</button>)}
+        {folderItems.map((item) => (
+          <button type="button" key={`${item.source}:${item.url}`} title={item.url} onClick={() => { setFolderOpen(null); void bridge.act(tabKey, "navigate", item.url); }}>
+            <Favicon url={item.url} />
+            <span>{item.title}</span>
+          </button>
+        ))}
       </div>}
       {historyOpen && (
         <div className="wb-browser-history" aria-label="История браузера">

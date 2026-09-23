@@ -21,7 +21,7 @@ import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
-import { BrowserDocument, browserBridge } from "./BrowserDocument";
+import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBridge, browserFaviconOrigin, browserTabUrl, cachedBrowserFavicon, type BrowserFaviconDetail } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
@@ -146,6 +146,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const toolsCatalog = useToolsCatalog();
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
+  const [browserFavicons, setBrowserFavicons] = useState<Record<string, string>>({});
+  const [browserOriginFavicons, setBrowserOriginFavicons] = useState<Record<string, string>>({});
   const [visited, setVisited] = useState<Set<string>>(() => new Set([tabs.active]));
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ key: string; x: number; y: number } | null>(null);
@@ -156,6 +158,18 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     // На телефоне панели перекрывают документ целиком: открыли вкладку — показываем её.
     if (window.matchMedia("(max-width: 720px)").matches) { setSidebarOpen(false); setPanelOpen(false); }
   }, [tabs.active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<BrowserFaviconDetail>).detail;
+      if (!detail?.favicon) return;
+      if (detail.key) setBrowserFavicons((current) => (current[detail.key!] === detail.favicon ? current : { ...current, [detail.key!]: detail.favicon }));
+      const origin = detail.url ? browserFaviconOrigin(detail.url) : "";
+      if (origin) setBrowserOriginFavicons((current) => (current[origin] === detail.favicon ? current : { ...current, [origin]: detail.favicon }));
+    };
+    window.addEventListener(BROWSER_FAVICON_EVENT, listener);
+    return () => window.removeEventListener(BROWSER_FAVICON_EVENT, listener);
+  }, []);
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 720px)").matches) { setSidebarOpen(false); setPanelOpen(false); }
@@ -559,6 +573,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               const meta = tabMeta(tab.key, data, catalogTitles);
               const active = tab.key === tabs.active;
               const isFileTab = tab.key.startsWith("file:") || tab.key.startsWith("local:");
+              const browserUrl = tab.key.startsWith("web:") ? browserTabUrl(tab.key) : "";
+              const browserFavicon = browserUrl
+                ? browserFavicons[tab.key] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(tab.key, browserUrl)
+                : "";
               return (
                 <div
                   key={tab.key}
@@ -576,7 +594,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   onDrop={(event) => { event.preventDefault(); if (draggedTab) tabs.move(draggedTab, tab.key); setDraggedTab(null); }}
                   onDragEnd={() => setDraggedTab(null)}
                 >
-                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={meta.icon} width={18} height={18} alt="" />}
+                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                   <span className="wb-tab-title">{meta.title}</span>
                   <button type="button" className="wb-tab-close" onClick={(event) => { event.stopPropagation(); closeTab(tab.key); }} aria-label={`Закрыть ${meta.title}`}>
                     <X size={13} />
@@ -616,9 +634,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                 {(() => {
                   const meta = tabMeta(splitKey, data, catalogTitles);
                   const isFileTab = splitKey.startsWith("file:") || splitKey.startsWith("local:");
+                  const browserUrl = splitKey.startsWith("web:") ? browserTabUrl(splitKey) : "";
+                  const browserFavicon = browserUrl
+                    ? browserFavicons[splitKey] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(splitKey, browserUrl)
+                    : "";
                   return (
                     <div className="wb-tab is-active" role="tab" aria-selected title={meta.hint}>
-                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={meta.icon} width={18} height={18} alt="" />}
+                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                       <span className="wb-tab-title">{meta.title}</span>
                       <button type="button" className="wb-tab-close" onClick={() => setSplitKey(null)} aria-label="Закрыть вторую область">
                         <X size={13} />

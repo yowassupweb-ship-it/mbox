@@ -70,6 +70,7 @@ const desktopApi = {
     hide: (key) => ipcRenderer.invoke("mbox-desktop:browser-hide", key),
     close: (key) => ipcRenderer.invoke("mbox-desktop:browser-close", key),
     capture: (key) => ipcRenderer.invoke("mbox-desktop:browser-capture", key),
+    favicon: (key, url) => ipcRenderer.invoke("mbox-desktop:browser-favicon", key, url),
     act: (key, command, payload) => ipcRenderer.invoke("mbox-desktop:browser-act", key, command, payload),
     bookmarks: () => ipcRenderer.invoke("mbox-desktop:browser-bookmarks"),
     history: (search, limit) => ipcRenderer.invoke("mbox-desktop:browser-history", search, limit),
