@@ -85,6 +85,11 @@ function publishFavicon(detail: BrowserFaviconDetail) {
   window.dispatchEvent(new CustomEvent<BrowserFaviconDetail>(BROWSER_FAVICON_EVENT, { detail }));
 }
 
+/** Compatibility shim: global popups no longer hide the browser page. */
+export function markOverlay(_open: boolean) {
+  // Browser-specific overlays handle their own visibility inside BrowserDocument.
+}
+
 function floatingPoint(rect: DOMRect, menu: { width: number; height: number }, offset = 4) {
   const padding = 8;
   return {
@@ -144,21 +149,6 @@ export function Favicon({ url, tabKey, size = 14 }: { url?: string; tabKey?: str
   }, [tabKey, url]);
   if (!src) return <Globe size={size} aria-hidden="true" />;
   return <img className="wb-browser-favicon" src={src} width={size} height={size} alt="" draggable={false} onError={() => setSrc("")} />;
-}
-
-/**
- * Меню и диалоги MBOX рисуются поверх документа, а страница браузера лежит поверх всего окна и
- * закрыла бы их собой. Пока открыто меню, страница прячется: событие шлют WbMenu и askText.
- */
-export const OVERLAY_EVENT = "mbox:overlay";
-/**
- * Оверлеев может быть несколько сразу (меню поверх диалога, попап шапки поверх меню), поэтому
- * считаем их, а не храним один флаг: иначе закрытие верхнего вернуло бы страницу поверх нижнего.
- */
-let overlayCount = 0;
-export function markOverlay(open: boolean) {
-  overlayCount = Math.max(0, overlayCount + (open ? 1 : -1));
-  window.dispatchEvent(new CustomEvent(OVERLAY_EVENT, { detail: overlayCount > 0 }));
 }
 
 /**
@@ -270,26 +260,27 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
     void bridge.setBounds(tabKey, bounds);
   }, [bridge, tabKey]);
 
-  // Меню или диалог MBOX открылись — страница сайта уходит, иначе она перекрыла бы их собой.
-  const [overlay, setOverlay] = useState(false);
-  useEffect(() => {
-    const listener = (event: Event) => setOverlay(Boolean((event as CustomEvent<boolean>).detail));
-    window.addEventListener(OVERLAY_EVENT, listener);
-    return () => window.removeEventListener(OVERLAY_EVENT, listener);
-  }, []);
-
   // Пока страница спрятана под меню, на её месте держим последний снимок — иначе под попапом
   // зияет пустое место и кажется, что вкладка перезагрузилась.
   const [frozen, setFrozen] = useState("");
-  const hidden = Boolean(overlay || toolsOpen || folderOpen || historyOpen || bookmarkMenu);
+  const lastFrozen = useRef("");
+  const hidden = Boolean(folderOpen || bookmarkMenu);
 
   useEffect(() => {
     if (!bridge || !visible) return;
     if (hidden) {
       let cancelled = false;
-      void (bridge.capture?.(tabKey) ?? Promise.resolve("")).then((shot) => { if (!cancelled && shot) setFrozen(shot); })
-        .finally(() => { if (!cancelled) void bridge.hide(tabKey); });
-      return () => { cancelled = true; };
+      if (lastFrozen.current) setFrozen(lastFrozen.current);
+      const capture = bridge.capture?.(tabKey) ?? Promise.resolve("");
+      void capture.then((shot) => {
+        if (cancelled || !shot) return;
+        lastFrozen.current = shot;
+        setFrozen(shot);
+      }).catch(() => undefined);
+      const timer = window.setTimeout(() => {
+        if (!cancelled) void bridge.hide(tabKey);
+      }, 80);
+      return () => { cancelled = true; window.clearTimeout(timer); };
     }
     setFrozen("");
     report();

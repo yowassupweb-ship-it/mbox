@@ -21,7 +21,7 @@ import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
-import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBridge, browserFaviconOrigin, browserTabUrl, cachedBrowserFavicon, type BrowserFaviconDetail } from "./BrowserDocument";
+import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBridge, browserFaviconOrigin, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
@@ -594,7 +594,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   onDrop={(event) => { event.preventDefault(); if (draggedTab) tabs.move(draggedTab, tab.key); setDraggedTab(null); }}
                   onDragEnd={() => setDraggedTab(null)}
                 >
-                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
+                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={tab.key} url={browserUrl} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                   <span className="wb-tab-title">{meta.title}</span>
                   <button type="button" className="wb-tab-close" onClick={(event) => { event.stopPropagation(); closeTab(tab.key); }} aria-label={`Закрыть ${meta.title}`}>
                     <X size={13} />
@@ -640,7 +640,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                     : "";
                   return (
                     <div className="wb-tab is-active" role="tab" aria-selected title={meta.hint}>
-                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
+                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={splitKey} url={browserUrl} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                       <span className="wb-tab-title">{meta.title}</span>
                       <button type="button" className="wb-tab-close" onClick={() => setSplitKey(null)} aria-label="Закрыть вторую область">
                         <X size={13} />

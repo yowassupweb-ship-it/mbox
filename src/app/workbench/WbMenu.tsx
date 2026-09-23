@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { markOverlay } from "./BrowserDocument";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -13,13 +12,6 @@ import { createPortal } from "react-dom";
 export function WbMenu({ x, y, onClose, children }: { x: number; y: number; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x, top: y });
-
-  // Пока меню открыто, страница встроенного браузера прячется: она рисуется поверх окна и иначе
-  // закрыла бы меню собой.
-  useEffect(() => {
-    markOverlay(true);
-    return () => markOverlay(false);
-  }, []);
 
   useLayoutEffect(() => {
     const el = ref.current;
