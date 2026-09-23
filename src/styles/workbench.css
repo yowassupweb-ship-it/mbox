@@ -1491,16 +1491,18 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: 12.5px; }
 .wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; }
 
-.wb-browser-bookmarks { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 2px 12px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
-.wb-browser-bookmarks > svg { flex: none; }
+.wb-browser-bookmarks { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
+.wb-browser-bookmarks > svg { flex: none; margin-right: 2px; opacity: .72; }
 .wb-browser-bookmarks > span { font-size: 11px; }
-.wb-browser-bookmarks button { flex: none; max-width: 180px; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); padding: 5px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+.wb-browser-bookmarks button { position: relative; flex: none; max-width: 180px; min-height: 25px; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); padding: 4px 8px; font: inherit; font-size: 11px; cursor: pointer; }
 .wb-browser-bookmarks button:not(:has(span)) { justify-content: center; padding-inline: 6px; }
 .wb-browser-bookmarks button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-browser-bookmarks button:hover, .wb-browser-bookmarks button:focus-visible { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-bookmarks button:hover, .wb-browser-bookmarks button:focus-visible { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-bookmarks button.is-drop-target { color: var(--text-main); background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+.wb-browser-bookmarks button.is-drop-target::before { content: ""; position: absolute; left: 2px; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent-color); }
 .wb-browser-bookmarks button:focus-visible, .wb-browser-tools button:focus-visible, .wb-browser-tools select:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 /* Меню папки — плавающий список по координатам кнопки, а не полоса, раздвигающая страницу. */
-.wb-browser-folder-menu { position: fixed; z-index: 41; display: grid; gap: 2px; min-width: 220px; max-width: 360px; max-height: 60vh; overflow-y: auto; padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
+.wb-browser-folder-menu { position: fixed; z-index: 41; display: grid; gap: 2px; min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: min(420px, calc(100vh - 16px)); overflow-y: auto; padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
 .wb-browser-folder-menu button { width: 100%; max-width: none; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); padding: 6px 9px; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .wb-browser-folder-menu button:not(:has(span)) { justify-content: center; padding-inline: 7px; }
 .wb-browser-folder-menu button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1534,7 +1536,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 /* Контекстное меню закладки: переименовать, открыть, удалить. */
 .wb-bookmark-scrim { position: fixed; inset: 0; z-index: 40; }
-.wb-bookmark-menu { position: fixed; z-index: 41; display: grid; gap: 2px; min-width: 220px; padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
+.wb-bookmark-menu { position: fixed; z-index: 41; display: grid; gap: 2px; width: min(240px, calc(100vw - 16px)); padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
 .wb-bookmark-menu input { margin-bottom: 4px; padding: 6px 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: 12px; }
 .wb-bookmark-menu input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
 .wb-bookmark-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }

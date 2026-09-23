@@ -267,4 +267,53 @@ async function favicon(url) {
   return result;
 }
 
+async function fillPassword(key, username) {
+  const tab = tabs.get(key);
+  if (!tab) return { ok: false, error: "Вкладка закрыта" };
+  const contents = tab.view.webContents;
+  const pageUrl = contents.getURL();
+  const entries = chromeImport.credentialsFor(pageUrl);
+  const entry = entries.find((item) => item.username === username);
+  if (!entry) return { ok: false, error: "Для этого сайта пароль не найден" };
+  const script = `(() => {
+    if (location.origin !== ${JSON.stringify(new URL(pageUrl).origin)}) return false;
+    const password = document.querySelector('input[type="password"]');
+    if (!password) return false;
+    const username = document.querySelector('input[autocomplete="username"], input[type="email"], input[name*="user" i]');
+    const set = (element, value) => {
+      if (!element) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    set(username, ${JSON.stringify(entry.username)});
+    set(password, ${JSON.stringify(entry.password)});
+    return true;
+  })()`;
+  const filled = await contents.executeJavaScript(script, true);
+  return filled ? { ok: true } : { ok: false, error: "На странице нет поля пароля" };
+}
+
+/**
+ * Подключает браузер к окну MBOX. Вызывается один раз при создании окна: виды живут внутри окна и
+ * пересоздаются вместе с ним.
+ */
+function attach(mainWindow, sendToUi) {
+  window = mainWindow;
+  emit = (payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) sendToUi(payload);
+  };
+
+  const browserSession = session.fromPartition(PARTITION);
+  // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
+  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  browserSession.setPermissionCheckHandler(() => false);
+  browserSession.on("will-download", (event) => event.preventDefault());
+
+  // Масштаб интерфейса меняется — прямоугольник в пикселях окна становится другим.
+  mainWindow.webContents.on("zoom-changed", () => { for (const tab of tabs.values()) applyBounds(tab); });
+  mainWindow.on("closed", () => { tabs.clear(); window = null; });
+}
+
 module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, state: stateOf, PARTITION };

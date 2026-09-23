@@ -186,11 +186,20 @@ function getBookmarks() {
   return Array.isArray(data.items) ? data.items.filter((item) => /^https?:\/\//i.test(item.url || "")) : [];
 }
 
-function setBookmark({ title, url }) {
+function setBookmark({ title, url, folder, source, imported }) {
   const valid = new URL(String(url || ""));
   if (!["https:", "http:"].includes(valid.protocol)) throw new Error("Можно сохранить только веб-страницу");
-  const items = getBookmarks().filter((item) => item.url !== valid.href);
-  items.unshift({ title: String(title || valid.hostname).slice(0, 120), url: valid.href, folder: "", source: "bookmark_bar" });
+  const current = getBookmarks();
+  const existing = current.find((item) => item.url === valid.href) || {};
+  const items = current.filter((item) => item.url !== valid.href);
+  const next = {
+    title: String(title || valid.hostname).slice(0, 120),
+    url: valid.href,
+    folder: String(folder ?? existing.folder ?? ""),
+    source: String(source ?? existing.source ?? "bookmark_bar"),
+    imported: Boolean(imported ?? existing.imported),
+  };
+  items.unshift(next);
   writeJson("bookmarks.json", { savedAt: Date.now(), items });
   return items;
 }

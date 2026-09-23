@@ -48,7 +48,7 @@ type BrowserBridge = {
   onEvent: (handler: (payload: { type: string; url?: string; bookmarks?: BrowserBookmark[] } & Partial<BrowserState>) => void) => () => void;
 };
 
-type BrowserBookmark = { title: string; url: string; folder?: string; source?: string };
+type BrowserBookmark = { title: string; url: string; folder?: string; source?: string; imported?: boolean };
 type BrowserHistoryEntry = { url: string; title: string; visits: number; visited_at: string };
 
 export function browserBridge(): BrowserBridge | undefined {
@@ -83,6 +83,22 @@ export function cachedBrowserFavicon(key?: string, url?: string): string {
 function publishFavicon(detail: BrowserFaviconDetail) {
   rememberFavicon(detail);
   window.dispatchEvent(new CustomEvent<BrowserFaviconDetail>(BROWSER_FAVICON_EVENT, { detail }));
+}
+
+function floatingPoint(rect: DOMRect, menu: { width: number; height: number }, offset = 4) {
+  const padding = 8;
+  return {
+    x: Math.min(Math.max(padding, rect.left), Math.max(padding, window.innerWidth - menu.width - padding)),
+    y: Math.min(Math.max(padding, rect.bottom + offset), Math.max(padding, window.innerHeight - menu.height - padding)),
+  };
+}
+
+function pointerPoint(x: number, y: number, menu: { width: number; height: number }) {
+  const padding = 8;
+  return {
+    x: Math.min(Math.max(padding, x), Math.max(padding, window.innerWidth - menu.width - padding)),
+    y: Math.min(Math.max(padding, y), Math.max(padding, window.innerHeight - menu.height - padding)),
+  };
 }
 
 export function Favicon({ url, tabKey, size = 14 }: { url?: string; tabKey?: string; size?: number }) {
@@ -165,6 +181,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
   const [folderOpen, setFolderOpen] = useState<{ name: string; x: number; y: number } | null>(null);
   const [bookmarkMenu, setBookmarkMenu] = useState<{ item: BrowserBookmark; x: number; y: number; title: string } | null>(null);
   const [dragUrl, setDragUrl] = useState("");
+  const [dropUrl, setDropUrl] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<BrowserHistoryEntry[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -310,7 +327,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
   async function renameBookmark(item: BrowserBookmark, title: string) {
     const next = title.trim();
     if (!next || next === item.title) return;
-    try { setBookmarks(await bridge!.addBookmark({ title: next, url: item.url })); }
+    try { setBookmarks(await bridge!.addBookmark({ ...item, title: next })); }
     catch (error) { setMessage(String(error)); }
   }
 
@@ -318,6 +335,13 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
     if (!url || url === beforeUrl || !bridge!.moveBookmark) return;
     try { setBookmarks(await bridge!.moveBookmark(url, beforeUrl)); }
     catch (error) { setMessage(String(error)); }
+    finally { setDropUrl(""); }
+  }
+
+  function openBookmarkMenu(item: BrowserBookmark, x: number, y: number) {
+    const point = pointerPoint(x, y, { width: 240, height: 150 });
+    setFolderOpen(null);
+    setBookmarkMenu({ item, x: point.x, y: point.y, title: item.title || "" });
   }
 
   async function toggleBookmark() {
@@ -392,18 +416,30 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
           <button
             type="button"
             key={item.url}
+            className={dropUrl === item.url ? "is-drop-target" : undefined}
             title={item.title ? `${item.title}
 ${item.url}` : item.url}
             draggable
-            onDragStart={() => setDragUrl(item.url)}
-            onDragOver={(event) => { if (dragUrl) event.preventDefault(); }}
+            onDragStart={(event) => { setDragUrl(item.url); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/uri-list", item.url); }}
+            onDragOver={(event) => { if (dragUrl && dragUrl !== item.url) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropUrl(item.url); } }}
+            onDragLeave={() => { if (dropUrl === item.url) setDropUrl(""); }}
             onDrop={(event) => { event.preventDefault(); void dropBookmark(dragUrl, item.url); setDragUrl(""); }}
-            onDragEnd={() => setDragUrl("")}
+            onDragEnd={() => { setDragUrl(""); setDropUrl(""); }}
             onClick={() => void bridge.act(tabKey, "navigate", item.url)}
             onContextMenu={(event) => {
               event.preventDefault();
-              setFolderOpen(null);
-              setBookmarkMenu({ item, x: event.clientX, y: event.clientY, title: item.title || "" });
+              openBookmarkMenu(item, event.clientX, event.clientY);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Delete" || event.key === "Backspace") {
+                event.preventDefault();
+                void bridge.removeBookmark(item.url).then(setBookmarks).catch((error) => setMessage(String(error)));
+              }
+              if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                openBookmarkMenu(item, rect.left, rect.bottom);
+              }
             }}
           >
             <Favicon url={item.url} />
@@ -420,8 +456,10 @@ ${item.url}` : item.url}
             aria-expanded={folderOpen?.name === name}
             onClick={(event) => {
               setToolsOpen(false);
+              setBookmarkMenu(null);
               const rect = event.currentTarget.getBoundingClientRect();
-              setFolderOpen(folderOpen?.name === name ? null : { name, x: rect.left, y: rect.bottom + 4 });
+              const point = floatingPoint(rect, { width: 360, height: Math.min(window.innerHeight * 0.6, 420) });
+              setFolderOpen(folderOpen?.name === name ? null : { name, x: point.x, y: point.y });
             }}
           >
             <Folder size={13} />
@@ -435,8 +473,10 @@ ${item.url}` : item.url}
             aria-expanded={folderOpen?.name === "Другие"}
             onClick={(event) => {
               setToolsOpen(false);
+              setBookmarkMenu(null);
               const rect = event.currentTarget.getBoundingClientRect();
-              setFolderOpen(folderOpen?.name === "Другие" ? null : { name: "Другие", x: rect.left, y: rect.bottom + 4 });
+              const point = floatingPoint(rect, { width: 360, height: Math.min(window.innerHeight * 0.6, 420) });
+              setFolderOpen(folderOpen?.name === "Другие" ? null : { name: "Другие", x: point.x, y: point.y });
             }}
           >
             <Folder size={13} />
@@ -462,7 +502,7 @@ ${item.url}` : item.url}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setFolderOpen(null);
-                setBookmarkMenu({ item, x: event.clientX, y: event.clientY, title: item.title || "" });
+                openBookmarkMenu(item, event.clientX, event.clientY);
               }}
             >
               <Favicon url={item.url} />
