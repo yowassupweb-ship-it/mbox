@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
@@ -32,6 +32,7 @@
       "resources/**/*",
       "package.json",
       "localUi.js",
+      "server-state.js",
       "ui/**/*",
       "!node_modules/node-pty/prebuilds/darwin-*/**",
       "!node_modules/node-pty/prebuilds/win32-arm64/**",
