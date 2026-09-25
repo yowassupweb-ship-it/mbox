@@ -1457,8 +1457,16 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   overflow-wrap: anywhere;
   tab-size: 4;
 }
-.wb-code-wrap.is-document .wb-code-layer { color: var(--text-main); }
-.wb-code-wrap.is-document .wb-code-editor.is-layered { caret-color: var(--text-main); white-space: pre-wrap; }
+.wb-code-wrap.is-document .wb-code-layer { display: none; }
+.wb-code-wrap.is-document .wb-code-editor.is-layered {
+  color: var(--text-main);
+  caret-color: var(--text-main);
+  white-space: pre-wrap;
+}
+.wb-code-wrap.is-document .wb-code-editor.is-layered::selection {
+  background: rgba(41, 224, 214, .28);
+  color: var(--text-main);
+}
 .wb-code-wrap.is-document .tok-comment { color: var(--text-muted); }
 .wb-code-wrap.is-document .tok-string,
 .wb-code-wrap.is-document .tok-value { color: color-mix(in srgb, var(--state-ok) 62%, var(--text-main)); }
