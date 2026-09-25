@@ -85,7 +85,7 @@ process.on("exit", releaseSingleInstanceLock);
 await ping("session_start");
 // Список моделей для чата — кеш каталога самого Codex (~/.codex/models_cache.json, список OpenAI для аккаунта).
 publishModelCatalog({
-  agent: "ChatGPT",
+  agent: agentKind === "cloud_agent" ? agentName : "ChatGPT",
   collect: async () => codexCachedModels(process.env.CODEX_HOME || path.join(os.homedir(), ".codex")),
   post: (body) => mboxFetch("/api/mbox/agent/models", { method: "POST", body: JSON.stringify(body) }),
   log: (message) => console.log(`${logPrefix} ${message}`),

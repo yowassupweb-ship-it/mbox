@@ -187,7 +187,9 @@ export const EFFORT_LABELS = {
   max: ["Максимум", "предельная глубина — дорого"],
   ultra: ["Ультра", "самая долгая работа — только для больших задач"],
 };
-const CATALOG_AGENTS = { Claude: "claude-code", ChatGPT: "codex-cli" };
+// ClaudeCloud/CodexCloud — те же CLI на сервере (deploy/cloud-agents), версия у них может отличаться от локальной.
+const CATALOG_AGENTS = { Claude: "claude-code", ChatGPT: "codex-cli", ClaudeCloud: "claude-code", CodexCloud: "codex-cli" };
+const CLOUD_CATALOG_AGENTS = new Set(["ClaudeCloud", "CodexCloud"]);
 let catalogReady = null;
 
 function ensureModelCatalog() {
@@ -263,7 +265,7 @@ export async function jarvisModels() {
       for (const model of live.models) models.push({ ...model, provider: CATALOG_AGENTS[agent], agent, available: true });
       defaults[agent] = live.default_model || "";
       sources[agent] = { source: live.source || "cli", fetched_at: live.fetched_at || live.updated_at, live: true };
-    } else {
+    } else if (!CLOUD_CATALOG_AGENTS.has(agent)) {
       // Наблюдатель ещё ни разу не отчитался — запасной список, честно помеченный.
       for (const model of fallback[agent]) models.push({ ...model, agent, available: true, role: model.role ? `${model.role} · список не получен от CLI` : "список не получен от CLI" });
       defaults[agent] = fallbackDefault[agent];

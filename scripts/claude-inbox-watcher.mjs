@@ -165,7 +165,8 @@ process.on("exit", releaseSingleInstanceLock);
 await ping("session_start");
 // Список моделей и уровней effort для чата — из самого Claude Code, а не из списка в коде MBOX.
 publishModelCatalog({
-  agent: "Claude",
+  // Облачный агент — под своим именем: его CLI на сервере бывает другой версии, и он затирал каталог локального Claude.
+  agent: agentKind === "cloud_agent" ? agentName : "Claude",
   collect: () => claudeCliModels(claudeCommand),
   post: (body) => mboxFetch("/api/mbox/agent/models", { method: "POST", body: JSON.stringify(body) }),
   log: (message) => console.log(`${logPrefix} ${message}`),

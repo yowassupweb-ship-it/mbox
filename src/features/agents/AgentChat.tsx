@@ -1142,7 +1142,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const chatTarget = cloudChat ? cloudPeer : peer;
   // Модели у агентов разные: у Джарвиса это Gemini/Groq на сервере, у Claude — алиасы его CLI на
   // машине владельца. Показываем набор того, кому сейчас пишут; адресат не выбран — все подряд.
-  const addressee = catalogAgent(liveMention || chatTarget || defaultResponder);
+  const target = (liveMention || chatTarget || defaultResponder).toLowerCase();
+  const addressee = catalog.models.some((item) => (item.agent || "").toLowerCase() === target) ? target : catalogAgent(target);
   const shownModels = catalog.models.filter((item) => {
     const agent = (item.agent || "").toLowerCase();
     return agent === addressee || (addressee === "chatgpt" && agent === "codex") || (addressee === "codex" && agent === "chatgpt");

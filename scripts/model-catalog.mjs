@@ -44,14 +44,21 @@ export function claudeCliModels(command = "claude", { timeoutMs = 30000 } = {}) 
         if (!list.length) return finish(new Error("claude initialize: список моделей пуст"));
         // «default» — это «что CLI возьмёт сам»: отдельной строкой не показываем, а помечаем модель, на которую он указывает.
         const fallback = list.find((model) => model.value === "default");
-        // «Opus 5 · Best for everyday, complex tasks · ~2× usage» — первая часть и есть точное имя модели.
-        const models = list.filter((model) => model.value && model.value !== "default").map((model) => ({
-          id: model.value,
-          label: String(model.description || "").split(" · ")[0] || model.displayName || model.value,
-          description: String(model.description || "").split(" · ").slice(1).join(" · "),
-          efforts: model.supportsEffort ? model.supportedEffortLevels || [] : [],
-          default_effort: "",
-        }));
+        // Claude Code до 2.1.2xx: «Opus 5 · Best for everyday, complex tasks · ~2× usage» — первая часть и есть
+        // точное имя модели. Новые версии пишут в description только назначение («Most capable for ambitious work»),
+        // имя тогда — displayName. Имя узнаём по виду, иначе в списке вместо моделей были одни описания.
+        const models = list.filter((model) => model.value && model.value !== "default").map((model) => {
+          const parts = String(model.description || "").split(" · ").map((part) => part.trim()).filter(Boolean);
+          const named = parts.length && /^(claude|opus|sonnet|haiku|fable)\b/i.test(parts[0]);
+          const display = String(model.displayName || "").trim();
+          return {
+            id: model.value,
+            label: named ? parts[0] : display && !/^default\b/i.test(display) ? display : model.resolvedModel || model.value,
+            description: (named ? parts.slice(1) : parts).join(" · "),
+            efforts: model.supportsEffort ? model.supportedEffortLevels || [] : [],
+            default_effort: "",
+          };
+        });
         const defaultModel = models.find((model) => list.find((entry) => entry.value === model.id)?.resolvedModel === fallback?.resolvedModel)?.id || models[0]?.id;
         return finish(null, { models, default_model: defaultModel, source: `claude initialize · ${response.account?.subscriptionType || "account"}` });
       }
