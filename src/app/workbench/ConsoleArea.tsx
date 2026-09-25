@@ -119,7 +119,7 @@ export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, ta
               aria-selected={active}
               className={active ? "wb-chat-kind is-active" : "wb-chat-kind"}
               onClick={() => setPeer(item.peer)}
-              title={!item.peer ? "Общий чат: отвечает Джарвис, @ — чтобы позвать другого агента" : `${item.label}: ${state === "working" ? "работает" : state === "online" ? "на связи" : "не запущен"}`}
+              title={!item.peer ? "Общий чат: отвечает сервер MBOX, @ — чтобы позвать другого агента" : `${item.label}: ${state === "working" ? "работает" : state === "online" ? "на связи" : "не запущен"}`}
             >
               {item.peer ? <AgentAvatar name={item.peer} size={20} /> : <MessagesSquare size={18} />}
               <span className="wb-chat-kind-label">{item.label}</span>

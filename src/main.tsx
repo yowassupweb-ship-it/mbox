@@ -79,7 +79,7 @@ function App() {
   if (!me.user) return <LoginScreen onLogin={setMe} />;
   return <Workspace user={me.user} onLogout={() => setMe({ user: null })} theme={theme} onThemeChange={setTheme} />;
 }
-function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string; jarvis_enabled?: boolean }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
   // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
   const data = useMboxData("", onLogout);

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Columns2, Database, GitBranch, MessageSquare, PanelBottom, PanelLeft, PanelRight, Power, RotateCcw, TerminalSquare, Trash2, X } from "lucide-react";
-import { AgentAvatar } from "../../components/AgentAvatar";
+import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
 import type { ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
-import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf } from "../../lib/agents";
+import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf, CLOUD_AGENTS, isCloudAgent } from "../../lib/agents";
 import { formatBytes, formatSince, plural } from "../../lib/format";
 import { agentStatusLabels, todoStatusLabel } from "../../lib/labels";
 import { AbilitiesBoard } from "../../pages/Abilities";
@@ -15,6 +15,7 @@ import { ArtifactsBoard } from "../../pages/Artifacts";
 import { Overview } from "../../pages/Overview";
 import type { Project, Todo } from "../../types";
 import { SkillDocument, ToolDocument } from "./CatalogDocuments";
+import { SeoBoard } from "../../pages/Seo";
 import { ConsoleArea, ConsolePaneDocument, PANE_MIME, TERMINAL_TAB, type ChatDebug } from "./ConsoleArea";
 import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
@@ -80,7 +81,7 @@ type Props = {
   renderers: WorkbenchRenderers;
   realtime: { state: string; label: string };
   status: { state: string; label: string };
-  user: { username: string; role: string; jarvis_enabled?: boolean };
+  user: { username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean };
   onProjectContext: (project: Project, position: { x: number; y: number }) => void;
 };
 
@@ -359,7 +360,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const agentsOnline = useMemo(() => {
     const map: Record<string, boolean> = {};
     for (const agent of knownAgents) {
-      const label = agentFamily(agent.name)?.label;
+      // Облачный агент — по своему служебному имени: иначе ClaudeCloud зажигал бы точку локального Claude.
+      const label = isCloudAgent(agent.name) ? agent.name : agentFamily(agent.name)?.label;
       if (label && (effectiveStatus(agent) !== "offline" || isAgentWorking(agent, data.runs))) map[label] = true;
     }
     return map;
@@ -462,6 +464,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <CommitDocument rootKey={first} hash={rest} />;
       case "skill":
         return <SkillDocument skillId={first} tabs={tabs} />;
+      case "seo":
+        return <SeoBoard mode="dashboard" />;
       case "skillblocks":
         return <SkillPageDocument skill={first} file="library.html" tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id ?? defaultNoteProjectId ?? data.projects[0]?.id} />;
       case "skillpage":
@@ -533,7 +537,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     });
   }, [tabs.active, splitKey, data, catalogTitles, localWorkspace.roots]);
   const renderChat = (visible: boolean, paneId: string, debug?: ChatDebug) => (
-    <AgentChat embedded visible={visible} peer={chatPeer(paneId)} debug={debug} jarvisEnabled={user.role === "owner" || user.jarvis_enabled !== false} focus={chatFocus} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
+    <AgentChat embedded visible={visible} peer={chatPeer(paneId)} debug={debug} jarvisEnabled={user.role === "owner" || user.jarvis_enabled !== false} defaultResponder={user.role === "owner" && user.jarvis_autoreply === false ? CLOUD_AGENTS.claude : undefined} focus={chatFocus} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
   );
   const chat = (
     <ConsoleArea
@@ -892,7 +896,8 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
   const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
   const agentSession = (name: string) => desktop.sessions.find((session) => session.id === `agent:${name}` && session.status === "running");
   const isOutside = (name: string) => desktop.outsideAgents.some((row) => row.agent === name);
-  const canStart = (name: string) => ["Claude", "ChatGPT"].includes(agentFamily(name)?.label || "");
+  // Облачного агента запускает systemd на сервере, не это окно.
+  const canStart = (name: string) => !isCloudAgent(name) && ["Claude", "ChatGPT"].includes(agentFamily(name)?.label || "");
   const openChat = (name: string) => {
     const pane = consoleLayout.newChatId(agentFamily(name)?.label || name);
     tabs.open(`${TERMINAL_TAB}${pane}`, true);
@@ -978,7 +983,7 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                 >
                   <AgentAvatar name={agent.name} status={status} live={live} size={28} />
                   <div className="wb-agent-main">
-                    <strong>{agent.name}<small>{agentClientLabel(agent.client || agent.kind)}</small></strong>
+                    <strong><AgentName name={agent.name} /><small>{isCloudAgent(agent.name) ? "сервер MBOX" : agentClientLabel(agent.client || agent.kind)}</small></strong>
                     <span className={live ? "is-live" : status === "active" ? "is-ok" : undefined}>{stateText}</span>
                   </div>
                   <div className="wb-agent-actions">

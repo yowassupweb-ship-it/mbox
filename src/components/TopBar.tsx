@@ -1,6 +1,6 @@
 import { AlertTriangle, Check, Download, FolderOpen, LogOut, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
+import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS, AgentName } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
 import { markOverlay } from "../app/workbench/BrowserDocument";
 
@@ -392,7 +392,7 @@ export function TopBar({
                   {roster.filter((agent) => agent.status !== "offline").map((agent) => (
                     <li key={agent.id} className="tb-pop-row" title={agent.detail || agent.statusLabel}>
                       <AgentAvatar name={agent.name} status={agent.status} live={agent.live} size={20} />
-                      <span className="tb-pop-name">{agent.name}</span>
+                      <AgentName name={agent.name} className="tb-pop-name" />
                       <small className={agent.live ? "is-live" : agent.status === "active" ? "is-ok" : undefined}>{agent.live ? "в работе" : agent.statusLabel}</small>
                     </li>
                   ))}

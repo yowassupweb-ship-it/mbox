@@ -106,6 +106,8 @@ async function openLocalPath(path: string, tabs: TabsApi, showFolders: () => voi
 
 /** Цель страницы навыка из каталога (skill-file:…, skill-blocks:…) → событие, как если бы вкладку открыл агент. */
 export function skillPageEvent(target: string, title: string): OpenTabEvent | null {
+  const tab = target.match(/^tab:(.+)$/);
+  if (tab) return { kind: "tab", key: tab[1], title, note: "", actor: "", reply_to: "Claude" };
   const file = target.match(/^skill-file:([a-z0-9][a-z0-9-]*)\/(.+)$/);
   if (file) return { kind: "skill-file", skill: file[1], file: file[2], title, note: "", actor: "", reply_to: "Claude" };
   const blocks = target.match(/^skill-blocks:([a-z0-9][a-z0-9-]*)$/);

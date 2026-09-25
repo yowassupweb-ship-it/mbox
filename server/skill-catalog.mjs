@@ -40,6 +40,22 @@ export const SKILL_CATALOG = [
     ],
   },
   {
+    id: "seo-wizard",
+    name: "SEO Wizard",
+    owner: "Codex · Claude",
+    trigger: "seo_wizard",
+    summary: "Собирает SEO-пакеты по данным sitemap, Вебмастера, Метрики, Wordstat, Topvisor и локальных проверок; превращает только доказанные находки в задачи.",
+    input: "Настроенные источники SEO и сценарий проверки",
+    output: "Дашборд с источниками, кандидатами, решениями и задачами",
+    category: "SEO",
+    goal: "Держать постоянный SEO-контур VS-Travel без задач без цифр и без смешивания API-настроек с правилами мастера.",
+    steps: ["Проверить источники и правила мастера", "Собрать пакет", "Выбрать 3-5 доказанных задач"],
+    location: "Сервер MBOX: skills/seo-wizard · ставится в ~/.claude/skills и ~/.codex/skills",
+    pages: [
+      { title: "Дашборд", target: "tab:seo:wizard" },
+    ],
+  },
+  {
     id: "post-writing",
     name: "Пост для канала «Вокруг света»",
     owner: "Claude",

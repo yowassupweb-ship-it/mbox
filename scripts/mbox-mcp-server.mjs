@@ -210,6 +210,101 @@ server.registerTool(
 );
 
 server.registerTool(
+  "seo_read_package",
+  {
+    title: "Read SEO Wizard package",
+    description: "Read the latest SEO Wizard package for a scenario. Use from the seo-wizard skill before choosing weekly tasks.",
+    inputSchema: { scenario: z.string().default("monday"), package_id: z.string().default("") },
+  },
+  async ({ scenario, package_id }) => {
+    const params = new URLSearchParams();
+    params.set("scenario", scenario);
+    if (package_id) params.set("id", package_id);
+    const data = await mboxFetch(`/api/mbox/seo/package?${params.toString()}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.package, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "seo_read_history",
+  {
+    title: "Read SEO Wizard history",
+    description: "Read SEO decisions, session reports and change log before reviewing a SEO package.",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await mboxFetch("/api/mbox/seo/history");
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "seo_update_issue",
+  {
+    title: "Update SEO issue status",
+    description: "Mark an SEO Wizard issue as open, review, resolved, rejected or noise. Add a short note when rejecting/noise.",
+    inputSchema: {
+      issue_id: z.string(),
+      status: z.enum(["open", "review", "resolved", "rejected", "noise"]),
+      note: z.string().default(""),
+    },
+  },
+  async ({ issue_id, status, note }) => {
+    const data = await mboxFetch(`/api/mbox/seo/issues/${encodeURIComponent(issue_id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, note }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.issue, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "seo_create_task_from_issue",
+  {
+    title: "Create MBOX task from SEO issue",
+    description: "Create or update a normal MBOX todo from a numeric SEO Wizard issue. Use only for selected weekly tasks.",
+    inputSchema: {
+      issue_id: z.string(),
+      project: z.string().default("Вокруг света"),
+      priority: z.enum(["", "low", "normal", "high", "urgent"]).default(""),
+    },
+  },
+  async ({ issue_id, project, priority }) => {
+    const data = await mboxFetch(`/api/mbox/seo/issues/${encodeURIComponent(issue_id)}/task`, {
+      method: "POST",
+      body: JSON.stringify({ project, priority }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.todo, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "seo_record_session_report",
+  {
+    title: "Record SEO Wizard session report",
+    description: "Append the SEO session report to the durable MBOX note and optionally write decisions.",
+    inputSchema: {
+      scenario: z.string().default("monday"),
+      title: z.string().default(""),
+      content: z.string(),
+      decisions: z.array(z.object({
+        title: z.string().default(""),
+        decision: z.string().default(""),
+        rationale: z.string().default(""),
+        impact: z.string().default(""),
+      })).default([]),
+    },
+  },
+  async ({ scenario, title, content, decisions }) => {
+    const data = await mboxFetch("/api/mbox/seo/session-report", {
+      method: "POST",
+      body: JSON.stringify({ scenario, title, content, decisions }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.report, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "create_project_relation",
   {
     title: "Create MBOX project relation",

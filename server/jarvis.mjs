@@ -35,6 +35,10 @@ function workspaceMarkdownLink(workspace, relativePath) {
 // клиентом не является: подхватывая чужую переменную, он переименовывался в "Codex" и сливался
 // с респондером в одну строку agent_presence, а его ответы и ошибки подписывались чужим именем.
 export const JARVIS_NAME = process.env.MBOX_JARVIS_NAME || "Джарвис";
+// JARVIS_AUTOREPLY=off: неадресованные вопросы владельца забирает облачный Claude CLI на сервере
+// (scripts/claude-inbox-watcher.mjs под именем ClaudeCloud), а Джарвис отвечает только на прямое
+// обращение. Участникам (не владельцу) Джарвис отвечает как раньше — облачные агенты им не отвечают.
+export const JARVIS_AUTOREPLY = !["off", "0", "false", "no"].includes(String(process.env.JARVIS_AUTOREPLY || "on").trim().toLowerCase());
 
 /** См. vite.config.ts — подробный трейс шагов агентного цикла в stdout. */
 function jlog(inboxId, message) {

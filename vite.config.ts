@@ -19,10 +19,11 @@ import { TOOL_CATALOG } from "./server/tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
+import { ensureSeoWizardSchema, handleSeoWizardApi } from "./server/seo-wizard.mjs";
 import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import {
-  configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
+  configureJarvis, JARVIS_NAME, JARVIS_AUTOREPLY, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, jarvisModels, publishAgentModels, type TourSheetItem,
 } from "./server/jarvis.mjs";
 
@@ -937,6 +938,7 @@ function mboxDevApi() {
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
       ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
+      ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
 
       realtimeServer.on("connection", (socket) => {
@@ -1038,7 +1040,7 @@ function mboxDevApi() {
               [user.rows[0].id, token],
             );
             res.setHeader("set-cookie", `mbox_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`);
-            return sendJson(res, 200, { user: user.rows[0] });
+            return sendJson(res, 200, { user: { ...user.rows[0], jarvis_autoreply: JARVIS_AUTOREPLY } });
           }
 
           if (url.pathname === "/api/mbox/auth/logout" && req.method === "POST") {
@@ -1049,7 +1051,8 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/auth/me") {
-            return sendJson(res, 200, { user: await currentUser(req) });
+            const me = await currentUser(req);
+            return sendJson(res, 200, { user: me ? { ...me, jarvis_autoreply: JARVIS_AUTOREPLY } : me });
           }
 
           const sessionUser = await requireUser(req, res);
@@ -1089,6 +1092,8 @@ function mboxDevApi() {
           // Зеркало прод-ручек состояния встроенного браузера (см. server/browser-state.mjs).
           if (await handleBrowserStateApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: true, userId: sessionUser.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
           if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
+          // Зеркало прод-ручек SEO Wizard (server/seo-wizard.mjs), доступ — только владельцу, как scope.all в проде.
+          if (await handleSeoWizardApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: sessionUser.role === "owner" })) return;
 
           if (url.pathname === "/api/mbox/agent/structure") {
             return sendJson(res, 200, { structure: agentStructure });
@@ -2415,7 +2420,8 @@ function mboxDevApi() {
             const isQuestion = String(body.item_type || "") === "question";
             const isReplyToJarvis = String(body.item_type || "") === "answer" && senderName === "Человек" && addressedTo === JARVIS_NAME;
             const jarvisOn = sessionUser.role === "owner" || (sessionUser as { jarvis_enabled?: boolean }).jarvis_enabled !== false;
-            if (result.rows[0] && jarvisOn && ((isQuestion && (senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME)) || isReplyToJarvis)) {
+            const forJarvis = addressedTo ? addressedTo === JARVIS_NAME : JARVIS_AUTOREPLY || sessionUser.role !== "owner";
+            if (result.rows[0] && jarvisOn && ((isQuestion && (senderName === "Человек" || senderName === "Claude") && forJarvis) || isReplyToJarvis)) {
               // См. server/mbox-server.mjs — тот же лимит против зацикливания агентов.
               let allowChain = senderName === "Человек";
               if (!allowChain) {
@@ -2496,8 +2502,9 @@ function mboxDevApi() {
                WHERE id = $1 AND (item_type = 'question' OR (item_type = 'answer' AND agent_name = 'Человек' AND props->>'to' = $2))
                  AND (props->>'mbox_user_id' = $3 OR ($4::boolean AND NOT (props ? 'mbox_user_id')))
                  AND (status = 'open' OR (status = 'doing' AND updated_at < now() - interval '10 minutes'))
+                 AND ($5::boolean OR props->>'to' = $2 OR props->>'mbox_owner' = 'false')
                RETURNING id::text, project_id::text, title, body, props`,
-              [answerMatch[1], JARVIS_NAME, String(sessionUser.id), sessionUser.role === "owner"],
+              [answerMatch[1], JARVIS_NAME, String(sessionUser.id), sessionUser.role === "owner", JARVIS_AUTOREPLY],
             )).rows[0];
             if (!row) return sendJson(res, 409, { error: "not_answerable" });
             replyAsJarvis(row).catch((error: Error) => console.error(`Jarvis hand-off reply uncaught: ${error.message}`));

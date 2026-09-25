@@ -128,6 +128,19 @@
 .agent-avatar.offline::after { background: #6b7280; }
 .agent-avatar.working::after { background: #7cc6ff; }
 
+/* Имя облачного агента: «Claude» и облачко после имени (служебное ClaudeCloud не показываем). */
+.agent-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-cloud-mark {
+  flex: none;
+  color: var(--accent-color);
+}
+
 .agent-avatar.working {
   animation: avatar-pulse 1.9s ease-out infinite;
 }

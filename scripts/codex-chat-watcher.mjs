@@ -23,6 +23,7 @@ const username = config.MBOX_USERNAME || "Admin";
 const accessToken = String(config.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
 const agentName = config.MBOX_AGENT_NAME || "ChatGPT";
+const agentKind = config.MBOX_AGENT_KIND || "local_watcher";
 const project = config.MBOX_PROJECT || "MBOX";
 // Опрос — запасной путь: обычно наблюдателя будит вебсокет (inbox-wake.mjs). Но сообщения из dev-окна
 // (локальный vite) прод не рассылает, и там ответ начинается только по опросу — поэтому он частый.
@@ -324,7 +325,7 @@ async function ping(event, phase, extra) {
     body: JSON.stringify({
       agent: agentName,
       event,
-      kind: "local_watcher",
+      kind: agentKind,
       client: "codex-chat-watcher",
       scope: "project_chat_mentions,codex_exec",
       ...(phase === undefined ? {} : { phase }),

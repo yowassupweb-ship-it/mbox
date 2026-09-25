@@ -14,6 +14,7 @@ export type JarvisTool = { type: "function"; function: { name: string; descripti
 
 export function configureJarvis(deps: JarvisDeps): void;
 export const JARVIS_NAME: string;
+export const JARVIS_AUTOREPLY: boolean;
 export const JARVIS_TOOLS: JarvisTool[];
 export const jarvisPhase: Map<string, { phase: string; at: number }>;
 export const activeJarvisRequests: Map<string, AbortController>;

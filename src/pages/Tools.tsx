@@ -142,19 +142,25 @@ export function ToolsBoard() {
 
               {open && (
                 <div className="row-detail">
-                  <div className="row-line">
-                    <code className="row-path">{tool.path}</code>
-                    <span className="row-line-actions path-actions">
-                      <button type="button" onClick={() => desktop()?.openPath?.(tool.path) ?? copy(tool.path, `${tool.id}:path`)} title="Открыть папку">
-                        <FolderOpen size={14} />
-                      </button>
-                      <button type="button" onClick={() => copy(tool.path, `${tool.id}:path`)} title="Скопировать путь">
-                        <Copy size={14} />{copied === `${tool.id}:path` ? "скопировано" : ""}
-                      </button>
-                      <a href={tool.docs} target="_blank" rel="noreferrer">документация</a>
-                      <a href={tool.repo} target="_blank" rel="noreferrer">github</a>
-                    </span>
-                  </div>
+                  {(tool.path || tool.docs || tool.repo) && (
+                    <div className="row-line">
+                      {tool.path && <code className="row-path">{tool.path}</code>}
+                      <span className="row-line-actions path-actions">
+                        {tool.path && (
+                          <>
+                            <button type="button" onClick={() => desktop()?.openPath?.(tool.path!) ?? copy(tool.path!, `${tool.id}:path`)} title="Открыть папку">
+                              <FolderOpen size={14} />
+                            </button>
+                            <button type="button" onClick={() => copy(tool.path!, `${tool.id}:path`)} title="Скопировать путь">
+                              <Copy size={14} />{copied === `${tool.id}:path` ? "скопировано" : ""}
+                            </button>
+                          </>
+                        )}
+                        {tool.docs && <a href={tool.docs} target="_blank" rel="noreferrer">документация</a>}
+                        {tool.repo && <a href={tool.repo} target="_blank" rel="noreferrer">github</a>}
+                      </span>
+                    </div>
+                  )}
 
                   {tool.commands.map((action) => {
                     const isRunning = state.running && state.label === action.label;

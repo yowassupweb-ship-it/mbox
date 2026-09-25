@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Client, Pool } from "pg";
 import {
-  configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
+  configureJarvis, JARVIS_NAME, JARVIS_AUTOREPLY, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   groqComplete, geminiComplete, bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms,
   jarvisModels,
   publishAgentModels,
@@ -26,6 +26,7 @@ import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-over
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
+import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -1008,6 +1009,11 @@ function sendForbidden(res) {
 
 // Members use the same console, but are fail-closed for endpoints which do not
 // have a project filter.  New endpoints must be deliberately added here.
+/** Кто отвечает в общем чате: JARVIS_AUTOREPLY=off — облачный Claude на сервере, иначе Джарвис (см. server/jarvis.mjs). */
+function withChatDefaults(user) {
+  return user ? { ...user, jarvis_autoreply: JARVIS_AUTOREPLY } : user;
+}
+
 function memberRouteAllowed(pathname) {
   return pathname === "/api/mbox/auth/me"
     || pathname === "/api/mbox/agent/skills"
@@ -1017,6 +1023,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/agents"
     || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history))?)?$/.test(pathname)
     || pathname === "/api/mbox/email/check"
+    || pathname.startsWith("/api/mbox/seo")
     || pathname === "/api/mbox/ui/open"
     || pathname === "/api/mbox/projects"
     || pathname === "/api/mbox/memories"
@@ -1093,7 +1100,7 @@ async function handleApiWithContext(req, res, url) {
       [user.rows[0].id],
     );
     res.setHeader("set-cookie", sessionCookie(req, encodeURIComponent(token), 2592000));
-    return sendJson(res, 200, { user: user.rows[0] });
+    return sendJson(res, 200, { user: withChatDefaults(user.rows[0]) });
   }
 
   if (url.pathname === "/api/mbox/auth/logout" && req.method === "POST") {
@@ -1104,7 +1111,7 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/auth/me") {
-    return sendJson(res, 200, { user: await currentUser(req) });
+    return sendJson(res, 200, { user: withChatDefaults(await currentUser(req)) });
   }
 
   if (await handlePublicInviteApi(req, res, url)) return;
@@ -1145,6 +1152,7 @@ async function handleApiWithContext(req, res, url) {
   // между машинами (см. server/browser-state.mjs).
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
+  if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: scope.all })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
     return sendJson(res, 200, { structure: agentStructure });
@@ -2616,7 +2624,8 @@ async function handleApiWithContext(req, res, url) {
       // Джарвис, props.re — его вопрос) тоже к нему: так человек одобряет уборку памяти.
       const isReplyToJarvis = String(body.item_type || "") === "answer" && senderName === "Человек" && addressedTo === JARVIS_NAME;
       const jarvisOn = isOwner(user) || user.jarvis_enabled !== false;
-      if (result.rows[0] && jarvisOn && ((isQuestion && (senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME)) || isReplyToJarvis)) {
+      const forJarvis = addressedTo ? addressedTo === JARVIS_NAME : JARVIS_AUTOREPLY || !isOwner(user);
+      if (result.rows[0] && jarvisOn && ((isQuestion && (senderName === "Человек" || senderName === "Claude") && forJarvis) || isReplyToJarvis)) {
         // Claude тоже может триггерить живой ответ Джарвиса (по просьбе человека — "агенты
         // общаются, но с ограничениями") — но без верхнего предела это открытая дверь для
         // зацикливания ботов друг на друге. Ограничение: если среди последних 6 сообщений треда
@@ -2718,8 +2727,9 @@ async function handleApiWithContext(req, res, url) {
        WHERE id = $1 AND (item_type = 'question' OR (item_type = 'answer' AND agent_name = 'Человек' AND props->>'to' = $2))
          AND (props->>'mbox_user_id' = $3 OR ($4::boolean AND NOT (props ? 'mbox_user_id')))
          AND (status = 'open' OR (status = 'doing' AND updated_at < now() - interval '10 minutes'))
+         AND ($5::boolean OR props->>'to' = $2 OR props->>'mbox_owner' = 'false')
        RETURNING id::text, project_id::text, title, body, props`,
-      [answerMatch[1], JARVIS_NAME, String(user.id), isOwner(user)],
+      [answerMatch[1], JARVIS_NAME, String(user.id), isOwner(user), JARVIS_AUTOREPLY],
     )).rows[0];
     if (!row) return sendJson(res, 409, { error: "not_answerable" });
     replyAsJarvis(row).catch((error) => console.error(`Jarvis hand-off reply uncaught: ${error.message}`));
@@ -3132,6 +3142,7 @@ ensureBrowserStateSchema(query).catch((error) => console.error(`browser state sc
 ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
+ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
 
 httpServer.listen(port, host, () => {
   console.log(`MBOX listening on http://${host}:${port}`);

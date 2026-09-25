@@ -586,6 +586,217 @@ CREATE TRIGGER trg_audit_memory_actions
 AFTER INSERT OR UPDATE OR DELETE ON memory_actions
 FOR EACH ROW EXECUTE FUNCTION write_audit_event();
 
+CREATE TABLE IF NOT EXISTS seo_runs (
+  id BIGSERIAL PRIMARY KEY,
+  scenario TEXT NOT NULL DEFAULT 'manual',
+  status TEXT NOT NULL DEFAULT 'running',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  sources JSONB NOT NULL DEFAULT '{}',
+  stats JSONB NOT NULL DEFAULT '{}',
+  errors JSONB NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS seo_urls (
+  id BIGSERIAL PRIMARY KEY,
+  url TEXT NOT NULL UNIQUE,
+  path TEXT NOT NULL,
+  url_type TEXT NOT NULL DEFAULT 'unknown',
+  section TEXT NOT NULL DEFAULT '',
+  status_code INT,
+  canonical TEXT NOT NULL DEFAULT '',
+  in_sitemap BOOLEAN NOT NULL DEFAULT false,
+  in_search BOOLEAN NOT NULL DEFAULT false,
+  lastmod DATE,
+  title TEXT NOT NULL DEFAULT '',
+  h1 TEXT NOT NULL DEFAULT '',
+  quality JSONB NOT NULL DEFAULT '{}',
+  source_flags JSONB NOT NULL DEFAULT '{}',
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_seo_urls_path ON seo_urls(path);
+CREATE INDEX IF NOT EXISTS idx_seo_urls_type ON seo_urls(url_type, section);
+CREATE INDEX IF NOT EXISTS idx_seo_urls_sitemap ON seo_urls(in_sitemap);
+
+CREATE TABLE IF NOT EXISTS seo_page_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  run_id BIGINT REFERENCES seo_runs(id) ON DELETE SET NULL,
+  url TEXT NOT NULL,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status_code INT,
+  canonical TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  h1 TEXT NOT NULL DEFAULT '',
+  meta JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_page_snapshots_url ON seo_page_snapshots(url, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS seo_queries (
+  id BIGSERIAL PRIMARY KEY,
+  query TEXT NOT NULL UNIQUE,
+  cluster_id BIGINT,
+  props JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS seo_clusters (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  intent TEXT NOT NULL DEFAULT '',
+  props JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE seo_queries ADD COLUMN IF NOT EXISTS cluster_id BIGINT REFERENCES seo_clusters(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS seo_rank_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source TEXT NOT NULL DEFAULT 'topvisor',
+  query TEXT NOT NULL,
+  url TEXT NOT NULL DEFAULT '',
+  position DOUBLE PRECISION,
+  region TEXT NOT NULL DEFAULT '',
+  device TEXT NOT NULL DEFAULT '',
+  raw JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_rank_snapshots_query ON seo_rank_snapshots(query, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS seo_serp_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source TEXT NOT NULL DEFAULT 'topvisor',
+  query TEXT NOT NULL,
+  position INT,
+  domain TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  snippet TEXT NOT NULL DEFAULT '',
+  features JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_serp_snapshots_query ON seo_serp_snapshots(query, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS seo_search_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source TEXT NOT NULL DEFAULT 'webmaster',
+  query TEXT NOT NULL,
+  url TEXT NOT NULL,
+  impressions INT NOT NULL DEFAULT 0,
+  clicks INT NOT NULL DEFAULT 0,
+  ctr DOUBLE PRECISION,
+  position DOUBLE PRECISION,
+  raw JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_search_snapshots_url ON seo_search_snapshots(url, captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_seo_search_snapshots_query ON seo_search_snapshots(query, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS seo_demand_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source TEXT NOT NULL DEFAULT 'wordstat',
+  query TEXT NOT NULL,
+  region TEXT NOT NULL DEFAULT '',
+  demand INT NOT NULL DEFAULT 0,
+  month TEXT NOT NULL DEFAULT '',
+  raw JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_demand_snapshots_query ON seo_demand_snapshots(query, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS seo_traffic_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  captured_on DATE NOT NULL DEFAULT CURRENT_DATE,
+  source TEXT NOT NULL DEFAULT 'metrica',
+  url TEXT NOT NULL,
+  search_engine TEXT NOT NULL DEFAULT '',
+  visits INT NOT NULL DEFAULT 0,
+  bounces INT NOT NULL DEFAULT 0,
+  page_depth DOUBLE PRECISION,
+  visit_duration DOUBLE PRECISION,
+  goals JSONB NOT NULL DEFAULT '{}',
+  raw JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_traffic_snapshots_url ON seo_traffic_snapshots(url, captured_on DESC);
+
+CREATE TABLE IF NOT EXISTS seo_page_semantics (
+  id BIGSERIAL PRIMARY KEY,
+  url TEXT NOT NULL,
+  query TEXT NOT NULL,
+  demand INT NOT NULL DEFAULT 0,
+  impressions INT NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT '',
+  props JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(url, query)
+);
+
+CREATE TABLE IF NOT EXISTS seo_links (
+  id BIGSERIAL PRIMARY KEY,
+  from_url TEXT NOT NULL,
+  to_url TEXT NOT NULL,
+  anchor TEXT NOT NULL DEFAULT '',
+  link_type TEXT NOT NULL DEFAULT 'internal',
+  props JSONB NOT NULL DEFAULT '{}',
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(from_url, to_url, anchor)
+);
+
+CREATE TABLE IF NOT EXISTS seo_issues (
+  id BIGSERIAL PRIMARY KEY,
+  fingerprint TEXT NOT NULL UNIQUE,
+  detector TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'open',
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  evidence JSONB NOT NULL DEFAULT '{}',
+  affected_count INT NOT NULL DEFAULT 0,
+  potential_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  last_run_id BIGINT REFERENCES seo_runs(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_seo_issues_status ON seo_issues(status, potential_score DESC, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_seo_issues_detector ON seo_issues(detector);
+
+CREATE TABLE IF NOT EXISTS seo_packages (
+  id BIGSERIAL PRIMARY KEY,
+  scenario TEXT NOT NULL,
+  run_id BIGINT REFERENCES seo_runs(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ready',
+  payload JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_seo_packages_scenario ON seo_packages(scenario, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS seo_changes (
+  id BIGSERIAL PRIMARY KEY,
+  issue_id BIGINT REFERENCES seo_issues(id) ON DELETE SET NULL,
+  todo_id BIGINT REFERENCES todos(id) ON DELETE SET NULL,
+  change_type TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  baseline JSONB NOT NULL DEFAULT '{}',
+  result JSONB NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'planned',
+  detected_at TIMESTAMPTZ,
+  measure_after DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS seo_settings (
+  id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  config JSONB NOT NULL DEFAULT '{}',
+  secrets_ciphertext BYTEA,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 INSERT INTO users(email, username, password_hash, role)
 SELECT 'admin@mbox.local', 'Admin', crypt('change-me-before-use', gen_salt('bf')), 'owner'
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'Admin');

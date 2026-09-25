@@ -1,4 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Cloud } from "lucide-react";
+import { agentDisplayName, isCloudAgent } from "../lib/agents";
 
 export type AgentIdentity = {
   key: string;
@@ -67,12 +69,14 @@ export function AgentAvatar({ name, status = "idle", live = false, size = 34 }: 
   // Claude/Codex — не разобрать, кто именно сейчас работает. Своя аватарка всегда своя; "работает"
   // теперь только классом (пульсирующая рамка через CSS), без подмены изображения.
   const imageSrc = identity.image;
+  const cloud = isCloudAgent(name);
+  const label = `${agentDisplayName(identity.label)}${cloud ? " · облако" : ""}`;
   return (
     <span
       className={`agent-avatar ${identity.key} ${stateClass}${imageSrc ? " has-image" : ""}`}
       style={{ ["--agent-accent" as string]: identity.accent, width: size, height: size }}
-      title={`${identity.label} · ${status}`}
-      aria-label={`${identity.label}, ${status}`}
+      title={`${label} · ${status}`}
+      aria-label={`${label}, ${status}`}
     >
       {imageSrc ? (
         <img src={imageSrc} width={Math.round(size * 0.88)} height={Math.round(size * 0.88)} alt="" />
@@ -84,3 +88,15 @@ export function AgentAvatar({ name, status = "idle", live = false, size = 34 }: 
     </span>
   );
 }
+
+/** Имя агента для человека: облачный — «Claude» с облачком, служебное «ClaudeCloud» не показываем. */
+export function AgentName({ name, className }: { name: string; className?: string }) {
+  const cloud = isCloudAgent(name);
+  return (
+    <span className={["agent-name", cloud ? "is-cloud" : "", className || ""].filter(Boolean).join(" ")} title={cloud ? "Облачный агент: работает на сервере MBOX" : undefined}>
+      {agentDisplayName(name)}
+      {cloud && <Cloud className="agent-cloud-mark" size={12} strokeWidth={2.2} aria-label="в облаке" />}
+    </span>
+  );
+}
+

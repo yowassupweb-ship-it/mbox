@@ -44,9 +44,9 @@ export type LocalTool = {
   name: string;
   kind: string;
   status: string;
-  path: string;
-  repo: string;
-  docs: string;
+  path?: string;
+  repo?: string;
+  docs?: string;
   icon: string;
   summary: string;
   capabilities: string[];

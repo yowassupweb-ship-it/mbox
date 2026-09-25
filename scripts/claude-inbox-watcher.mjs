@@ -22,6 +22,8 @@ const username = process.env.MBOX_USERNAME || "Admin";
 const accessToken = String(process.env.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(process.env.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
 const agentName = process.env.MBOX_AGENT_NAME || "Claude";
+// cloud_agent — тот же наблюдатель на сервере MBOX (ClaudeCloud); в списке агентов он отличается от локального.
+const agentKind = process.env.MBOX_AGENT_KIND || "local_watcher";
 const project = process.env.MBOX_PROJECT || "MBOX";
 // 15 с ожидания до того, как наблюдатель вообще увидит сообщение, плюс холодный старт CLI — человек
 // это чувствует как «не дошло». Пять секунд заметно живее и всё ещё дёшево: два лёгких запроса за тик.
@@ -345,7 +347,7 @@ async function mboxFetch(apiPath, init = {}) {
 async function ping(event, phase, extra) {
   await mboxFetch("/api/mbox/agent/ping", {
     method: "POST",
-    body: JSON.stringify({ agent: agentName, event, kind: "local_watcher", client: "claude-inbox-watcher", scope: "agent_inbox", ...(phase === undefined ? {} : { phase }), ...(extra || {}) }),
+    body: JSON.stringify({ agent: agentName, event, kind: agentKind, client: "claude-inbox-watcher", scope: "agent_inbox", ...(phase === undefined ? {} : { phase }), ...(extra || {}) }),
   });
 }
 
@@ -633,7 +635,8 @@ async function runClaudeTurn(item, resumeId) {
   // Модель и «усилие» человек выбирает рядом с полем ввода в MBOX (см. jarvisModels на сервере);
   // не выбрал — остаётся то, что настроено переменными окружения, а дальше умолчание самого CLI.
   const wantedModel = pickModel(item.props?.model) || pickModel(claudeModel) || CLAUDE_DEFAULT_MODEL;
-  const wantedEffort = pickEffort(item.props?.effort);
+  // CLAUDE_WATCH_EFFORT — экономный уровень по умолчанию для облачного агента (low), если в чате не выбран другой.
+  const wantedEffort = pickEffort(item.props?.effort) || pickEffort(process.env.CLAUDE_WATCH_EFFORT);
   if (wantedModel) args.push("--model", wantedModel);
   if (wantedEffort) args.push("--effort", wantedEffort);
   if (mcpConfigReady) args.push("--mcp-config", mcpConfigPath);

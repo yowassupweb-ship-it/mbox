@@ -14,6 +14,7 @@ services:
       MBOX_PORT: "3000"
       MBOX_HOST: "0.0.0.0"
       MBOX_AGENT_NAME: ${MBOX_AGENT_NAME:-Джарвис}
+      JARVIS_AUTOREPLY: ${JARVIS_AUTOREPLY:-on}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
       GROQ_MODEL_JUNIOR: ${GROQ_MODEL_JUNIOR:-openai/gpt-oss-20b}

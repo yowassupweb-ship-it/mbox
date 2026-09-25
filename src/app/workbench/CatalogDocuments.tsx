@@ -3,9 +3,10 @@ import { ArrowRight, Check, Copy, ExternalLink, FolderOpen, Play, Square } from 
 import { openSkillPage } from "./agentTabs";
 import type { TabsApi } from "./tabs";
 import type { LocalTool, ToolRunEvent } from "../../types";
-import { formatLastUsed, formatTokens, useSkillsCatalog, useToolsCatalog } from "./catalog";
+import { formatLastUsed, formatTokens, isSeoWizardTool, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { ToolIcon } from "./CatalogViews";
 import { fetchJson } from "../../lib/api";
+import { SeoBoard } from "../../pages/Seo";
 
 function useCopy() {
   const [copied, setCopied] = useState("");
@@ -101,6 +102,8 @@ export function ToolDocument({ toolId, tabs }: { toolId: string; tabs: TabsApi }
 }
 
 function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
+  if (isSeoWizardTool(tool)) return <SeoBoard toolId={tool.id} />;
+
   const { copied, copy } = useCopy();
   const [run, setRun] = useState<RunState>(EMPTY_RUN);
   const [canRun, setCanRun] = useState(() => Boolean(desktop()?.runTool));
@@ -187,7 +190,7 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
           <p>{tool.summary}</p>
         </div>
       </header>
-      {tool.planned && (
+      {tool.planned && !isSeoWizardTool(tool) && (
         <p className="wb-tool-planned">
           <b>В подготовке.</b> {tool.group ? `Войдёт в ${tool.group} и будет доступен отдельно` : "Инструмент ещё не подключён"} — запуска пока нет, карточка нужна, чтобы агенты и люди знали о нём заранее.
         </p>
@@ -198,8 +201,8 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
         {tool.path && <><dt>Папка</dt>
         <dd>
           <code>{tool.path}</code>{" "}
-          {desktop()?.openPath && <button type="button" className="wb-inline-btn" onClick={() => void desktop()?.openPath?.(tool.path)}><FolderOpen size={12} /> открыть</button>}
-          <button type="button" className="wb-inline-btn" onClick={() => copy(tool.path, "path")}><Copy size={12} />{copied === "path" ? "скопировано" : ""}</button>
+          {desktop()?.openPath && <button type="button" className="wb-inline-btn" onClick={() => void desktop()?.openPath?.(tool.path || "")}><FolderOpen size={12} /> открыть</button>}
+          <button type="button" className="wb-inline-btn" onClick={() => copy(tool.path || "", "path")}><Copy size={12} />{copied === "path" ? "скопировано" : ""}</button>
         </dd></>}
         {(tool.docs || tool.repo) && (
           <>

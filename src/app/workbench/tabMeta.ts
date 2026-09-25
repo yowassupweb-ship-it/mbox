@@ -73,6 +73,8 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: `Коммит ${key.split(":").slice(2).join(":").slice(0, 7)}`, hint: "git show", icon: `${SYSTEM}/history.png` };
     case "skill":
       return { title: titles[key] ?? first, hint: "Навык", icon: `${NAVIGATION}/skills.png` };
+    case "seo":
+      return { title: "SEO Wizard", hint: "Дашборд навыка", icon: `${NAVIGATION}/skills.png` };
     case "web": {
       // Пока сайт не загрузился, заголовка нет — показываем домен, он уже в ключе вкладки.
       const address = key.slice(4);

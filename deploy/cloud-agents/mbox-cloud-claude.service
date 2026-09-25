@@ -1,0 +1,30 @@
+[Unit]
+Description=MBOX cloud agent ClaudeCloud (Claude Code CLI)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=mboxagent
+WorkingDirectory=/home/mboxagent/mbox
+EnvironmentFile=/etc/mbox/cloud-agents.env
+Environment=MBOX_AGENT_NAME=ClaudeCloud
+Environment=MBOX_AGENT_ALIASES=claudecloud
+Environment=MBOX_AGENT_KIND=cloud_agent
+# Неадресованные вопросы владельца — его (вместо Gemini-Джарвиса, см. JARVIS_AUTOREPLY=off).
+Environment=MBOX_WATCH_UNADDRESSED=true
+Environment=MBOX_WATCH_BACKLOG=false
+# Экономно по умолчанию; в чате можно выбрать другую модель и effort.
+Environment=CLAUDE_WATCH_MODEL=sonnet
+Environment=CLAUDE_WATCH_EFFORT=low
+Environment=CLAUDE_COMMAND=/home/mboxagent/.local/bin/claude
+Environment=CLAUDE_WATCH_WORKDIR=/home/mboxagent/mbox
+Environment=PATH=/home/mboxagent/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node scripts/claude-inbox-watcher.mjs
+Restart=always
+# Наблюдатель на SIGTERM выходит не сразу (ждёт вебсокет) — без этого restart висел 90 с в deactivating.
+TimeoutStopSec=10
+RestartSec=10
+MemoryMax=1600M
+
+[Install]
+WantedBy=multi-user.target

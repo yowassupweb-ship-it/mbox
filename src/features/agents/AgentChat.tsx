@@ -1,9 +1,9 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, Terminal, Wrench, X } from "lucide-react";
+import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, Terminal, Wrench, X } from "lucide-react";
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
-import { AgentAvatar } from "../../components/AgentAvatar";
+import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
-import { effectiveStatus, liveRunOf } from "../../lib/agents";
+import { effectiveStatus, liveRunOf, CLOUD_AGENTS, agentDisplayName, isCloudAgent } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
@@ -295,15 +295,40 @@ function contextLoadText(load: ContextLoad) {
   return `${formatWorkTokens(load.tokens)}${load.window ? ` из ${formatWorkTokens(load.window)} · ${percent}%` : ""}`;
 }
 
+/**
+ * Облачный напарник вкладки: у Claude — ClaudeCloud, у ChatGPT — CodexCloud (deploy/cloud-agents на сервере).
+ * Во вкладке агента чат бывает локальным или облачным — это собеседник, записанный в чате (thread.peer).
+ */
+function cloudPeerOf(peer: string) {
+  const name = peer.toLowerCase();
+  if (name === "claude") return CLOUD_AGENTS.claude;
+  if (name === "chatgpt" || name === "codex") return CLOUD_AGENTS.codex;
+  return "";
+}
+
+/** Каталог моделей публикуют «Claude» и «ChatGPT»; облачные агенты — те же CLI и берут тот же набор. */
+function catalogAgent(name: string) {
+  const key = name.toLowerCase();
+  if (key === CLOUD_AGENTS.claude.toLowerCase()) return "claude";
+  if (key === CLOUD_AGENTS.codex.toLowerCase()) return "chatgpt";
+  return key;
+}
+
+function peerNames(peer: string) {
+  const name = peer.toLowerCase();
+  const local = name === "chatgpt" ? ["chatgpt", "codex"] : [name];
+  const cloud = cloudPeerOf(peer).toLowerCase();
+  return cloud ? [...local, cloud] : local;
+}
+
 function threadMatchesPeer(thread: ChatThread, peer: string) {
   if (!peer) return true;
-  const names = peer.toLowerCase() === "chatgpt" ? ["chatgpt", "codex"] : [peer.toLowerCase()];
+  const names = peerNames(peer);
   return names.includes(String(thread.peer || "").toLowerCase()) || names.includes(String(thread.last_agent || "").toLowerCase());
 }
 
 function belongsToPeer(item: AgentInboxItem, peer: string) {
-  const name = peer.toLowerCase();
-  const names = name === "chatgpt" ? new Set(["chatgpt", "codex"]) : new Set([name]);
+  const names = new Set(peerNames(peer));
   const to = String(item.props?.to ?? "").toLowerCase();
   if (item.agent_name === HUMAN) return to ? names.has(to) : names.has(parseMention(item.body || item.title).toLowerCase());
   return names.has(item.agent_name.toLowerCase()) && (!to || names.has(to) || to === HUMAN.toLowerCase());
@@ -1009,7 +1034,7 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
   );
 }
 
-export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false, peer = "", debug, jarvisEnabled = true, focus = [] }: {
+export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false, peer = "", debug, jarvisEnabled = true, defaultResponder = JARVIS_NAME, focus = [] }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
@@ -1027,6 +1052,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   debug?: ChatDebug;
   /** Джарвис включён у аккаунта (у участника — по решению владельца). */
   jarvisEnabled?: boolean;
+  /** Кто отвечает в общем чате без @: Джарвис или облачный Claude (JARVIS_AUTOREPLY=off на сервере). */
+  defaultResponder?: string;
   /** Открытое сейчас в рабочем месте — чипы над полем ввода, уходят агенту в props.context. */
   focus?: FocusItem[];
 }) {
@@ -1054,6 +1081,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [thread, setThread] = usePersistentState(peer ? `mbox.chat.thread:${peer}` : "mbox.chat.thread", "");
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadMenu, setThreadMenu] = useState(false);
+  // Выбор «локальный / в облаке» у кнопки «Новый чат» — только когда облачный агент на связи.
+  const [newChatMenu, setNewChatMenu] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   // Сообщения выбранного чата, которых нет среди 200 последних в общем inbox (старый чат).
   const [threadInbox, setThreadInbox] = useState<AgentInboxItem[]>([]);
@@ -1087,7 +1116,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [awaitingJarvisVerb, setAwaitingJarvisVerb] = useState("думает");
   // Кого ждём. Раньше плашка «думает» была только у Джарвиса, и работа Claude шла совершенно молча:
   // фаза уходила в нижнюю панель, а в самой переписке не появлялось ничего.
-  const [awaitingAgent, setAwaitingAgent] = useState(JARVIS_NAME);
+  const [awaitingAgent, setAwaitingAgent] = useState(defaultResponder);
   /**
    * Цепочка, которая растёт прямо во время работы: шаги приезжают по сокету отдельными событиями
    * (agent_step), в базе их нет. Ключ — номер шага: результат инструмента приходит вторым событием
@@ -1105,9 +1134,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const placeThreads = (node: ReactNode) => (headSlot ? createPortal(node, headSlot) : node);
   const lastComposerHeightRef = useRef(0);
   const liveMention = parseMention(text);
+  // Собеседник текущего чата: во вкладке агента чат локальный (Claude на этом компьютере) или облачный.
+  const cloudPeer = cloudPeerOf(peer);
+  const cloudOnline = Boolean(cloudPeer && agents.some((agent) => agent.name === cloudPeer && effectiveStatus(agent) === "active"));
+  const threadPeer = threads.find((item) => item.id === thread)?.peer || "";
+  const cloudChat = Boolean(cloudPeer && isCloudAgent(threadPeer));
+  const chatTarget = cloudChat ? cloudPeer : peer;
   // Модели у агентов разные: у Джарвиса это Gemini/Groq на сервере, у Claude — алиасы его CLI на
   // машине владельца. Показываем набор того, кому сейчас пишут; адресат не выбран — все подряд.
-  const addressee = (liveMention || peer || JARVIS_NAME).toLowerCase();
+  const addressee = catalogAgent(liveMention || chatTarget || defaultResponder);
   const shownModels = catalog.models.filter((item) => {
     const agent = (item.agent || "").toLowerCase();
     return agent === addressee || (addressee === "chatgpt" && agent === "codex") || (addressee === "codex" && agent === "chatgpt");
@@ -1255,14 +1290,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     setReplyTo(null);
   }, [setThread]);
   // Чат сохраняется на сервере сразу — он есть в списке до первого сообщения и на любом устройстве.
-  const startNewChat = useCallback(() => {
+  const startNewChat = useCallback((scope: "local" | "cloud" = "local") => {
     const id = newThreadId();
-    setThreads((current) => [{ id, title: "Новый чат", last_at: new Date().toISOString(), messages: 0, peer: peer || null, last_agent: null }, ...current]);
+    const owner = scope === "cloud" && cloudPeer ? cloudPeer : peer;
+    setNewChatMenu(false);
+    setThreads((current) => [{ id, title: "Новый чат", last_at: new Date().toISOString(), messages: 0, peer: owner || null, last_agent: null }, ...current]);
     switchThread(id);
-    fetchJson("/api/mbox/agent/threads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, peer }) })
+    fetchJson("/api/mbox/agent/threads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, peer: owner }) })
       .then(refreshThreads)
       .catch(() => {});
-  }, [peer, refreshThreads, switchThread]);
+  }, [peer, cloudPeer, refreshThreads, switchThread]);
   const renameThread = useCallback((id: string, title: string) => {
     setRenaming(null);
     const clean = title.trim();
@@ -1356,7 +1393,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   // «Работает» — только когда агент правда работает: есть живой запуск или фаза от наблюдателя.
   // Раньше плашка писала «ChatGPT: работает… 80с», пока наблюдатель был мёртв или вне окна.
-  const awaitingDead = Boolean(peer && debug?.process?.state === "dead" && awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase());
+  const awaitingDead = Boolean(peer && (cloudChat ? !cloudOnline : debug?.process?.state === "dead") && awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase());
   const awaitingPhase = useMemo(() => {
     if (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase()) return awaitingJarvisPhase;
     const family = (name: string) => (/^(codex|chatgpt)$/i.test(name) ? "chatgpt" : name.toLowerCase());
@@ -1400,7 +1437,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   }, [awaitingJarvisId]);
 
   const states = useMemo(
-    () => agents.filter((agent) => !peer || agent.name.toLowerCase() === peer.toLowerCase()).map((agent) => ({ agent, state: agentState(agent, runs) })),
+    () => agents.filter((agent) => !peer || peerNames(peer).includes(agent.name.toLowerCase())).map((agent) => ({ agent, state: agentState(agent, runs) })),
     [agents, runs, peer],
   );
   // Плашки «Codex: отвечает» под лентой больше нет (todo #314): она держалась на живом запуске и
@@ -1662,7 +1699,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     const replying = overrideText === undefined ? replyTo : null;
     if (replying) setReplyTo(null);
     // Адресат: явное @Имя, иначе собеседник этого чата, иначе автор сообщения, на которое отвечаем.
-    const mentionTarget = parseMention(raw) || peer || (replying && replying.actor !== HUMAN ? replying.actor : "") || JARVIS_NAME;
+    const mentionTarget = parseMention(raw) || chatTarget || (replying && replying.actor !== HUMAN ? replying.actor : "") || defaultResponder;
     const localId = `local-${Date.now()}`;
     const localAt = new Date().toISOString();
     setPending((current) => [...current, { id: localId, body, at: localAt, sent: false, attachments: files.length ? files : undefined }]);
@@ -1697,7 +1734,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       });
       // Джарвис отвечает и на нетегнутые сообщения (см. scripts/mbox-archivist.mjs), поэтому
       // без адресата ждём его; с адресатом — того, кому написали (Claude, Codex).
-      const waitingFor = mentionTarget || JARVIS_NAME;
+      const waitingFor = mentionTarget || defaultResponder;
       if (result.inbox_item?.id) {
         setAwaitingAgent(waitingFor);
         setAwaitingJarvisId(result.inbox_item.id);
@@ -1801,13 +1838,24 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   const threadList = (
     <>
-      <button type="button" role="menuitem" className="console-thread-menu-new" onClick={startNewChat}>
-        <MessageSquarePlus size={14} /> Новый чат
-      </button>
+      {cloudOnline ? (
+        <>
+          <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("local")}>
+            <Monitor size={14} /> Новый чат · локальный
+          </button>
+          <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("cloud")}>
+            <Cloud size={14} /> Новый чат · в облаке
+          </button>
+        </>
+      ) : (
+        <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("local")}>
+          <MessageSquarePlus size={14} /> Новый чат
+        </button>
+      )}
       {shownThreads.map((item) => (
         <div key={item.id} className={item.id === thread ? "console-thread-menu-row is-active" : "console-thread-menu-row"}>
           <button type="button" role="menuitem" onClick={() => switchThread(item.id)}>
-            <span className="console-thread-menu-title">{item.title}</span>
+            <span className="console-thread-menu-title"><span className="console-thread-menu-name">{item.title}</span>{isCloudAgent(item.peer) && <Cloud className="agent-cloud-mark" size={13} strokeWidth={2} aria-label="в облаке" />}</span>
             <span className="console-thread-menu-meta">
               {formatSince(item.last_at)} · {item.messages} {plural(item.messages, "сообщение", "сообщения", "сообщений")}
               {Number(item.last_work?.context_tokens) > 0 && ` · контекст ${formatWorkTokens(Number(item.last_work?.context_tokens))}`}
@@ -1836,9 +1884,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           <div className="console-bar">
             <div className="console-bar-roster" title={rosterSummary}>
               {states.length ? states.map(({ agent, state }) => (
-                <span className={`console-bar-agent ${state.key}`} key={agent.id} title={`${agent.name} · ${state.label}`}>
+                <span className={`console-bar-agent ${state.key}`} key={agent.id} title={`${agentDisplayName(agent.name)}${isCloudAgent(agent.name) ? " в облаке" : ""} · ${state.label}`}>
                   <AgentAvatar name={agent.name} status={state.key} live={state.key === "working"} size={20} />
-                  <span className="console-bar-agent-name">{agent.name}</span>
+                  <AgentName name={agent.name} className="console-bar-agent-name" />
                   {state.key === "working" && <span className="console-bar-agent-phase">{state.label}</span>}
                 </span>
               )) : <span className="console-bar-agent muted">агентов нет на связи</span>}
@@ -1879,6 +1927,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             ) : (
               <button type="button" className="console-thread-current" onClick={() => (threadsAside ? thread && setRenaming(thread) : setThreadMenu((value) => !value))} onDoubleClick={() => thread && setRenaming(thread)} aria-expanded={threadsAside ? undefined : threadMenu} title={threadsAside ? "Переименовать чат" : "Все чаты · двойной щелчок — переименовать"}>
                 <span className="console-thread-title">{thread ? currentThread?.title || "Новый чат" : "Старая переписка"}</span>
+                {cloudChat && <Cloud className="agent-cloud-mark" size={12} strokeWidth={2.2} aria-label="в облаке" />}
                 {!threadsAside && <ChevronDown size={13} />}
               </button>
             )}
@@ -1891,9 +1940,26 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-context-text">{formatWorkTokens(contextLoad.tokens)}</span>
               </div>
             )}
-            <button type="button" className="console-thread-icon" onClick={startNewChat} title="Новый чат: агент начнёт с чистого контекста, старый останется в списке" aria-label="Новый чат">
+            <button
+              type="button"
+              className={newChatMenu ? "console-thread-icon is-on" : "console-thread-icon"}
+              onClick={() => (cloudOnline ? setNewChatMenu((value) => !value) : startNewChat("local"))}
+              title={cloudOnline ? "Новый чат: локальный или в облаке" : "Новый чат: агент начнёт с чистого контекста, старый останется в списке"}
+              aria-label="Новый чат"
+              aria-expanded={cloudOnline ? newChatMenu : undefined}
+            >
               <MessageSquarePlus size={15} />
             </button>
+            {newChatMenu && cloudOnline && (
+              <div className="console-thread-menu console-new-chat-menu" role="menu">
+                <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("local")}>
+                  <Monitor size={14} /> Локальный · на этом компьютере
+                </button>
+                <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("cloud")}>
+                  <Cloud size={14} /> В облаке · работает без компьютера
+                </button>
+              </div>
+            )}
             {debug && (
               <button
                 type="button"
@@ -1930,9 +1996,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             {lines.length === 0 && (
               <div className="console-empty">
                 {peer ? <AgentAvatar name={peer} size={64} /> : <MessagesSquare size={48} strokeWidth={1.5} />}
-                <strong>{peer ? `Чат с ${peer}` : "Общий чат"}</strong>
+                <strong className="agent-name">{peer ? `Чат с ${peer}` : "Общий чат"}{cloudChat && <Cloud className="agent-cloud-mark" size={14} strokeWidth={2.2} aria-label="в облаке" />}</strong>
                 <p>{peer
-                  ? `Сообщения уходят только ${peer}, @ писать не нужно. Каждый чат — отдельная сессия: агент помнит только этот разговор.`
+                  ? `Сообщения уходят только ${peer}${cloudChat ? " в облаке — он работает на сервере MBOX и отвечает при выключенном компьютере" : " на этом компьютере"}, @ писать не нужно. Каждый чат — отдельная сессия: агент помнит только этот разговор.`
                   : "Отвечает Джарвис. Позвать другого агента — @Имя, команды — /help."}</p>
               </div>
             )}
@@ -1953,7 +2019,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                     <span className="console-log-head">
                       {line.kind === "in" && <AgentAvatar name={line.actor} size={18} />}
                       <span className="console-log-actor">
-                        {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "Вы" : line.actor}
+                        {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "Вы" : <AgentName name={line.actor} />}
                       </span>
                       <span className="console-log-time" title={new Date(line.at).toLocaleString("ru-RU")}>{time}</span>
                       {line.inboxId && (
@@ -2049,8 +2115,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                   {/* Шуточные глаголы — это голос Джарвиса. Для остальных агентов нужен простой
                       признак жизни, а не «прячется в чернильное облако от смущения». */}
                   {awaitingDead ? (
-                    <span className="console-log-text">Наблюдатель {peer} не работает ({debug?.process?.text}) — ответа не будет, пока его не запустить.</span>
-                  ) : <span className="console-log-text">{awaitingAgent}: {awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} {awaitingJarvisSeconds}с</span>}
+                    <span className="console-log-text">{cloudChat ? `${peer} в облаке не на связи — сообщение ждёт в очереди, ответ придёт, когда агент на сервере снова подключится.` : `Наблюдатель ${peer} не работает (${debug?.process?.text}) — ответа не будет, пока его не запустить.`}</span>
+                  ) : <span className="console-log-text"><AgentName name={awaitingAgent} />: {awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} {awaitingJarvisSeconds}с</span>}
                   {awaitingDead && debug?.process && (
                     <button type="button" className="console-start-btn" onClick={debug.process.start}>Запустить</button>
                   )}
@@ -2153,7 +2219,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                   onKeyUp={(event) => setCursor(event.currentTarget.selectionStart)}
                   onKeyDown={onKeyDown}
                   onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void attachFiles(files); } }}
-                  placeholder={peer ? `Сообщение для ${peer}` : "Напишите сообщение…"}
+                  placeholder={peer ? `Сообщение для ${peer}${cloudChat ? " в облаке" : ""}` : "Напишите сообщение…"}
                   spellCheck
                   autoComplete="off"
                   rows={1}

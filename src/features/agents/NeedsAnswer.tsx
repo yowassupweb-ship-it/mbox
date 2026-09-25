@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check, Send, X } from "lucide-react";
-import { AgentAvatar } from "../../components/AgentAvatar";
+import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { fetchJson } from "../../lib/api";
 import type { AgentInboxItem } from "../../types";
 import { Button } from "../../ui";
@@ -74,7 +74,7 @@ export function NeedsAnswer({ inbox, onSaved }: { inbox: AgentInboxItem[]; onSav
           <article className="needs-item" key={item.id}>
             <AgentAvatar name={item.agent_name} size={34} />
             <div className="needs-item-body">
-              <span className="muted">{item.agent_name} спрашивает</span>
+              <span className="muted"><AgentName name={item.agent_name} /> спрашивает</span>
               <strong>{item.title}</strong>
               {item.body && item.body.trim() !== item.title.trim() && <p>{item.body}</p>}
               <div className="needs-item-reply">

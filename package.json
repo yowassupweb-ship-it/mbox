@@ -21,6 +21,7 @@
     "mbox:skills-sync": "node scripts/sync-skills.mjs",
     "mbox:skills-pull": "node scripts/skills-pull.mjs",
     "mbox:agent-export": "node scripts/mbox-maintenance.mjs agent-export",
+    "seo:wizard": "node scripts/seo-wizard-runner.mjs all step1",
     "smoke-test": "node scripts/smoke-test.mjs"
   },
   "dependencies": {

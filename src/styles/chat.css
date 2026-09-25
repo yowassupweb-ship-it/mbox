@@ -1703,11 +1703,31 @@
 .console-thread-menu button.is-active { background: var(--surface-selected); }
 
 .console-thread-menu .console-thread-menu-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+
+/* Название обрезается многоточием, облачко облачного чата остаётся видно после него. */
+.console-thread-menu .console-thread-menu-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+}
+
+.console-thread-menu .console-thread-menu-title > .agent-cloud-mark {
+  flex: none;
+}
+
+/* В заголовке кнопка разносит детей по краям (space-between) — облачко прижимаем к названию. */
+.console-thread-current > .agent-cloud-mark {
+  flex: none;
+  margin-left: 6px;
+  margin-right: auto;
 }
 
 .console-thread-menu .console-thread-menu-meta {

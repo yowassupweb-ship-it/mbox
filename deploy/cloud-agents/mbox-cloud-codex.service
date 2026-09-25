@@ -1,0 +1,26 @@
+[Unit]
+Description=MBOX cloud agent CodexCloud (Codex CLI)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=mboxagent
+WorkingDirectory=/home/mboxagent/mbox
+EnvironmentFile=/etc/mbox/cloud-agents.env
+Environment=MBOX_AGENT_NAME=CodexCloud
+# Только прямое обращение: @CodexCloud или чат с ним. @codex/@ChatGPT остаются локальному Codex.
+Environment=CODEX_CHAT_ALIASES=CodexCloud,codexcloud
+Environment=MBOX_AGENT_KIND=cloud_agent
+Environment=MBOX_WATCH_BACKLOG=false
+Environment=CODEX_WATCH_EFFORT=low
+Environment=CODEX_WATCH_WORKDIR=/home/mboxagent/mbox
+Environment=PATH=/home/mboxagent/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node scripts/codex-chat-watcher.mjs
+Restart=always
+# Наблюдатель на SIGTERM выходит не сразу (ждёт вебсокет) — без этого restart висел 90 с в deactivating.
+TimeoutStopSec=10
+RestartSec=10
+MemoryMax=1200M
+
+[Install]
+WantedBy=multi-user.target

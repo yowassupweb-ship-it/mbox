@@ -67,3 +67,21 @@ export function agentFamily(name: string): { key: string; label: string } | null
   if (key.includes("codex") || key.includes("chatgpt") || key.includes("gpt") || key.includes("openai")) return { key: "codex", label: "ChatGPT" };
   return null;
 }
+
+/**
+ * Облачные агенты — те же Claude Code и Codex CLI, но на сервере MBOX (deploy/cloud-agents). Служебные
+ * имена ClaudeCloud/CodexCloud нужны только для адресации (props.to, @упоминание); человеку показываем
+ * «Claude»/«Codex» с облачком, а локальные на этом компьютере — просто «Claude»/«ChatGPT».
+ */
+export const CLOUD_AGENTS = { claude: "ClaudeCloud", codex: "CodexCloud" } as const;
+
+export function isCloudAgent(name: string | null | undefined) {
+  return /cloud$/i.test(String(name || "").trim());
+}
+
+export function agentDisplayName(name: string | null | undefined) {
+  const raw = String(name || "").trim();
+  if (!isCloudAgent(raw)) return raw;
+  return raw.replace(/cloud$/i, "") || raw;
+}
+
