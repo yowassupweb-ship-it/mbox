@@ -5,6 +5,7 @@
 //      out/ready/tour-<ID>.html: каждый день — пунктирный блок с кнопкой копирования в менеджерку,
 //      внизу — история изменений (в менеджерку не копируется).
 // Результат для человека — только HTML в out/ready; markdown в out/work — рабочий текст модели.
+// Word-файлы не создаются.
 //
 //   node scripts/route.mjs <ID> [ID...] [--no-fetch] [--open]
 //     --no-fetch  не ходить в менеджерскую программу, взять уже скачанные out/tour-<ID>.json
@@ -27,6 +28,19 @@ if (!ids.length) {
 const escapeHtml = (text) => String(text ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[ch]);
 const SECTION_TITLES = /^(включено|не включено|важная информация|дополнительно|информация)$/i;
 const HISTORY_HEADING = /^\*\*\s*история изменений\s*:?\s*\*\*\s*$/im;
+const FINAL_TEMPLATE_MARKDOWN = `**Стоимость**
+
+**При группе**
+
+**Организационные детали**
+
+По вашему желанию мы можем изменить программу тура:
+добавить или сократить питание, экскурсионную программу, организовать банкет и развлекательную программу.
+Время отправления и место сбора группы оговаривается дополнительно.
+
+Стоимость указана на 1 чел. при размещении в 1/2 2-х местного номера.
+При сокращении количества участников тура - стоимость пересчитывается.`;
+const FINAL_TEMPLATE_HTML = `<p><strong>Стоимость</strong></p><p><strong>При группе</strong></p><p><strong>Организационные детали</strong></p><p>По вашему желанию мы можем изменить программу тура:<br>добавить или сократить питание, экскурсионную программу, организовать банкет и развлекательную программу.<br>Время отправления и место сбора группы оговаривается дополнительно.</p><p>Стоимость указана на 1 чел. при размещении в 1/2 2-х местного номера.<br>При сокращении количества участников тура - стоимость пересчитывается.</p>`;
 const DAY_HEADING = /^\d+\s*день(?![а-яё])/i; // \b в JavaScript не работает с кириллицей
 const isListLine = (line) => /^[-•]\s+/.test(line);
 const hash = (text) => createHash("sha1").update(String(text).replace(/\s+/g, " ").trim()).digest("hex");
@@ -82,9 +96,21 @@ const AWKWARD = [
   [/средневеков[а-яё]*\s+город[а-яё]*\s+возрастом/i, "Городу N лет. Отдельным предложением — что о его облике сказано в источнике"],
 ];
 
+// Служебная строка (§3.5) не бывает заголовком экскурсии (§3.6): жирным выделяется только название объекта,
+// и у него нет точки в конце. Обед или чаепитие с собственным описанием — полноценный пункт, его не трогаем.
+const SERVICE_TITLE = /^(размещение|заселение|освобождение номеров|выселение|возвращение|трансфер|переезд|посадка|отправление|прибытие|приезд|выезд(?![а-яё])|окончание программы|свободное время|завтрак|обед|ужин|ночлег|информация)(?![а-яё])/i;
+
+// Обрыв текста (25.09.2026): резать по первой точке нельзя — точка стоит внутри инициалов и сокращений.
+const TRUNCATED = [
+  [/\.\.$/, "строка кончается двойной точкой — склеены точка источника и своя"],
+  [/(^|\s)[А-ЯЁ]\.\s?[А-ЯЁ]?\.$/, "строка обрывается на инициалах — допиши фразу до конца"],
+  [/(^|\s)(?<!\d\s)(г|п|с|д|ул|им|пос)\.$/i, "строка обрывается на сокращении — допиши название"],
+];
+
 // Редакционная политика «Вокруг света» (MBOX #136, rules.md §4.5): то, что ловится механически.
 const EDITORIAL = [
-  [/(?<![а-яё])(красив|величеств|живописн|атмосферн|невероятн|незабываем|потрясающ|великолепн|сказочн|волшебн|чудесн|удивительн|интересн|жемчужин|гостеприим|уникальн|восхитит|очаровател|неповторим)[а-яё]*|(?<![а-яё])лучш(ий|ая|ее|ие|его|ей|их|ими|им|ую)(?![а-яё])/i, "оценочное слово — замени фактом или убери"],
+  [/(?<![а-яё])(красив|величеств|живописн|атмосферн|невероятн|незабываем|потрясающ|великолепн|сказочн(?!ик)|волшебн|чудесн|удивительн|интересн|жемчужин|гостеприимн|уникальн|восхитит|очаровател|неповторим|вкуснейш|душевн|таинствен|торжествен|роскошн|шедевр|легендарн|самобытн|поражает)[а-яё]*|(?<![а-яё])лучш(ий|ая|ее|ие|его|ей|их|ими|им|ую)(?![а-яё])|(?<![а-яё])велик(ий|ого|ому|им|ая|ой|ую|ое|ие|их|ими)\s+(?![А-ЯЁ])/i, "оценочное слово — замени фактом или убери"],
+  [/визитн[а-яё]*\s+карточк|время\s+(будто|словно)\s+останов|застыло время(?!:)/i, "штамп — замени фактом из источника"],
   [/(?<![а-яё])(важно|важный|важная|важное)(?![а-яё])/i, "навязанное мнение — убери"],
   [/(?<![а-яё])(не просто|не только|это не|вместо)(?![а-яё])/i, "противопоставление «не…, а…» — пиши утверждением"],
   [/(славится|богат(ой|ая|ую) истори|окунуться в атмосфер|прикоснуться к истори)/i, "штамп, подходит любому туру — убери или замени фактом"],
@@ -97,11 +123,30 @@ const EDITORIAL = [
 // Ничего придуманного (rules.md §1): числа, века и имена собственные в пунктах программы должны найтись в источнике.
 const normalizeText = (text) => String(text || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ");
 function checkFacts(parsed, draft) {
-  const corpus = normalizeText([
+  const source = [
     draft.route,
     ...draft.days.flatMap((day) => [day.title, ...day.items.flatMap((item) => [item.title, item.text])]),
     ...draft.sections.flatMap((section) => section.items),
-  ].join(" \n "));
+  ].join(" \n ");
+  const corpus = normalizeText(source);
+  // Битая первая буква (1239: «Брест» → «арест», 1486: «Туристический» → «еуристический»): слово, которого нет
+  // в источнике, но есть источниковое с заглавной, отличающееся только первой буквой.
+  const capitals = new Set();
+  const properNouns = new Set();
+  for (const match of source.matchAll(/[А-ЯЁ][а-яё]{3,}/g)) {
+    const before = source.slice(0, match.index).replace(/[\s«"'(]+$/, "");
+    capitals.add(normalizeText(match[0]));
+    // Имя собственное — заглавная не в начале предложения: только такое слово нельзя спутать с обычным.
+    if (before && !/[.!?:;]$/.test(before)) properNouns.add(normalizeText(match[0]));
+  }
+  // atLineStart — слово стоит там, где ждём заглавную: сломанной может быть любая первая буква (1486: «еуристический»).
+  const broken = (word, atLineStart) => {
+    const clean = normalizeText(word);
+    if (corpus.includes(clean)) return null;
+    const candidates = atLineStart ? capitals : properNouns;
+    for (const candidate of candidates) if (candidate.length === clean.length && candidate[0] !== clean[0] && candidate.slice(1) === clean.slice(1)) return candidate;
+    return null;
+  };
   const numbers = new Set((corpus.match(/\d+(?:[.,]\d+)?/g) || []).map((number) => number.replace(",", ".")));
   const problems = [];
   const report = (block, line, what) => problems.push(`нет в источнике (§1) — ${block.title.match(/^\d+\s*день/i)?.[0] || block.title}: ${what} в «${line.slice(0, 70)}»`);
@@ -109,6 +154,11 @@ function checkFacts(parsed, draft) {
     for (const part of block.parts) {
       for (const raw of [part.title, ...part.lines].filter(Boolean)) {
         const line = raw.replace(/^[-•]\s+/, "");
+        for (const match of line.matchAll(/[а-яёА-ЯЁ]{4,}/g) || []) {
+          const before = line.slice(0, match.index).trimEnd();
+          const fixed = broken(match[0], !before || /[.!?:]$/.test(before));
+          if (fixed) report(block, line, `битое слово «${match[0]}» — в источнике «${fixed}»`);
+        }
         for (const number of line.match(/\d+(?:[.,]\d+)?/g) || []) if (!numbers.has(number.replace(",", "."))) report(block, line, `число ${number}`);
         for (const roman of line.match(/(?<![A-Za-z])[IVXLC]{1,7}(?![A-Za-z])/g) || []) {
           if (!new RegExp(`(^|[^a-z])${roman.toLowerCase()}([^a-z]|$)`).test(corpus)) report(block, line, `век ${roman}`);
@@ -122,6 +172,14 @@ function checkFacts(parsed, draft) {
           if (!corpus.includes(stem)) report(block, line, `«${match[0]}»`);
         }
       }
+    }
+  }
+  // Заголовок маршрута и названия дней тоже бывают битыми (1239).
+  for (const title of [parsed.route, ...parsed.blocks.map((block) => block.title)]) {
+    for (const match of String(title).matchAll(/[а-яёА-ЯЁ]{4,}/g) || []) {
+      const before = String(title).slice(0, match.index).trimEnd();
+      const fixed = broken(match[0], !before || /[.!?:–—-]$/.test(before));
+      if (fixed) problems.push(`нет в источнике (§1) — заголовок «${String(title).slice(0, 60)}»: битое слово «${match[0]}» — в источнике «${fixed}»`);
     }
   }
   return problems;
@@ -200,7 +258,10 @@ function checkRules(body, draft) {
   const problems = [];
   body.split("\n").forEach((line, lineIndex) => {
     const where = `строка ${lineIndex + 1}: «${line.trim().slice(0, 70)}»`;
-    if (/^(сбор|место сбора|встреча с гидом)(?![а-яё])/i.test(line.trim())) problems.push(`место сбора группы (§2.5) — ${where}`);
+    // Строку проверяем без разметки: жирный заголовок и пункт списка — та же строка программы (1079, 1926: 25.09.2026).
+    const plain = line.trim().replace(/^[-•]\s+/, "").replace(/^\*\*\s*/, "").replace(/\s*\*\*$/, "").trim();
+    if (/^(сбор|место сбора|встреча с гидом|встреча туристов|встреча группы)(?![а-яё])/i.test(plain)) problems.push(`место сбора группы (§2.5) — ${where}`);
+    for (const [pattern, advice] of TRUNCATED) if (pattern.test(plain)) problems.push(`обрыв текста (§1) — ${advice} — ${where}`);
     for (const [pattern, better] of AWKWARD) if (pattern.test(line)) problems.push(`неудачный оборот (§4.5), пиши «${better}» — ${where}`);
     for (const [pattern, advice] of EDITORIAL) if (pattern.test(line)) problems.push(`редполитика (§4.5): ${advice} — ${where}`);
     if (/(^|[\s(])(?:[01]?\d|2[0-3])[:.][0-5]\d(?=$|[\s),.;—–-])/.test(line)) problems.push(`время (§2.1) — ${where}`);
@@ -208,6 +269,20 @@ function checkRules(body, draft) {
     if (ANNOUNCEMENT.test(line)) problems.push(`анонс (§2.2) — ${where}`);
     if (draft.tourName && line.toLowerCase().includes(draft.tourName.toLowerCase())) problems.push(`название тура (§2.4) — ${where}`);
   });
+  return problems;
+}
+
+// Разметка пунктов (§3.5, §3.6): у экскурсии жирное название без точки в конце, у служебной строки заголовка нет.
+function checkStructure(parsed) {
+  const problems = [];
+  for (const block of parsed.blocks) {
+    if (DAY_HEADING.test(block.title) === false && !SECTION_TITLES.test(block.title.replace(/[:.]$/, ""))) continue;
+    for (const part of block.parts.filter((entry) => entry.title)) {
+      const where = `${block.title.match(/^\d+\s*день/i)?.[0] || block.title}, «${part.title.slice(0, 60)}»`;
+      if (/[.]$/.test(part.title)) problems.push(`точка в конце жирного названия (§3.6) — это служебная строка, а не экскурсия: убери звёздочки и точку — ${where}`);
+      else if (SERVICE_TITLE.test(part.title) && !part.lines.length) problems.push(`служебная строка жирным заголовком без описания (§3.5) — убери звёздочки и поставь её в группу служебных строк — ${where}`);
+    }
+  }
   return problems;
 }
 
@@ -270,8 +345,11 @@ function sourceChanges(draft) {
 }
 
 function tourSection(id, parsed, draft) {
-  const routeHtml = `<p><strong>${escapeHtml(parsed.route)}</strong></p>${parsed.duration ? `<p>${escapeHtml(parsed.duration)}</p>` : ""}`;
-  const routeMarkdown = `**${parsed.route}**${parsed.duration ? `\n\n${parsed.duration}` : ""}`;
+  const sourceUrl = draft.source || `https://vs-travel.ru/tour?id=${id}`;
+  const sourceHtml = `<p>Ссылка на тур: <a href="${escapeHtml(sourceUrl)}">${escapeHtml(sourceUrl)}</a></p>`;
+  const sourceMarkdown = `Ссылка на тур: ${sourceUrl}`;
+  const routeHtml = `<p><strong>${escapeHtml(parsed.route)}</strong></p>${parsed.duration ? `<p>${escapeHtml(parsed.duration)}</p>` : ""}${sourceHtml}`;
+  const routeMarkdown = `**${parsed.route}**${parsed.duration ? `\n\n${parsed.duration}` : ""}\n\n${sourceMarkdown}`;
   const blocks = parsed.blocks.map((block) => {
     const parts = block.parts.map((part) => ({ kind: part.title ? "item" : "group", html: partHtml(part), markdown: partMarkdown(part) }));
     return {
@@ -290,10 +368,11 @@ function tourSection(id, parsed, draft) {
         <p class="meta">Тур ${escapeHtml(id)}</p>
         <h1>${escapeHtml(parsed.route)}</h1>
         ${parsed.duration ? `<p class="duration">${escapeHtml(parsed.duration)}</p>` : ""}
+        <p class="source">Ссылка на тур: <a href="${escapeHtml(sourceUrl)}">${escapeHtml(sourceUrl)}</a></p>
       </div>
       <div class="actions">
         <button type="button" ${copy(routeHtml, routeMarkdown)}>Копировать маршрут</button>
-        <button type="button" class="primary" ${copy(routeHtml + blocks.map((block) => block.html).join(""), `${routeMarkdown}\n\n${blocks.map((block) => block.markdown).join("\n\n")}`)}>Копировать всё</button>
+        <button type="button" class="primary" ${copy(routeHtml + blocks.map((block) => block.html).join("") + FINAL_TEMPLATE_HTML, `${routeMarkdown}\n\n${blocks.map((block) => block.markdown).join("\n\n")}\n\n${FINAL_TEMPLATE_MARKDOWN}`)}>Копировать всё</button>
       </div>
     </header>
     ${blocks.map((block) => `
@@ -304,6 +383,13 @@ function tourSection(id, parsed, draft) {
       </div>
       ${block.parts.map((part) => `<div class="part ${part.kind}">${part.html}</div>`).join("\n      ")}
     </article>`).join("")}
+    <article class="block">
+      <div class="block-head">
+        <h2>Организационные детали</h2>
+        <button type="button" ${copy(FINAL_TEMPLATE_HTML, FINAL_TEMPLATE_MARKDOWN)}>Копировать</button>
+      </div>
+      <div class="part group">${FINAL_TEMPLATE_HTML}</div>
+    </article>
     <section class="history" aria-labelledby="history-${escapeHtml(id)}">
       <h2 id="history-${escapeHtml(id)}">История изменений</h2>
       <p class="hint">Для проверки — в менеджерку не копируется.</p>
@@ -457,7 +543,10 @@ for (const id of ids) {
   } catch (error) {
     problems.push(`разметка: ${error.message}`);
   }
-  if (parsed) problems.push(...checkFacts(parsed, draft));
+  if (parsed) problems.push(...checkFacts(parsed, draft), ...checkStructure(parsed));
+  // Продолжительность обязательна, пока черновик её знает (§3.2); места в маршруте разделяются тире, не дефисом (§3.1).
+  if (parsed && draft.duration && !parsed.duration) problems.push(`нет строки продолжительности «${draft.duration}» вторым абзацем (§3.2)`);
+  if (parsed && /\S\s-\s\S/.test(parsed.route)) problems.push(`дефис вместо тире « – » в заголовке маршрута (§3.1): «${parsed.route.slice(0, 70)}»`);
   // Длина — ориентир, не лимит (владелец 15.09.2026): отличительная деталь важнее знаков, сборку не останавливаем.
   const lengthNotes = parsed ? checkCompression(parsed, draft) : [];
 
@@ -480,11 +569,11 @@ for (const id of ids) {
   pages.push(htmlPath);
   console.log(`Тур ${id}: ${parsed.route} — дней ${parsed.blocks.filter((block) => DAY_HEADING.test(block.title)).length}, правила соблюдены → ${htmlPath}`);
 
-  // Документ живёт в MBOX, а не только в папке на диске: тур уходит артефактом в «Маршруты», оттуда
-  // же берётся Word-версия. Нет связи с MBOX — остаётся HTML, об этом говорится вслух.
+  // Документ живёт в MBOX, а не только в папке на диске: HTML-тур уходит артефактом в «Маршруты».
+  // Нет связи с MBOX — остаётся локальный HTML, об этом говорится вслух.
   const published = await publishTour({ id, route: parsed.route, html, readyDir: READY_DIR });
-  if (published.skipped) console.log(`  Артефакт MBOX и Word не сохранены: ${published.skipped}`);
-  else console.log(`  MBOX: ${published.updated ? "обновлён" : "создан"} артефакт «Маршруты» #${published.artifactId}, Word → ${published.docxPath}`);
+  if (published.skipped) console.log(`  Артефакт MBOX не сохранён: ${published.skipped}`);
+  else console.log(`  MBOX: ${published.updated ? "обновлён" : "создан"} артефакт «Маршруты» #${published.artifactId}`);
   if (lengthNotes.length) {
     console.log(`  Длиннее ориентира — сократи второстепенное, если есть; отличительные детали (конфессия, век, материал, имя) не вырезай:`);
     for (const note of lengthNotes) console.log(`    - ${note}`);

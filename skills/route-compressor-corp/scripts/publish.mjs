@@ -1,13 +1,9 @@
 #!/usr/bin/env node
-// Готовый тур уезжает в MBOX: страница становится артефактом в разделе «Маршруты» проекта
-// «Вокруг света», а рядом с HTML появляется Word-версия. Конвертер в .docx живёт на сервере MBOX
-// (server/docx.mjs) и общий для всех документов — навык не собирает свой собственный Word.
+// Готовый тур уезжает в MBOX: HTML-страница становится артефактом в разделе «Маршруты» проекта
+// «Вокруг света». Word-файлы навык не генерирует.
 //
 // Без доступа к MBOX (нет MBOX_URL/MBOX_PASSWORD, сервер не отвечает) навык не падает: HTML уже
 // собран, публикация просто пропускается с честной строкой в отчёте.
-import fs from "node:fs";
-import path from "node:path";
-
 const PROJECT_NAME = process.env.ROUTE_CORP_PROJECT || "Вокруг света";
 const CATEGORY = "Маршруты";
 
@@ -47,11 +43,11 @@ async function projectId() {
 }
 
 /**
- * Кладёт тур в артефакты и сохраняет Word рядом с HTML.
+ * Кладёт HTML-тур в артефакты MBOX.
  * Имя артефакта закреплено за номером тура: пересборка обновляет тот же документ, а не плодит копии.
- * Возвращает { artifactId, docxPath } либо { skipped } с причиной.
+ * Возвращает { artifactId } либо { skipped } с причиной.
  */
-export async function publishTour({ id, route, html, readyDir }) {
+export async function publishTour({ id, route, html }) {
   if (!mboxConfigured()) return { skipped: "MBOX_URL/MBOX_PASSWORD не заданы — тур не отправлен в артефакты" };
   const name = `Тур ${id} — ${route}.html`;
   try {
@@ -65,10 +61,7 @@ export async function publishTour({ id, route, html, readyDir }) {
     })).json();
     const artifactId = saved.artifact?.id || existing?.id;
 
-    const docx = Buffer.from(await (await api(`/api/mbox/artifacts/${artifactId}/docx`)).arrayBuffer());
-    const docxPath = path.join(readyDir, `tour-${id}.docx`);
-    fs.writeFileSync(docxPath, docx);
-    return { artifactId, docxPath, updated: Boolean(existing) };
+    return { artifactId, updated: Boolean(existing) };
   } catch (error) {
     return { skipped: error.message };
   }
