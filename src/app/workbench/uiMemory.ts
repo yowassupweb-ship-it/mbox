@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { scopedStorageKey } from "./tabs";
 
 /**
  * Локальная память интерфейса сверх раскладки (usePersistentState):
@@ -17,7 +18,7 @@ const MAX_DRAFT_CHARS = 200_000;
 
 function readBucket<T>(name: string): Bucket<T> {
   try {
-    const raw = window.localStorage.getItem(name);
+    const raw = window.localStorage.getItem(scopedStorageKey(name));
     const parsed = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
@@ -35,7 +36,7 @@ function writeEntry<T>(name: string, id: string, value: T | undefined) {
     if (keys.length > limit) {
       keys.sort((a, b) => bucket[a].t - bucket[b].t).slice(0, keys.length - limit).forEach((key) => delete bucket[key]);
     }
-    window.localStorage.setItem(name, JSON.stringify(bucket));
+    window.localStorage.setItem(scopedStorageKey(name), JSON.stringify(bucket));
   } catch {
     // квота или приватный режим — живём без памяти
   }

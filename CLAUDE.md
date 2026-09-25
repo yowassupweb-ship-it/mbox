@@ -123,6 +123,38 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    `public/downloads/latest.yml`). `MBOX_UI=remote` — старый режим загрузки сайта (удобно для HMR).
    Изменения `mbox-desktop/main.js` требуют перезапуска приложения, перезагрузки страницы мало.
 
+16. **Чаты консоли (props.thread).** «Новый чат» в `AgentChat.tsx` заводит id чата, его несут вопрос и ответ.
+   Список с названиями и архивом — таблица `chat_threads` (`server/chat-threads.mjs`, `/api/mbox/agent/threads`,
+   прод и dev). Наблюдатели Claude/Codex продолжают сессию CLI внутри чата (`claude --resume`, `codex exec resume`,
+   соответствие чат → сессия в `~/.mbox/chat-sessions-*.json`, `scripts/chat-threads.mjs`) и не вклеивают историю
+   заново; в `props.work` ответа — `context_tokens`/`context_window` для индикатора нагрузки. Джарвис берёт историю
+   только из своего чата. Наблюдателей держит живыми `mbox-desktop/main.js` (сторож раз в минуту + перезапуск
+   после падения); ручная остановка из интерфейса снимает агента со сторожа.
+17. **Доступ к заметкам.** `notes.owner_user_id` + `access_level` (`private` по умолчанию | `project` | `all`).
+   Уровень, проект, ссылки и удаление меняет только владелец. Инструменты Джарвиса получают `viewer` и видят
+   заметки по тем же правилам. Будущие таблицы MBOX — по той же модели.
+18. **Таблицы и Word в локальных папках.** Операции `read_table`/`write_cells`/`read_doc`/`write_data` очереди
+   `workspace_ops` выполняет страница (`src/app/workbench/officeOps.ts`, exceljs/mammoth — те же, что во вкладке);
+   `write_docx` сервер превращает в `write_data` через `server/docx.mjs` (markdown-таблицы в Word не переносятся).
+   MCP: `note_*`, `workspace_edit_file`, `workspace_read_table` (`styles=true` — оформление), `workspace_write_cells`,
+   `workspace_format_cells` (заливка/шрифт/рамки; едет той же операцией `write_cells` с полем `format`), `workspace_read_document`,
+   `workspace_write_docx`; `show=true` открывает документ вкладкой у человека. Под наблюдателем MCP не дописывает
+   к ответам пуш и напоминание (`MBOX_MCP_PUSH=off`) — это были лишние токены на каждом вызове.
+
+19. **Участники (role member) и проекты.** Всё делится по проектам (`project_memberships`). Хранилище S3 — один бакет,
+   у проекта папка `projects/<id>/`; участник видит и пишет только в папках своих проектов и в `notes/<id>/` доступных
+   заметок (`storageAccessFor` в прод-сервере, то же в `vite.config.ts`; настройки бакета — только владельцу). Джарвис
+   у участника — по флагу `users.jarvis_enabled` (админка «Команда»), видит только его проекты (`allowed_project_ids`).
+   Наблюдатели Claude/Codex участникам не отвечают (`props.mbox_owner === false`): они работают на машине владельца.
+   Новый маршрут для участника — в `memberRouteAllowed`, иначе 403.
+20. **Контекст фокуса в чате.** Чипы над полем ввода — активная вкладка и вторая область (`chatFocus` в Workbench);
+   уходят в `props.context` сообщения. Наблюдатели добавляют их в промпт (`focusLines` в `scripts/chat-threads.mjs`),
+   Джарвис — в системный промпт. Новый вид вкладки, о котором агенту стоит знать, — добавить в `chatFocus`.
+21. **Редактор таблиц** — `SheetEditor.tsx` (виртуальная сетка поверх листа exceljs) для .xlsx/.csv из локальных папок
+   (`LocalOfficeDocument`) и из хранилища (`StorageSheetDocument`, вкладка `s3sheet:<ключ>`). exceljs формулы не
+   считает — `formulaEval.ts` пересчитывает их после каждой правки и пишет result в файл; незнакомая функция
+   оставляет результат, посчитанный Excel.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

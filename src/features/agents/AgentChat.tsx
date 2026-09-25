@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowUp, AtSign, Brain, Check, ChevronDown, CornerDownRight, DollarSign, FileText, Hash, Paperclip, Reply, Slash, Terminal, Wrench, X } from "lucide-react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, Terminal, Wrench, X } from "lucide-react";
+import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
 import { effectiveStatus, liveRunOf } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
-import { usePersistentState } from "../../app/workbench/tabs";
+import { scopedStorageKey, usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
 import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { AGENT_STEP_EVENT } from "../../hooks/useRealtime";
 import { markOverlay } from "../../app/workbench/BrowserDocument";
 import { formatBytes } from "../../lib/format";
+import type { ChatDebug } from "../../app/workbench/ConsoleArea";
+import { ChatHeadSlot } from "../../app/workbench/chatHeadSlot";
+import { createPortal } from "react-dom";
 
 const JARVIS_NAME = "Джарвис";
 const CHAT_HISTORY_LIMIT = 50;
@@ -26,6 +30,7 @@ const SLASH_COMMANDS = [
   { value: "who", hint: "что известно про агента" },
   { value: "jarvis", hint: "из чего состоит Джарвис — агенты, инструменты, скиллы" },
   { value: "clear", hint: "очистить окно" },
+  { value: "new", hint: "новый чат — агент начнёт с чистого контекста" },
 ];
 
 /** Ручной список — тот же набор function-схем живёт в JARVIS_TOOLS на сервере (см.
@@ -80,6 +85,15 @@ const JARVIS_DESCRIPTION = [
 const TRIGGER_ICON = { "@": AtSign, "/": Slash, "$": DollarSign, "#": Hash } as const;
 
 type Suggestion = { value: string; hint?: string };
+
+/**
+ * Что у человека открыто в рабочем месте (активная вкладка и вторая область). Уходит агенту вместе с
+ * сообщением (props.context), чтобы «поправь тут заголовок» не начиналось с поиска файла по диску.
+ * Чип можно отжать — тогда этот пункт агенту не отправится.
+ */
+export type FocusItem = { key: string; kind: string; title: string; id?: string; detail?: string };
+
+const FOCUS_ICON: Record<string, typeof FileText> = { file: FileText, diff: FileText, note: StickyNote, todo: SquareCheck, web: Globe, storage: Table2, memory: Brain };
 
 /** Ведущее @Имя в начале сообщения — раньше был отдельный ростер кнопок для выбора адресата,
  * теперь то же самое просто печатается в тексте (см. подсказки по @) и парсится отсюда. */
@@ -256,6 +270,37 @@ function snippet(text: string, max = 140) {
  * Разговор с одним агентом: сообщения человека ему (props.to или ведущее @Имя) и ответы этого агента
  * человеку. Реплики агента, адресованные другому агенту, сюда не попадают.
  */
+/**
+ * Чат, к которому относится сообщение (props.thread). Пусто — старый общий чат.
+ *
+ * Зачем чаты: агенты Claude и Codex продолжают сессию своего CLI внутри чата и не перечитывают
+ * историю заново, а новый чат начинается с чистого контекста. Раньше в каждый запрос вклеивались
+ * десятки последних реплик всей консоли, и лимит подписки уходил на чтение чужих разговоров.
+ */
+function threadOfItem(item: AgentInboxItem) {
+  return typeof item.props?.thread === "string" ? item.props.thread : "";
+}
+
+function newThreadId() {
+  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+type ChatThread = { id: string; title: string; custom_title?: boolean; last_at: string; messages: number; peer: string | null; last_agent: string | null; last_work?: LogLine["work"] | null };
+
+/** Сколько занимает контекст сессии агента в чате: последний ответ с этой цифрой. */
+type ContextLoad = { tokens: number; window: number; agent: string };
+
+function contextLoadText(load: ContextLoad) {
+  const percent = load.window ? Math.round((load.tokens / load.window) * 100) : 0;
+  return `${formatWorkTokens(load.tokens)}${load.window ? ` из ${formatWorkTokens(load.window)} · ${percent}%` : ""}`;
+}
+
+function threadMatchesPeer(thread: ChatThread, peer: string) {
+  if (!peer) return true;
+  const names = peer.toLowerCase() === "chatgpt" ? ["chatgpt", "codex"] : [peer.toLowerCase()];
+  return names.includes(String(thread.peer || "").toLowerCase()) || names.includes(String(thread.last_agent || "").toLowerCase());
+}
+
 function belongsToPeer(item: AgentInboxItem, peer: string) {
   const name = peer.toLowerCase();
   const names = name === "chatgpt" ? new Set(["chatgpt", "codex"]) : new Set([name]);
@@ -362,14 +407,48 @@ function randomThinkingVerb(exclude?: string) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+/**
+ * Ошибка наблюдателя как её видит человек: «codex.exe завершился с кодом 1. Исчерпан лимит подписки:
+ * {"type":"error","message":"…"}» превращается в текст из message, а код выхода уходит в подробности.
+ */
+function humanizeAgentError(text: string) {
+  let message = text.trim();
+  let detail = "";
+  const exit = message.match(/^(\S+ завершился с кодом -?\d+)\.\s*/);
+  if (exit) { detail = exit[1]; message = message.slice(exit[0].length); }
+  const from = message.indexOf("{");
+  const to = message.lastIndexOf("}");
+  if (from >= 0 && to > from) {
+    try {
+      const parsed = JSON.parse(message.slice(from, to + 1)) as { message?: unknown; error?: { message?: unknown } };
+      const inner = typeof parsed.message === "string" ? parsed.message : typeof parsed.error?.message === "string" ? parsed.error.message : "";
+      if (inner) {
+        const lead = message.slice(0, from).trim().replace(/:$/, "");
+        message = lead ? `${lead}.\n${inner}` : inner;
+      }
+    } catch { /* не JSON — оставляем как есть */ }
+  }
+  const seen = new Set<string>();
+  message = message
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\[[\w:.-]+\]\s*\{.*\}$/.test(line) && !/^\S+ завершился с кодом -?\d+\.?$/.test(line))
+    .filter((line) => (seen.has(line) ? false : (seen.add(line), true)))
+    .join("\n");
+  return { message, detail };
+}
+
 type MessageAction = { label: string; value: string };
 
 /** Что сервер разрешает выбрать в поле ввода — см. jarvisModels в server/jarvis.mjs. */
 type JarvisCatalog = {
-  models: Array<{ id: string; label: string; provider: string; role: string; agent?: string }>;
+  /** У моделей Claude и ChatGPT свой набор уровней effort — его публикует CLI на машине владельца. */
+  models: Array<{ id: string; label: string; provider: string; role: string; agent?: string; efforts?: string[]; default_effort?: string }>;
   efforts: Array<{ id: string; label: string; hint: string }>;
+  effortLabels: Record<string, { label: string; hint: string }>;
   /** Что сработает, если человек ничего не выбрал — показываем это же в поле ввода. */
   defaultModel: string;
+  defaults: Record<string, string>;
   defaultEffort: string;
 };
 
@@ -407,25 +486,35 @@ function ChainTimeline({ steps }: { steps: ChainStep[] }) {
         </button>
       )}
       <ol className="console-chain">
-        {shown.map((step, index) => (
-          <li key={hidden + index} className={step.kind === "text" ? "is-text" : step.is_error ? "is-error" : undefined}>
-            {step.kind === "text" ? (
-              <p className="console-chain-say">{step.text}</p>
-            ) : (
-              /* Аргументы и вывод свёрнуты: в строке остаётся только что за шаг и сколько занял,
-                 а содержимое раскрывается щелчком по строке — иначе один Read забивает пол-экрана. */
+        {shown.map((step, index) => {
+          if (step.kind === "text") {
+            return (
+              <li key={hidden + index} className="is-text">
+                <p className="console-chain-say">{step.text}</p>
+              </li>
+            );
+          }
+          const view = describeStep(step);
+          const Icon = view.icon;
+          return (
+            <li key={hidden + index} className={step.is_error ? "is-error" : undefined}>
+              {/* Аргументы и вывод свёрнуты: в строке — что за шаг словами и с чем, а содержимое
+                  раскрывается щелчком по строке — иначе один Read забивает пол-экрана. */}
               <details className="console-chain-step">
-                <summary>
-                  <b>{step.name || "…"}</b>
-                  {step.hint && <span>{step.hint}</span>}
+                <summary title={view.tool}>
+                  <Icon size={12} className="console-chain-icon" />
+                  <b>{view.label}</b>
+                  {view.detail && <span>{view.detail}</span>}
+                  {step.is_error && <em className="console-chain-err">{isAccessError(view.error) ? "нет доступа" : "ошибка"}</em>}
                   {step.ms ? <time>{step.ms >= 1000 ? `${Math.round(step.ms / 1000)} с` : `${step.ms} мс`}</time> : null}
                 </summary>
+                {view.error && <p className="console-chain-reason">{view.error}</p>}
                 {step.input && <pre className="console-chain-io" data-label="IN">{step.input}</pre>}
                 {step.output && <pre className="console-chain-io" data-label="OUT">{step.output}</pre>}
               </details>
-            )}
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
     </>
   );
@@ -532,8 +621,13 @@ const EFFORT_LABEL: Record<string, string> = { low: "быстро", medium: "о�
  * заняло и во сколько обошлось; вместе со списком инструментов ниже это и есть «что он делал».
  */
 function workSummary(work: LogLine["work"]) {
-  if (!work) return "";
+  const parts = workParts(work);
+  return parts.length ? `Ход работы · ${parts.join(" · ")}` : "";
+}
+
+function workParts(work: LogLine["work"]) {
   const parts: string[] = [];
+  if (!work) return parts;
   const total = Number(work.total_tokens) || ((Number(work.input_tokens) || 0) + (Number(work.output_tokens) || 0));
   if (total) parts.push(`${formatWorkTokens(total)} токенов`);
   const input = Number(work.input_tokens) || 0;
@@ -547,7 +641,23 @@ function workSummary(work: LogLine["work"]) {
   else if (thinking) parts.push(`размышление ${formatWorkTokens(thinking)}`);
   const seconds = Math.round((Number(work.duration_ms) || 0) / 1000);
   if (seconds) parts.push(seconds >= 60 ? `${Math.floor(seconds / 60)} мин ${seconds % 60} с` : `${seconds} с`);
-  return parts.length ? `Ход работы · ${parts.join(" · ")}` : "";
+  if (work.resumed) parts.push("продолжение чата");
+  return parts;
+}
+
+/** Заголовок цепочки: крупно — что агент делал, мелко рядом — шаги, время и токены. */
+function ChainTitle({ steps, work }: { steps: ChainStep[]; work?: LogLine["work"] }) {
+  const tools = steps.filter((step) => step.kind === "tool").length;
+  const digest = stepsDigest(steps);
+  const stats = workParts(work);
+  return (
+    <p className="console-chain-title">
+      <strong>{digest || "Ход работы"}</strong>
+      <span title={stats.join(" · ") || undefined}>
+        {tools} {plural(tools, "шаг", "шага", "шагов")}{stats.length ? ` · ${stats.join(" · ")}` : ""}
+      </span>
+    </p>
+  );
 }
 
 function formatWorkTokens(count: number) {
@@ -603,6 +713,11 @@ type LogLine = {
     total_tokens?: number;
     duration_ms?: number;
     turns?: number;
+    /** Ответ продолжил сессию агента в этом чате — история шла из кеша, а не заново. */
+    resumed?: boolean;
+    /** Размер контекста сессии после ответа и окно модели — индикатор нагрузки чата. */
+    context_tokens?: number;
+    context_window?: number;
   };
   /** Ответ не получился: наблюдатель агента упал. Видно сразу, а не только в логе. */
   failed?: boolean;
@@ -894,7 +1009,7 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
   );
 }
 
-export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false, peer = "" }: {
+export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId, currentProjectName, onSaved, embedded = false, visible = false, peer = "", debug, jarvisEnabled = true, focus = [] }: {
   inbox: AgentInboxItem[];
   agents: AgentActivity[];
   runs: AgentRun[];
@@ -908,11 +1023,18 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   visible?: boolean;
   /** Чат с одним агентом: видна только переписка с ним, сообщения уходят ему без @. Пусто — общий чат. */
   peer?: string;
+  /** Режим отладки: вывод процесса агента, спрятанный за кнопкой в шапке чата. */
+  debug?: ChatDebug;
+  /** Джарвис включён у аккаунта (у участника — по решению владельца). */
+  jarvisEnabled?: boolean;
+  /** Открытое сейчас в рабочем месте — чипы над полем ввода, уходят агенту в props.context. */
+  focus?: FocusItem[];
 }) {
   const [openState, setOpen] = useState(false);
   const open = embedded ? visible : openState;
+  const effectiveProjectId = projectId || projects[0]?.id || "";
   const [panelWidth, setPanelWidth] = useState(() => {
-    const stored = Number(window.localStorage.getItem("mbox.console.width"));
+    const stored = Number(window.localStorage.getItem(scopedStorageKey("mbox.console.width")));
     return stored > 0 ? stored : Math.round(window.innerWidth / 3);
   });
   const resizingRef = useRef(false);
@@ -920,15 +1042,32 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [text, setText] = useDraft(peer ? `chat:input:${peer}` : "chat:input", "");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   // Чем отвечать: модель и «усилие» размышления. Пусто — как было, решает сервер (см. jarvisModels).
-  const [model, setModel] = usePersistentState("mbox.chat.model", "");
-  const [effort, setEffort] = usePersistentState("mbox.chat.effort", "");
-  const [catalog, setCatalog] = useState<JarvisCatalog>({ models: [], efforts: [], defaultModel: "", defaultEffort: "" });
+  // У каждого вида чата свой выбор: gpt-6-luna, выбранная для ChatGPT, однажды ушла к Claude.
+  const [model, setModel] = usePersistentState(`mbox.chat.model:${peer || "common"}`, "");
+  const [effort, setEffort] = usePersistentState(`mbox.chat.effort:${peer || "common"}`, "");
+  const [threadsAside, setThreadsAside] = usePersistentState("mbox.chat.threadsAside", false);
+  // Отжатые чипы фокуса — по ключу вкладки: снова открытая вкладка остаётся отжатой, пока её не включат.
+  const [mutedFocus, setMutedFocus] = useState<string[]>([]);
+  const sharedFocus = focus.filter((item) => !mutedFocus.includes(item.key));
+  const [catalog, setCatalog] = useState<JarvisCatalog>({ models: [], efforts: [], effortLabels: {}, defaultModel: "", defaults: {}, defaultEffort: "" });
+  // Текущий чат у каждого собеседника свой; пусто — старый общий чат без thread.
+  const [thread, setThread] = usePersistentState(peer ? `mbox.chat.thread:${peer}` : "mbox.chat.thread", "");
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [threadMenu, setThreadMenu] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // Сообщения выбранного чата, которых нет среди 200 последних в общем inbox (старый чат).
+  const [threadInbox, setThreadInbox] = useState<AgentInboxItem[]>([]);
   useEffect(() => {
     let alive = true;
-    fetchJson<JarvisCatalog & { default_model?: string; default_effort?: string }>("/api/mbox/agent/models")
-      .then((data) => { if (alive) setCatalog({ models: data.models || [], efforts: data.efforts || [], defaultModel: data.default_model || "", defaultEffort: data.default_effort || "" }); })
+    // Каталог публикуют наблюдатели при старте — перечитываем при возврате в окно и раз в 5 минут,
+    // иначе чат, открытый раньше публикации, так и показывал бы запасной список.
+    const load = () => fetchJson<Partial<JarvisCatalog> & { default_model?: string; default_effort?: string; effort_labels?: JarvisCatalog["effortLabels"] }>("/api/mbox/agent/models")
+      .then((data) => { if (alive) setCatalog({ models: data.models || [], efforts: data.efforts || [], effortLabels: data.effort_labels || {}, defaultModel: data.default_model || "", defaults: data.defaults || {}, defaultEffort: data.default_effort || "" }); })
       .catch(() => { /* старый сервер без этой ручки — просто нет выбора, как раньше */ });
-    return () => { alive = false; };
+    void load();
+    const timer = window.setInterval(load, 5 * 60_000);
+    window.addEventListener("focus", load);
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", load); };
   }, []);
   const [cursor, setCursor] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
@@ -961,21 +1100,38 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [, setElapsedTick] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  // В консоли шапка чата уезжает в строку «Общий · Claude · ChatGPT» (одна строка хрома вместо двух).
+  const headSlot = useContext(ChatHeadSlot);
+  const placeThreads = (node: ReactNode) => (headSlot ? createPortal(node, headSlot) : node);
   const lastComposerHeightRef = useRef(0);
   const liveMention = parseMention(text);
   // Модели у агентов разные: у Джарвиса это Gemini/Groq на сервере, у Claude — алиасы его CLI на
   // машине владельца. Показываем набор того, кому сейчас пишут; адресат не выбран — все подряд.
-  const addressee = (liveMention || peer || "").toLowerCase();
-  const shownModels = addressee
-    ? catalog.models.filter((item) => {
-      const agent = (item.agent || "").toLowerCase();
-      return agent === addressee || (addressee === "chatgpt" && agent === "codex") || (addressee === "codex" && agent === "chatgpt");
-    })
-    : catalog.models;
+  const addressee = (liveMention || peer || JARVIS_NAME).toLowerCase();
+  const shownModels = catalog.models.filter((item) => {
+    const agent = (item.agent || "").toLowerCase();
+    return agent === addressee || (addressee === "chatgpt" && agent === "codex") || (addressee === "codex" && agent === "chatgpt");
+  });
   const modelAllowed = !model || shownModels.some((item) => item.id === model);
   const effectiveModel = modelAllowed ? model : "";
-  const shownDefaultModel = shownModels.some((item) => item.id === catalog.defaultModel) ? catalog.defaultModel : (shownModels[0]?.id || "");
-  const defaultModelLabel = shownModels.find((item) => item.id === shownDefaultModel)?.label || shownModels[0]?.label || "по умолчанию";
+  // undefined — сервер не прислал defaults (Джарвис или старый сервер); "" — «как настроено в CLI агента».
+  const agentDefault = Object.entries(catalog.defaults).find(([agent]) => agent.toLowerCase() === (addressee === "codex" ? "chatgpt" : addressee))?.[1];
+  const shownDefaultModel = agentDefault !== undefined
+    ? (shownModels.some((item) => item.id === agentDefault) ? agentDefault : "")
+    : ([catalog.defaultModel].find((id) => id && shownModels.some((item) => item.id === id)) || shownModels[0]?.id || "");
+  const defaultModelLabel = shownModels.find((item) => item.id === shownDefaultModel)?.label || (agentDefault === "" ? "Как в CLI" : shownModels[0]?.label || "по умолчанию");
+  // Уровни effort — у выбранной модели свои (у Codex есть «ultra», у Haiku их нет вовсе); у Джарвиса — общие три.
+  const activeModel = shownModels.find((item) => item.id === (effectiveModel || shownDefaultModel));
+  // Модель не выбрана и CLI решает сам — показываем только уровни, которые есть у всех его моделей.
+  const commonEfforts = shownModels.every((item) => item.efforts)
+    ? shownModels.reduce<string[] | null>((acc, item) => (acc ? acc.filter((id) => item.efforts!.includes(id)) : [...item.efforts!]), null)
+    : null;
+  const effortIds = activeModel?.efforts ?? (shownModels.length && !activeModel ? commonEfforts : null);
+  const shownEfforts = effortIds
+    ? effortIds.map((id) => ({ id, label: catalog.effortLabels[id]?.label || id, hint: catalog.effortLabels[id]?.hint || "" }))
+    : catalog.efforts;
+  const shownDefaultEffort = effortIds ? (activeModel?.default_effort || "") : catalog.defaultEffort;
+  const effectiveEffort = effort && shownEfforts.some((item) => item.id === effort) ? effort : "";
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1057,13 +1213,82 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     });
   }
 
-  const conversation = useMemo(
-    () => [...inbox]
-      .filter((item) => CONVERSATION.has(item.item_type) && (!peer || belongsToPeer(item, peer)))
+  const inboxVersion = inbox.reduce((latest, item) => (item.updated_at > latest ? item.updated_at : latest), "");
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetchJson<{ threads: ChatThread[] }>("/api/mbox/agent/threads")
+      .then((data) => { if (alive) setThreads(data.threads || []); })
+      .catch(() => { /* старый сервер без чатов — остаётся общий */ });
+    return () => { alive = false; };
+  }, [open, inboxVersion]);
+  useEffect(() => {
+    if (!thread || !open) { setThreadInbox([]); return; }
+    let alive = true;
+    fetchJson<{ inbox: AgentInboxItem[] }>(`/api/mbox/agent/inbox?thread=${encodeURIComponent(thread)}&limit=200`)
+      .then((data) => { if (alive) setThreadInbox(data.inbox || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [thread, open, inboxVersion]);
+  const shownThreads = useMemo(() => threads.filter((item) => threadMatchesPeer(item, peer)), [threads, peer]);
+  const currentThread = threads.find((item) => item.id === thread);
+  const conversation = useMemo(() => {
+    const byId = new Map<string, AgentInboxItem>();
+    for (const item of [...threadInbox, ...inbox]) byId.set(String(item.id), item);
+    const all = [...byId.values()].filter((item) => CONVERSATION.has(item.item_type) && (!peer || belongsToPeer(item, peer)));
+    // Ответ агента, который ещё не знает про чаты (старая версия наблюдателя), приходит без метки —
+    // но он отвечает на сообщение из этого чата, значит, и показывать его надо здесь.
+    const own = new Set(all.filter((item) => threadOfItem(item) === thread).map((item) => String(item.id)));
+    return all
+      .filter((item) => threadOfItem(item) === thread || (thread !== "" && !threadOfItem(item) && own.has(repliedId(item))))
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .slice(-CHAT_HISTORY_LIMIT),
-    [inbox, peer],
-  );
+      .slice(-CHAT_HISTORY_LIMIT);
+  }, [inbox, threadInbox, peer, thread]);
+  const refreshThreads = useCallback(() => {
+    fetchJson<{ threads: ChatThread[] }>("/api/mbox/agent/threads").then((data) => setThreads(data.threads || [])).catch(() => {});
+  }, []);
+  const switchThread = useCallback((id: string) => {
+    setThread(id);
+    setThreadMenu(false);
+    setRenaming(null);
+    setLocalLines([]);
+    setReplyTo(null);
+  }, [setThread]);
+  // Чат сохраняется на сервере сразу — он есть в списке до первого сообщения и на любом устройстве.
+  const startNewChat = useCallback(() => {
+    const id = newThreadId();
+    setThreads((current) => [{ id, title: "Новый чат", last_at: new Date().toISOString(), messages: 0, peer: peer || null, last_agent: null }, ...current]);
+    switchThread(id);
+    fetchJson("/api/mbox/agent/threads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, peer }) })
+      .then(refreshThreads)
+      .catch(() => {});
+  }, [peer, refreshThreads, switchThread]);
+  const renameThread = useCallback((id: string, title: string) => {
+    setRenaming(null);
+    const clean = title.trim();
+    if (!clean) return;
+    setThreads((current) => current.map((item) => item.id === id ? { ...item, title: clean, custom_title: true } : item));
+    fetchJson(`/api/mbox/agent/threads/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: clean }) })
+      .then(refreshThreads)
+      .catch(() => {});
+  }, [refreshThreads]);
+  const archiveThread = useCallback((id: string) => {
+    setThreads((current) => current.filter((item) => item.id !== id));
+    if (id === thread) switchThread("");
+    fetchJson(`/api/mbox/agent/threads/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ archived: true }) })
+      .then(refreshThreads)
+      .catch(() => {});
+  }, [thread, refreshThreads, switchThread]);
+  // Нагрузка контекста: последний ответ агента, у которого наблюдатель знает размер сессии.
+  const contextLoad = useMemo<ContextLoad | null>(() => {
+    for (let index = conversation.length - 1; index >= 0; index -= 1) {
+      const work = conversation[index].props?.work as LogLine["work"] | undefined;
+      const tokens = Number(work?.context_tokens) || 0;
+      if (tokens) return { tokens, window: Number(work?.context_window) || 0, agent: conversation[index].agent_name };
+    }
+    return null;
+  }, [conversation]);
+  const contextShare = contextLoad?.window ? contextLoad.tokens / contextLoad.window : 0;
   const inboxById = useMemo(() => new Map(inbox.map((item) => [String(item.id), item])), [inbox]);
 
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
@@ -1129,10 +1354,23 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return () => window.removeEventListener(AGENT_STEP_EVENT, listener);
   }, [awaitingJarvisId]);
 
+  // «Работает» — только когда агент правда работает: есть живой запуск или фаза от наблюдателя.
+  // Раньше плашка писала «ChatGPT: работает… 80с», пока наблюдатель был мёртв или вне окна.
+  const awaitingDead = Boolean(peer && debug?.process?.state === "dead" && awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase());
   const awaitingPhase = useMemo(() => {
     if (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase()) return awaitingJarvisPhase;
-    return agents.find((agent) => agent.name.toLowerCase() === awaitingAgent.toLowerCase())?.phase || null;
-  }, [awaitingAgent, awaitingJarvisPhase, agents]);
+    const family = (name: string) => (/^(codex|chatgpt)$/i.test(name) ? "chatgpt" : name.toLowerCase());
+    const row = agents.find((agent) => family(agent.name) === family(awaitingAgent));
+    // Шаги по сокету — самый прямой признак работы: Codex не шлёт ни фазу, ни запуск, а цепочка идёт.
+    const lastStep = liveSteps[liveSteps.length - 1];
+    if (lastStep) return lastStep.kind === "text" ? "пишет ответ" : `${describeStep(lastStep).label.toLowerCase()}${liveSteps.length > 1 ? ` · шаг ${liveSteps.length}` : ""}`;
+    if (row?.phase) return row.phase;
+    if (!row) return "не на связи — сообщение ждёт, пока запустится наблюдатель";
+    const state = agentState(row, runs);
+    if (state.key === "working") return row.phase || state.label || "работает";
+    if (state.key === "offline") return "не на связи — сообщение ждёт, пока запустится наблюдатель";
+    return "в очереди, ещё не начал";
+  }, [awaitingAgent, awaitingJarvisPhase, agents, runs, liveSteps]);
 
   // Секунды в "думает…" — раньше плашка просто висела без обратной связи, сколько ещё ждать.
   useEffect(() => {
@@ -1179,10 +1417,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     : "агентов нет на связи";
 
   const [readAt, setReadAt] = useState(() => {
-    const stored = window.localStorage.getItem(READ_KEY);
+    const stored = window.localStorage.getItem(scopedStorageKey(READ_KEY));
     if (stored) return stored;
     const now = new Date().toISOString();
-    window.localStorage.setItem(READ_KEY, now);
+    window.localStorage.setItem(scopedStorageKey(READ_KEY), now);
     return now;
   });
 
@@ -1195,7 +1433,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   useEffect(() => {
     if (!open || !unread) return;
     const last = unreadItems[unreadItems.length - 1].created_at;
-    window.localStorage.setItem(READ_KEY, last);
+    window.localStorage.setItem(scopedStorageKey(READ_KEY), last);
     setReadAt(last);
   }, [open, unread, unreadItems]);
 
@@ -1224,7 +1462,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       resizingRef.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      setPanelWidth((current) => { window.localStorage.setItem("mbox.console.width", String(current)); return current; });
+      setPanelWidth((current) => { window.localStorage.setItem(scopedStorageKey("mbox.console.width"), String(current)); return current; });
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     }
@@ -1355,6 +1593,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           "  /who <имя>        — что известно про агента",
           "  /jarvis           — из чего состоит Джарвис: агенты, tools, skills",
           "  /clear            — очистить окно (переписка не удаляется)",
+          "  /new              — новый чат: агент начнёт с чистого контекста",
           "  /help             — эта справка",
           "что угодно без / — уходит агентам в общую или адресную (кнопки выше) переписку",
           "",
@@ -1391,6 +1630,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         setLocalLines([]);
         setPending([]);
         return;
+      case "new":
+        startNewChat();
+        return;
       default:
         pushLocal("sys", `неизвестная команда: /${cmd} — попробуй /help`);
     }
@@ -1420,7 +1662,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     const replying = overrideText === undefined ? replyTo : null;
     if (replying) setReplyTo(null);
     // Адресат: явное @Имя, иначе собеседник этого чата, иначе автор сообщения, на которое отвечаем.
-    const mentionTarget = parseMention(raw) || peer || (replying && replying.actor !== HUMAN ? replying.actor : "");
+    const mentionTarget = parseMention(raw) || peer || (replying && replying.actor !== HUMAN ? replying.actor : "") || JARVIS_NAME;
     const localId = `local-${Date.now()}`;
     const localAt = new Date().toISOString();
     setPending((current) => [...current, { id: localId, body, at: localAt, sent: false, attachments: files.length ? files : undefined }]);
@@ -1435,13 +1677,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if (currentProjectName) messageProps.current_project_name = currentProjectName;
       // Модель и «усилие» выбираются рядом с полем ввода; пустое значение = как было (по умолчанию).
       if (effectiveModel) messageProps.model = effectiveModel;
-      if (effort) messageProps.effort = effort;
+      if (effectiveEffort) messageProps.effort = effectiveEffort;
       if (files.length) messageProps.attachments = files;
+      if (thread) messageProps.thread = thread;
+      if (sharedFocus.length) messageProps.context = sharedFocus.map(({ kind, title, id, detail }) => ({ kind, title, ...(id ? { id } : {}), ...(detail ? { detail } : {}) }));
       const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          project_id: projectId || null,
+          project_id: effectiveProjectId || null,
           agent_name: HUMAN,
           item_type: "question",
           title: (raw || files.map((file) => file.name).join(", ")).slice(0, 120),
@@ -1474,7 +1718,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     for (const file of list) {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const safe = (file.name || "файл").replace(/[^\p{L}\p{N}._-]+/gu, "-");
-      const key = `chat/${day}/${id}-${safe}`;
+      // Всё относится к проектам: вложения чата лежат в папке проекта (участнику другие папки хранилища закрыты).
+      const key = effectiveProjectId ? `projects/${effectiveProjectId}/chat/${day}/${id}-${safe}` : `chat/${day}/${id}-${safe}`;
       const draft: DraftAttachment = { id, name: file.name || safe, key, size: file.size, type: file.type || "application/octet-stream", loaded: 0 };
       setDrafts((current) => [...current, draft]);
       uploadToStorage(key, file, (loaded) => setDrafts((current) => current.map((item) => (item.id === id ? { ...item, loaded } : item))))
@@ -1554,6 +1799,31 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     }
   }
 
+  const threadList = (
+    <>
+      <button type="button" role="menuitem" className="console-thread-menu-new" onClick={startNewChat}>
+        <MessageSquarePlus size={14} /> Новый чат
+      </button>
+      {shownThreads.map((item) => (
+        <div key={item.id} className={item.id === thread ? "console-thread-menu-row is-active" : "console-thread-menu-row"}>
+          <button type="button" role="menuitem" onClick={() => switchThread(item.id)}>
+            <span className="console-thread-menu-title">{item.title}</span>
+            <span className="console-thread-menu-meta">
+              {formatSince(item.last_at)} · {item.messages} {plural(item.messages, "сообщение", "сообщения", "сообщений")}
+              {Number(item.last_work?.context_tokens) > 0 && ` · контекст ${formatWorkTokens(Number(item.last_work?.context_tokens))}`}
+            </span>
+          </button>
+          <button type="button" className="console-thread-archive" onClick={() => { switchThread(item.id); setRenaming(item.id); }} title="Переименовать" aria-label={`Переименовать: ${item.title}`}><Pencil size={12} /></button>
+          <button type="button" className="console-thread-archive" onClick={() => archiveThread(item.id)} title="Убрать чат в архив" aria-label={`Убрать в архив: ${item.title}`}><Archive size={13} /></button>
+        </div>
+      ))}
+      <button type="button" role="menuitem" className={!thread ? "console-thread-menu-legacy is-active" : "console-thread-menu-legacy"} onClick={() => switchThread("")}>
+        <span className="console-thread-menu-title">Старая переписка</span>
+        <span className="console-thread-menu-meta">сообщения до появления чатов</span>
+      </button>
+    </>
+  );
+
   let lastDay = "";
 
   return (
@@ -1576,6 +1846,76 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             <button className="chat-close" type="button" onClick={() => setOpen(false)} aria-label="Свернуть"><X size={21} strokeWidth={3} /></button>
           </div>
 
+          <div className={threadsAside ? "console-split has-aside" : "console-split"}>
+          {threadsAside && (
+            <nav className="console-threads-aside" aria-label="Чаты">
+              <div className="console-thread-menu is-aside" role="menu">{threadList}</div>
+            </nav>
+          )}
+          <div className="console-main">
+          {placeThreads(<div className="console-threads">
+            <button
+              type="button"
+              className={threadsAside ? "console-thread-icon is-on" : "console-thread-icon"}
+              onClick={() => { setThreadsAside(!threadsAside); setThreadMenu(false); }}
+              aria-pressed={threadsAside}
+              title={threadsAside ? "Скрыть список чатов" : "Список чатов сбоку"}
+              aria-label="Список чатов сбоку"
+            >
+              <PanelLeft size={15} />
+            </button>
+            {renaming === thread && thread ? (
+              <input
+                className="console-thread-rename"
+                autoFocus
+                defaultValue={currentThread?.title || ""}
+                aria-label="Название чата"
+                onBlur={(event) => renameThread(thread, event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") renameThread(thread, event.currentTarget.value);
+                  if (event.key === "Escape") setRenaming(null);
+                }}
+              />
+            ) : (
+              <button type="button" className="console-thread-current" onClick={() => (threadsAside ? thread && setRenaming(thread) : setThreadMenu((value) => !value))} onDoubleClick={() => thread && setRenaming(thread)} aria-expanded={threadsAside ? undefined : threadMenu} title={threadsAside ? "Переименовать чат" : "Все чаты · двойной щелчок — переименовать"}>
+                <span className="console-thread-title">{thread ? currentThread?.title || "Новый чат" : "Старая переписка"}</span>
+                {!threadsAside && <ChevronDown size={13} />}
+              </button>
+            )}
+            {contextLoad && (
+              <div
+                className={`console-context${contextShare >= 0.6 ? " is-heavy" : ""}`}
+                title={`Контекст сессии ${contextLoad.agent} в этом чате: ${contextLoadText(contextLoad)}. Столько агент перечитывает на каждом шаге — чем больше, тем дороже каждый ответ.${contextShare >= 0.6 ? " Для новой темы лучше начать новый чат." : ""}`}
+              >
+                <span className="console-context-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.round(contextShare * 100))}%` }} /></span>
+                <span className="console-context-text">{formatWorkTokens(contextLoad.tokens)}</span>
+              </div>
+            )}
+            <button type="button" className="console-thread-icon" onClick={startNewChat} title="Новый чат: агент начнёт с чистого контекста, старый останется в списке" aria-label="Новый чат">
+              <MessageSquarePlus size={15} />
+            </button>
+            {debug && (
+              <button
+                type="button"
+                className={debug.open ? "console-thread-icon is-on" : "console-thread-icon"}
+                onClick={debug.toggle}
+                aria-pressed={debug.open}
+                title={debug.open ? "Скрыть режим отладки" : "Режим отладки: вывод процесса агента"}
+                aria-label="Режим отладки"
+              >
+                <Bug size={14} />
+                {debug.live && <i className="console-debug-live" aria-hidden="true" />}
+              </button>
+            )}
+            {threadMenu && !threadsAside && (
+              <div className="console-thread-menu" role="menu">
+                {threadList}
+              </div>
+            )}
+          </div>)}
+
+          {debug?.open && <div className="console-debug">{debug.panel}</div>}
+
           {/* Действия, требующие решения человека (requires_human) — раньше жили только на
               Обзоре, в консоли их не было видно вовсе, приходилось ждать, пока агент сам
               не подвиснет с вопросом в логе. Тот же компонент, что на Обзоре — не дублируем логику. */}
@@ -1588,8 +1928,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
           <div className="console-log" ref={scrollRef} data-scroll-memory="off">
             {lines.length === 0 && (
-              <div className="console-log-line sys">
-                <span className="console-log-text">{peer ? `Чат с ${peer}: сообщения уходят только ему, @ писать не нужно.` : "mbox консоль готова. /help — список команд."}</span>
+              <div className="console-empty">
+                {peer ? <AgentAvatar name={peer} size={64} /> : <MessagesSquare size={48} strokeWidth={1.5} />}
+                <strong>{peer ? `Чат с ${peer}` : "Общий чат"}</strong>
+                <p>{peer
+                  ? `Сообщения уходят только ${peer}, @ писать не нужно. Каждый чат — отдельная сессия: агент помнит только этот разговор.`
+                  : "Отвечает Джарвис. Позвать другого агента — @Имя, команды — /help."}</p>
               </div>
             )}
             {lines.length > visibleLines.length && (
@@ -1622,7 +1966,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         а не приложение к ней: сначала видно, что агент делал, потом что получилось. */}
                     {!!line.steps?.length && (
                       <div className="console-chain-block">
-                        <p className="console-chain-title">{workSummary(line.work) || `Ход работы · ${line.steps.length} шагов`}</p>
+                        <ChainTitle steps={line.steps} work={line.work} />
                         <ChainTimeline steps={line.steps} />
                       </div>
                     )}
@@ -1634,20 +1978,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         <span>{snippet(quote.text)}</span>
                       </button>
                     )}
+                    {line.failed && <span className="console-failed-title"><AlertTriangle size={13} /> Ответ не получен</span>}
                     <span className="console-log-text">
-                      {line.renderedText || renderMarkdownLite(line.text)}
+                      {line.failed ? renderMarkdownLite(humanizeAgentError(line.text).message) : line.renderedText || renderMarkdownLite(line.text)}
                       {line.pending === "sending" && <em className="console-log-status"> отправляется…</em>}
                       {line.pending === "failed" && <em className="console-log-status failed"> не отправлено</em>}
                     </span>
+                    {line.failed && humanizeAgentError(line.text).detail && <span className="console-failed-detail">{humanizeAgentError(line.text).detail}</span>}
                     {!!line.attachments?.length && <AttachmentList files={line.attachments} />}
                     </div>
-                    {!!line.toolsUsed?.length && (
-                      <span className="console-tools-used">
-                        {line.toolsUsed.map((tool) => (
-                          <span key={tool} className="console-tool-chip"><Wrench size={10} />{tool}</span>
-                        ))}
-                      </span>
-                    )}
+                    {/* Пилюли использованных инструментов под ответом убраны: те же шаги уже видны цепочкой над ним. */}
                     {!!line.highlights?.length && (
                       <div className="console-highlights">
                         {line.highlights.map((text, index) => (
@@ -1704,15 +2044,20 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             {awaitingJarvisId && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
-                <span className="console-thinking-row">
-                  <ThinkingSpinner />
+                <span className={awaitingDead ? "console-thinking-row is-dead" : "console-thinking-row"}>
+                  {awaitingDead ? <AlertTriangle size={16} /> : <ThinkingSpinner />}
                   {/* Шуточные глаголы — это голос Джарвиса. Для остальных агентов нужен простой
                       признак жизни, а не «прячется в чернильное облако от смущения». */}
-                  <span className="console-log-text">{awaitingAgent}: {awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} {awaitingJarvisSeconds}с</span>
-                  {/* Прервать умеет только Джарвис: он отвечает внутри сервера. У локального агента
-                      крутится свой CLI на машине владельца, и кнопка врала бы, что его можно остановить. */}
-                  {awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() && (
-                    <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Прервать запрос">
+                  {awaitingDead ? (
+                    <span className="console-log-text">Наблюдатель {peer} не работает ({debug?.process?.text}) — ответа не будет, пока его не запустить.</span>
+                  ) : <span className="console-log-text">{awaitingAgent}: {awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} {awaitingJarvisSeconds}с</span>}
+                  {awaitingDead && debug?.process && (
+                    <button type="button" className="console-start-btn" onClick={debug.process.start}>Запустить</button>
+                  )}
+                  {/* Отмена снимает сообщение с очереди (status done): наблюдатель его уже не возьмёт.
+                      Джарвису она ещё и обрывает запрос к модели. CLI, который уже начал отвечать, не прерывается. */}
+                  {(
+                    <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Отменить: сообщение уйдёт из очереди">
                       <X size={11} />
                     </button>
                   )}
@@ -1763,7 +2108,11 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 ))}
               </div>
             )}
+            {!peer && !jarvisEnabled && (
+              <p className="console-jarvis-off">Джарвис для вашего аккаунта выключен — владелец может включить его в настройках команды. Сообщения в этом чате сейчас никто не прочитает.</p>
+            )}
             <form
+              hidden={!peer && !jarvisEnabled}
               className={dragFiles ? "console-input-row is-drop" : "console-input-row"}
               onSubmit={(event) => { event.preventDefault(); void send(); }}
               onDragOver={(event) => { if ([...event.dataTransfer.types].includes("Files")) { event.preventDefault(); setDragFiles(true); } }}
@@ -1775,7 +2124,27 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               </button>
               <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void attachFiles([...(event.target.files ?? [])]); event.target.value = ""; }} />
               <div className="console-input-body">
-                {(liveMention || peer) && <span className="console-recipient"><AtSign size={11} />{liveMention || peer}</span>}
+                {focus.length > 0 && (
+                  <div className="console-focus" aria-label="Что агент увидит как открытое у вас">
+                    {focus.map((item) => {
+                      const off = mutedFocus.includes(item.key);
+                      const Icon = FOCUS_ICON[item.kind] || AppWindow;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          className={off ? "console-focus-chip is-off" : "console-focus-chip"}
+                          aria-pressed={!off}
+                          onClick={() => setMutedFocus((current) => (off ? current.filter((key) => key !== item.key) : [...current, item.key]))}
+                          title={`${off ? "Не отправляется" : "Агент увидит, что это открыто"}: ${item.detail || item.title} — нажмите, чтобы ${off ? "включить" : "отжать"}`}
+                        >
+                          <Icon size={11} />
+                          <span>{item.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <textarea
                   ref={composerRef}
                   value={text}
@@ -1808,17 +2177,17 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                       // чтобы в поле ввода всегда было видно, кто будет отвечать.
                       placeholder={defaultModelLabel}
                       defaultValue={shownDefaultModel}
-                      options={shownModels.map((item) => ({ value: item.id, label: item.label, hint: item.role }))}
+                      options={shownModels.map((item) => ({ value: item.id, label: item.label }))}
                     />
                   )}
-                  {catalog.efforts.length > 0 && (
+                  {shownEfforts.length > 0 && (
                     <ComposerPicker
                       label="Как долго думать перед ответом"
-                      value={effort}
+                      value={effectiveEffort}
                       onChange={setEffort}
-                      placeholder={catalog.efforts.find((item) => item.id === catalog.defaultEffort)?.label || "Обычно"}
-                      defaultValue={catalog.defaultEffort}
-                      options={catalog.efforts.map((item) => ({ value: item.id, label: item.label, hint: item.hint }))}
+                      placeholder={shownEfforts.find((item) => item.id === shownDefaultEffort)?.label || "По умолчанию"}
+                      defaultValue={shownDefaultEffort}
+                      options={shownEfforts.map((item) => ({ value: item.id, label: item.label, hint: item.hint }))}
                     />
                   )}
                   </div>
@@ -1828,6 +2197,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <ArrowUp size={16} strokeWidth={2.25} />
               </button>
             </form>
+          </div>
+          </div>
           </div>
         </div>
       )}

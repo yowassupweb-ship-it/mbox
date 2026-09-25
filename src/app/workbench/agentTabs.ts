@@ -1,6 +1,6 @@
 import { workspaceBridge } from "./localWorkspace";
 import { browserBridge, browserTabKey } from "./BrowserDocument";
-import type { TabsApi } from "./tabs";
+import { scopedStorageKey, type TabsApi } from "./tabs";
 
 /**
  * Агент открывает вкладку в интерфейсе (MCP open_tab → POST /api/mbox/ui/open → вебсокет open_tab, см.
@@ -35,7 +35,7 @@ export const skillPageKey = (skill: string, file: string) => `skillpage:${skill}
 const REPLY_KEY = "mbox.skillpage.replyTo";
 
 function readReplyMap(): Record<string, string> {
-  try { return JSON.parse(window.localStorage.getItem(REPLY_KEY) || "{}") as Record<string, string>; } catch { return {}; }
+  try { return JSON.parse(window.localStorage.getItem(scopedStorageKey(REPLY_KEY)) || "{}") as Record<string, string>; } catch { return {}; }
 }
 
 export function skillPageReplyTo(key: string) {
@@ -44,7 +44,7 @@ export function skillPageReplyTo(key: string) {
 
 function rememberReplyTo(key: string, agent: string) {
   if (!agent) return;
-  try { window.localStorage.setItem(REPLY_KEY, JSON.stringify({ ...readReplyMap(), [key]: agent })); } catch { /* без памяти — уйдёт Claude */ }
+  try { window.localStorage.setItem(scopedStorageKey(REPLY_KEY), JSON.stringify({ ...readReplyMap(), [key]: agent })); } catch { /* без памяти — уйдёт Claude */ }
 }
 
 // ─── Папка на диске → раскрыть её в «Папках» ─────────────────────────────────────────

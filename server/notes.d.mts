@@ -11,13 +11,16 @@ type Handler = {
   readBody: (req: IncomingMessage) => Promise<any>;
   sendJson: (res: ServerResponse, status: number, body: unknown) => void;
   allowed: boolean;
+  scope?: { all: boolean; projectIds: string[]; userId?: string };
 };
 
 export const NOTES_SCHEMA_SQL: string;
 export function ensureNotesSchema(query: Query): Promise<void>;
-export function listNotes(query: Query, search?: string, limit?: unknown): Promise<Row[]>;
+export const NOTE_ACCESS_LEVELS: string[];
+export function canAccessNote(query: Query, noteId: string, scope?: { all: boolean; projectIds: string[]; userId?: string }): Promise<boolean>;
+export function listNotes(query: Query, search?: string, limit?: unknown, scope?: { all: boolean; projectIds: string[]; userId?: string }): Promise<Row[]>;
 export function createNote(query: Query, input: Row): Promise<Row>;
-export function handleNotesApi(input: Handler & { actor: string }): Promise<boolean>;
+export function handleNotesApi(input: Handler & { actor: string; broadcast?: (type: string, payload: Record<string, unknown>) => void }): Promise<boolean>;
 export function handleSharedNoteApi(input: Omit<Handler, "allowed"> & {
   storage: {
     signedGet: (key: string) => Promise<string | null>;

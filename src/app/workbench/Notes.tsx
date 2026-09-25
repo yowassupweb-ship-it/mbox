@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, Eye, GitCompare, History, Link2, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Copy, Eye, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, Users, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
 import { askText } from "../../ui/askText";
-import { DocShell, DrawerToggle, useDrawer } from "./docLayout";
+import { DocShell, useDrawer } from "./docLayout";
+import { WbMenu } from "./WbMenu";
 import { DiffLines, lineDiff } from "./LocalFileDocument";
 import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
@@ -18,7 +19,15 @@ import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } 
 
 export type NoteColor = "default" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "gray";
 export type NoteTheme = "light" | "graphite" | "black";
-export type Note = { id: string; title: string; content?: string; tabs?: NoteTab[]; snippet?: string; pinned: boolean; color: NoteColor; theme: NoteTheme; project_id: string | null; tags: string[]; author: string; created_at: string; updated_at: string; size_bytes: number };
+/** Кто видит заметку. По умолчанию — только владелец (см. server/notes.mjs). */
+export type NoteAccess = "private" | "project" | "all";
+const NOTE_ACCESS: Array<{ value: NoteAccess; label: string; hint: string }> = [
+  { value: "private", label: "Только я", hint: "видите только вы и агенты, работающие от вашего имени" },
+  { value: "project", label: "Участники проекта", hint: "видят все, у кого есть доступ к проекту заметки" },
+  { value: "all", label: "Все в MBOX", hint: "видят все пользователи MBOX" },
+];
+
+export type Note = { id: string; title: string; content?: string; tabs?: NoteTab[]; snippet?: string; pinned: boolean; color: NoteColor; theme: NoteTheme; project_id: string | null; tags: string[]; author: string; owner_user_id?: string | null; access_level?: NoteAccess; created_at: string; updated_at: string; size_bytes: number };
 type NoteVersion = { id: string; title: string; sha: string; size_bytes: number; author: string; source: string; created_at: string };
 type NoteVersionFull = NoteVersion & { content: string; tabs: NoteTab[] };
 
@@ -46,9 +55,6 @@ const NOTE_COLORS: Array<{ value: NoteColor; label: string }> = [
 const NOTE_THEME_ORDER: NoteTheme[] = ["light", "graphite", "black"];
 const NOTE_THEME_LABEL: Record<NoteTheme, string> = { light: "светлая", graphite: "графитовая", black: "чёрная" };
 
-function nextNoteTheme(theme: NoteTheme) {
-  return NOTE_THEME_ORDER[(NOTE_THEME_ORDER.indexOf(theme) + 1) % NOTE_THEME_ORDER.length];
-}
 
 /** Список заметок общий для боковой панели и заголовков вкладок; вкладка заметки сообщает о правках. */
 const notesStore = {
@@ -96,9 +102,10 @@ function snippetOf(note: Note) {
   return lines.slice(1).join(" · ").slice(0, 140);
 }
 
-export function NotesView({ tabs }: { tabs: TabsApi }) {
+export function NotesView({ tabs, defaultProjectId = null }: { tabs: TabsApi; defaultProjectId?: string | null }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(notesStore.query);
+  const canCreate = defaultProjectId !== undefined;
 
   useEffect(() => {
     const rerender = () => setTick((value) => value + 1);
@@ -139,7 +146,7 @@ export function NotesView({ tabs }: { tabs: TabsApi }) {
       <header className="wb-view-head">
         <span>Заметки</span>
         <div className="wb-view-actions">
-          <button type="button" onClick={() => void createNoteAndOpen(tabs)} title="Новая заметка (Ctrl+Alt+N)"><Plus size={14} /></button>
+          <button type="button" disabled={!canCreate} onClick={() => void createNoteAndOpen(tabs, defaultProjectId ?? null)} title={canCreate ? "Новая заметка (Ctrl+Alt+N)" : "Нет доступных проектов для заметок"}><Plus size={14} /></button>
         </div>
       </header>
       <div className="wb-filter">
@@ -154,7 +161,7 @@ export function NotesView({ tabs }: { tabs: TabsApi }) {
         {!notesStore.list.length && (
           <div className="wb-session-empty">
             <p>{query ? "Ничего не нашлось." : "Заметок пока нет."}</p>
-            {!query && <button type="button" onClick={() => void createNoteAndOpen(tabs)}><Plus size={13} /> Новая заметка</button>}
+            {!query && <button type="button" disabled={!canCreate} onClick={() => void createNoteAndOpen(tabs, defaultProjectId ?? null)}><Plus size={13} /> Новая заметка</button>}
           </div>
         )}
       </div>
@@ -194,6 +201,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   tabsRef.current = noteTabs;
   const savingRef = useRef(false);
   const [mergeNotice, setMergeNotice] = useState("");
+  const [accessError, setAccessError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
@@ -204,6 +212,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const [viewing, setViewing] = useState<NoteVersionFull | null>(null);
   const [compare, setCompare] = useState(true);
   const [drawerOpen, setDrawerOpen] = useDrawer(`mbox.doc.note.history:${noteId}`);
+  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
   const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
   const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content, enabled: visible });
 
@@ -348,9 +357,15 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   });
 
   async function update(patch: Partial<Note>) {
-    const { note: updated } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
-    setNote(updated);
-    patchListed(updated);
+    setAccessError("");
+    try {
+      const { note: updated } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
+      setNote(updated);
+      patchListed(updated);
+    } catch (cause) {
+      // Доступ и проект меняет только владелец заметки — сервер отвечает 403, человеку нужна причина.
+      setAccessError(/only_owner/.test(String(cause)) ? "доступ меняет только владелец заметки" : "не сохранилось");
+    }
   }
 
   async function remove() {
@@ -471,52 +486,115 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   if (missing) return <div className="wb-doc-missing">Заметка не найдена — возможно, её удалили.</div>;
   if (!note) return <div className="wb-doc-missing">Открываю заметку…</div>;
 
-  const stateLabel = { saved: "сохранено", pending: "…", saving: "сохраняю…", error: "не сохранилось — Ctrl+S ещё раз" }[state];
+  const saveBusy = state === "pending" || state === "saving";
+  const access = NOTE_ACCESS.find((item) => item.value === (note.access_level || "private")) ?? NOTE_ACCESS[0];
+  const AccessIcon = access.value === "all" ? Globe2 : access.value === "project" ? Users : Lock;
+  const projectName = data.projects.find((project) => project.id === note.project_id)?.name;
   const activeTheme = note.theme || "graphite";
-  const nextTheme = nextNoteTheme(activeTheme);
+  const activeColor = note.color || "default";
+  const notices = [imageError, mergeNotice, accessError].filter(Boolean);
 
   return (
     <DocShell
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">Заметки › {formatDateTime(note.updated_at)}{shared && <span className="wb-shared-note-label">расшарена</span>} <span className={`wb-save-state is-${state}`}>{stateLabel}</span>{imageError && <span className="wb-save-state is-error"> {imageError}</span>}{mergeNotice && <span className="wb-save-state is-pending"> {mergeNotice}</span>}</span>
+          <span className="wb-note-status" title={`Изменено ${formatDateTime(note.updated_at)}`}>
+            {state === "error" ? (
+              <span className="wb-note-save is-error" role="alert"><AlertCircle size={13} aria-hidden="true" /> Не сохранилось — Ctrl+S</span>
+            ) : saveBusy ? (
+              <span className="wb-note-save is-busy"><span className="wb-note-spinner" aria-hidden="true" /> Сохраняю…</span>
+            ) : (
+              <span className="wb-note-save"><Check size={13} aria-hidden="true" /> Изменено {formatSince(note.updated_at)}</span>
+            )}
+            {note.pinned && <span className="wb-note-flag" title="Закреплена сверху списка"><Pin size={11} aria-hidden="true" /> Закреплена</span>}
+            {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
+            {notices.map((text) => <span key={text} className="wb-note-notice">{text}</span>)}
+          </span>
           {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
-          <div className="wb-doc-actions">
-            {/* Заметку правят ещё и агенты, и владелец ссылки. Кнопка — на случай, когда ждать
-                автоподхвата не хочется или сеть моргнула. */}
-            <button
-              type="button"
-              onClick={() => void pullRemote(true)}
-              title="Перечитать заметку с сервера"
-              aria-label="Перечитать заметку с сервера"
-            >
-              <RefreshCw size={14} />
-            </button>
-            <select className="wb-bar-select" value={note.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} title="Проект">
-              <option value="">без проекта</option>
-              {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-            <button
-              type="button"
-              className={`doc-theme-button is-${activeTheme}`}
-              onClick={() => void update({ theme: nextTheme })}
-              title={`Тема документа: ${NOTE_THEME_LABEL[activeTheme]}`}
-              aria-label={`Тема документа: ${NOTE_THEME_LABEL[activeTheme]}. Переключить на ${NOTE_THEME_LABEL[nextTheme]}`}
-            >
-              <span className="doc-theme-dot" aria-hidden="true" />
-            </button>
-            <select className="wb-bar-select wb-note-color-select" value={note.color || "default"} onChange={(event) => void update({ color: event.target.value as NoteColor })} title="Цвет карточки" aria-label="Цвет карточки">
-              {NOTE_COLORS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-            <div className="wb-segmented">
-              <button type="button" className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(); setMode("preview"); }}><Eye size={13} /></button>
-              <button type="button" className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")}><Pencil size={13} /></button>
+          <div className="wb-note-tools">
+            <div className="wb-note-mode" role="radiogroup" aria-label="Режим">
+              <button type="button" role="radio" aria-checked={mode === "preview"} className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(); setMode("preview"); }} title="Просмотр"><Eye size={14} aria-hidden="true" /><span>Просмотр</span></button>
+              <button type="button" role="radio" aria-checked={mode === "edit"} className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")} title="Правка"><Pencil size={13} aria-hidden="true" /><span>Правка</span></button>
             </div>
+            <span className="wb-note-divider" aria-hidden="true" />
+            <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
+              <AccessIcon size={13} aria-hidden="true" />
+              <span>{access.label}</span>
+              <ChevronDown size={12} aria-hidden="true" />
+              <select value={access.value} onChange={(event) => void update({ access_level: event.target.value as NoteAccess })} aria-label="Кто видит заметку">
+                {NOTE_ACCESS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <label className="wb-note-popup" title="Проект заметки">
+              <FolderClosed size={13} aria-hidden="true" />
+              <span className={projectName ? undefined : "is-muted"}>{projectName ?? "Без проекта"}</span>
+              <ChevronDown size={12} aria-hidden="true" />
+              <select value={note.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} aria-label="Проект заметки">
+                <option value="">Без проекта</option>
+                {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </label>
+            <span className="wb-note-divider" aria-hidden="true" />
             <ShareButton noteId={noteId} onSharedChange={setShared} />
-            <button type="button" className={note.pinned ? "is-on" : undefined} onClick={() => void update({ pinned: !note.pinned })} title={note.pinned ? "Открепить" : "Закрепить сверху"}>{note.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
-            <DrawerToggle open={drawerOpen} onToggle={() => setDrawerOpen(!drawerOpen)} label="История" count={versions.length} />
-            <button type="button" className="is-danger" onClick={() => void remove()} title="Удалить заметку"><Trash2 size={14} /></button>
+            <button type="button" className={`wb-note-icon${drawerOpen ? " is-on" : ""}`} onClick={() => setDrawerOpen(!drawerOpen)} aria-pressed={drawerOpen} title={drawerOpen ? "Скрыть историю версий" : "История версий"} aria-label="История версий">
+              <History size={14} aria-hidden="true" />
+              {versions.length > 0 && <b>{versions.length}</b>}
+            </button>
+            <button
+              type="button"
+              className={`wb-note-icon${moreMenu ? " is-on" : ""}`}
+              onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 232, y: rect.bottom + 4 }); }}
+              aria-haspopup="menu"
+              aria-expanded={Boolean(moreMenu)}
+              title="Ещё"
+              aria-label="Ещё действия"
+            >
+              <MoreHorizontal size={15} aria-hidden="true" />
+            </button>
           </div>
+          {moreMenu && (
+            <WbMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}>
+              <div className="wb-note-menu">
+                <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); void update({ pinned: !note.pinned }); }}>
+                  <span>{note.pinned ? <PinOff size={14} /> : <Pin size={14} />}{note.pinned ? "Открепить" : "Закрепить сверху"}</span>
+                </button>
+                <div className="wb-menu-sep" role="separator" />
+                <div className="wb-note-menu-label">Фон документа</div>
+                {NOTE_THEME_ORDER.map((theme) => (
+                  <button key={theme} type="button" role="menuitemradio" aria-checked={activeTheme === theme} onClick={() => { setMoreMenu(null); void update({ theme }); }}>
+                    <span><i className={`wb-note-theme-swatch is-${theme}`} aria-hidden="true" />{NOTE_THEME_LABEL[theme][0].toUpperCase() + NOTE_THEME_LABEL[theme].slice(1)}</span>
+                    {activeTheme === theme && <Check size={14} aria-hidden="true" />}
+                  </button>
+                ))}
+                <div className="wb-menu-sep" role="separator" />
+                <div className="wb-note-menu-label">Метка</div>
+                <div className="wb-note-swatches" role="group" aria-label="Цвет метки">
+                  {NOTE_COLORS.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={activeColor === item.value}
+                      aria-label={item.label}
+                      title={item.label}
+                      className={`wb-note-swatch is-${item.value}${activeColor === item.value ? " is-on" : ""}`}
+                      onClick={() => { setMoreMenu(null); void update({ color: item.value }); }}
+                    >
+                      {item.value === "default" && <X size={11} aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
+                <div className="wb-menu-sep" role="separator" />
+                <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); void pullRemote(true); }} title="Заметку правят и агенты, и владельцы ссылок — обычно она подхватывается сама">
+                  <span><RefreshCw size={14} />Перечитать с сервера</span>
+                </button>
+                <div className="wb-menu-sep" role="separator" />
+                <button type="button" role="menuitem" className="is-danger" onClick={() => { setMoreMenu(null); void remove(); }}>
+                  <span><Trash2 size={14} />Удалить заметку</span>
+                </button>
+              </div>
+            </WbMenu>
+          )}
         </>
       )}
       drawerOpen={drawerOpen}

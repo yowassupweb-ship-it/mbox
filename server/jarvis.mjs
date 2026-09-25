@@ -1,5 +1,5 @@
 import { Client } from "pg";
-import { createNote, listNotes, recordNoteVersion } from "./notes.mjs";
+import { canAccessNote, createNote, listNotes, recordNoteVersion } from "./notes.mjs";
 import { describeWorkspaceError, findWorkspace, listVersions, listWorkspaces, requestWorkspaceOp } from "./workspaces.mjs";
 
 // Джарвис целиком: инструменты, агентный цикл, модели, источники данных. Раньше он жил в трёх копиях
@@ -108,43 +108,166 @@ const DEFAULT_EFFORT = "medium";
 // Бюджет размышления Gemini в токенах. -1 — «решай сам», 0 — не думать вовсе.
 const GEMINI_THINKING_BUDGET = { low: 0, medium: -1, high: 24576 };
 
+function parseModelList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => /^[A-Za-z0-9._:/@-]{1,120}$/.test(item));
+}
+
+function modelLabel(id) {
+  return String(id || "")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function uniqueModels(models) {
+  const seen = new Set();
+  return models.filter((model) => {
+    if (!model?.id || seen.has(model.id)) return false;
+    seen.add(model.id);
+    return true;
+  });
+}
+
 /**
  * Модели агента Claude — это алиасы Claude Code CLI (`claude --model`), а не ключи в окружении
  * сервера: отвечает Claude не отсюда, а наблюдателем на машине владельца
  * (scripts/claude-inbox-watcher.mjs), который получает выбор в `props.model` сообщения.
- * Поэтому список фиксированный и без проверки доступности — что реально доступно, решает подписка
- * на той машине. Пустой выбор = модель по умолчанию у самого CLI.
+ * Алиас всегда ведёт на последнюю модель линейки, поэтому список короткий и не устаревает сам:
+ * править его нужно, только когда меняется состав линеек. `role` — подсказка, на что модель
+ * тратить: Fable дорог и нужен для больших задач, мелочь дешевле отдать Haiku.
  */
 const CLAUDE_MODELS = [
-  { id: "sonnet", provider: "claude-code", label: "Sonnet 5", role: "по умолчанию" },
-  { id: "opus", provider: "claude-code", label: "Opus 5", role: "самая способная" },
-  { id: "haiku", provider: "claude-code", label: "Haiku 4.5", role: "самая быстрая" },
+  { id: "sonnet", provider: "claude-code", label: "Sonnet 5", role: "по умолчанию — обычная работа" },
+  { id: "haiku", provider: "claude-code", label: "Haiku 4.5", role: "мелкие задачи, быстро и дёшево" },
+  { id: "opus", provider: "claude-code", label: "Opus 5.5", role: "сложные задачи" },
+  { id: "fable", provider: "claude-code", label: "Fable 5.1", role: "самая сильная — только для больших задач" },
 ];
 /** Чем отвечает Claude, если модель не выбрали. Алиас CLI, а не полное имя: последняя в линейке. */
 const CLAUDE_DEFAULT_MODEL = "sonnet";
 
 /**
  * Модели Codex — это значения для `codex exec -m` на машине владельца. Доступность решает локальный
- * CLI/подписка, как и у Claude Code; MBOX только передаёт выбранный id в props.model.
+ * CLI/подписка, как и у Claude Code; MBOX только передаёт выбранный id в props.model. Раньше сюда же
+ * подмешивался весь /v1/models OpenAI и запасные gpt-5/gpt-5-codex — в выборе висели модели, которых
+ * Codex уже не предлагает. Теперь — только актуальная линейка (как в `codex` → /model), с заменой
+ * через CODEX_MODELS, когда она сменится.
  */
-const CODEX_MODELS = [
-  { id: "gpt-5.1-codex-max", provider: "codex-cli", label: "GPT-5.1 ChatGPT Max", role: "самая способная" },
-  { id: "gpt-5.1-codex", provider: "codex-cli", label: "GPT-5.1 ChatGPT", role: "по умолчанию" },
-  { id: "gpt-5.1", provider: "codex-cli", label: "GPT-5.1", role: "универсальная" },
-  { id: "gpt-5", provider: "codex-cli", label: "GPT-5", role: "совместимость" },
-];
-const CODEX_DEFAULT_MODEL = "gpt-5.1-codex";
+const CLAUDE_EXTRA_MODELS = parseModelList(process.env.CLAUDE_WATCH_MODELS || process.env.CLAUDE_MODELS || "")
+  .map((id) => ({ id, provider: "claude-code", label: modelLabel(id), role: "из окружения" }));
+const CODEX_MODEL_ROLES = {
+  "gpt-6-sol": "по умолчанию — код и обычная работа",
+  "gpt-6-luna": "мелкие задачи, быстро и дёшево",
+  "gpt-6-astra": "самая сильная — только для больших задач",
+};
+const CODEX_MODELS = parseModelList(process.env.CODEX_WATCH_MODELS || process.env.CODEX_MODELS || "gpt-6-sol,gpt-6-luna,gpt-6-astra")
+  .map((id) => ({ id, provider: "codex-cli", label: codexLabel(id), role: CODEX_MODEL_ROLES[id] || "из окружения" }));
 
-export function jarvisModels() {
+function codexLabel(id) {
+  return String(id).replace(/^gpt-/i, "GPT-").replace(/-([a-z])/g, (_, char) => `-${char.toUpperCase()}`);
+}
+
+/**
+ * Живой каталог Claude и ChatGPT (Codex). Списки выше — только запасные: реальный набор моделей и уровней
+ * effort знает CLI на машине владельца (Claude Code отдаёт его в ответе initialize, Codex держит в
+ * ~/.codex/models_cache.json — это список OpenAI для аккаунта ChatGPT). Наблюдатели публикуют его сюда
+ * (POST /api/mbox/agent/models), а чат показывает опубликованное, а не придуманное.
+ */
+export const EFFORT_LABELS = {
+  minimal: ["Минимум", "почти без размышления"],
+  low: ["Быстро", "минимум размышления — короткие вопросы и правки"],
+  medium: ["Обычно", "баланс скорости и глубины"],
+  high: ["Тщательно", "думает дольше — разбор, планирование"],
+  xhigh: ["Очень тщательно", "долгие рассуждения для сложных задач"],
+  max: ["Максимум", "предельная глубина — дорого"],
+  ultra: ["Ультра", "самая долгая работа — только для больших задач"],
+};
+const CATALOG_AGENTS = { Claude: "claude-code", ChatGPT: "codex-cli" };
+let catalogReady = null;
+
+function ensureModelCatalog() {
+  if (!query) return Promise.resolve(false);
+  catalogReady ||= query(`CREATE TABLE IF NOT EXISTS agent_model_catalog (
+    agent TEXT PRIMARY KEY,
+    models JSONB NOT NULL DEFAULT '[]'::jsonb,
+    default_model TEXT,
+    source TEXT,
+    fetched_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`).then(() => true).catch((error) => { catalogReady = null; throw error; });
+  return catalogReady;
+}
+
+const cleanText = (value, max) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+
+/** Что прислал наблюдатель — проверяем и режем: это чужие данные, в интерфейс они пойдут как есть. */
+export async function publishAgentModels(body) {
+  const agent = Object.keys(CATALOG_AGENTS).find((name) => name.toLowerCase() === String(body?.agent || "").toLowerCase());
+  if (!agent) throw new Error("unknown_agent");
+  const models = (Array.isArray(body?.models) ? body.models : []).slice(0, 40).map((model) => {
+    const id = cleanText(model?.id, 120);
+    if (!/^[A-Za-z0-9._:/@[\]-]{1,120}$/.test(id)) return null;
+    const efforts = (Array.isArray(model.efforts) ? model.efforts : []).map((effort) => cleanText(effort, 20)).filter((effort) => EFFORT_LABELS[effort]);
+    return {
+      id,
+      label: cleanText(model.label, 60) || modelLabel(id),
+      role: cleanText(model.description, 160),
+      efforts,
+      default_effort: efforts.includes(model.default_effort) ? model.default_effort : "",
+    };
+  }).filter(Boolean);
+  if (!models.length) throw new Error("empty_models");
+  // Пусто — «как настроено в CLI»: модель по умолчанию наблюдатель не угадывает (Codex выбирает сам без -m).
+  const defaultModel = models.some((model) => model.id === body.default_model) ? body.default_model : "";
+  await ensureModelCatalog();
+  await query(
+    `INSERT INTO agent_model_catalog(agent, models, default_model, source, fetched_at, updated_at)
+     VALUES ($1, $2::jsonb, $3, $4, $5, now())
+     ON CONFLICT (agent) DO UPDATE SET models = EXCLUDED.models, default_model = EXCLUDED.default_model,
+       source = EXCLUDED.source, fetched_at = EXCLUDED.fetched_at, updated_at = now()`,
+    [agent, JSON.stringify(models), defaultModel, cleanText(body.source, 120), Number.isNaN(Date.parse(body.fetched_at)) ? null : body.fetched_at],
+  );
+  return { agent, models: models.length, default_model: defaultModel };
+}
+
+async function publishedCatalog() {
+  try {
+    await ensureModelCatalog();
+    const rows = (await query("SELECT agent, models, default_model, source, fetched_at::text, updated_at::text FROM agent_model_catalog")).rows;
+    return Object.fromEntries(rows.map((row) => [row.agent, row]));
+  } catch {
+    return {};
+  }
+}
+
+export async function jarvisModels() {
   const models = [];
+  const published = await publishedCatalog();
+  const defaults = {};
+  const sources = {};
   if (GEMINI_API_KEY) models.push({ id: GEMINI_MODEL, agent: JARVIS_NAME, provider: "gemini", label: `${GEMINI_MODEL} (Gemini)`, role: "основная", available: true });
   if (GROQ_API_KEY) {
     models.push({ id: GROQ_MODEL, agent: JARVIS_NAME, provider: "groq", label: `${GROQ_MODEL} (Groq)`, role: "резерв", available: true });
     models.push({ id: GROQ_MODEL_JUNIOR, agent: JARVIS_NAME, provider: "groq", label: `${GROQ_MODEL_JUNIOR} (Groq, младшая)`, role: "мелкие задачи", available: true });
   }
-  for (const model of CLAUDE_MODELS) models.push({ ...model, agent: "Claude", available: true });
-  for (const model of CODEX_MODELS) models.push({ ...model, agent: "ChatGPT", available: true });
-  return { models, efforts: JARVIS_EFFORTS, default_model: CLAUDE_DEFAULT_MODEL, default_effort: DEFAULT_EFFORT };
+  const fallback = { Claude: uniqueModels([...CLAUDE_MODELS, ...CLAUDE_EXTRA_MODELS]), ChatGPT: uniqueModels(CODEX_MODELS) };
+  const fallbackDefault = { Claude: CLAUDE_DEFAULT_MODEL, ChatGPT: CODEX_MODELS[0]?.id || "" };
+  for (const agent of Object.keys(CATALOG_AGENTS)) {
+    const live = published[agent];
+    if (live?.models?.length) {
+      for (const model of live.models) models.push({ ...model, provider: CATALOG_AGENTS[agent], agent, available: true });
+      defaults[agent] = live.default_model || "";
+      sources[agent] = { source: live.source || "cli", fetched_at: live.fetched_at || live.updated_at, live: true };
+    } else {
+      // Наблюдатель ещё ни разу не отчитался — запасной список, честно помеченный.
+      for (const model of fallback[agent]) models.push({ ...model, agent, available: true, role: model.role ? `${model.role} · список не получен от CLI` : "список не получен от CLI" });
+      defaults[agent] = fallbackDefault[agent];
+      sources[agent] = { source: "fallback", live: false };
+    }
+  }
+  const effortLabels = Object.fromEntries(Object.entries(EFFORT_LABELS).map(([id, [label, hint]]) => [id, { label, hint }]));
+  return { models, efforts: JARVIS_EFFORTS, effort_labels: effortLabels, default_model: CLAUDE_DEFAULT_MODEL, defaults, sources, default_effort: DEFAULT_EFFORT };
 }
 
 /** Какому провайдеру принадлежит id модели; неизвестная — как будто не выбирали. */
@@ -480,6 +603,7 @@ const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
   "create_note", "update_note",
+  "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
 
@@ -765,6 +889,110 @@ export const JARVIS_TOOLS = [
           path: { type: "string", description: "Относительный путь файла" },
           content: { type: "string", description: "Полный новый текст файла" },
           message: { type: "string", description: "Коротко — что и зачем изменено (попадёт в историю версий)" },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_read_table",
+      description: "Прочитать таблицу (.xlsx, .csv, .tsv) из локальной папки: список листов и ячейки с номерами строк и буквами столбцов. Формулы видны как «=ФОРМУЛА → результат». Для больших листов передай range, например A1:F50, 1:10 или A:C. styles=true добавит оформление (заливка, цвет и начертание шрифта, выравнивание) диапазонами.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла" },
+          sheet: { type: "string", description: "Лист; пусто — первый" },
+          range: { type: "string", description: "Диапазон вроде A1:F50; пусто — весь лист" },
+          styles: { type: "boolean", description: "Показать оформление ячеек" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_write_cells",
+      description: "Записать ячейки в таблицу (.xlsx, .csv, .tsv) в локальной папке. cells — объект {\"B3\": \"текст\", \"C3\": 12, \"D3\": \"=B3*C3\"}; null очищает ячейку. Нет файла или листа — создаст; остальное содержимое книги не трогается. Открытая у человека вкладка таблицы перечитает файл сама.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла" },
+          sheet: { type: "string", description: "Лист; пусто — первый" },
+          cells: { type: "object", description: "Адрес ячейки → значение" },
+        },
+        required: ["path", "cells"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_format_cells",
+      description: "Оформить диапазоны таблицы .xlsx в локальной папке, не трогая значения: заливка, цвет шрифта, жирный/курсив/подчёркнутый/зачёркнутый, размер шрифта, выравнивание, перенос, формат чисел, рамки. Каждое правило меняет только заданные свойства. Диапазоны: A1:H10, B5, 1:10 (строки целиком), A:C (столбцы целиком). Цвет — #RRGGBB или имя (yellow, red, green, blue, orange, gray, lightgreen…); null или \"none\" снимает заливку или цвет. Пример: format=[{range:\"1:10\", fill:\"yellow\"}]. Проверить — workspace_read_table со styles=true.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла .xlsx" },
+          sheet: { type: "string", description: "Лист; пусто — первый" },
+          format: {
+            type: "array",
+            description: "Правила оформления",
+            items: {
+              type: "object",
+              properties: {
+                range: { type: "string" },
+                fill: { type: ["string", "null"], description: "Цвет заливки" },
+                color: { type: ["string", "null"], description: "Цвет шрифта" },
+                bold: { type: "boolean" },
+                italic: { type: "boolean" },
+                underline: { type: "boolean" },
+                strike: { type: "boolean" },
+                size: { type: "number" },
+                align: { type: "string", enum: ["left", "center", "right", "general"] },
+                wrap: { type: "boolean" },
+                number_format: { type: "string", description: "Формат Excel: 0.00, #,##0, dd.mm.yyyy, 0%" },
+                border: { type: "string", enum: ["thin", "medium", "thick", "none"] },
+              },
+              required: ["range"],
+            },
+          },
+        },
+        required: ["path", "format"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_read_document",
+      description: "Прочитать документ Word (.docx) из локальной папки — текст в markdown: заголовки, списки, таблицы.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла .docx" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_write_docx",
+      description: "Создать или перезаписать документ Word (.docx) в локальной папке из markdown: заголовки, абзацы, списки, жирный и курсив. Таблицы markdown в Word не превращаются — табличные данные клади в .xlsx через workspace_write_cells.",
+      parameters: {
+        type: "object",
+        properties: {
+          workspace: { type: "string", description: "Имя или номер папки" },
+          path: { type: "string", description: "Относительный путь файла .docx" },
+          content: { type: "string", description: "Полный текст документа, markdown" },
         },
         required: ["path", "content"],
       },
@@ -1335,9 +1563,9 @@ export const TOOL_GROUPS = {
     tools: ["analyze_posts"],
   },
   local_files: {
-    label: "локальные папки на компьютере: прочитать и записать файл (с историей версий), найти файл, git-статус и коммиты",
-    match: /(локальн|файл|\.md(?![a-z])|\.txt(?![a-z])|readme|git|гит|коммит|ветк|diff|репозитор|на диске|в папке)/,
-    tools: ["list_workspaces", "workspace_list_dir", "workspace_find_files", "workspace_read_file", "workspace_write_file", "workspace_file_history", "workspace_git"],
+    label: "локальные папки на компьютере: прочитать и записать файл (с историей версий), таблицы Excel/CSV и документы Word, найти файл, git-статус и коммиты",
+    match: /(локальн|файл|\.md(?![a-z])|\.txt(?![a-z])|readme|git|гит|коммит|ветк|diff|репозитор|на диске|в папке|таблиц|excel|эксел|xlsx|csv|ячейк|word|ворд|docx)/,
+    tools: ["list_workspaces", "workspace_list_dir", "workspace_find_files", "workspace_read_file", "workspace_write_file", "workspace_file_history", "workspace_git", "workspace_read_table", "workspace_write_cells", "workspace_format_cells", "workspace_read_document", "workspace_write_docx"],
   },
   workspace: {
     label: "папки, артефакты, журнал решений, лента активности, расход токенов, черновики младшей модели",
@@ -1922,7 +2150,12 @@ export async function refreshDataSourceById(id, { inboxId } = {}) {
   }
 }
 
-export async function runJarvisTool(client, name, rawArgs, projectList, inboxId) {
+/**
+ * viewer — от чьего имени работает Джарвис ({ userId, all, projectIds }): заметки приватны, и отвечая
+ * участнику, он не должен ни найти, ни прочитать чужую личную заметку. Без viewer (архивариус,
+ * старые вызовы) — прежнее поведение.
+ */
+export async function runJarvisTool(client, name, rawArgs, projectList, inboxId, viewer = null) {
   let args = {};
   try { args = JSON.parse(rawArgs || "{}"); } catch { /* модель иногда шлёт кривой JSON — просто игнорируем аргументы */ }
 
@@ -2345,7 +2578,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
     return `последние события${project ? ` в «${project.name}»` : ""}: ${lines.join("; ")}`;
   }
 
-  if (["list_workspaces", "workspace_list_dir", "workspace_find_files", "workspace_read_file", "workspace_write_file", "workspace_file_history", "workspace_git"].includes(name)) {
+  if (["list_workspaces", "workspace_list_dir", "workspace_find_files", "workspace_read_file", "workspace_write_file", "workspace_file_history", "workspace_git", "workspace_read_table", "workspace_write_cells", "workspace_format_cells", "workspace_read_document", "workspace_write_docx"].includes(name)) {
     const run = (sql, values) => client.query(sql, values);
     if (name === "list_workspaces") {
       const rows = await listWorkspaces(run);
@@ -2369,13 +2602,23 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
       const commits = (git.commits || []).map((commit) => `${commit.short} ${commit.date?.slice(0, 10)} ${commit.author}: ${commit.subject}`).join("\n");
       return `ветка ${git.branch}${git.upstream ? ` → ${git.upstream}` : ""}, ↑${git.ahead || 0} ↓${git.behind || 0}, сводка от ${git.checkedAt || "?"}\nизменённые файлы (${git.changesTotal ?? 0}):\n${changes || "нет"}\nпоследние коммиты:\n${commits || "нет"}`;
     }
-    const opByTool = { workspace_list_dir: "list", workspace_find_files: "find", workspace_read_file: "read", workspace_write_file: "write", workspace_git: "git_log" };
+    const opByTool = {
+      workspace_list_dir: "list", workspace_find_files: "find", workspace_read_file: "read", workspace_write_file: "write", workspace_git: "git_log",
+      workspace_read_table: "read_table", workspace_write_cells: "write_cells", workspace_format_cells: "write_cells", workspace_read_document: "read_doc", workspace_write_docx: "write_docx",
+    };
+    // Параметры таблицы уходят JSON-ом в content операции — их разбирает страница MBOX Desktop (officeOps.ts).
+    const opContent = name === "workspace_write_file" || name === "workspace_write_docx" ? String(args.content ?? "")
+      : name === "workspace_read_table" ? JSON.stringify({ sheet: args.sheet || undefined, range: args.range || undefined, styles: args.styles || undefined })
+        : name === "workspace_write_cells" ? JSON.stringify({ sheet: args.sheet || undefined, cells: args.cells && typeof args.cells === "object" ? args.cells : {} })
+          // Оформление едет той же операцией write_cells — форматирует страница MBOX Desktop (officeOps.ts).
+          : name === "workspace_format_cells" ? JSON.stringify({ sheet: args.sheet || undefined, format: Array.isArray(args.format) ? args.format : [] })
+            : null;
     try {
       const op = await requestWorkspaceOp(run, {
         workspace,
         op: opByTool[name],
         path: name === "workspace_find_files" ? String(args.query || "") : String(args.path || ""),
-        content: name === "workspace_write_file" ? String(args.content ?? "") : null,
+        content: opContent,
         message: String(args.message || ""),
         requestedBy: JARVIS_NAME,
       });
@@ -2391,6 +2634,22 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
       }
       if (name === "workspace_write_file") return `записал ${workspaceMarkdownLink(workspace, result.path)} в «${workspace.name}» (${result.size} байт); прежняя версия сохранена в истории MBOX`;
       if (name === "workspace_git") return (result.commits || []).map((commit) => `${commit.short} ${commit.date?.slice(0, 10)} ${commit.author}: ${commit.subject}`).join("\n") || "коммитов с этим файлом нет";
+      if (name === "workspace_read_table") {
+        const header = `листы: ${(result.sheets || []).map((sheet) => `${sheet.name} (${sheet.rows}×${sheet.columns})`).join(", ")}; лист «${result.sheet}»${result.truncated ? " — показана часть, сузь range" : ""}`;
+        const grid = [["", ...(result.columns || [])].join("\t"), ...(result.rows || []).map((row) => [row.row, ...row.cells].join("\t"))].join("\n");
+        const styles = args.styles ? `\nоформление:\n${result.styles ? result.styles.join("\n") || "нет" : "недоступно — обновите MBOX Desktop"}` : "";
+        return `${header}\n${grid}${styles}`;
+      }
+      if (name === "workspace_format_cells") {
+        if (result.formatted === undefined) return "не получилось: MBOX Desktop на этом компьютере слишком старый — оформление не поддерживается, нужно обновить приложение";
+        return `оформил ${result.formatted} ячеек на листе «${result.sheet}» в ${workspaceMarkdownLink(workspace, result.path)}`;
+      }
+      if (name === "workspace_write_cells") return `записал ${result.cells} ячеек на лист «${result.sheet}» в ${workspaceMarkdownLink(workspace, result.path)}`;
+      if (name === "workspace_read_document") {
+        const text = String(result.content || "");
+        return text.length > 12000 ? `${text.slice(0, 12000)}\n… (показаны первые 12000 из ${text.length} символов)` : text || "(документ пуст)";
+      }
+      if (name === "workspace_write_docx") return `записал документ ${workspaceMarkdownLink(workspace, result.path)} в «${workspace.name}» (${result.size} байт)`;
     } catch (error) {
       return `не получилось: ${describeWorkspaceError(error, workspace)}`;
     }
@@ -2529,7 +2788,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
   // ничего там не видел (todo #318: заметка #6 осталась нетронутой, текст ушёл в память #117).
   if (name === "search_notes") {
     const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
-    const rows = await listNotes(client.query.bind(client), String(args.query || "").trim(), limit);
+    const rows = await listNotes(client.query.bind(client), String(args.query || "").trim(), limit, viewer?.userId ? viewer : undefined);
     if (!rows.length) return "заметок не нашлось";
     return rows.map((row) => `#${row.id} «${row.title || "без заголовка"}» — ${String(row.snippet || "").replace(/\s+/g, " ").slice(0, 140)}`).join("\n");
   }
@@ -2537,6 +2796,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
   if (name === "read_note") {
     const id = String(args.note_id || "").trim().replace(/^#/, "");
     if (!/^\d+$/.test(id)) return "нужен числовой ID заметки — возьми его из search_notes";
+    if (viewer?.userId && !(await canAccessNote(client.query.bind(client), id, viewer))) return `заметка #${id} не нашлась`;
     const note = (await client.query("SELECT id::text, title, content, tabs FROM notes WHERE id = $1", [id])).rows[0];
     if (!note) return `заметка #${id} не нашлась`;
     const tabs = Array.isArray(note.tabs) && note.tabs.length ? note.tabs : [{ title: "Основная", content: note.content }];
@@ -2547,7 +2807,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
   if (name === "create_note") {
     const content = String(args.content ?? "");
     if (!content.trim()) return "нужен текст заметки";
-    const note = await createNote(client.query.bind(client), { title: String(args.title || "").trim(), content, author: JARVIS_NAME });
+    const note = await createNote(client.query.bind(client), { title: String(args.title || "").trim(), content, author: JARVIS_NAME, owner_user_id: viewer?.userId || null });
     broadcastRealtime("entity_changed", { entity: "notes", action: "create", actor: JARVIS_NAME, detail: note.title, notification: `Агент ${JARVIS_NAME} создал заметку «${note.title}»` });
     return `создана заметка «${note.title}» (#${note.id})`;
   }
@@ -2555,6 +2815,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId)
   if (name === "update_note") {
     const id = String(args.note_id || "").trim().replace(/^#/, "");
     if (!/^\d+$/.test(id)) return "нужен числовой ID заметки — возьми его из search_notes";
+    if (viewer?.userId && !(await canAccessNote(client.query.bind(client), id, viewer))) return `заметка #${id} не нашлась`;
     const note = (await client.query("SELECT id::text, title, content, tabs FROM notes WHERE id = $1", [id])).rows[0];
     if (!note) return `заметка #${id} не нашлась`;
     const tabs = (Array.isArray(note.tabs) && note.tabs.length ? note.tabs : [{ id: "main", title: "Основная", content: note.content }]).map((tab) => ({ ...tab }));
@@ -2823,7 +3084,9 @@ export async function replyAsJarvis(item) {
 
     const mboxUserId = String(item.props?.mbox_user_id || "");
     const includeLegacyInbox = item.props?.mbox_owner === true;
-    const replyIdentity = mboxUserId ? { mbox_user_id: mboxUserId, mbox_owner: includeLegacyInbox } : {};
+    // Чат (props.thread, кнопка «Новый чат»): ответ ложится в тот же чат, история — только из него.
+    const thread = /^[A-Za-z0-9_-]{1,80}$/.test(String(item.props?.thread || "")) ? String(item.props.thread) : "";
+    const replyIdentity = { ...(mboxUserId ? { mbox_user_id: mboxUserId, mbox_owner: includeLegacyInbox } : {}), ...(thread ? { thread } : {}) };
     const fastPathReply = await tryFastPath(client, item.body || item.title);
     if (fastPathReply) {
       jlog(item.id, `fast-path: "${String(item.body || "").slice(0, 80)}" -> без обращения к LLM`);
@@ -2902,6 +3165,15 @@ export async function replyAsJarvis(item) {
       + JARVIS_DATA_RULES
       + (item.props?.current_project_name
         ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
+        : "")
+      // Чипы над полем ввода: что открыто у человека. «Поправь тут» относится к этому — не ищи по всей базе.
+      + (Array.isArray(item.props?.context) && item.props.context.length
+        ? ` Сейчас у пользователя открыто: ${item.props.context.slice(0, 6).map((entry) => {
+          const kinds = { note: "заметка", todo: "задача", memory: "запись памяти", file: "локальный файл", diff: "изменения файла", storage: "файл в хранилище", web: "страница", project: "проект", skill: "навык" };
+          const id = /^\d+$/.test(String(entry?.id || "")) ? ` #${entry.id}` : "";
+          const detail = entry?.detail ? ` (${String(entry.detail).slice(0, 200)})` : "";
+          return `${kinds[entry?.kind] || "вкладка"}${id} «${String(entry?.title || "").slice(0, 120)}»${detail}`;
+        }).join("; ")}. Если вопрос не называет объект явно — он про открытое.`
         : "");
     // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — если человек в прошлом сообщении назвал
     // стек или ссылку, а в этом попросил "создай проект", Джарвис не мог их связать. Подтягиваем
@@ -2919,8 +3191,9 @@ export async function replyAsJarvis(item) {
        WHERE item_type IN ('question', 'answer') AND (agent_name = 'Человек' OR agent_name = 'Claude' OR agent_name = $1)
          AND ($2::boolean OR project_id = ANY($3::bigint[]))
          AND (props->>'mbox_user_id' = $4 OR ($5::boolean AND NOT (props ? 'mbox_user_id')))
+         AND COALESCE(props->>'thread', '') = $6
        ORDER BY created_at DESC LIMIT ${KEEP_RAW + OLDER_CAP}`,
-      [JARVIS_NAME, allowedProjectIds == null, allowedProjectIds || [], mboxUserId, includeLegacyInbox],
+      [JARVIS_NAME, allowedProjectIds == null, allowedProjectIds || [], mboxUserId, includeLegacyInbox, thread],
     )).rows.reverse();
     // Однократный запрос с несколькими действиями ("удали Тест и Тест 2") ненадёжен — модель
     // часто возвращает только один tool_call за раз, даже когда попросили вызывать функцию на
@@ -3046,7 +3319,7 @@ export async function replyAsJarvis(item) {
         try {
           result = call.function?.name === "request_tools"
             ? (enableToolGroups(focusGroups, call.function?.arguments), enableToolGroups(activeGroups, call.function?.arguments))
-            : await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList, item.id);
+            : await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList, item.id, mboxUserId ? { userId: mboxUserId, all: allowedProjectIds == null, projectIds: allowedProjectIds || [] } : null);
           jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
         } catch (error) {
           result = describeToolFailure(call.function?.name || "инструмент", error);

@@ -175,7 +175,14 @@ async function executeOps() {
         result = { path: written.path, size: written.size };
       } else if (op.op === "find") result = { paths: await bridge.find(key, op.path) };
       else if (op.op === "git_log") result = { commits: op.path ? await bridge.gitLog(key, op.path) : (await bridge.git(key)).commits ?? [] };
-      else throw new Error(`неизвестная операция ${op.op}`);
+      // Таблицы и Word — отдельным модулем: exceljs и mammoth тяжёлые и нужны только по запросу агента.
+      else if (op.op === "read_table") result = await (await import("./officeOps")).readTable(bridge, key, op.path, parseOpContent(op.content));
+      else if (op.op === "write_cells") result = await (await import("./officeOps")).writeCells(bridge, key, op.path, parseOpContent(op.content));
+      else if (op.op === "read_doc") result = await (await import("./officeOps")).readDocument(bridge, key, op.path);
+      else if (op.op === "write_data") {
+        if (!bridge.writeData) throw new Error("обновите MBOX Desktop: запись документов недоступна");
+        result = await bridge.writeData(key, op.path, op.content ?? "");
+      } else throw new Error(`неизвестная операция ${op.op}`);
     } catch (cause) {
       error = (cause instanceof Error ? cause.message : String(cause)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
     }
@@ -185,6 +192,11 @@ async function executeOps() {
       body: JSON.stringify({ status: error ? "failed" : "done", result, error }),
     }).catch(() => undefined);
   }
+}
+
+function parseOpContent(content: string | null) {
+  if (!content) return {};
+  try { return JSON.parse(content) as Record<string, never>; } catch { throw new Error("параметры операции — не JSON"); }
 }
 
 async function onDiskChange(key: string, paths: string[]) {

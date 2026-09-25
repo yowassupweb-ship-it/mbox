@@ -37,10 +37,6 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
           <button type="button" onClick={reload} title="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
-      <div className="wb-skills-intro">
-        <span>Готовые способы выполнить работу с агентом</span>
-        <small>Выберите результат — MBOX откроет нужный сценарий и сохранит итог рядом с проектом.</small>
-      </div>
       <Filter value={filter} onChange={setFilter} placeholder="Что нужно сделать?" />
       <div className="wb-view-body">
         {loading && <p className="wb-empty">Загрузка…</p>}
@@ -64,9 +60,12 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
                     title={skill.summary}
                   >
                     <span className="wb-menu-item-title">{skill.name}</span>
-                    <span className="wb-menu-item-meta">
-                      {skill.calls > 0 ? `${skill.calls} выз. · ${formatLastUsed(skill.last_used_at)}` : skill.owner.split("·")[0].trim()}
-                    </span>
+                    {/* Кто исполняет — на странице навыка; в списке только то, что меняется: как часто пользуются. */}
+                    {skill.calls > 0 && (
+                      <span className="wb-menu-item-meta">
+                        {skill.calls} {plural(skill.calls, "вызов", "вызова", "вызовов")}{skill.last_used_at ? ` · ${formatLastUsed(skill.last_used_at)}` : ""}
+                      </span>
+                    )}
                   </button>
                   {launch && (
                     <button type="button" className="wb-menu-item-launch" onClick={() => openSkillPage(launch, tabs)} title={`Запустить: ${launch.title}`} aria-label={`Запустить ${skill.name}`}>
@@ -86,7 +85,7 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
             {data.modes.map((mode) => (
               <div key={mode.id} className="wb-menu-item is-static">
                 <span className="wb-menu-item-title">{mode.name}</span>
-                <span className="wb-menu-item-meta">{mode.calls} выз. · {formatLastUsed(mode.last_used_at)}</span>
+                <span className="wb-menu-item-meta">{mode.calls} {plural(mode.calls, "вызов", "вызова", "вызовов")}{mode.last_used_at ? ` · ${formatLastUsed(mode.last_used_at)}` : ""}</span>
               </div>
             ))}
           </section>
@@ -103,11 +102,20 @@ export function ToolIcon({ src, name, size }: { src: string; name: string; size:
   return <img src={src} width={size} height={size} alt="" onError={() => setFailed(true)} />;
 }
 
+/** Готов, нужна настройка или заготовка — по полю status/planned каталога. */
+function toolTone(tool: { status: string; planned?: boolean }) {
+  if (tool.planned) return "is-planned";
+  if (/нужн|авторизац|не установ|ошибк/i.test(tool.status)) return "is-warn";
+  return "is-ok";
+}
+
 export function ToolsView({ tabs }: { tabs: TabsApi }) {
   const { data, loading, reload } = useToolsCatalog();
   const [filter, setFilter] = usePersistentState("mbox.tools.filter", "");
+  const [collapsed, setCollapsed] = usePersistentState<string[]>("mbox.tools.collapsed", []);
   const needle = filter.trim().toLowerCase();
-  const tools = data.tools.filter((tool) => !needle || `${tool.name} ${tool.kind} ${tool.summary} ${tool.capabilities.join(" ")}`.toLowerCase().includes(needle));
+  const tools = data.tools.filter((tool) => !needle || `${tool.name} ${tool.kind} ${tool.summary} ${tool.group || ""} ${tool.capabilities.join(" ")}`.toLowerCase().includes(needle));
+  const groups = [...tools.reduce((map, tool) => map.set(tool.group || "Другое", [...(map.get(tool.group || "Другое") ?? []), tool]), new Map<string, typeof tools>())];
 
   return (
     <div className="wb-view">
@@ -120,25 +128,47 @@ export function ToolsView({ tabs }: { tabs: TabsApi }) {
       <Filter value={filter} onChange={setFilter} placeholder="Найти инструмент" />
       <div className="wb-view-body">
         {loading && <p className="wb-empty">Загрузка…</p>}
-        {tools.map((tool) => {
-          const key = `tool:${tool.id}`;
+        {groups.map(([group, items]) => {
+          const open = Boolean(needle) || !collapsed.includes(group);
+          const planned = items.every((tool) => tool.planned);
           return (
-            <button
-              key={tool.id}
-              type="button"
-              className={tabs.active === key ? "wb-menu-item has-icon is-active" : "wb-menu-item has-icon"}
-              onClick={() => tabs.open(key)}
-              onDoubleClick={() => tabs.open(key, true)}
-              title={tool.summary}
-            >
-              <ToolIcon src={tool.icon} name={tool.name} size={20} />
-              <span className="wb-menu-item-title">{tool.name}</span>
-              <span className="wb-menu-item-meta">{tool.kind} · {tool.status}</span>
-            </button>
+            <section key={group} className="wb-menu-group">
+              <button type="button" className="wb-menu-group-head" onClick={() => setCollapsed((current) => (current.includes(group) ? current.filter((item) => item !== group) : [...current, group]))}>
+                <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>{group}{planned && <i className="wb-tool-soon">скоро</i>}<b>{items.length}</b>
+              </button>
+              {open && items.map((tool) => {
+                const key = `tool:${tool.id}`;
+                return (
+                  <button
+                    key={tool.id}
+                    type="button"
+                    className={["wb-menu-item has-icon wb-tool-item", tabs.active === key ? "is-active" : "", tool.planned ? "is-planned" : ""].filter(Boolean).join(" ")}
+                    onClick={() => tabs.open(key)}
+                    onDoubleClick={() => tabs.open(key, true)}
+                    title={`${tool.summary}\n\n${tool.status}`}
+                  >
+                    <span className={`wb-tool-glyph ${toolTone(tool)}`}>
+                      <ToolIcon src={tool.planned ? "" : tool.icon} name={tool.name} size={20} />
+                      <i aria-hidden="true" />
+                    </span>
+                    <span className="wb-menu-item-title">{tool.name}</span>
+                    <span className="wb-menu-item-meta">{tool.kind}</span>
+                  </button>
+                );
+              })}
+            </section>
           );
         })}
         {!loading && !tools.length && <p className="wb-empty">{needle ? "Ничего не найдено" : "Инструментов пока нет"}</p>}
       </div>
     </div>
   );
+}
+
+function plural(count: number, one: string, few: string, many: string) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }

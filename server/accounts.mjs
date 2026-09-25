@@ -9,6 +9,11 @@ export async function ensureAccountsSchema(query) {
     PRIMARY KEY (project_id, user_id)
   )`);
   await query("CREATE INDEX IF NOT EXISTS idx_project_memberships_user ON project_memberships(user_id, project_id)");
+  // Свой Джарвис у аккаунта — по желанию владельца: выключен — вопросы участника Джарвис не будят.
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS jarvis_enabled BOOLEAN NOT NULL DEFAULT true");
+  // Когда сессией пользовались: при входе вытесняются давно не используемые, а не самые старые —
+  // иначе каждый вход агента по паролю (MCP, наблюдатели) выбивал человека из браузера.
+  await query("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ");
   await query(`CREATE TABLE IF NOT EXISTS account_tokens (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -18,6 +23,17 @@ export async function ensureAccountsSchema(query) {
     last_used_at TIMESTAMPTZ
   )`);
   await query("CREATE INDEX IF NOT EXISTS idx_account_tokens_user ON account_tokens(user_id, created_at DESC)");
+  await query(`CREATE TABLE IF NOT EXISTS account_invites (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_ids BIGINT[] NOT NULL DEFAULT '{}',
+    uses_remaining INTEGER NOT NULL DEFAULT 20,
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '7 days',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+  )`);
+  await query("CREATE INDEX IF NOT EXISTS idx_account_invites_token ON account_invites(token_hash)");
 }
 
 const ownerOnly = (user, sendJson, res) => {
@@ -26,9 +42,13 @@ const ownerOnly = (user, sendJson, res) => {
   return false;
 };
 
+function looksLikePasswordHash(value) {
+  return /^(pbkdf2_sha256|bcrypt|scrypt|argon2|sha256|sha512)\$/i.test(String(value || ""));
+}
+
 async function accountRows(query) {
   return (await query(
-    `SELECT u.id::text, u.email, u.username, u.role, u.created_at::text,
+    `SELECT u.id::text, u.email, u.username, u.role, COALESCE((to_jsonb(u)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled, u.created_at::text,
             COALESCE(jsonb_agg(jsonb_build_object('project_id', p.id::text, 'project_name', p.name, 'role', pm.role)
               ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects
      FROM users u
@@ -115,15 +135,17 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     const existing = (await query("SELECT id::text, role FROM users WHERE id = $1", [match[1]])).rows[0];
     if (!existing) { sendJson(res, 404, { error: "not_found" }); return true; }
     if (existing.role === "owner" && String(user.id) !== String(existing.id)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
+    const password = String(body.password || "");
     await query(
       `UPDATE users SET
          username = COALESCE(NULLIF($1, ''), username),
          email = COALESCE(NULLIF($2, ''), email),
          password_hash = CASE WHEN length($3) >= 8 THEN crypt($3, gen_salt('bf')) ELSE password_hash END
        WHERE id = $4`,
-      [String(body.username || "").trim(), String(body.email || "").trim(), String(body.password || ""), match[1]],
+      [String(body.username || "").trim(), String(body.email || "").trim(), looksLikePasswordHash(password) ? "" : password, match[1]],
     );
     if (existing.role !== "owner" && Object.prototype.hasOwnProperty.call(body, "project_ids")) await replaceMemberships(query, match[1], body.project_ids);
+    if (existing.role !== "owner" && typeof body.jarvis_enabled === "boolean") await query("UPDATE users SET jarvis_enabled = $1 WHERE id = $2", [body.jarvis_enabled, match[1]]);
     sendJson(res, 200, { user: (await accountRows(query)).find((row) => row.id === match[1]) });
     return true;
   }

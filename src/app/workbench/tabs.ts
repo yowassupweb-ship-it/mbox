@@ -11,6 +11,16 @@ type TabsState = { tabs: TabRef[]; active: string };
 
 const STORAGE_KEY = "mbox.workbench.tabs.v1";
 const MAX_TABS = 24;
+let storageUser = "anonymous";
+
+export function setWorkbenchStorageUser(username: string) {
+  const normalized = String(username || "anonymous").trim().toLowerCase().replace(/[^a-z0-9_.@-]+/g, "-").replace(/^-+|-+$/g, "");
+  storageUser = normalized || "anonymous";
+}
+
+export function scopedStorageKey(key: string) {
+  return `${key}.user.${storageUser}`;
+}
 
 const legacySections: Record<string, string> = {
   overview: "welcome",
@@ -43,7 +53,7 @@ export function tabFromLocation(): string {
 
 function readStored(): TabsState {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+    const raw = JSON.parse(window.localStorage.getItem(scopedStorageKey(STORAGE_KEY)) || "null");
     if (raw && Array.isArray(raw.tabs)) {
       const tabs = raw.tabs.filter((tab: TabRef) => tab && typeof tab.key === "string" && !["memory:new", "file:new", "agents"].includes(tab.key));
       return { tabs, active: String(raw.active || "") };
@@ -68,7 +78,7 @@ export function useTabs() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.localStorage.setItem(scopedStorageKey(STORAGE_KEY), JSON.stringify(state));
     } catch {
       // не критично: вкладки просто не переживут перезагрузку
     }
@@ -171,7 +181,7 @@ export function projectIdOfTab(key: string): string | undefined {
 export function usePersistentState<T>(key: string, fallback: T) {
   const [value, setValue] = useState<T>(() => {
     try {
-      const raw = window.localStorage.getItem(key);
+      const raw = window.localStorage.getItem(scopedStorageKey(key));
       return raw === null ? fallback : (JSON.parse(raw) as T);
     } catch {
       return fallback;
@@ -179,7 +189,7 @@ export function usePersistentState<T>(key: string, fallback: T) {
   });
   useEffect(() => {
     try {
-      window.localStorage.setItem(key, JSON.stringify(value));
+      window.localStorage.setItem(scopedStorageKey(key), JSON.stringify(value));
     } catch {
       // приватный режим — живём без памяти раскладки
     }

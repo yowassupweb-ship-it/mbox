@@ -1,4 +1,5 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { scopedStorageKey } from "./tabs";
 
 /**
  * Раскладка консоли как у терминалов VS Code: несколько групп (в списке справа видна каждая), на экране
@@ -26,7 +27,7 @@ const newId = (prefix: string) => `${prefix}~${Date.now().toString(36)}${(seq++)
 export const isChatPane = (id: string) => id === CHAT || id.startsWith(`${CHAT}~`);
 
 /** С кем можно вести отдельный чат. Сообщения в нём уходят этому агенту без @ (props.to). */
-export const CHAT_PEERS = ["Джарвис", "Claude", "ChatGPT"];
+export const CHAT_PEERS = ["Claude", "ChatGPT"];
 
 /** Чат с одним агентом — панель chat~<агент>~<id>; общий чат — chat или chat~<id>. */
 export function chatPeer(id: string) {
@@ -39,29 +40,6 @@ function emptyGroup(pane: string = CHAT, layout: Layout = "row"): ConsoleGroup {
 }
 
 /** Старая раскладка (ряд панелей и их доли) переходит в одну группу как есть. */
-function legacyState(): ConsoleState {
-  const base: ConsoleState = { groups: [emptyGroup()], active: 0, focused: CHAT, labels: {}, listOpen: true, listWidth: 190, listCompact: false, collapsed: [] };
-  try {
-    const panes = JSON.parse(window.localStorage.getItem("mbox.console.panes") || "null") as string[] | null;
-    const sizes = JSON.parse(window.localStorage.getItem("mbox.console.sizes") || "null") as number[] | null;
-    const layout = (JSON.parse(window.localStorage.getItem("mbox.console.layout") || "null") as Layout | null) === "column" ? "column" : "row";
-    if (!Array.isArray(panes) || !panes.length) return base;
-    const seen = new Set<string>();
-    const unique = panes.map((pane) => {
-      const id = isChatPane(pane) && seen.has(CHAT) ? newId(CHAT) : pane;
-      seen.add(isChatPane(pane) ? CHAT : pane);
-      return id;
-    }).filter((pane, index, all) => all.indexOf(pane) === index);
-    return {
-      ...base,
-      groups: [{ id: newId("g"), layout, columns: unique.map((pane) => [pane]), colSizes: sizes?.length === unique.length ? sizes : unique.map(() => 1), paneSizes: unique.map(() => [1]) }],
-      focused: unique[0],
-    };
-  } catch {
-    return base;
-  }
-}
-
 function normalizeGroup(group: ConsoleGroup): ConsoleGroup | null {
   const columns: string[][] = [];
   const colSizes: number[] = [];
@@ -100,27 +78,31 @@ function normalize(state: ConsoleState): ConsoleState {
 
 function load(): ConsoleState {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(scopedStorageKey(STORAGE_KEY));
     if (raw) return normalize(JSON.parse(raw) as ConsoleState);
   } catch {
     // битое хранилище — начинаем заново
   }
-  return normalize(legacyState());
+  return normalize({ groups: [emptyGroup()], active: 0, focused: CHAT, labels: {}, listOpen: true, listWidth: 190, listCompact: false, collapsed: [] });
 }
 
 const store = {
   state: null as ConsoleState | null,
+  key: "",
   listeners: new Set<() => void>(),
 };
 
 function current(): ConsoleState {
+  const key = scopedStorageKey(STORAGE_KEY);
+  if (store.key !== key) { store.key = key; store.state = null; }
   if (!store.state) store.state = load();
   return store.state;
 }
 
 function commit(next: ConsoleState) {
   store.state = normalize(next);
-  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store.state)); } catch { /* без памяти */ }
+  store.key = scopedStorageKey(STORAGE_KEY);
+  try { window.localStorage.setItem(store.key, JSON.stringify(store.state)); } catch { /* без памяти */ }
   store.listeners.forEach((listener) => listener());
 }
 

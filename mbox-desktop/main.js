@@ -20,6 +20,25 @@ const processPatterns = {
   Codex: "codex-chat-watcher.mjs",
   Claude: "claude-inbox-watcher.mjs"
 };
+// Наблюдатель ChatGPT называется по-разному: в меню и скриптах «Codex», в списке процессов и в
+// интерфейсе — «ChatGPT». Раньше сравнение шло как есть, и приложение не видело уже запущенного
+// ChatGPT (запускало второй) и не могло его остановить из интерфейса.
+function responderName(name) {
+  const value = String(name || "").toLowerCase();
+  if (value === "codex" || value === "chatgpt") return "Codex";
+  if (value === "claude") return "Claude";
+  return "";
+}
+
+/**
+ * Какие наблюдатели должны работать. Раньше упавший наблюдатель (сеть, туннель, сбой CLI) оставался
+ * лежать, и чат молчал, пока человек не нажмёт «остановить/запустить». Теперь приложение само
+ * поднимает его: сразу после выхода — с нарастающей паузой, и раз в минуту сторож проверяет, что
+ * процесс на месте. Остановка человеком убирает агента из списка — тогда его никто не трогает.
+ */
+const wantedResponders = new Set();
+const restartDelay = new Map();
+const RESPONDER_WATCHDOG_MS = 60 * 1000;
 
 // Встроенный интерфейс (ui/) вместо загрузки сайта — см. localUi.js. Схему регистрируем до ready.
 const useLocalUi = localUi.localUiAvailable();
@@ -52,8 +71,11 @@ app.whenReady().then(async () => {
   createTray();
   setMenu();
   setupAutoUpdates();
+  // Наблюдатели живут только внутри окна: старый автозапуск Windows поднимал их без окна, и чат
+  // отвечал кодом, которого в приложении уже нет, а вывод никуда не попадал. Ключи убираем молча.
+  await removeResponderRunKeys();
   if (process.env.MBOX_DESKTOP_SKIP_AGENT_AUTOSTART !== "1") {
-    await startResponders({ reveal: false }).catch((error) => log(`autostart responders failed: ${error.message}`));
+    await startResponders({ reveal: false, takeover: true }).catch((error) => log(`autostart responders failed: ${error.message}`));
   }
 });
 
@@ -67,6 +89,14 @@ function resolveRepoRoot() {
   const candidates = [
     process.env.MBOX_REPO_ROOT,
     isDev ? path.resolve(__dirname, "..") : "",
+    path.join(path.dirname(process.cwd()), "mbox"),
+    path.join(process.cwd(), "mbox"),
+    path.join(os.homedir(), "Desktop", "Mbox", "mbox"),
+    path.join(os.homedir(), "Desktop", "MBOX", "mbox"),
+    path.join(os.homedir(), "Projects", "Mbox", "mbox"),
+    path.join(os.homedir(), "Projects", "MBOX", "mbox"),
+    "E:\\Projects\\Mbox\\mbox",
+    "E:\\Projects\\MBOX\\mbox",
     path.join(os.homedir(), "Desktop", "Mbox", "memora", "memora-graph"),
     path.join(os.homedir(), "Desktop", "MBOX", "memora", "memora-graph"),
     path.resolve(__dirname, "..")
@@ -198,7 +228,11 @@ function createWindow() {
     // окно дёргалось, фокус уходил в меню и курсор пропадал из заметки. Меню скрыто насовсем ниже,
     // его горячие клавиши (Ctrl+R, масштаб, DevTools) продолжают работать.
     autoHideMenuBar: false,
-    titleBarStyle: "hiddenInset",
+    // Одна полоса вместо двух: системная рамка Windows убрана, кнопки окна рисуются поверх шапки MBOX
+    // (Window Controls Overlay). Цвет кнопок страница подстраивает под тему (mbox-desktop:titlebar-theme).
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" }
+      : { titleBarStyle: "hidden", titleBarOverlay: { color: "#25262a", symbolColor: "#f5f5f7", height: 38 } }),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       additionalArguments: [`--mbox-server=${mboxUrl}`, `--mbox-local-ui=${useLocalUi ? "1" : "0"}`],
@@ -292,8 +326,8 @@ function setMenu() {
     {
       label: "Агенты",
       submenu: [
-        { label: "Запустить ChatGPT", click: () => startResponder("Codex") },
-        { label: "Запустить Claude", click: () => startResponder("Claude") },
+        { label: "Запустить ChatGPT", click: () => startResponder("Codex", { takeover: true }) },
+        { label: "Запустить Claude", click: () => startResponder("Claude", { takeover: true }) },
         { label: "Запустить обоих", click: () => startResponders() },
         { type: "separator" },
         { label: "Остановить ChatGPT", click: () => stopResponder("Codex") },
@@ -326,15 +360,29 @@ function wrapperPath(name) {
   return fs.existsSync(repoPath) ? repoPath : packagedPath;
 }
 
-async function startResponders(options = {}) {
+async function startResponders(options = { takeover: true }) {
   const results = [];
   results.push(await startResponder("Codex", options));
   results.push(await startResponder("Claude", options));
   return results;
 }
 
-async function startResponder(name, { reveal = true } = {}) {
-  if ((await processStatus()).some((item) => item.agent === name)) return { agent: name, status: "already-running" };
+async function startResponder(rawName, { reveal = true, takeover = false } = {}) {
+  const name = responderName(rawName);
+  if (!name) throw new Error(`Неизвестный агент: ${rawName}`);
+  wantedResponders.add(name);
+  if (tracked.has(name)) return { agent: name, status: "starting" };
+  const foreign = (await processStatus()).filter((item) => responderName(item.agent) === name);
+  if (foreign.length) {
+    // «Или в окне, или никак»: наблюдатель вне окна (автозапуск, прошлый сеанс) забираем сюда.
+    // Сторож и автоперезапуск этого не делают — иначе два открытых окна MBOX отбирали бы
+    // наблюдателя друг у друга по кругу.
+    if (!takeover) return { agent: name, status: "already-running" };
+    for (const item of foreign) await killPid(item.pid);
+    invalidateProcessStatus();
+    await sleep(400);
+    log(`${name} responder: забран в окно (был pid ${foreign.map((item) => item.pid).join(", ")})`);
+  }
   const file = wrapperPath(name);
   if (!fs.existsSync(file)) throw new Error(`${name} wrapper not found: ${file}`);
   const workdir = fs.existsSync(path.join(repoRoot, "package.json")) ? repoRoot : path.dirname(path.dirname(file));
@@ -364,6 +412,7 @@ async function startResponder(name, { reveal = true } = {}) {
     env
   });
   tracked.set(name, child);
+  const spawnedAt = Date.now();
   invalidateProcessStatus();
   startSession({
     id: `agent:${name}`,
@@ -378,6 +427,7 @@ async function startResponder(name, { reveal = true } = {}) {
       tracked.delete(name);
       invalidateProcessStatus();
       log(`${name} responder exited code=${code ?? ""} signal=${signal ?? ""}`);
+      scheduleResponderRestart(name, Date.now() - spawnedAt);
     }
   });
   log(`started ${name} responder from ${file}`);
@@ -389,10 +439,36 @@ async function stopResponders() {
   await stopResponder("Claude");
 }
 
-async function stopResponder(name) {
+/** Проработал дольше пяти минут — считаем, что падение случайное, и снова поднимаем быстро. */
+function scheduleResponderRestart(name, uptimeMs) {
+  if (!wantedResponders.has(name) || app.isQuitting) return;
+  const previous = uptimeMs > 5 * 60 * 1000 ? 0 : restartDelay.get(name) || 0;
+  const delay = Math.min(previous ? previous * 2 : 5000, 5 * 60 * 1000);
+  restartDelay.set(name, delay);
+  log(`${name} responder: перезапуск через ${Math.round(delay / 1000)} с`);
+  setTimeout(() => {
+    if (!wantedResponders.has(name) || app.isQuitting) return;
+    startResponder(name, { reveal: false }).catch((error) => log(`${name} responder restart failed: ${error.message}`));
+  }, delay).unref?.();
+}
+
+setInterval(() => {
+  for (const name of wantedResponders) {
+    if (tracked.has(name) || app.isQuitting) continue;
+    startResponder(name, { reveal: false })
+      .then((result) => { if (result.status === "started") log(`${name} responder поднят сторожем`); })
+      .catch((error) => log(`${name} responder watchdog failed: ${error.message}`));
+  }
+}, RESPONDER_WATCHDOG_MS).unref?.();
+
+async function stopResponder(rawName) {
+  const name = responderName(rawName);
+  if (!name) return;
+  wantedResponders.delete(name);
+  restartDelay.delete(name);
   const pattern = processPatterns[name];
   markStopped(`agent:${name}`);
-  const matches = (await processStatus()).filter((item) => item.agent === name);
+  const matches = (await processStatus()).filter((item) => responderName(item.agent) === name);
   for (const item of matches) await killPid(item.pid);
   const child = tracked.get(name);
   if (child && !child.killed) killTree(child.pid);
@@ -454,20 +530,22 @@ function killPid(pid) {
   });
 }
 
+/** Агенты без окна больше не запускаются: «автозапуск агентов» = автозапуск самого MBOX Desktop,
+ * который поднимает их внутри себя. */
 async function installResponderAutostart() {
-  const key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-  for (const name of ["Codex", "Claude"]) {
-    const value = `cmd.exe /d /c start "" /min "${wrapperPath(name)}"`;
-    await reg(["add", key, "/v", `MBOX ${name} Responder`, "/t", "REG_SZ", "/d", value, "/f"]);
-  }
-  dialog.showMessageBox(mainWindow, { type: "info", message: "Автозапуск локальных агентов включён." });
+  await removeResponderRunKeys();
+  await installAppAutostart();
 }
 
 async function removeResponderAutostart() {
+  await removeResponderRunKeys();
+  await removeAppAutostart();
+}
+
+async function removeResponderRunKeys() {
   const key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
   await reg(["delete", key, "/v", "MBOX Codex Responder", "/f"]).catch(() => {});
   await reg(["delete", key, "/v", "MBOX Claude Responder", "/f"]).catch(() => {});
-  dialog.showMessageBox(mainWindow, { type: "info", message: "Автозапуск локальных агентов отключён." });
 }
 
 async function installAppAutostart() {
@@ -605,25 +683,31 @@ async function checkForUpdates(manual) {
 ipcMain.handle("mbox-desktop:status", async () => processStatus());
 ipcMain.handle("mbox-desktop:start", async (_event, name) => {
   if (name === "All") await startResponders();
-  else if (name === "Codex" || name === "Claude") await startResponder(name);
+  else if (responderName(name)) await startResponder(name, { takeover: true });
   await sleep(1200);
   return processStatus();
 });
 ipcMain.handle("mbox-desktop:stop", async (_event, name) => {
   if (name === "All") await stopResponders();
-  else if (name === "Codex" || name === "Claude") await stopResponder(name);
+  else if (responderName(name)) await stopResponder(name);
   return processStatus();
 });
 // Агент, запущенный вне приложения (автозапуск Windows, старая версия), не отдаёт вывод —
 // перезапуск переносит его внутрь, в сессию консоли.
 ipcMain.handle("mbox-desktop:restart-agent", async (_event, name) => {
-  if (name !== "Codex" && name !== "Claude") throw new Error("Неизвестный агент");
+  if (!responderName(name)) throw new Error("Неизвестный агент");
   await stopResponder(name);
   await sleep(600);
   await startResponder(name);
   return processStatus();
 });
-ipcMain.handle("mbox-desktop:ssh-start", async (_event, target, cols, rows) => startSshSession(target, cols, rows));
+ipcMain.handle("mbox-desktop:titlebar-theme", async (_event, color, symbolColor) => {
+  if (process.platform === "darwin" || !mainWindow || mainWindow.isDestroyed()) return false;
+  const safe = (value, fallback) => (/^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\))$/i.test(String(value || "").trim()) ? String(value).trim() : fallback);
+  try { mainWindow.setTitleBarOverlay({ color: safe(color, "#25262a"), symbolColor: safe(symbolColor, "#f5f5f7"), height: 38 }); } catch { return false; }
+  return true;
+});
+ipcMain.handle("mbox-desktop:ssh-start", async (_event, target, cols, rows, options) => startSshSession(target, cols, rows, options));
 ipcMain.handle("mbox-desktop:session-resize", async (_event, id, cols, rows) => resizeSession(String(id || ""), cols, rows));
 ipcMain.handle("mbox-desktop:sessions", async () => listSessions());
 ipcMain.handle("mbox-desktop:session-input", async (_event, id, input) => sendSessionInput(String(id || ""), String(input ?? "")));
@@ -930,6 +1014,7 @@ function sessionMeta(session) {
     cwd: session.cwd,
     pid: session.child?.pid ?? session.pty?.pid ?? null,
     terminal: session.kind === "ssh",
+    ...(session.kind === "ssh" ? { phase: session.phase, retryAt: session.retryAt, connectedAt: session.connectedAt, direct: session.direct, jump: session.jump } : {}),
     status: session.status,
     code: session.code,
     startedAt: session.startedAt,
@@ -1085,25 +1170,38 @@ function normalizeSshTarget(raw) {
 const SSH_BUFFER_LIMIT = 256 * 1024;
 const SSH_RECONNECT_MIN_MS = 2000;
 const SSH_RECONNECT_MAX_MS = 15000;
+// Сессия считается установленной, прожив минуту: до этого обрыв — неудачный вход, а не разрыв связи,
+// и бесконечный повтор только копит запросы пароля (и неверные попытки для fail2ban).
+const SSH_ESTABLISHED_MS = 60000;
+const SSH_MAX_FAILED_ATTEMPTS = 3;
+const SSH_PROMPT = /(?:password|passphrase for key [^\n]*?|verification code|\(yes\/no(?:\/\[fingerprint\])?\)\?)\s*:?\s*$/i;
+const SSH_CLIENT_ERROR = /(?:^|\n)(?:ssh|kex_exchange_identification|Connection (?:to|closed)|channel \d+)[^\n]*(?:refused|timed out|closed|reset|not known|No route|failed)[^\n]*\s*$/i;
+const SSH_AUTH_FAILURE = /Permission denied \(|Too many authentication failures|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i;
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 function sshJumpHost() {
-  const host = responderEnv.MBOX_SSH_HOST || (() => { try { return new URL(mboxUrl).hostname; } catch { return ""; } })();
+  // Dev-окно ходит на http://localhost:5173 — прыгать через «root@localhost» бессмысленно, маршрут всё равно через prod.
+  const urlHost = (() => { try { return new URL(mboxUrl).hostname; } catch { return ""; } })();
+  const host = responderEnv.MBOX_SSH_HOST || (LOCAL_HOSTS.has(urlHost) ? "mbox.shar-os.ru" : urlHost);
   if (!host) return "";
   return responderEnv.MBOX_SSH_JUMP || `${responderEnv.MBOX_SSH_USER || "root"}@${host}`;
 }
 
-function sshArgs(target, port) {
+function sshArgs(target, port, direct = false) {
   const args = [
     "-tt",
     "-o", "ServerAliveInterval=20",
     "-o", "ServerAliveCountMax=3",
-    "-o", "TCPKeepAlive=yes",
-    "-o", "ConnectTimeout=12"
+    "-o", "TCPKeepAlive=yes"
   ];
-  const jump = sshJumpHost();
+  const jump = direct ? "" : sshJumpHost();
   const targetHost = target.split("@").pop().toLowerCase();
   const jumpHost = jump.split("@").pop().toLowerCase();
+  // С -J ConnectTimeout ограничивает и обмен баннером с целью, а он ждёт, пока человек вводит пароль
+  // jump-хоста: через 12 с ssh рвал вход с «timed out during banner exchange … UNKNOWN port 65535».
   if (jump && targetHost !== jumpHost) args.push("-J", jump);
+  else args.push("-o", "ConnectTimeout=12");
   if (port) args.push("-p", String(port));
   args.push(target);
   return args;
@@ -1120,7 +1218,7 @@ function connectSshSession(session) {
   const pty = require("node-pty");
   let term;
   try {
-    term = pty.spawn("ssh.exe", sshArgs(session.target, session.port), {
+    term = pty.spawn("ssh.exe", sshArgs(session.target, session.port, session.direct), {
       name: "xterm-256color",
       cols: session.cols,
       rows: session.rows,
@@ -1136,39 +1234,86 @@ function connectSshSession(session) {
   session.status = "running";
   session.code = null;
   session.endedAt = null;
+  setSshPhase(session, "connecting");
+  const spawnedAt = Date.now();
+  let tail = "";
+  let authFailed = false;
+  let settleTimer = null;
   term.onData((data) => {
     if (sessions.get(session.id) !== session || session.pty !== term) return;
-    session.reconnectAttempts = 0;
+    tail = (tail + data).slice(-2000);
+    if (SSH_AUTH_FAILURE.test(tail)) authFailed = true;
     appendSshData(session, data);
+    if (settleTimer) clearTimeout(settleTimer);
+    if (session.phase === "connected" || authFailed) return;
+    const plain = tail.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, "");
+    if (SSH_PROMPT.test(plain)) { setSshPhase(session, "auth"); return; }
+    // ConPTY сразу шлёт служебные коды без текста, а ошибку ssh — через секунды: тишина после них ничего не значит.
+    if (!plain.trim()) return;
+    // Поток затих, и последним был не запрос пароля и не ошибка ssh — значит, открылась удалённая оболочка.
+    settleTimer = setTimeout(() => {
+      if (session.pty !== term || authFailed || SSH_CLIENT_ERROR.test(plain.slice(-300))) return;
+      session.reconnectAttempts = 0;
+      setSshPhase(session, "connected", { connectedAt: Date.now() });
+    }, 1500);
   });
   term.onExit(({ exitCode }) => {
     if (sessions.get(session.id) !== session || session.pty !== term) return;
+    if (settleTimer) clearTimeout(settleTimer);
     session.pty = null;
     if (session.stopRequested) {
-      session.status = "stopped";
-      session.code = null;
-      session.endedAt = Date.now();
-      emitSession({ id: session.id, event: "exited", code: null, session: sessionMeta(session) });
+      finishSshSession(session, "stopped", null);
       return;
     }
     session.code = exitCode ?? null;
+    if (session.phase === "connected" || Date.now() - spawnedAt >= SSH_ESTABLISHED_MS) {
+      session.reconnectAttempts = 0;
+    } else if (authFailed) {
+      appendSshData(session, "\r\n\x1b[31m— Вход не удался (пароль, ключ или ключ хоста). Автоповтор остановлен, чтобы не набрать бан. —\x1b[0m\r\n");
+      finishSshSession(session, "exited", session.code, "auth_failed");
+      return;
+    }
     scheduleSshReconnect(session);
   });
 }
 
+function setSshPhase(session, phase, extra = {}) {
+  if (session.phase === phase && !Object.keys(extra).length) return;
+  Object.assign(session, { phase, retryAt: null }, extra);
+  emitSession({ id: session.id, event: "meta", session: sessionMeta(session) });
+}
+
+function finishSshSession(session, status, code, phase = status === "stopped" ? "stopped" : "failed") {
+  if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+  session.reconnectTimer = null;
+  session.phase = phase;
+  session.retryAt = null;
+  session.status = status;
+  session.code = code;
+  session.endedAt = Date.now();
+  emitSession({ id: session.id, event: "exited", code, session: sessionMeta(session) });
+}
+
 function scheduleSshReconnect(session) {
   if (session.stopRequested || sessions.get(session.id) !== session) return;
+  if ((session.reconnectAttempts || 0) >= SSH_MAX_FAILED_ATTEMPTS) {
+    appendSshData(session, `\r\n\x1b[31m— Не удалось подключиться ${SSH_MAX_FAILED_ATTEMPTS + 1} раза подряд. Автоповтор остановлен. —\x1b[0m\r\n`);
+    finishSshSession(session, "exited", session.code);
+    return;
+  }
   session.reconnectAttempts = (session.reconnectAttempts || 0) + 1;
   const delay = Math.min(SSH_RECONNECT_MAX_MS, SSH_RECONNECT_MIN_MS * session.reconnectAttempts);
-  appendSshData(session, `\r\n\x1b[33m— SSH через MBOX prod разорван. Переподключение через ${Math.ceil(delay / 1000)} с… —\x1b[0m\r\n`);
+  appendSshData(session, `\r\n\x1b[33m— Соединение разорвано. Переподключение через ${Math.ceil(delay / 1000)} с… —\x1b[0m\r\n`);
+  setSshPhase(session, "reconnecting", { retryAt: Date.now() + delay });
   session.reconnectTimer = setTimeout(() => {
     session.reconnectTimer = null;
     connectSshSession(session);
   }, delay);
 }
 
-function startSshSession(rawTarget, cols, rows) {
+function startSshSession(rawTarget, cols, rows, options = {}) {
   const { target, port, label } = normalizeSshTarget(rawTarget);
+  const direct = Boolean(options?.direct);
   const id = `ssh:${label.toLowerCase()}`;
   const previous = sessions.get(id);
   if (previous?.status === "running") {
@@ -1177,7 +1322,7 @@ function startSshSession(rawTarget, cols, rows) {
   }
   const safeCols = Math.max(20, Math.min(500, Math.floor(Number(cols) || 100)));
   const safeRows = Math.max(5, Math.min(200, Math.floor(Number(rows) || 30)));
-  const routeArgs = sshArgs(target, port);
+  const routeArgs = sshArgs(target, port, direct);
   const session = {
     id,
     kind: "ssh",
@@ -1197,12 +1342,17 @@ function startSshSession(rawTarget, cols, rows) {
     rows: safeRows,
     reconnectAttempts: 0,
     reconnectTimer: null,
-    stopRequested: false
+    stopRequested: false,
+    direct,
+    jump: routeArgs.includes("-J") ? routeArgs[routeArgs.indexOf("-J") + 1] : "",
+    phase: "connecting",
+    retryAt: null,
+    connectedAt: null
   };
   sessions.set(id, session);
   emitSession({ id, event: "started", reveal: true, session: sessionMeta(session) });
   connectSshSession(session);
-  return { ok: true, id, pid: session.pty?.pid ?? null, target: label, jump: sshJumpHost() };
+  return { ok: true, id, pid: session.pty?.pid ?? null, target: label, jump: session.jump };
 }
 
 const crypto = require("crypto");

@@ -17,6 +17,7 @@ export const STORAGE_SCHEMA_SQL: string;
 export function ensureStorageSchema(query: Query): Promise<void>;
 export function signRequest(input: Row): { headers: Record<string, string>; signature: string };
 export function presignUrl(input: Row): string;
-export function handleStorageApi(input: Handler & { secretKey: string }): Promise<boolean>;
+export type StorageAccess = { roots: Array<{ prefix: string; label: string }>; canUse: (key: string) => Promise<boolean> };
+export function handleStorageApi(input: Handler & { secretKey: string; access?: StorageAccess | null; labels?: Record<string, string> }): Promise<boolean>;
 export function storageSignedGet(query: Query, secretKey: string, key: string, expires?: number): Promise<string | null>;
 export function storagePutStream(query: Query, secretKey: string, key: string, stream: ReadableStream, length: number, contentType: string): Promise<{ ok: boolean; error?: string }>;

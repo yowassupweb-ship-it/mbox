@@ -190,8 +190,8 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--accent-color);
-  color: #04182e;
+  background: var(--accent-fill);
+  color: var(--on-accent);
   align-self: end;
   margin-left: var(--space-2);
 }
@@ -439,8 +439,8 @@
   height: 44px;
   border: 0;
   border-radius: 50%;
-  background: var(--accent-color);
-  color: #04182e;
+  background: var(--accent-fill);
+  color: var(--on-accent);
   box-shadow: var(--accent-shadow);
   transition: filter var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
@@ -1091,7 +1091,7 @@
 .console-input-meta { min-width: 0; display: flex; align-items: center; gap: 9px; }
 .console-input-hints { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 9.5px; line-height: 1; white-space: nowrap; }
 .console-input-pickers { flex: none; display: flex; align-items: center; gap: 6px; }
-.console-input-pickers .console-picker:last-child .console-picker-menu { left: auto; right: 0; }
+.console-input-pickers .console-picker-menu { left: auto; right: 0; max-width: min(280px, calc(100vw - 24px)); }
 .console-input-hints b { color: var(--text-2); font-weight: var(--weight-medium); }
 .console-input-newline { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
 .console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--surface-chrome); color: var(--text-muted); font: inherit; text-align: center; }
@@ -1287,8 +1287,8 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-pill);
-  background: var(--accent-color);
-  color: var(--bg-color);
+  background: var(--accent-fill);
+  color: var(--on-accent);
   cursor: pointer;
   transition: transform var(--duration-fast) ease, filter var(--duration-fast) ease, opacity var(--duration-fast) ease;
 }
@@ -1482,13 +1482,19 @@
 /* ─── Цепочка работы агента (ChainTimeline): шаг, его аргументы и результат ───
    Живёт прямо в переписке, до самого ответа, и всегда развёрнута: это часть разговора,
    а не приложение к нему. Поэтому всё здесь компактнее обычного текста чата. */
-.console-chain-block { margin: 2px 0 6px; }
+.console-chain-block { align-self: stretch; min-width: 0; margin: 2px 0 6px; }
 .console-chain-title {
-  margin: 0 0 3px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 0 4px;
   color: var(--text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+.console-chain-title strong { flex: none; max-width: 70%; overflow: hidden; color: var(--text-2); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.console-chain-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .console-chain {
   margin: 0;
@@ -1525,8 +1531,22 @@
 .console-chain-step > summary::-webkit-details-marker { display: none; }
 .console-chain-step > summary::marker { content: ""; }
 .console-chain-step > summary:hover b { color: var(--accent-color); }
-.console-chain-step > summary b { color: var(--text-main); font-weight: 600; }
-.console-chain-step > summary span { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.console-chain-step > summary b { flex: none; color: var(--text-main); font-weight: 600; }
+.console-chain-step > summary span { min-width: 0; overflow: hidden; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.console-chain-icon { flex: none; align-self: center; color: var(--text-muted); }
+.console-chain-step > summary:hover .console-chain-icon { color: var(--accent-color); }
+.console-chain-err { flex: none; color: var(--state-danger); font-size: 11px; font-style: normal; }
+.console-chain > li.is-error .console-chain-icon { color: var(--state-danger); }
+/* Причина ошибки видна без раскрытия шага: иначе в цепочке одно «ошибка» и непонятно, что сломалось. */
+.console-chain-reason {
+  margin: 1px 0 0 19px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--state-danger) 80%, var(--text-2));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .console-chain-step > summary time { margin-left: auto; flex: none; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* Реплика агента между шагами: две строки, дальше — обрез. */
@@ -1595,3 +1615,360 @@
 @media (prefers-reduced-motion: reduce) {
   .console-chain > li { animation: none; }
 }
+
+/* Чаты консоли: текущий чат, список прошлых и «Новый чат» (см. threadOfItem в AgentChat.tsx). */
+.agent-chat-shell .console-threads {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-panel);
+}
+
+.console-threads .console-thread-current,
+.console-threads .console-thread-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.console-threads .console-thread-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: space-between;
+}
+
+.console-threads .console-thread-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-threads .console-thread-new {
+  flex: none;
+  color: var(--accent-color);
+}
+
+.console-threads .console-thread-current:hover,
+.console-threads .console-thread-new:hover { background: var(--surface-hover); }
+
+.console-threads button:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+.console-threads .console-thread-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 10px;
+  right: 10px;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: var(--float);
+}
+
+.console-thread-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.console-thread-menu button:hover { background: var(--surface-hover); }
+.console-thread-menu button.is-active { background: var(--surface-selected); }
+
+.console-thread-menu .console-thread-menu-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.console-thread-menu .console-thread-menu-meta {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.console-threads .console-thread-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-color);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.console-threads .console-thread-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.console-threads .console-thread-icon:hover { background: var(--surface-hover); color: var(--text-main); }
+
+.console-thread-menu .console-thread-menu-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 7px;
+}
+
+.console-thread-menu .console-thread-menu-row.is-active { background: var(--surface-selected); }
+.console-thread-menu .console-thread-menu-row > button:first-child { flex: 1 1 auto; min-width: 0; }
+
+.console-thread-menu .console-thread-menu-row .console-thread-archive {
+  flex: none;
+  width: 30px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.console-thread-menu .console-thread-menu-row:hover .console-thread-archive,
+.console-thread-menu .console-thread-archive:focus-visible { opacity: 1; }
+
+/* Нагрузка контекста чата: сколько агент перечитывает на каждом шаге. С 60% — предупреждение. */
+.console-threads .console-context {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.console-context .console-context-bar {
+  position: relative;
+  width: 42px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-hover);
+}
+
+.console-context .console-context-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--state-ok);
+}
+
+.console-context.is-heavy { color: var(--state-warn); }
+.console-context.is-heavy .console-context-bar > span { background: var(--state-warn); }
+
+/* Шапка чата: одна строка — название (список чатов), нагрузка контекста, новый чат, отладка. */
+.agent-chat-shell .console-threads { gap: 2px; padding: 4px 6px 4px 4px; }
+.console-threads .console-thread-current {
+  flex: 0 1 auto;
+  justify-content: flex-start;
+  border-color: transparent;
+  font-weight: 500;
+  font-size: 13px;
+}
+.console-threads .console-thread-current > svg { flex: none; color: var(--text-muted); }
+.console-threads .console-context { margin-left: auto; }
+.console-threads .console-thread-current + .console-thread-icon { margin-left: auto; }
+.console-threads .console-thread-icon { position: relative; }
+.console-threads .console-thread-icon.is-on { background: var(--surface-selected); color: var(--accent-color); }
+.console-debug-live { position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--state-ok); }
+.console-threads .console-thread-menu { left: 4px; right: 4px; }
+.console-thread-menu button.console-thread-menu-new { flex-direction: row; align-items: center; gap: 7px; color: var(--accent-color); font-size: 13px; }
+.console-thread-menu button.console-thread-menu-legacy { margin-top: 4px; border-top: 1px solid var(--border-color); border-radius: 0 0 7px 7px; }
+.console-thread-menu button.console-thread-menu-legacy .console-thread-menu-title { color: var(--text-2); font-size: 12px; }
+
+/* Пустой чат — подсказка по центру, а не системная строка лога. */
+.console-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 10vh auto 0;
+  padding: 40px 24px;
+  max-width: 340px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.console-empty strong { color: var(--text-main); font-size: 14px; font-weight: 600; }
+.console-empty p { margin: 0; font-size: 12.5px; line-height: 1.5; }
+
+/* Несостоявшийся ответ: заголовок, человеческий текст, код выхода мелко. */
+.console-bubble.is-failed { padding: 8px 10px; border-radius: 0 8px 8px 0; }
+.console-failed-title { display: inline-flex; align-items: center; gap: 6px; color: var(--state-danger); font-weight: 600; font-size: 12.5px; }
+.console-log-line .console-bubble.is-failed .console-log-text { color: var(--text-main); }
+.console-failed-detail { color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
+
+/* Боковой список чатов (кнопка слева в шапке): список слева, разговор справа. */
+.agent-chat-shell .console-split { flex: 1 1 auto; min-height: 0; display: flex; container-type: inline-size; position: relative; }
+.agent-chat-shell .console-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.console-threads-aside {
+  flex: none;
+  width: clamp(150px, 32%, 240px);
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-color);
+  background: var(--surface-panel);
+}
+.console-thread-menu.is-aside { position: static; max-height: none; padding: 6px 4px; border-radius: 0; background: transparent; box-shadow: none; }
+.console-thread-menu.is-aside .console-thread-menu-meta { font-size: 11px; }
+.console-thread-menu.is-aside .console-thread-menu-legacy { border-radius: 7px; }
+/* Узкая консоль: список не отнимает место у разговора, а ложится поверх него. */
+@container (max-width: 460px) {
+  .console-threads-aside { position: absolute; inset: 0 auto 0 0; z-index: 25; width: min(260px, 82%); box-shadow: var(--float); }
+}
+.console-threads > .console-thread-icon:first-child { margin-left: 0; }
+
+/* Наблюдатель агента мёртв: не спиннер «работает», а честное предупреждение и кнопка запуска. */
+.console-thinking-row.is-dead { color: var(--state-danger); }
+.console-log-line.typing:has(.is-dead) { opacity: 1; }
+.console-log-line.typing:has(.is-dead) .console-log-text { animation: none; color: var(--text-main); }
+.console-start-btn {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-color);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.console-start-btn:hover { background: var(--surface-selected); }
+
+.console-jarvis-off { margin: 0; padding: 10px 12px; border: 1px dashed var(--border-color); border-radius: 10px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+.console-input-row[hidden] { display: none; }
+
+/* ═══ Чат, финальная полировка (поверх правил выше) ═══════════════════════════════════════════
+   Агент — слева без рамок, текст под именем с отступом на аватар. Вы — справа, мягкий пузырь без
+   подписи «Вы». Служебное (ход работы, инструменты, время) — тише основного текста. */
+.agent-chat-shell .console-log { padding: 14px 16px 8px; font-size: 13.5px; line-height: 1.58; scroll-padding-bottom: 12px; }
+
+.console-log-sep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.console-log-sep::before,
+.console-log-sep::after { content: ""; flex: 1; height: 1px; background: color-mix(in srgb, var(--border-color) 70%, transparent); }
+
+.console-log-line.in { padding: 8px 0 10px; }
+.console-log-line.in .console-log-head { gap: 8px; min-height: 22px; }
+.console-log-line.in .console-log-actor { color: var(--text-main); font-size: 13px; font-weight: 600; }
+.console-log-line.in .console-log-time { font-size: 11px; opacity: 0.8; }
+/* Всё, что под шапкой агента, — с отступом на ширину аватара: колонка текста ровная. */
+.console-log-line.in > :not(.console-log-head) { margin-left: 26px; }
+.console-log-line.in .console-bubble { max-width: min(100%, 760px); gap: 8px; }
+.console-log-line.in .console-log-text { color: var(--text-main); }
+
+.console-log-line.out { padding: 6px 0 8px; }
+.console-log-line.out .console-log-actor { display: none; }
+.console-log-line.out .console-log-head { gap: 8px; min-height: 18px; }
+.console-log-line.out .console-bubble {
+  max-width: min(84%, 640px);
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--surface-panel, var(--bg-color)));
+}
+.console-log-line.out .console-log-text { color: var(--text-main); }
+.console-log-line.out.failed .console-bubble { background: color-mix(in srgb, var(--state-danger) 12%, var(--surface-panel, var(--bg-color))); }
+
+/* «Ответить» — только при наведении на сообщение, не шумит в каждой строке. */
+.console-log-line .console-reply-btn { opacity: 0; transition: opacity 0.12s; }
+.console-log-line:hover .console-reply-btn,
+.console-log-line .console-reply-btn:focus-visible { opacity: 1; }
+
+/* Служебные строки ответа — мельче и тише. */
+.console-chain-title,
+.console-work-line { color: var(--text-muted); font-size: 11px; letter-spacing: 0.01em; }
+.console-tools-used { opacity: 0.8; }
+.console-bubble.is-failed { border-radius: 4px 10px 10px 4px; }
+
+.console-log-text code { font-size: 0.9em; }
+.console-log-pre { border-radius: 8px; }
+
+/* Поле ввода — карточка; сверху чипы того, что открыто (вместо бесполезного «@агент»). */
+.agent-chat-shell .console-composer { padding: 8px 12px 12px; }
+.console-input-row { border-radius: 14px; }
+.console-focus { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.console-focus-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.console-focus-chip > svg { flex: none; color: var(--accent-color); }
+.console-focus-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-focus-chip:hover { border-color: var(--accent-color); }
+.console-focus-chip.is-off { border-style: dashed; border-color: var(--border-color); background: transparent; color: var(--text-muted); opacity: 0.75; }
+.console-focus-chip.is-off > svg { color: var(--text-muted); }
+.console-focus-chip.is-off > span { text-decoration: line-through; }
+.console-focus-chip:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .console-focus-chip { transition: none; } }
+
+/* Узкий чат: подсказки уходят целиком, по одной, а не обрезаются посреди «Shift Enter». */
+.console-input-meta { container-type: inline-size; }
+@container (max-width: 520px) { .console-input-newline { display: none; } }
+@container (max-width: 400px) { .console-input-hints > span:nth-child(n+3) { display: none; } }
+@container (max-width: 300px) { .console-input-hints { visibility: hidden; } }
+
+/* Пустой чат: заглушка крупнее и по центру свободного места, а не прибита к верху отступом 10vh. */
+.console-log:has(> .console-empty) { display: flex; flex-direction: column; }
+.console-log > .console-empty { flex: none; gap: 12px; margin: auto; padding: 24px; max-width: 420px; }
+.console-empty > svg { color: var(--text-muted); }
+.console-empty strong { font-size: 20px; letter-spacing: -0.01em; }
+.console-empty p { font-size: 14px; line-height: 1.55; }

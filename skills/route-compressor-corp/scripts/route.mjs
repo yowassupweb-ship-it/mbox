@@ -67,7 +67,7 @@ function parseResult(markdown) {
   return result;
 }
 
-// Степень сжатия (§4.4) — ориентир, не лимит: предупреждаем, если описание длиннее 25% текста пункта в менеджерке
+// Степень сжатия (§4.4) — ориентир, не лимит: предупреждаем, если описание длиннее 25% текста пункта в источнике
 // (короткий исходник — 140 знаков); у однодневок — 50% и 250 знаков. Сборку не останавливает.
 const MAX_RATIO = 0.25;
 const MIN_LIMIT = 140;
@@ -79,7 +79,7 @@ const SERVICE_LINE_LIMIT = 200;
 // Неудачные обороты, подтверждённые владельцем (§4.5): шаблон → как писать.
 const AWKWARD = [
   [/групповой\s+(переезд|трансфер)/i, "Переезд группы"],
-  [/средневеков[а-яё]*\s+город[а-яё]*\s+возрастом/i, "Городу N лет. Отдельным предложением — что о его облике сказано в менеджерке"],
+  [/средневеков[а-яё]*\s+город[а-яё]*\s+возрастом/i, "Городу N лет. Отдельным предложением — что о его облике сказано в источнике"],
 ];
 
 // Редакционная политика «Вокруг света» (MBOX #136, rules.md §4.5): то, что ловится механически.
@@ -94,7 +94,7 @@ const EDITORIAL = [
   [/!/, "восклицательный знак — эмоцию даёт факт или действие, не пунктуация (§4.3)"],
 ];
 
-// Ничего придуманного (rules.md §1): числа, века и имена собственные в пунктах программы должны найтись в менеджерке.
+// Ничего придуманного (rules.md §1): числа, века и имена собственные в пунктах программы должны найтись в источнике.
 const normalizeText = (text) => String(text || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ");
 function checkFacts(parsed, draft) {
   const corpus = normalizeText([
@@ -104,7 +104,7 @@ function checkFacts(parsed, draft) {
   ].join(" \n "));
   const numbers = new Set((corpus.match(/\d+(?:[.,]\d+)?/g) || []).map((number) => number.replace(",", ".")));
   const problems = [];
-  const report = (block, line, what) => problems.push(`нет в менеджерке (§1) — ${block.title.match(/^\d+\s*день/i)?.[0] || block.title}: ${what} в «${line.slice(0, 70)}»`);
+  const report = (block, line, what) => problems.push(`нет в источнике (§1) — ${block.title.match(/^\d+\s*день/i)?.[0] || block.title}: ${what} в «${line.slice(0, 70)}»`);
   for (const block of parsed.blocks) {
     for (const part of block.parts) {
       for (const raw of [part.title, ...part.lines].filter(Boolean)) {
@@ -138,7 +138,7 @@ function checkCompression(parsed, draft) {
       for (const line of part.lines.filter((entry) => entry.length > SERVICE_LINE_LIMIT)) problems.push(`длинная строка без заголовка (§4.4) — ${block.title.match(/^\d+\s*день/i)?.[0] || block.title}: «${line.slice(0, 60)}…» ${line.length} знаков; служебная строка — до ${SERVICE_LINE_LIMIT}, описание экскурсии — под **жирным названием**`);
     }
     for (const part of block.parts.filter((entry) => entry.title)) {
-      // Пункт менеджерки ищем по общим основам слов в заголовке.
+      // Пункт источника ищем по общим основам слов в заголовке.
       const titleStems = stems(part.title);
       const best = day.items
         .map((item) => ({ item, score: [...stems(item.title)].filter((stem) => titleStems.has(stem)).length }))
@@ -148,7 +148,7 @@ function checkCompression(parsed, draft) {
       const length = part.lines.map((line) => line.replace(/^[-•]\s+/, "")).join(" ").length;
       const oneDay = draft.days.length === 1;
       const limit = Math.max(Math.round(source * (oneDay ? ONE_DAY_RATIO : MAX_RATIO)), oneDay ? ONE_DAY_MIN_LIMIT : MIN_LIMIT);
-      if (length > limit) problems.push(`${block.title.match(/^\d+\s*день/i)?.[0] || block.title}, «${part.title}»: ${length} знаков при ${source} в менеджерке, ориентир ${limit}`);
+      if (length > limit) problems.push(`${block.title.match(/^\d+\s*день/i)?.[0] || block.title}, «${part.title}»: ${length} знаков при ${source} в источнике, ориентир ${limit}`);
     }
   }
   return problems;
@@ -173,7 +173,7 @@ function checkBalance(parsed) {
   return notes;
 }
 
-// Слова текста, которых нет в менеджерке, — след пересказа своими словами. Не блокирует сборку (падежи и служебные
+// Слова текста, которых нет в источнике, — след пересказа своими словами. Не блокирует сборку (падежи и служебные
 // слова дают шум), но печатается при каждой сборке: модель обязана пройти список и убедиться, что смысл взят из источника.
 function unsourcedWords(parsed, draft) {
   const corpus = normalizeText([
@@ -309,7 +309,7 @@ function tourSection(id, parsed, draft) {
       <p class="hint">Для проверки — в менеджерку не копируется.</p>
       <h3>Правки текста</h3>
       ${historyList(parsed.history)}
-      <h3>Что убрано из менеджерской программы</h3>
+      <h3>Что убрано из источника</h3>
       ${historyList(sourceChanges(draft))}
     </section>
   </section>`;
@@ -496,7 +496,7 @@ for (const id of ids) {
   }
   const unsourced = unsourcedWords(parsed, draft);
   if (unsourced.length) {
-    console.log(`  Слова не из менеджерки — сверь смысл с черновиком (§1, ничего сочинять нельзя):`);
+    console.log(`  Слова не из источника — сверь смысл с черновиком (§1, ничего сочинять нельзя):`);
     for (const entry of unsourced) console.log(`    - ${entry}`);
   }
 }

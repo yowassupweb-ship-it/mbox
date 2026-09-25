@@ -5,13 +5,14 @@ import { gitLetter } from "./LocalFolders";
 import { fetchVersion, fetchVersions, gitStatusOf, onWorkspaceChange, rootName, saveLocalFile, useLocalWorkspace, workspaceBridge, type FileRead, type FileVersion, type GitCommit } from "./localWorkspace";
 import { renderDocument } from "./MemoryDocument";
 import { DocShell, DrawerToggle, useDrawer } from "./docLayout";
-import { usePersistentState, type TabsApi } from "./tabs";
+import { scopedStorageKey, usePersistentState, type TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
 import { CodeEditor } from "./CodeEditor";
 import { languageOf } from "./codeHighlight";
 import { buildLocalPreview } from "./localPreview";
 import { MarkdownToolbar, markdownShortcut, toggleTask } from "./MarkdownToolbar";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
+import { WORKSPACE_VERSION_EVENT } from "../../hooks/useRealtime";
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 
@@ -224,9 +225,11 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [viewing, setViewing] = useState<(FileVersion & { content: string }) | null>(null);
+  const [liveVersion, setLiveVersion] = useState<FileVersion | null>(null);
   const [compare, setCompare] = useState(false);
   const [sideTab, setSideTab] = usePersistentSide();
   const [drawerOpen, setDrawerOpen] = useDrawer("mbox.doc.local.history");
+  const serverWorkspaceId = ws.serverWorkspace(rootKey)?.id;
   const fileRef = useRef<FileRead | null>(null);
   fileRef.current = file;
   const dirty = Boolean(file) && draft !== (file?.content ?? "");
@@ -255,8 +258,10 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   }, [bridge, rootKey, path, isMarkdown]);
 
   const loadHistory = useCallback(async () => {
-    setVersions(await fetchVersions(rootKey, path).catch(() => []));
+    const nextVersions = await fetchVersions(rootKey, path).catch(() => []);
+    setVersions(nextVersions);
     if (bridge) setCommits(await bridge.gitLog(rootKey, path).catch(() => []));
+    return nextVersions;
   }, [bridge, rootKey, path]);
 
   useEffect(() => { void load(); }, [load]);
@@ -270,6 +275,22 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
     else void load();
     window.setTimeout(() => void loadHistory(), 1500);
   }), [rootKey, path, load, loadHistory]);
+
+  useEffect(() => {
+    if (!serverWorkspaceId) return;
+    const onVersion = (event: Event) => {
+      const detail = (event as CustomEvent<{ workspace_id?: string; path?: string }>).detail;
+      if (String(detail?.workspace_id || "") !== String(serverWorkspaceId) || detail?.path !== path) return;
+      void loadHistory().then((nextVersions) => {
+        const latest = nextVersions[0];
+        if (!latest || latest.source === "mbox") return;
+        setLiveVersion(latest);
+        setSideTab("history");
+      });
+    };
+    window.addEventListener(WORKSPACE_VERSION_EVENT, onVersion);
+    return () => window.removeEventListener(WORKSPACE_VERSION_EVENT, onVersion);
+  }, [serverWorkspaceId, path, loadHistory, setSideTab]);
 
   async function save(force = false) {
     if (!file || saving) return;
@@ -313,6 +334,13 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
   async function openVersion(version: FileVersion) {
     setViewing(await fetchVersion(version.id));
     setCompare(false);
+  }
+
+  async function openLiveVersion() {
+    if (!liveVersion) return;
+    setViewing(await fetchVersion(liveVersion.id));
+    setCompare(true);
+    setDrawerOpen(true);
   }
 
   const diff = useMemo(() => (viewing && compare ? lineDiff(viewing.content, draft) : null), [viewing, compare, draft]);
@@ -405,6 +433,14 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
         </div>
       )}
       {error && <div className="wb-banner is-error">{error}</div>}
+      {liveVersion && !viewing && (
+        <div className="wb-banner is-live">
+          {sourceLabel[liveVersion.source] ?? liveVersion.source} {liveVersion.author || "агент"} изменил файл {formatSince(liveVersion.created_at)}
+          <button type="button" onClick={() => void openLiveVersion()}><GitCompare size={12} /> Показать diff</button>
+          <button type="button" onClick={() => { setDrawerOpen(true); setSideTab("history"); }}>История</button>
+          <button type="button" onClick={() => setLiveVersion(null)}><X size={12} /> Скрыть</button>
+        </div>
+      )}
       {file.binary || file.tooLarge ? (
         <div className="wb-doc-missing">{file.binary ? "Двоичный файл — в MBOX не показывается." : `Файл ${formatBytes(file.size)} — слишком большой для редактора.`}</div>
       ) : viewing ? (
@@ -435,9 +471,13 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
 
 function usePersistentSide() {
   const [value, setValue] = useState<"history" | "git">(() => {
-    try { return window.localStorage.getItem("mbox.local.sideTab") === "git" ? "git" : "history"; } catch { return "history"; }
+    try { return window.localStorage.getItem(scopedStorageKey("mbox.local.sideTab")) === "git" ? "git" : "history"; } catch { return "history"; }
   });
-  return [value, (next: "history" | "git") => { setValue(next); try { window.localStorage.setItem("mbox.local.sideTab", next); } catch { /* без памяти */ } }] as const;
+  const save = useCallback((next: "history" | "git") => {
+    setValue(next);
+    try { window.localStorage.setItem(scopedStorageKey("mbox.local.sideTab"), next); } catch { /* без памяти */ }
+  }, []);
+  return [value, save] as const;
 }
 
 export function GitDiffDocument({ rootKey, path, tabs }: { rootKey: string; path: string; tabs: TabsApi }) {

@@ -51,6 +51,10 @@ export type LocalTool = {
   summary: string;
   capabilities: string[];
   commands: ToolCommand[];
+  /** Раздел списка: «Браузер и автоматизация», «SEO Wizard»… */
+  group?: string;
+  /** Заготовка: карточка есть, запуска ещё нет. */
+  planned?: boolean;
 };
 
 export type ToolOutputLine = { stream: "out" | "err"; line: string };

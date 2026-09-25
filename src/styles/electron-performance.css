@@ -7,7 +7,9 @@ html[data-mbox-desktop="true"] {
 html[data-mbox-desktop="true"] *,
 html[data-mbox-desktop="true"] *::before,
 html[data-mbox-desktop="true"] *::after {
-  transition-duration: 0.01ms !important;
+  /* 0s, а не 0.01ms: у всех элементов transition-property: all, и «почти ноль» превращал любую смену
+     стиля в переход — синхронный замер (авторазмер поля ввода) читал старую высоту и застревал на 220px. */
+  transition-duration: 0s !important;
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
 }

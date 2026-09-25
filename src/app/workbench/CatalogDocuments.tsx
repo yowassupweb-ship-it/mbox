@@ -29,9 +29,9 @@ export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsAp
       <header className="wb-skill-hero">
         <div className="wb-skill-hero-main">
           <span className="wb-doc-crumbs">Навыки › {skill.category || "Рабочий сценарий"}</span>
-          <span className="wb-skill-kicker">Готовый сценарий для агента</span>
           <h1>{skill.name}</h1>
           <p>{skill.goal || skill.summary}</p>
+          <p className="wb-skill-outcome-line"><Check size={14} aria-hidden="true" /><span><b>Результат:</b> {skill.output || "готовый результат в MBOX"}</span></p>
           {!!skill.pages?.length && (
             <div className="wb-skill-launch">
               {skill.pages.map((page, index) => (
@@ -42,23 +42,18 @@ export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsAp
             </div>
           )}
         </div>
-        <aside className="wb-skill-outcome">
-          <span><Check size={14} /> Результат</span>
-          <strong>{skill.output || "Готовый результат в MBOX"}</strong>
-          <small>Результат остаётся в рабочем контексте и его можно открыть позже.</small>
-        </aside>
       </header>
       <section className="wb-skill-flow" aria-label="Как работает навык">
         {steps.map((step, index) => (
           <div key={step}><b>{index + 1}</b><span>{step}</span>{index < steps.length - 1 && <ArrowRight size={15} />}</div>
         ))}
       </section>
-      <div className="wb-stat-row">
-        <div><b>{skill.calls}</b><span>вызовов</span></div>
-        <div><b>{skill.calls_24h}</b><span>за сутки</span></div>
-        <div><b>{formatTokens(skill.tokens)}</b><span>токенов</span></div>
-        <div><b>{formatLastUsed(skill.last_used_at)}</b><span>последний раз</span></div>
-      </div>
+      {/* Статистика — справка, а не главное: одной строкой; у нового навыка четыре нуля ничего не говорят. */}
+      <p className="wb-skill-usage">
+        {skill.calls ? (
+          <>{skill.calls} {plural(skill.calls, "вызов", "вызова", "вызовов")} · {skill.calls_24h} за сутки · {formatTokens(skill.tokens)} токенов · последний раз {formatLastUsed(skill.last_used_at)}</>
+        ) : "Ещё не запускался"}
+      </p>
       <section className="wb-skill-details">
         <h2>Что понадобится</h2>
         <dl className="wb-spec">
@@ -192,14 +187,20 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
           <p>{tool.summary}</p>
         </div>
       </header>
+      {tool.planned && (
+        <p className="wb-tool-planned">
+          <b>В подготовке.</b> {tool.group ? `Войдёт в ${tool.group} и будет доступен отдельно` : "Инструмент ещё не подключён"} — запуска пока нет, карточка нужна, чтобы агенты и люди знали о нём заранее.
+        </p>
+      )}
       <dl className="wb-spec">
         <dt>Статус</dt><dd>{tool.status}</dd>
-        <dt>Папка</dt>
+        {tool.group && <><dt>Раздел</dt><dd>{tool.group}</dd></>}
+        {tool.path && <><dt>Папка</dt>
         <dd>
           <code>{tool.path}</code>{" "}
           {desktop()?.openPath && <button type="button" className="wb-inline-btn" onClick={() => void desktop()?.openPath?.(tool.path)}><FolderOpen size={12} /> открыть</button>}
           <button type="button" className="wb-inline-btn" onClick={() => copy(tool.path, "path")}><Copy size={12} />{copied === "path" ? "скопировано" : ""}</button>
-        </dd>
+        </dd></>}
         {(tool.docs || tool.repo) && (
           <>
             <dt>Ссылки</dt>
@@ -217,7 +218,7 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
         )}
       </dl>
 
-      <section className="wb-commands">
+      {tool.commands.length > 0 && <section className="wb-commands">
         <h3>Команды{!canRun && <span> · запуск доступен в приложении MBOX</span>}</h3>
         {tool.commands.map((command) => {
           const running = run.running && run.label === command.label;
@@ -234,7 +235,7 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
             </div>
           );
         })}
-      </section>
+      </section>}
 
       {(run.lines.length > 0 || run.note) && (
         <section className="wb-run-log">
@@ -246,4 +247,12 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
       )}
     </div>
   );
+}
+
+function plural(count: number, one: string, few: string, many: string) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }

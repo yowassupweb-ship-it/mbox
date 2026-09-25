@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Download, FolderOpen, LogOut, PanelLeft, Play, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Download, FolderOpen, LogOut, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
@@ -75,7 +75,18 @@ declare global {
 }
 
 const attentionStatusLabel: Record<string, string> = { blocked: "заблокирована", review: "на проверке" };
-const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.37.exe";
+
+/** «Агент Джарвис подключился» три раза подряд — одна строка «×3» со временем последнего раза. */
+function collapseNotices(notices: Array<{ id: string; text: string; at: string }>) {
+  const out: Array<{ id: string; text: string; at: string; count: number }> = [];
+  for (const item of notices) {
+    const last = out[out.length - 1];
+    if (last && last.text === item.text) last.count += 1;
+    else out.push({ ...item, count: 1 });
+  }
+  return out;
+}
+const desktopDownloadUrl = "/downloads/mbox-desktop-setup-0.1.43.exe";
 
 function detectDesktopShell() {
   if (typeof window === "undefined") return false;
@@ -106,8 +117,6 @@ export function TopBar({
   busy = false,
 }: TopBarProps) {
   const [open, setOpen] = useState(false);
-  const [popoverMounted, setPopoverMounted] = useState(false);
-  const [popoverClosing, setPopoverClosing] = useState(false);
   const [logoBurst, setLogoBurst] = useState(false);
   const [desktopOpen, setDesktopOpen] = useState(false);
   const [desktopRows, setDesktopRows] = useState<DesktopResponder[]>([]);
@@ -116,7 +125,7 @@ export function TopBar({
   const [desktopApi, setDesktopApi] = useState<DesktopApi | null>(null);
   const [isDesktopShell, setIsDesktopShell] = useState(false);
   const [desktopUpdateStatus, setDesktopUpdateStatus] = useState("Обновления проверяются в установленном приложении");
-  const closeTimer = useRef<number | undefined>(undefined);
+  const barRef = useRef<HTMLElement | null>(null);
   const burstTimer = useRef<number | undefined>(undefined);
   const firstRun = useRef(true);
   const desktopOpenRef = useRef(desktopOpen);
@@ -190,22 +199,23 @@ export function TopBar({
     };
   }, []);
 
-  // Попап раньше пропадал мгновенно при закрытии — CSS-анимация играла только на открытии.
-  // Держим DOM ещё один тик, проигрываем обратную анимацию, и только потом размонтируем.
+  // Открыт не больше одного попапа; клик мимо и Escape закрывают — раньше два попапа ложились друг на друга.
   useEffect(() => {
-    window.clearTimeout(closeTimer.current);
-    if (open) {
-      setPopoverClosing(false);
-      setPopoverMounted(true);
-    } else if (popoverMounted) {
-      setPopoverClosing(true);
-      closeTimer.current = window.setTimeout(() => {
-        setPopoverMounted(false);
-        setPopoverClosing(false);
-      }, 160);
-    }
-    return () => window.clearTimeout(closeTimer.current);
-  }, [open]);
+    if (!open && !desktopOpen) return;
+    const close = () => { setOpen(false); setDesktopOpen(false); };
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest(".tb-pop, .tb-pop-trigger")) return;
+      close();
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, desktopOpen]);
 
   // Открытие/закрытие менюшки — тоже триггер: лого-осьминог должен шевелить щупальцами
   // на сам переход, не только пока данные грузятся или агент работает.
@@ -226,14 +236,31 @@ export function TopBar({
     });
   }, [desktop]);
 
+  // Кнопки окна Windows нарисованы поверх шапки (titleBarOverlay) — красим их в цвет шапки текущей темы.
+  useEffect(() => {
+    const setTheme = (window.mboxDesktop as { setTitleBarTheme?: (color: string, symbol: string) => Promise<unknown> } | undefined)?.setTitleBarTheme;
+    if (!setTheme) return;
+    const app = document.querySelector(".app");
+    const sync = () => {
+      const bar = document.querySelector(".wb-titlebar");
+      if (!bar) return;
+      const styles = getComputedStyle(bar);
+      void setTheme(styles.backgroundColor, styles.color);
+    };
+    sync();
+    if (!app) return;
+    const observer = new MutationObserver(() => window.requestAnimationFrame(sync));
+    observer.observe(app, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    return () => observer.disconnect();
+  }, [desktopApi]);
+
   return (
-    <header className="topbar">
-      <div className="topbar-context" title={activeHint}>
-        <img src={activeIcon} alt="" width={22} height={22} />
-        <div>
-          <strong>{activeTitle}{activeDirty ? " *" : ""}</strong>
-          <span>{activeHint}{tabCount > 1 ? ` · ${tabCount} вкладок` : ""}</span>
-        </div>
+    <header className="topbar" ref={barRef}>
+      <div className="topbar-context" title={`${activeTitle} — ${activeHint}${tabCount > 1 ? ` · ${tabCount} вкладок` : ""}`}>
+        <img src={activeIcon} alt="" width={18} height={18} />
+        <strong>{activeTitle}</strong>
+        {activeDirty && <i className="topbar-dirty" aria-label="есть несохранённые правки" />}
+        <span>{activeHint}</span>
       </div>
       <button className="command-center" type="button" onClick={onOpenSearch} title="Поиск и команды">
         <Search size={14} />
@@ -254,15 +281,15 @@ export function TopBar({
       <div className={isDesktopShell || desktopApi ? "desktop-slot is-desktop-shell" : "desktop-slot"}>
         {desktop ? (
           <button
-            className={`desktop-pill ${chatgptLive && claudeLive ? "active" : ""}`}
+            className={`desktop-pill tb-pop-trigger ${chatgptLive && claudeLive ? "active" : ""}`}
             type="button"
-            onClick={() => { setDesktopOpen((value) => !value); void refreshDesktop(); }}
+            onClick={() => { setOpen(false); setDesktopOpen((value) => !value); void refreshDesktop(); }}
             aria-expanded={desktopOpen}
-            title="MBOX Desktop"
+            title={`Локальные агенты MBOX Desktop: запущено ${desktopRows.length}`}
+            aria-label={`Локальные агенты: запущено ${desktopRows.length}`}
           >
             <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
-            <strong>Desktop</strong>
-            <span>{chatgptLive && claudeLive ? "2" : desktopRows.length ? String(desktopRows.length) : "0"}</span>
+            <span className={desktopRows.length ? "desktop-pill-count" : "desktop-pill-count is-zero"}>{desktopRows.length}</span>
           </button>
         ) : isDesktopShell ? (
           <button className="desktop-pill bridge-missing" type="button" disabled title="MBOX Desktop IPC не подключился">
@@ -277,52 +304,45 @@ export function TopBar({
           </a>
         )}
         {desktop && desktopOpen && (
-          <div className="desktop-popover" role="dialog" aria-label="MBOX Desktop">
-            <div className="desktop-popover-head">
+          <div className="tb-pop tb-pop-desktop" role="dialog" aria-label="Локальные агенты">
+            <header className="tb-pop-head">
               <strong>Локальные агенты</strong>
-              <button type="button" onClick={refreshDesktop} disabled={desktopBusy} aria-label="Обновить">
-                <RefreshCw size={14} />
+              <button type="button" className="tb-pop-icon" onClick={refreshDesktop} disabled={desktopBusy} aria-label="Обновить состояние" title="Обновить состояние">
+                <RefreshCw size={13} />
               </button>
-            </div>
-            <div className="desktop-agent-list">
+            </header>
+            <ul className="tb-pop-list">
               {["ChatGPT", "Claude"].map((name) => {
                 const row = desktopRows.find((item) => item.agent === name || (name === "ChatGPT" && item.agent === "Codex"));
                 return (
-                  <div className="desktop-agent-row" key={name}>
-                    <span className={row ? "desktop-dot live" : "desktop-dot"} />
-                    <div>
-                      <strong>{name}</strong>
-                      <span>{row ? `pid ${row.pid}` : "не запущен"}</span>
-                    </div>
-                  </div>
+                  <li key={name} className="tb-pop-row">
+                    <i className={row ? "tb-dot is-live" : "tb-dot"} aria-hidden="true" />
+                    <span className="tb-pop-name">{name}</span>
+                    <small>{row ? "работает" : "не запущен"}</small>
+                  </li>
                 );
               })}
-            </div>
-            <div className="desktop-actions">
-              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.start("All"))}>
-                <Play size={14} /> Запустить
+            </ul>
+            <div className="tb-pop-buttons">
+              <button type="button" className="is-primary" disabled={desktopBusy || desktopRows.length >= 2} onClick={() => desktopAction(() => desktop.start("All"))}>
+                <Play size={13} /> Запустить
               </button>
-              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.stop("All"))}>
-                <Square size={14} /> Остановить
-              </button>
-              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAutostart())}>
-                Автозапуск агентов
-              </button>
-              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAppAutostart())}>
-                Автозапуск приложения
-              </button>
-              <button type="button" disabled={desktopBusy || !desktop.checkUpdates} onClick={() => desktopAction(() => desktop.checkUpdates?.() ?? Promise.resolve())}>
-                <RefreshCw size={14} /> Обновить
-              </button>
-              <button type="button" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.openRepo())}>
-                <FolderOpen size={14} /> Репозиторий
+              <button type="button" disabled={desktopBusy || !desktopRows.length} onClick={() => desktopAction(() => desktop.stop("All"))}>
+                <Square size={12} /> Остановить
               </button>
             </div>
-            <div className={`desktop-update-state${desktopError ? " is-error" : ""}`}>{desktopError || desktopUpdateStatus}</div>
+            <div className="tb-pop-sep" role="separator" />
+            <div className="tb-pop-menu" role="menu">
+              <button type="button" role="menuitem" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAutostart())}><Power size={14} /> Запускать агентов при входе в Windows</button>
+              <button type="button" role="menuitem" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.installAppAutostart())}><Monitor size={14} /> Запускать приложение при входе</button>
+              <button type="button" role="menuitem" disabled={desktopBusy || !desktop.checkUpdates} onClick={() => desktopAction(() => desktop.checkUpdates?.() ?? Promise.resolve())}><Download size={14} /> Проверить обновления</button>
+              <button type="button" role="menuitem" disabled={desktopBusy} onClick={() => desktopAction(() => desktop.openRepo())}><FolderOpen size={14} /> Открыть папку репозитория</button>
+            </div>
+            <footer className={`tb-pop-foot${desktopError ? " is-error" : ""}`}>{desktopError || desktopUpdateStatus}</footer>
           </div>
         )}
       </div>
-      <button className={`realtime-pill monostatus ${realtimeState}`} type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+      <button className={`realtime-pill monostatus tb-pop-trigger ${realtimeState}`} type="button" onClick={() => { setDesktopOpen(false); setOpen((value) => !value); }} aria-expanded={open} title="Агенты и последние действия">
         {stack.length > 0 && (
           <span className="pill-avatars" aria-hidden="true">
             {stack.map((agent) => (
@@ -331,7 +351,8 @@ export function TopBar({
           </span>
         )}
         <img className="topbar-logo" src={busy || logoBurst ? logoFrame : WORKING_FRAMES[0]} width={32} height={32} alt="" />
-        <strong className={realtimeLabel === "MBOX" ? "is-brand" : ""}>{realtimeLabel}</strong>
+        {/* «MBOX» рядом с логотипом — повтор бренда; подпись нужна, только когда это состояние («Агент подключается»). */}
+        {realtimeLabel === "MBOX" ? <span className="topbar-sr">MBOX: статус агентов</span> : <strong>{realtimeLabel}</strong>}
         {notice && <span>{notice}</span>}
       </button>
       {onLogout && (
@@ -340,30 +361,22 @@ export function TopBar({
         </button>
       )}
       </div>
-      {popoverMounted && (
-        <div className={`agent-status-popover${popoverClosing ? " closing" : ""}`} role="dialog" aria-label="Статус агентов">
+      {open && (
+        <div className="tb-pop tb-pop-agents" role="dialog" aria-label="Агенты и последние действия">
           {attentionTodos.length > 0 && (
-            <section className="popover-section">
-              <strong><AlertTriangle size={14} /> Требует внимания</strong>
-              <ul className="attention-list">
+            <section>
+              <h3 className="tb-pop-label is-warn"><AlertTriangle size={12} /> Требует внимания · {attentionTodos.length}</h3>
+              <ul className="tb-pop-list">
                 {attentionTodos.map((todo) => (
-                  <li key={todo.id}>
-                    <button type="button" onClick={() => { onOpenTodo?.(todo.id); setOpen(false); }}>
-                      <span className={`attention-dot status-${todo.status}`} />
-                      <span className="attention-body">
-                        <span className="attention-title">{todo.title}</span>
-                        <span className="attention-meta">{todo.projectName} · {attentionStatusLabel[todo.status] || todo.status}</span>
-                      </span>
+                  <li key={todo.id} className="tb-pop-row is-action">
+                    <button type="button" className="tb-pop-rowbtn" onClick={() => { onOpenTodo?.(todo.id); setOpen(false); }}>
+                      <i className={`tb-dot ${todo.status === "blocked" ? "is-danger" : "is-warn"}`} aria-hidden="true" />
+                      <span className="tb-pop-name">{todo.title}</span>
+                      <small>{todo.projectName} · {attentionStatusLabel[todo.status] || todo.status}</small>
                     </button>
                     {onResolveTodo && (
-                      <button
-                        type="button"
-                        className="attention-done"
-                        title="Отметить готовой"
-                        aria-label={`Отметить готовой: ${todo.title}`}
-                        onClick={() => onResolveTodo(todo.id)}
-                      >
-                        <Check size={14} />
+                      <button type="button" className="tb-pop-icon" title="Отметить готовой" aria-label={`Отметить готовой: ${todo.title}`} onClick={() => onResolveTodo(todo.id)}>
+                        <Check size={13} />
                       </button>
                     )}
                   </li>
@@ -371,38 +384,37 @@ export function TopBar({
               </ul>
             </section>
           )}
-          <section className="popover-section">
-            <strong>Команда</strong>
+          <section>
+            <h3 className="tb-pop-label">Агенты</h3>
             {roster.length ? (
-              <ul className="agent-roster">
-                {roster.map((agent) => (
-                  <li className={`agent-roster-item ${agent.status}`} key={agent.id}>
-                    <AgentAvatar name={agent.name} status={agent.status} live={agent.live} size={34} />
-                    <div className="agent-roster-body">
-                      <span className="agent-roster-name">{agent.name}</span>
-                      <span className="agent-roster-detail">{agent.detail || agent.statusLabel}</span>
-                    </div>
-                    <div className="agent-roster-meta">
-                      <span className={`agent-roster-state ${agent.live ? "working" : agent.status}`}>{agent.live ? "в работе" : agent.statusLabel}</span>
-                      {agent.since && <time>{agent.since}</time>}
-                    </div>
+              <>
+                <ul className="tb-pop-list">
+                  {roster.filter((agent) => agent.status !== "offline").map((agent) => (
+                    <li key={agent.id} className="tb-pop-row" title={agent.detail || agent.statusLabel}>
+                      <AgentAvatar name={agent.name} status={agent.status} live={agent.live} size={20} />
+                      <span className="tb-pop-name">{agent.name}</span>
+                      <small className={agent.live ? "is-live" : agent.status === "active" ? "is-ok" : undefined}>{agent.live ? "в работе" : agent.statusLabel}</small>
+                    </li>
+                  ))}
+                </ul>
+                {roster.some((agent) => agent.status === "offline") && (
+                  <p className="tb-pop-note">Не в сети: {roster.filter((agent) => agent.status === "offline").map((agent) => agent.name).join(", ")}</p>
+                )}
+              </>
+            ) : <p className="tb-pop-note">Агенты пока не подключались</p>}
+          </section>
+          <section>
+            <h3 className="tb-pop-label">Последние действия</h3>
+            {notices.length ? (
+              <ul className="tb-pop-feed">
+                {collapseNotices(notices).slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <span>{item.text}{item.count > 1 && <b> ×{item.count}</b>}</span>
+                    <time>{item.at}</time>
                   </li>
                 ))}
               </ul>
-            ) : <p>Агенты пока не подключены</p>}
-          </section>
-          <section className="popover-section">
-            <strong>Действия</strong>
-            {notices.length ? (
-              <div className="agent-status-list">
-                {notices.map((item) => (
-                  <div className="agent-status-item" key={item.id}>
-                    <span>{item.text}</span>
-                    <time>{item.at}</time>
-                  </div>
-                ))}
-              </div>
-            ) : <p>Агенты ещё ничего не меняли</p>}
+            ) : <p className="tb-pop-note">Агенты ещё ничего не меняли</p>}
           </section>
         </div>
       )}

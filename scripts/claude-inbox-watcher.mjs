@@ -4,6 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncSkills } from "./sync-skills.mjs";
+import { createInboxWake } from "./inbox-wake.mjs";
+import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
+import { createSessionStore, focusLines, isLostSession, sameThread, threadOf } from "./chat-threads.mjs";
+
+const FETCH_TIMEOUT_MS = 30_000;
+const LOCK_TOUCH_MS = 30_000;
+const LOCK_STALE_MS = 3 * 60_000;
+// Потолок на один ответ: зависший CLI раньше держал наблюдателя бесконечно. 45 минут хватает и на большую работу.
+const RUN_TIMEOUT_MS = Number(process.env.MBOX_WATCH_RUN_TIMEOUT_MS || 45 * 60_000);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -16,12 +25,20 @@ const agentName = process.env.MBOX_AGENT_NAME || "Claude";
 const project = process.env.MBOX_PROJECT || "MBOX";
 // 15 с ожидания до того, как наблюдатель вообще увидит сообщение, плюс холодный старт CLI — человек
 // это чувствует как «не дошло». Пять секунд заметно живее и всё ещё дёшево: два лёгких запроса за тик.
-const pollMs = Number(process.env.MBOX_WATCH_POLL_MS || 5000);
+// Опрос — запасной путь: обычно наблюдателя будит вебсокет (inbox-wake.mjs). Но сообщения из dev-окна
+// (локальный vite) прод не рассылает, и там ответ начинается только по опросу — поэтому он частый.
+const pollMs = Number(process.env.MBOX_WATCH_POLL_MS || 2000);
+// Heartbeat — не на каждый круг опроса: присутствие считается живым минутами, лишний POST раз в 2 с не нужен.
+const HEARTBEAT_MS = 20_000;
+let lastHeartbeat = 0;
 const includeUnaddressed = !["0", "false", "no"].includes(String(process.env.MBOX_WATCH_UNADDRESSED || "true").toLowerCase());
 const startGraceMs = Number(process.env.MBOX_WATCH_START_GRACE_MS || 15 * 60 * 1000);
 const includeBacklog = ["1", "true", "yes"].includes(String(process.env.MBOX_WATCH_BACKLOG || "").toLowerCase());
 const startedAt = new Date();
-const cutoffAt = includeBacklog ? new Date(startedAt.getTime() - startGraceMs) : startedAt;
+// Сообщение, отправленное, пока наблюдатель лежал (перезапуск, сбой сети), раньше терялось: брались
+// только пришедшие после старта. Теперь подхватываем открытые за последние startGraceMs — повторно
+// ответить нельзя: отвеченное уже done, взятое — doing, а claim с if_status не даст взять дважды.
+const cutoffAt = new Date(startedAt.getTime() - startGraceMs);
 const agentAliases = [agentName, ...(process.env.MBOX_AGENT_ALIASES || "Клод").split(",")]
   .map((alias) => alias.trim())
   .filter(Boolean);
@@ -38,7 +55,10 @@ const claudeCommand = process.env.CLAUDE_COMMAND || "claude";
 const claudeModel = process.env.CLAUDE_WATCH_MODEL || "";
 const workdir = process.env.CLAUDE_WATCH_WORKDIR || path.resolve(__dirname, "..");
 const autoRespond = !["0", "false", "no"].includes(String(process.env.MBOX_WATCH_AUTORESPOND || "true").toLowerCase());
-const contextLimit = Number(process.env.MBOX_WATCH_CONTEXT_LIMIT || 30);
+// Старый общий чат (сообщения без thread) по-прежнему тянет историю в промпт — но теперь только
+// свою и короче: 30 реплик по 6000 символов съедали лимит подписки быстрее самой работы.
+const contextLimit = Number(process.env.MBOX_WATCH_CONTEXT_LIMIT || 12);
+const sessions = createSessionStore(agentName);
 
 // ВНИМАНИЕ: главный цикл этого файла (`while (!stopping)`) работает на верхнем уровне модуля и
 // никогда не завершается, поэтому до объявлений НИЖЕ него исполнение просто не доходит. Функции
@@ -47,17 +67,23 @@ const contextLimit = Number(process.env.MBOX_WATCH_CONTEXT_LIMIT || 30);
 // объявляем здесь, до цикла.
 // Из сообщения приходит чужой ввод — в аргументы командной строки он попадает только из этих
 // списков, никогда как есть.
-const CLAUDE_MODEL_CHOICES = new Set(["fable", "opus", "sonnet", "haiku"]);
 // Модель по умолчанию — та же, что сервер показывает в поле ввода (см. jarvisModels).
 const CLAUDE_DEFAULT_MODEL = "sonnet";
 const CLAUDE_EFFORT_CHOICES = new Set(["low", "medium", "high", "xhigh", "max"]);
-const pickModel = (value) => (CLAUDE_MODEL_CHOICES.has(String(value || "")) ? String(value) : "");
+const pickModel = (value) => {
+  const model = String(value || "").trim();
+  if (!model || ["default", "auto", "claude default"].includes(model.toLowerCase())) return "";
+  // Только модели Claude: выбор из чата другого агента (gpt-6-luna) ронял CLI с unrecognized_model.
+  if (!/^(claude|opus|sonnet|haiku|fable)/i.test(model)) return "";
+  // Скобки — часть id из каталога CLI: «claude-fable-5-1[1m]» (вариант с окном в миллион токенов).
+  return /^[A-Za-z0-9._:/@[\]-]{1,120}$/.test(model) ? model : "";
+};
 const pickEffort = (value) => (CLAUDE_EFFORT_CHOICES.has(String(value || "")) ? String(value) : "");
 // Сколько истории показывать агенту. Потолок на запись — против одного гигантского сообщения,
 // общий бюджет — против тридцати средних. Вместе держат промпт в рамках, не обрывая при этом
 // обычный развёрнутый ответ на полуслове.
-const CONTEXT_CHARS_PER_ENTRY = 6000;
-const CONTEXT_CHARS_TOTAL = 40000;
+const CONTEXT_CHARS_PER_ENTRY = 2500;
+const CONTEXT_CHARS_TOTAL = 12000;
 // MCP агента должен смотреть на ТОТ ЖЕ сервер, что и наблюдатель. Глобальный конфиг в ~/.claude.json
 // нацелен на прод, и когда наблюдатель работает против другого адреса (локальный запуск, свой
 // сервер), инструменты вроде open_tab уходили в пустоту: окно человека подключено к одному серверу,
@@ -128,12 +154,25 @@ let stopping = false;
 let lockFd = null;
 
 acquireSingleInstanceLock();
+setInterval(touchLock, LOCK_TOUCH_MS).unref();
 
 process.on("SIGINT", () => { stopping = true; releaseSingleInstanceLock(); });
 process.on("SIGTERM", () => { stopping = true; releaseSingleInstanceLock(); });
 process.on("exit", releaseSingleInstanceLock);
 
 await ping("session_start");
+// Список моделей и уровней effort для чата — из самого Claude Code, а не из списка в коде MBOX.
+publishModelCatalog({
+  agent: "Claude",
+  collect: () => claudeCliModels(claudeCommand),
+  post: (body) => mboxFetch("/api/mbox/agent/models", { method: "POST", body: JSON.stringify(body) }),
+  log: (message) => console.log(`${logPrefix} ${message}`),
+});
+const wake = createInboxWake({
+  baseUrl,
+  authHeaders: () => ({ ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }), "x-mbox-agent": encodeURIComponent(agentName) }),
+  log: (message) => console.log(`${logPrefix} ${message}`),
+});
 
 // Навыки хранятся на сервере MBOX; ставим их в ~/.claude/skills при старте и раз в час, чтобы `claude -p`
 // на этой машине видел актуальные SKILL.md, правила и скрипты. Ошибка синхронизации не останавливает наблюдатель.
@@ -157,7 +196,7 @@ console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring inb
 
 while (!stopping) {
   try {
-    await ping("heartbeat");
+    if (Date.now() - lastHeartbeat > HEARTBEAT_MS) { lastHeartbeat = Date.now(); await ping("heartbeat"); }
     if (Date.now() - lastSkillSync > skillSyncMs) await refreshSkills();
     const items = await newInboxItems();
     for (const item of items) {
@@ -169,7 +208,7 @@ while (!stopping) {
   } catch (error) {
     console.error(`${logPrefix} ${error.stack || error.message}`);
   }
-  await sleep(pollMs);
+  await wake.wait(pollMs);
 }
 
 console.log(`${logPrefix} stopped`);
@@ -181,7 +220,7 @@ function acquireSingleInstanceLock() {
     fs.writeFileSync(lockFd, String(process.pid));
   } catch (error) {
     const pid = readLockPid();
-    if (pid && isProcessAlive(pid)) {
+    if (pid && isProcessAlive(pid) && lockIsFresh()) {
       console.error(`${logPrefix} another watcher is already running pid=${pid}; exiting`);
       process.exit(0);
     }
@@ -193,6 +232,29 @@ function acquireSingleInstanceLock() {
       console.error(`${logPrefix} could not acquire lock ${lockPath}: ${retryError.message}`);
       process.exit(1);
     }
+  }
+}
+
+/**
+ * Живой наблюдатель трогает lock-файл каждые LOCK_TOUCH_MS (таймер идёт и во время долгого ответа).
+ * Проверки одного pid мало: Windows переиспользует номера процессов, и после сбоя новый наблюдатель
+ * видел «живой» чужой pid в старом lock и молча выходил — чат не отвечал до ручного перезапуска.
+ */
+function lockIsFresh() {
+  try {
+    return Date.now() - fs.statSync(lockPath).mtimeMs < LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function touchLock() {
+  if (lockFd === null) return;
+  try {
+    const now = new Date();
+    fs.utimesSync(lockPath, now, now);
+  } catch {
+    // lock удалили снаружи — следующий запуск просто создаст новый
   }
 }
 
@@ -246,6 +308,7 @@ function requireValue(value, name) {
 
 async function login() {
   const response = await fetch(`${baseUrl}/api/mbox/auth/login`, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -257,6 +320,9 @@ async function login() {
 async function mboxFetch(apiPath, init = {}) {
   if (!accessToken && !cookie) await login();
   const response = await fetch(`${baseUrl}${apiPath}`, {
+    // Без таймаута запрос при обрыве сети висел вечно, и вместе с ним — весь наблюдатель: чат молчал,
+    // пока человек не перезапустит ответчик вручную.
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -309,6 +375,9 @@ async function newInboxItems() {
 }
 
 function isAddressedToMe(item) {
+  // Наблюдатель работает под аккаунтом владельца и с его диском — отвечает только владельцу.
+  // Участникам (mbox_owner: false) отвечает Джарвис, если он у них включён.
+  if (item.props?.mbox_owner === false) return false;
   const text = `${item.title || ""}\n${item.body || ""}`;
   const to = item.props?.to || item.props?.target || item.props?.agent;
   if (agentAliases.some((alias) => String(to || "").toLowerCase() === alias.toLowerCase())) return true;
@@ -356,6 +425,7 @@ async function handleInboxItem(item) {
         in_reply_to: item.id,
         to: item.agent_name || "Человек",
         source: "claude-inbox-watcher",
+        ...(threadOf(item) ? { thread: threadOf(item) } : {}),
         // След работы для чата: чипы инструментов, раскрывающийся список шагов и строка
         // «сколько думал / сколько заняло». Текста размышления у CLI нет — см. spawnStreaming.
         tools_used: outcome.toolsUsed,
@@ -385,7 +455,7 @@ async function handleInboxItem(item) {
       body: message,
       item_type: "agent_error",
       priority: "high",
-      props: { in_reply_to: item.id, source: "claude-inbox-watcher" },
+      props: { in_reply_to: item.id, source: "claude-inbox-watcher", ...(threadOf(item) ? { thread: threadOf(item) } : {}) },
     });
     await patchInbox(item.id, {
       status: "open",
@@ -475,6 +545,8 @@ async function recentConversationContext(item) {
   const rows = (data.inbox || [])
     .filter((entry) => ["question", "chat", "answer", "agent_response"].includes(entry.item_type))
     .filter((entry) => !targetProjectId || !entry.project_id || String(entry.project_id) === targetProjectId)
+    .filter((entry) => sameThread(entry, item))
+    .filter((entry) => String(entry.id) !== String(item.id))
     .filter((entry) => new Date(entry.created_at || 0).getTime() <= currentCreatedAt)
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
     .slice(-contextLimit);
@@ -508,36 +580,46 @@ function formatContextLine(entry) {
   return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}${re}): ${clipped}`;
 }
 
+/**
+ * Ответ в чате. Первый запрос чата — полный промпт с инструкциями, следующие продолжают ту же сессию
+ * CLI (`--resume`): инструкции и история уже в ней, уходит только новое сообщение. Потерянная сессия
+ * (CLI её не нашёл) — не ошибка для человека: чат просто начинается заново.
+ */
 async function runClaude(item) {
-  const conversationContext = await recentConversationContext(item);
-  const prompt = [
-    "You were woken by MBOX agent_inbox.",
-    `Your canonical agent name is ${agentName}.`,
-    "Answer the inbox item below. If asked to do code work, do it in the repo and summarize the result.",
-    "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
-    "Keep the final answer concise and directly useful.",
-    "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
-    // MBOX — русскоязычный проект: владелец, Джарвис и вся консоль общаются по-русски. Без этой
-    // строки ответ уходил на английском (нет другого языкового сигнала во всём промпте).
-    "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
-    // Длинный отчёт в чате терялся — теперь он всегда отдельным файлом со ссылкой (MCP save_report).
-    "If the answer is a report, audit, research or anything longer than ~20 lines, first save the full text as Markdown with the mbox-prod MCP tool save_report, then reply in chat with a short summary (5-10 lines) and the returned markdown_link — the owner must get a clickable link.",
-    // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
-    "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
-    // Навыки ставятся с сервера MBOX (refreshSkills); без явного списка Claude в -p режиме их не замечал.
-    installedSkills.length
-      ? `MBOX skills are installed from the MBOX server in ~/.claude/skills. If the request matches one, invoke it with the Skill tool and follow its SKILL.md exactly: ${installedSkills.map((skill) => `${skill.id} — ${skill.description}`).join(" | ")}`
-      : "",
-    "",
-    conversationContext,
-    "",
+  const thread = threadOf(item);
+  const sessionId = sessions.get(thread);
+  if (sessionId) {
+    try {
+      const outcome = await runClaudeTurn(item, sessionId);
+      sessions.remember(thread, outcome.sessionId || sessionId);
+      return outcome;
+    } catch (error) {
+      if (!isLostSession(error)) throw error;
+      console.log(`${logPrefix} сессия чата ${thread} потеряна — начинаю заново`);
+      sessions.forget(thread);
+    }
+  }
+  const outcome = await runClaudeTurn(item, "");
+  sessions.remember(thread, outcome.sessionId);
+  return outcome;
+}
+
+function messageLines(item) {
+  return [
     `Inbox id: ${item.id}`,
-    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id, текст есть в контексте выше.
-    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to} — read that message in the context above and answer in its thread.`] : []),
+    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id.
+    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to}.`] : []),
     `From: ${item.agent_name || "unknown"}`,
     `Title: ${item.title || ""}`,
     `Body:\n${item.body || ""}`,
-  ].join("\n");
+    ...focusLines(item),
+  ];
+}
+
+async function runClaudeTurn(item, resumeId) {
+  const prompt = resumeId
+    ? ["New message in this same MBOX chat. Answer it the same way as before (Russian, concise; the watcher posts your final answer).", "", ...messageLines(item)].join("\n")
+    : await freshPrompt(item);
 
   // stream-json вместо text: в человеке важен не только финальный ответ, но и то, что агент сейчас
   // делает. Текста размышления CLI не отдаёт ни при каких флагах (блоки thinking приходят пустыми,
@@ -547,15 +629,55 @@ async function runClaude(item) {
   // --include-partial-messages не нужен: события system/thinking_tokens приходят и без него,
   // а с ним поток раздувается в двадцать раз на тех же данных (проверено).
   const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--input-format", "text"];
+  if (resumeId) args.push("--resume", resumeId);
   // Модель и «усилие» человек выбирает рядом с полем ввода в MBOX (см. jarvisModels на сервере);
   // не выбрал — остаётся то, что настроено переменными окружения, а дальше умолчание самого CLI.
-  const wantedModel = pickModel(item.props?.model) || claudeModel || CLAUDE_DEFAULT_MODEL;
+  const wantedModel = pickModel(item.props?.model) || pickModel(claudeModel) || CLAUDE_DEFAULT_MODEL;
   const wantedEffort = pickEffort(item.props?.effort);
   if (wantedModel) args.push("--model", wantedModel);
   if (wantedEffort) args.push("--effort", wantedEffort);
   if (mcpConfigReady) args.push("--mcp-config", mcpConfigPath);
 
-  return await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt, item.id);
+  const outcome = await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt, item.id);
+  if (outcome.stats) outcome.stats.resumed = Boolean(resumeId);
+  return outcome;
+}
+
+async function freshPrompt(item) {
+  const conversationContext = await recentConversationContext(item);
+  return [
+    "You were woken by MBOX agent_inbox.",
+    `Your canonical agent name is ${agentName}.`,
+    "Answer the inbox item below. If asked to do code work, do it in the repo and summarize the result.",
+    "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
+    "Keep the final answer concise and directly useful.",
+    "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
+    // MBOX — русскоязычный проект: владелец, Джарвис и вся консоль общаются по-русски. Без этой
+    // строки ответ уходил на английском (нет другого языкового сигнала во всём промпте).
+    "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
+    // 24.09: Codex правил .docx встроенным PowerShell (Expand-Archive в %TEMP%, регулярки по XML, Compress-Archive
+    // и перезапись файла в «Загрузках») — Defender принял это за шифровальщик (Trojan:Win32/Commando.A!ml) и блокировал.
+    "Editing Word/Excel/PowerPoint files: never unzip/rezip them with inline PowerShell (Expand-Archive, Compress-Archive, [IO.Compression]) or rewrite their XML with regex in %TEMP% — Windows Defender flags that pattern as ransomware and blocks it. Use the mbox-prod MCP tools (workspace_read_document, workspace_write_docx, workspace_read_table, workspace_write_cells, workspace_format_cells) for files in MBOX local folders — colors, fonts, borders and number formats go through workspace_format_cells, checked with workspace_read_table styles=true, not through Python; otherwise write a small Python script with python-docx/openpyxl. Always keep the original: save the result next to it (e.g. name.edited.docx) unless the owner explicitly asked to overwrite.",
+    // 24.09: «сделай шрифт не жирным» стоило 20+ шагов и 580k токенов — агент искал render_docx.py, LibreOffice
+    // и Word COM, чтобы визуально проверить результат. Каждый шаг пересылает весь контекст заново.
+    "Routine requests (edit a file, fix formatting, rename, small change): do it in the fewest possible steps — ideally one tool call to change and one to verify by reading the result back. Do not search for renderers, converters or viewers (LibreOffice/soffice, Word COM, render scripts) and do not verify visually unless the owner asked for it. Do not explore the filesystem beyond what the task needs. If a skill's instructions demand heavier verification, skip it for routine edits.",
+    "If a command or tool fails with access denied / permission denied / EACCES / EPERM, do not work around it (no copying elsewhere, no elevation, no retries under another path): stop and end your answer with a short question to the owner naming exactly what access is needed and why.",
+    // Длинный отчёт в чате терялся — теперь он всегда отдельным файлом со ссылкой (MCP save_report).
+    "If the answer is a report, audit, research or anything longer than ~20 lines, first save the full text as Markdown with the mbox-prod MCP tool save_report, then reply in chat with a short summary (5-10 lines) and the returned markdown_link — the owner must get a clickable link.",
+    // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
+    "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
+    // Навыки ставятся с сервера MBOX (refreshSkills); без явного списка Claude в -p режиме их не замечал.
+    installedSkills.length
+      ? `MBOX skills are installed from the MBOX server in ~/.claude/skills. If the request matches one, invoke it with the Skill tool and follow its SKILL.md exactly: ${installedSkills.map((skill) => `${skill.id} — ${skill.description}`).join(" | ")}`
+      : "",
+    // Инструменты «на глазах»: агент работает в документах и таблицах, а человек видит правку во вкладке.
+    "Documents and tables: MBOX notes (note_search, note_read, note_write, note_edit) and files in the owner's local folders (workspace_edit_file for small text edits instead of rewriting a whole file, workspace_read_table / workspace_write_cells / workspace_format_cells for .xlsx/.csv, workspace_read_document / workspace_write_docx for Word). Pass show=true when the owner should watch the change happen — the document opens as a tab in MBOX.",
+    "Save tokens: read only the parts you need, prefer targeted search over broad scans, do not repeat large file contents in the answer.",
+    "",
+    conversationContext,
+    "",
+    ...messageLines(item),
+  ].join("\n");
 }
 
 /** 1300 -> «1,3k»: в живой строке важен порядок величины, а не точное число. */
@@ -586,10 +708,11 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
     const child = process.platform === "win32"
       ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].join(" ")}"`], { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
       : spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const runTimer = armRunTimeout(child);
 
     // steps — цепочка шагов для чата: что вызвано, с чем и что вернулось, в порядке событий.
     // pendingTools связывает вызов с его результатом: они приходят разными событиями потока.
-    const state = { text: "", toolsUsed: [], trace: [], steps: [], thinkingTokens: 0, rateLimit: null, stats: null, failure: "" };
+    const state = { text: "", toolsUsed: [], trace: [], steps: [], thinkingTokens: 0, rateLimit: null, stats: null, failure: "", sessionId: "", contextTokens: 0 };
     const pendingTools = new Map();
     // Claude Code стартует несколько секунд (грузит MCP и навыки) и до первого события молчит —
     // без этой строки человек всё это время видел бы пустоту там, где агент уже занят.
@@ -610,6 +733,7 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
     };
 
     const handle = (event) => {
+      if (event.session_id) state.sessionId = String(event.session_id);
       if (event.type === "system" && event.subtype === "thinking_tokens") {
         state.thinkingTokens = Math.max(state.thinkingTokens, Number(event.estimated_tokens) || 0);
         pushPhase("Думает");
@@ -618,6 +742,12 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
       if (event.type === "rate_limit_event" && event.rate_limit_info) {
         state.rateLimit = event.rate_limit_info;
         return;
+      }
+      if (event.type === "assistant" && event.message?.usage) {
+        // Размер контекста — вход ПОСЛЕДНЕГО вызова модели вместе с кешем: столько сессия чата
+        // сейчас тащит в каждый запрос. Его и показывает индикатор нагрузки чата.
+        const usage = event.message.usage;
+        state.contextTokens = (Number(usage.input_tokens) || 0) + (Number(usage.cache_read_input_tokens) || 0) + (Number(usage.cache_creation_input_tokens) || 0);
       }
       if (event.type === "assistant" && Array.isArray(event.message?.content)) {
         for (const block of event.message.content) {
@@ -675,6 +805,12 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
         // эти доллары человеку значит врать о том, чего он не платит. Не берём.
         state.stats = {
           thinking_tokens: event.usage?.output_tokens_details?.thinking_tokens ?? state.thinkingTokens,
+          // Те же поля, что у Codex: чат показывает, сколько ушло на вход и сколько из этого — из кеша.
+          input_tokens: (Number(event.usage?.input_tokens) || 0) + (Number(event.usage?.cache_read_input_tokens) || 0) + (Number(event.usage?.cache_creation_input_tokens) || 0),
+          cached_input_tokens: Number(event.usage?.cache_read_input_tokens) || 0,
+          output_tokens: Number(event.usage?.output_tokens) || 0,
+          context_tokens: state.contextTokens || 0,
+          context_window: Math.max(0, ...Object.values(event.modelUsage || {}).map((item) => Number(item?.contextWindow) || 0)) || 0,
           duration_ms: Number(event.duration_ms) || 0,
           turns: Number(event.num_turns) || 0,
         };
@@ -714,6 +850,7 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
 
     child.on("error", reject);
     child.on("close", (code) => {
+      clearTimeout(runTimer);
       ping("heartbeat", "").catch(() => {});
       if (code !== 0) { reject(describeCliFailure(command, code, `${plain}\n${state.text}`, stderr)); return; }
       if (state.failure) { const error = new Error(state.failure); error.cliFailure = true; reject(error); return; }
@@ -763,3 +900,11 @@ function describeCliFailure(command, code, stdout, stderr) {
   return error;
 }
 
+/** Зависший CLI (сеть, ожидание ввода) снимаем по таймауту — вместе с дочерними процессами. */
+function armRunTimeout(child) {
+  return setTimeout(() => {
+    console.error(`${logPrefix} ответ дольше ${Math.round(RUN_TIMEOUT_MS / 60000)} мин — останавливаю CLI`);
+    if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+    else child.kill("SIGKILL");
+  }, RUN_TIMEOUT_MS);
+}

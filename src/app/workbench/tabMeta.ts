@@ -49,6 +49,11 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: noteTitle(key) || "Заметка", hint: "Заметка", icon: `${NAVIGATION}/notes.png` };
     case "storage":
       return { title: "Хранилище S3", hint: "Yandex Object Storage", icon: `${NAVIGATION}/storage.png` };
+    case "s3sheet": {
+      const storageKey = key.slice("s3sheet:".length);
+      const name = storageKey.split("/").pop() || storageKey;
+      return { title: name, hint: `Хранилище › ${storageKey}`, icon: fileIcon("text", name) };
+    }
     case "local": {
       const path = key.split(":").slice(2).join(":");
       const name = path.split("/").pop() || path;

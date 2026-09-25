@@ -4,7 +4,7 @@ import { fetchJson } from "../../lib/api";
 import { DocShell } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import { skillPageReplyTo } from "./agentTabs";
-import { usePersistentState, type TabsApi } from "./tabs";
+import { scopedStorageKey, usePersistentState, type TabsApi } from "./tabs";
 
 const HUMAN = "Человек";
 
@@ -82,7 +82,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
       if (event.source !== frameRef.current?.contentWindow) return;
       const data = event.data as { type?: string; text?: unknown; items?: unknown };
       if (data?.type === "mbox:storage" && data.items && typeof data.items === "object") {
-        try { window.localStorage.setItem(storageKey, JSON.stringify(data.items)); } catch { /* без памяти */ }
+        try { window.localStorage.setItem(scopedStorageKey(storageKey), JSON.stringify(data.items)); } catch { /* без памяти */ }
       }
       if (data?.type === "mbox:close") tabs.close(tabKey);
       if (data?.type === "mbox:read" || data?.type === "mbox:write" || data?.type === "mbox:write-files" || data?.type === "mbox:files" || data?.type === "mbox:email-check" || data?.type === "mbox:agents" || data?.type === "mbox:send") void answer(data as BridgeCall);
@@ -214,7 +214,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
 }
 
 function readStorage(key: string): Record<string, string> {
-  try { return JSON.parse(window.localStorage.getItem(key) || "{}") as Record<string, string>; } catch { return {}; }
+  try { return JSON.parse(window.localStorage.getItem(scopedStorageKey(key)) || "{}") as Record<string, string>; } catch { return {}; }
 }
 
 /** window.mbox и localStorage для страницы в песочнице. Скрипт идёт первым в <head>, до скриптов самой страницы. */

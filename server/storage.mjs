@@ -223,18 +223,31 @@ function cleanKey(value) {
   return key;
 }
 
-export async function handleStorageApi({ req, res, url, query, readBody, sendJson, allowed, secretKey }) {
+/**
+ * Хранилище делится по проектам: один бакет, у каждого проекта папка projects/<id>/. Владелец видит всё,
+ * участник — только папки своих проектов (и картинки доступных ему заметок, notes/<id>/). Настройки
+ * бакета и проверка подключения — только владельцу.
+ *
+ * access (для участника): { roots: [{ prefix, label }], canUse(key) → Promise<boolean> }.
+ * labels: { "projects/4/": "Вокруг света" } — подписи папок проектов для интерфейса.
+ */
+export async function handleStorageApi({ req, res, url, query, readBody, sendJson, allowed, access = null, labels = {}, secretKey }) {
   if (!url.pathname.startsWith("/api/mbox/storage")) return false;
-  if (!allowed) {
+  if (!allowed && !access) {
     sendJson(res, 403, { error: "forbidden" });
     return true;
   }
   const { pathname } = url;
+  const member = !allowed;
+  const denied = () => { sendJson(res, 403, { error: "Нет доступа к этой папке хранилища — только папки ваших проектов" }); return true; };
+  const usable = async (key) => !member || await access.canUse(key);
   try {
     if (pathname === "/api/mbox/storage/config" && req.method === "GET") {
-      sendJson(res, 200, { config: publicConfig(await loadConfig(query, secretKey)) });
+      const config = publicConfig(await loadConfig(query, secretKey));
+      sendJson(res, 200, { config: member ? { configured: config.configured, bucket: config.bucket, endpoint: config.endpoint, region: config.region, access_key_id: "", has_secret: false, member: true } : config });
       return true;
     }
+    if (member && (pathname === "/api/mbox/storage/config" || pathname === "/api/mbox/storage/test")) return denied();
     if (pathname === "/api/mbox/storage/config" && req.method === "PUT") {
       const body = await readBody(req);
       const secret = String(body.secret_access_key || "").trim();
@@ -270,13 +283,23 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       return true;
     }
     if (pathname === "/api/mbox/storage/objects" && req.method === "GET") {
-      sendJson(res, 200, await listObjects(config, url.searchParams.get("prefix") || "", url.searchParams.get("token") || ""));
+      const prefix = url.searchParams.get("prefix") || "";
+      if (member && !prefix) {
+        sendJson(res, 200, { prefix: "", folders: access.roots.map((root) => root.prefix), objects: [], next_token: null, labels });
+        return true;
+      }
+      if (prefix && !(await usable(cleanKey(prefix)))) return denied();
+      sendJson(res, 200, { ...(await listObjects(config, prefix, url.searchParams.get("token") || "")), labels });
       return true;
     }
+    // Всё ниже работает с конкретным ключом: участнику — только внутри своих папок.
+    const keyParam = pathname === "/api/mbox/storage/upload-url" || pathname === "/api/mbox/storage/folder" ? null : url.searchParams.get("key");
+    if (member && keyParam !== null && keyParam !== undefined && !(await usable(cleanKey(keyParam)))) return denied();
     if (pathname === "/api/mbox/storage/upload-url" && req.method === "POST") {
       const body = await readBody(req);
       const key = cleanKey(body.key);
       if (!key || key.endsWith("/")) { sendJson(res, 400, { error: "Нужно имя файла" }); return true; }
+      if (!(await usable(key))) return denied();
       try {
         await ensureUploadCors(config);
       } catch (error) {
@@ -304,6 +327,7 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
     if (pathname === "/api/mbox/storage/folder" && req.method === "POST") {
       const body = await readBody(req);
       const key = `${cleanKey(body.prefix).replace(/\/+$/, "")}/`;
+      if (!(await usable(key))) return denied();
       const response = await s3(config, { method: "PUT", key, headers: { "content-length": "0" }, body: "", payloadHash: EMPTY_SHA256 });
       sendJson(res, response.ok ? 200 : 502, response.ok ? { key } : { error: await s3Error(response) });
       return true;
@@ -328,6 +352,8 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
     }
     if (pathname === "/api/mbox/storage/object" && req.method === "DELETE") {
       const key = cleanKey(url.searchParams.get("key"));
+      // Корневую папку проекта участник не удаляет — только её содержимое.
+      if (member && access.roots.some((root) => root.prefix === key)) return denied();
       const keys = [];
       if (key.endsWith("/")) {
         // «Папка» в S3 — только общий префикс: удаляем всё под ним.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { scopedStorageKey } from "./tabs";
 
 /**
  * Левое меню рабочего места (полоса разделов).
@@ -95,7 +96,7 @@ const RAIL_EVENT = "mbox:rail-hidden";
 
 function readHidden(): RailItemId[] {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(RAIL_HIDDEN_KEY) || "[]");
+    const raw = JSON.parse(window.localStorage.getItem(scopedStorageKey(RAIL_HIDDEN_KEY)) || "[]");
     return Array.isArray(raw) ? (raw as RailItemId[]) : [];
   } catch {
     return [];
@@ -104,7 +105,7 @@ function readHidden(): RailItemId[] {
 
 export function setRailHidden(next: RailItemId[]) {
   try {
-    window.localStorage.setItem(RAIL_HIDDEN_KEY, JSON.stringify(next));
+    window.localStorage.setItem(scopedStorageKey(RAIL_HIDDEN_KEY), JSON.stringify(next));
   } catch {
     // приватный режим — настройка не переживёт перезагрузку, но в этой сессии работает
   }

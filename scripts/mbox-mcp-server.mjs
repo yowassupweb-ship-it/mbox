@@ -73,7 +73,13 @@ async function login() {
  */
 let lastPushCheck = 0;
 
+// Под наблюдателем (claude-inbox-watcher, codex-chat-watcher) сообщение уже доставлено промптом — пуш
+// в каждом ответе инструмента только повторял его текст и сжигал токены на каждом вызове.
+const pushDisabled = String(process.env.MBOX_MCP_PUSH || "").toLowerCase() === "off" || /-watcher$/.test(String(process.env.MBOX_AGENT_CLIENT || ""));
+let workflowReminderShown = false;
+
 async function pendingMessages() {
+  if (pushDisabled) return "";
   const now = Date.now();
   if (now - lastPushCheck < 3000) return "";
   lastPushCheck = now;
@@ -81,7 +87,8 @@ async function pendingMessages() {
     const data = await mboxFetch("/api/mbox/agent/inbox");
     const inbox = data.inbox || [];
     const mine = inbox.filter((item) => {
-      if (item.status === "done") return false;
+      // doing — сообщение уже взял наблюдатель или другой агент; повторять его в каждом ответе незачем.
+      if (item.status === "done" || item.status === "doing") return false;
       if (item.agent_name === agentName) return false;
       if (["agent_response", "agent_error"].includes(item.item_type)) return false;
       const to = item.props?.to || item.props?.target || item.props?.agent;
@@ -128,11 +135,18 @@ async function pendingMessages() {
  * и агент проходил мимо него взглядом.
  */
 async function withPush(result) {
-  const push = await pendingMessages();
+  // Под наблюдателем (claude-inbox-watcher, codex-chat-watcher) сообщения доставляет и ответ размещает сам
+  // наблюдатель. Блок «используй create_inbox_item» противоречил его инструкции — агент принимал его
+  // за инъекцию в выводе инструмента. Там push не нужен вовсе.
+  const push = pushDisabled ? "" : await pendingMessages();
   const content = result.content || [];
-  const extra = push
-    ? [{ type: "text", text: push }]
-    : [{ type: "text", text: "MBOX workflow reminder: use get_agent_context before work, claim_task before editing, set_task_status/finish_task when pausing or finishing, and record_memory after meaningful work." }];
+  // Напоминание о порядке работы — один раз за сессию: на каждом вызове это были одни и те же
+  // 40 токенов, умноженные на число вызовов инструментов.
+  const reminder = !workflowReminderShown && !pushDisabled
+    ? "MBOX workflow reminder: use get_agent_context before work, claim_task before editing, set_task_status/finish_task when pausing or finishing, and record_memory after meaningful work."
+    : "";
+  if (reminder) workflowReminderShown = true;
+  const extra = push ? [{ type: "text", text: push }] : reminder ? [{ type: "text", text: reminder }] : [];
   return { ...result, content: [...content, ...extra] };
 }
 
@@ -1024,7 +1038,8 @@ async function workspaceOp(workspace, op, path, extra = {}) {
   const target = await resolveWorkspace(workspace);
   const response = await fetch(`${baseUrl}/api/mbox/workspaces/${target.id}/ops`, {
     method: "POST",
-    headers: { "content-type": "application/json", cookie, "x-mbox-agent": encodeURIComponent(agentName) },
+    // Та же авторизация, что в mboxFetch: с токеном доступа cookie пуст, и операции с папками отвечали 401.
+    headers: { "content-type": "application/json", ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }), "x-mbox-agent": encodeURIComponent(agentName) },
     body: JSON.stringify({ op, path, ...extra }),
   });
   const data = await response.json().catch(() => ({}));
@@ -1219,6 +1234,289 @@ server.registerTool(
       body: JSON.stringify({ files, message }),
     });
     return textResult(result.unchanged ? "No changes." : `Saved ${result.files?.length || files.length} files in ${id}. Live now.`);
+  },
+);
+
+// ─── Документы и таблицы «на глазах» ───────────────────────────────────────────────────
+// Агент работает в заметках MBOX и в файлах локальных папок так, чтобы человек видел правку:
+// show=true открывает документ вкладкой в MBOX, а открытая вкладка перечитывает его сама (заметки —
+// по вебсокету, файлы — по наблюдателю за диском). Точечные правки (note_edit, workspace_edit_file,
+// workspace_write_cells) дешевле полной перезаписи: агенту не нужно гонять весь текст туда-обратно.
+
+const showArg = z.boolean().default(false).describe("Open the document as a tab in the owner's MBOX so they watch the change live");
+
+async function showInMbox(target, title = "") {
+  try {
+    const data = await mboxFetch("/api/mbox/ui/open", { method: "POST", body: JSON.stringify({ target, title, note: "", reply_to: agentName }) });
+    return data.delivered ? " Opened in MBOX." : " (MBOX is not open — nothing shown.)";
+  } catch {
+    return "";
+  }
+}
+
+function localTarget(workspace, rel) {
+  const root = String(workspace.root_path || "").replace(/[\\/]+$/, "");
+  const separator = root.includes("\\") ? "\\" : "/";
+  return `path:${root}${separator}${String(rel).replace(/[\\/]+/g, separator)}`;
+}
+
+function noteTabsOf(note) {
+  return Array.isArray(note.tabs) && note.tabs.length ? note.tabs.map((tab) => ({ ...tab })) : [{ id: "main", title: "Основная", content: note.content || "" }];
+}
+
+function pickTab(tabs, tab) {
+  if (!tab) return 0;
+  const wanted = String(tab).trim().toLowerCase();
+  const index = tabs.findIndex((item, position) => String(item.id).toLowerCase() === wanted || String(item.title || "").toLowerCase() === wanted || String(position + 1) === wanted);
+  if (index < 0) throw new Error(`Нет вкладки «${tab}». Есть: ${tabs.map((item) => item.title).join(", ")}`);
+  return index;
+}
+
+/** PATCH заметки поверх версии, которую видел агент; человек успел поправить (409) — один повтор на свежей. */
+async function patchNote(noteId, change) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { note } = await mboxFetch(`/api/mbox/notes/${noteId}`);
+    // Без title сервер выводит заголовок из первой строки текста и затирает заданный — сохраняем текущий.
+    const body = { title: note.title, ...change(note) };
+    try {
+      return (await mboxFetch(`/api/mbox/notes/${noteId}`, { method: "PATCH", body: JSON.stringify({ ...body, base_updated_at: note.updated_at }) })).note;
+    } catch (error) {
+      if (!/^MBOX 409/.test(error.message) || attempt) throw error;
+    }
+  }
+  throw new Error("note changed concurrently");
+}
+
+server.registerTool(
+  "note_search",
+  {
+    title: "Find the owner's notes (documents)",
+    description: "Search MBOX notes — the owner's documents with tabs and version history (not agent memory). Empty query lists recent notes.",
+    inputSchema: { query: z.string().default(""), limit: z.number().int().min(1).max(50).default(15) },
+  },
+  async ({ query, limit }) => {
+    const { notes } = await mboxFetch(`/api/mbox/notes?q=${encodeURIComponent(query)}&limit=${limit}`);
+    if (!notes?.length) return textResult("No notes found.");
+    return textResult(notes.map((note) => `#${note.id} «${note.title || "без заголовка"}» · ${String(note.updated_at || "").slice(0, 16)} — ${String(note.snippet || note.content || "").replace(/\s+/g, " ").slice(0, 120)}`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "note_read",
+  {
+    title: "Read a note",
+    description: "Read an MBOX note. Without `tab` returns all tabs; with `tab` (title, id or 1-based number) only that tab. Line numbers are NOT added — copy text exactly for note_edit.",
+    inputSchema: { note_id: z.string(), tab: z.string().default("") },
+  },
+  async ({ note_id, tab }) => {
+    const { note } = await mboxFetch(`/api/mbox/notes/${String(note_id).replace(/^#/, "")}`);
+    const tabs = noteTabsOf(note);
+    const chosen = tab ? [tabs[pickTab(tabs, tab)]] : tabs;
+    const body = chosen.length === 1 && tabs.length === 1 ? chosen[0].content : chosen.map((item) => `=== tab «${item.title}» (id ${item.id}) ===\n${item.content}`).join("\n\n");
+    return textResult(`Note #${note.id} «${note.title}» · updated ${note.updated_at}\n\n${body}`);
+  },
+);
+
+server.registerTool(
+  "note_write",
+  {
+    title: "Create or rewrite a note",
+    description: [
+      "Create a new MBOX note (no note_id) or change an existing one: mode=replace replaces the tab text, mode=append adds to its end.",
+      "For small changes inside a long note prefer note_edit — it does not resend the whole text.",
+      "Every change lands in the note's version history under your name; the owner can roll back.",
+    ].join("\n"),
+    inputSchema: {
+      note_id: z.string().default(""),
+      title: z.string().default(""),
+      content: z.string(),
+      mode: z.enum(["replace", "append"]).default("replace"),
+      tab: z.string().default("").describe("Tab title/id/number; a new title creates a new tab"),
+      access: z.enum(["private", "project", "all"]).default("private").describe("Who sees a NEW note: private (owner only, default), project (members of project_id), all (every MBOX user)"),
+      project_id: z.string().default("").describe("Project of a NEW note (needed for access=project)"),
+      show: showArg,
+    },
+  },
+  async ({ note_id, title, content, mode, tab, access, project_id, show }) => {
+    const id = String(note_id || "").replace(/^#/, "");
+    if (!id) {
+      const { note } = await mboxFetch("/api/mbox/notes", { method: "POST", body: JSON.stringify({ title, content, access_level: access, project_id: project_id || null }) });
+      return textResult(`Created note #${note.id} «${note.title}».${show ? await showInMbox(`note:${note.id}`, note.title) : ""}`);
+    }
+    const note = await patchNote(id, (current) => {
+      const tabs = noteTabsOf(current);
+      let index = 0;
+      if (tab) {
+        try { index = pickTab(tabs, tab); } catch {
+          tabs.push({ id: `t${Date.now().toString(36)}`, title: tab, content: "" });
+          index = tabs.length - 1;
+        }
+      }
+      tabs[index].content = mode === "append" && tabs[index].content ? `${tabs[index].content}\n\n${content}` : content;
+      return { tabs, content: tabs[0].content, ...(title ? { title } : {}) };
+    });
+    return textResult(`Updated note #${note.id} «${note.title}».${show ? await showInMbox(`note:${note.id}`, note.title) : ""}`);
+  },
+);
+
+server.registerTool(
+  "note_edit",
+  {
+    title: "Edit part of a note",
+    description: "Replace an exact fragment of a note tab with new text (like a code edit). old_text must match exactly once unless replace_all. Cheaper and safer than rewriting the note.",
+    inputSchema: {
+      note_id: z.string(),
+      old_text: z.string().min(1),
+      new_text: z.string(),
+      replace_all: z.boolean().default(false),
+      tab: z.string().default(""),
+      show: showArg,
+    },
+  },
+  async ({ note_id, old_text, new_text, replace_all, tab, show }) => {
+    const id = String(note_id).replace(/^#/, "");
+    let replaced = 0;
+    const note = await patchNote(id, (current) => {
+      const tabs = noteTabsOf(current);
+      const index = pickTab(tabs, tab);
+      const text = tabs[index].content;
+      const count = text.split(old_text).length - 1;
+      if (!count) throw new Error("old_text not found in the note — read it again with note_read");
+      if (count > 1 && !replace_all) throw new Error(`old_text occurs ${count} times — add surrounding text or pass replace_all`);
+      tabs[index].content = replace_all ? text.split(old_text).join(new_text) : text.replace(old_text, () => new_text);
+      replaced = replace_all ? count : 1;
+      return { tabs, content: tabs[0].content };
+    });
+    return textResult(`Edited note #${note.id} «${note.title}»: ${replaced} replacement(s).${show ? await showInMbox(`note:${note.id}`, note.title) : ""}`);
+  },
+);
+
+server.registerTool(
+  "workspace_edit_file",
+  {
+    title: "Edit part of a local text file (versioned)",
+    description: "Replace an exact fragment of a text file in a local workspace. old_text must match exactly once unless replace_all. Use instead of workspace_write_file for small changes. Previous content is kept in MBOX history.",
+    inputSchema: {
+      workspace: workspaceArg,
+      path: z.string(),
+      old_text: z.string().min(1),
+      new_text: z.string(),
+      replace_all: z.boolean().default(false),
+      message: z.string().default(""),
+      show: showArg,
+    },
+  },
+  async ({ workspace, path, old_text, new_text, replace_all, message, show }) => {
+    const { result: file } = await workspaceOp(workspace, "read", path);
+    if (file.binary || file.tooLarge) throw new Error("Not an editable text file");
+    const text = String(file.content ?? "");
+    const count = text.split(old_text).length - 1;
+    if (!count) throw new Error("old_text not found — read the file again");
+    if (count > 1 && !replace_all) throw new Error(`old_text occurs ${count} times — add surrounding text or pass replace_all`);
+    const next = replace_all ? text.split(old_text).join(new_text) : text.replace(old_text, () => new_text);
+    const { workspace: target, result } = await workspaceOp(workspace, "write", path, { content: next, message });
+    return textResult(`Edited ${result.path} in «${target.name}»: ${replace_all ? count : 1} replacement(s).${show ? await showInMbox(localTarget(target, result.path)) : ""}`);
+  },
+);
+
+server.registerTool(
+  "workspace_read_table",
+  {
+    title: "Read a spreadsheet (.xlsx/.csv/.tsv) from a local workspace",
+    description: "Returns the list of sheets and a grid of cells with row numbers and column letters. Formulas are shown as «=FORMULA → result». Use `range` (e.g. A1:F50, 1:10, A:C) for big sheets. styles=true also lists cell formatting (fill, font color, bold/italic/underline/strike, alignment) as ranges — use it to check colors instead of opening the file in Python.",
+    inputSchema: { workspace: workspaceArg, path: z.string(), sheet: z.string().default(""), range: z.string().default(""), styles: z.boolean().default(false) },
+  },
+  async ({ workspace, path, sheet, range, styles }) => {
+    const { result } = await workspaceOp(workspace, "read_table", path, { content: JSON.stringify({ sheet: sheet || undefined, range: range || undefined, styles: styles || undefined }) });
+    const lines = [
+      `Sheets: ${result.sheets.map((item) => `${item.name} (${item.rows}×${item.columns})`).join(", ")}`,
+      `Sheet «${result.sheet}»${result.truncated ? " — truncated, ask for a narrower range" : ""}`,
+      ["", ...result.columns].join("\t"),
+      ...result.rows.map((row) => [row.row, ...row.cells.map((cell) => String(cell).replace(/[\t\r\n]+/g, " "))].join("\t")),
+    ];
+    // Старое приложение флаг styles не знает и поля не вернёт — лучше сказать об этом, чем промолчать.
+    if (styles) lines.push("", "Formatting:", ...(result.styles ? (result.styles.length ? result.styles : ["none"]) : ["unavailable — update MBOX Desktop"]));
+    return textResult(lines.join("\n"));
+  },
+);
+
+server.registerTool(
+  "workspace_write_cells",
+  {
+    title: "Write cells in a local spreadsheet",
+    description: "Set cells in an .xlsx/.csv/.tsv file: cells = {\"B3\": \"text\", \"C3\": 12, \"D3\": \"=B3*C3\", \"E3\": null (clear)}. Creates the file or sheet if missing; everything else in the workbook stays as is. show=true lets the owner watch the table change.",
+    inputSchema: {
+      workspace: workspaceArg,
+      path: z.string(),
+      sheet: z.string().default(""),
+      cells: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+      show: showArg,
+    },
+  },
+  async ({ workspace, path, sheet, cells, show }) => {
+    const { workspace: target, result } = await workspaceOp(workspace, "write_cells", path, { content: JSON.stringify({ sheet: sheet || undefined, cells }) });
+    return textResult(`Wrote ${result.cells} cell(s) on «${result.sheet}» in ${result.path} («${target.name}»).${show ? await showInMbox(localTarget(target, result.path)) : ""}`);
+  },
+);
+
+const colorArg = z.string().nullable().optional();
+server.registerTool(
+  "workspace_format_cells",
+  {
+    title: "Format cells in a local .xlsx",
+    description: "Color and style ranges of an .xlsx without touching values: fill (background), font color, bold/italic/underline/strike, font size, alignment, wrap, number format, borders. One call can apply several rules; each rule changes only the properties it sets. Ranges: \"A1:H10\", \"B5\", \"1:10\" (whole rows, up to the last used column), \"A:C\" (whole columns). Colors: #RRGGBB or a name (yellow, red, green, blue, orange, gray, lightgreen, lightred, lightyellow, lightblue); null or \"none\" removes fill/color. Example: format=[{range:\"1:10\", fill:\"yellow\"}, {range:\"A1:H1\", bold:true}]. Verify with workspace_read_table styles=true. CSV/TSV have no formatting.",
+    inputSchema: {
+      workspace: workspaceArg,
+      path: z.string(),
+      sheet: z.string().default(""),
+      format: z.array(z.object({
+        range: z.string(),
+        fill: colorArg,
+        color: colorArg,
+        bold: z.boolean().optional(),
+        italic: z.boolean().optional(),
+        underline: z.boolean().optional(),
+        strike: z.boolean().optional(),
+        size: z.number().positive().optional(),
+        align: z.enum(["left", "center", "right", "general"]).optional(),
+        wrap: z.boolean().optional(),
+        number_format: z.string().optional().describe("Excel number format, e.g. \"0.00\", \"#,##0\", \"dd.mm.yyyy\", \"0%\""),
+        border: z.enum(["thin", "medium", "thick", "none"]).optional().describe("Outline every cell in the range"),
+      })).min(1),
+      show: showArg,
+    },
+  },
+  async ({ workspace, path, sheet, format, show }) => {
+    // Едет той же операцией write_cells, что и значения: очередь и сервер не меняются, форматирует страница (officeOps.ts).
+    const { workspace: target, result } = await workspaceOp(workspace, "write_cells", path, { content: JSON.stringify({ sheet: sheet || undefined, format }) });
+    if (result.formatted === undefined) throw new Error("MBOX Desktop on this computer is too old to format cells — update the app");
+    return textResult(`Formatted ${result.formatted} cell(s) on «${result.sheet}» in ${result.path} («${target.name}»).${show ? await showInMbox(localTarget(target, result.path)) : ""}`);
+  },
+);
+
+server.registerTool(
+  "workspace_read_document",
+  {
+    title: "Read a Word document (.docx) from a local workspace",
+    description: "Returns the document as Markdown (headings, lists, tables, bold/italic, links).",
+    inputSchema: { workspace: workspaceArg, path: z.string() },
+  },
+  async ({ workspace, path }) => {
+    const { result } = await workspaceOp(workspace, "read_doc", path);
+    return textResult(String(result.content ?? ""));
+  },
+);
+
+server.registerTool(
+  "workspace_write_docx",
+  {
+    title: "Write a Word document (.docx) in a local workspace",
+    description: "Create or overwrite a .docx from Markdown: headings, paragraphs, bullet/numbered lists, bold/italic. Markdown tables are NOT converted (they come out as plain text) — put tabular data into an .xlsx with workspace_write_cells instead. Overwrites the whole file — read it first with workspace_read_document when editing.",
+    inputSchema: { workspace: workspaceArg, path: z.string(), content: z.string(), show: showArg },
+  },
+  async ({ workspace, path, content, show }) => {
+    const { workspace: target, result } = await workspaceOp(workspace, "write_docx", path, { content });
+    return textResult(`Wrote ${result.path} in «${target.name}» (${result.size} bytes).${show ? await showInMbox(localTarget(target, result.path)) : ""}`);
   },
 );
 

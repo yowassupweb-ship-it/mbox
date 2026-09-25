@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Код и данные разведены: навык ставится с сервера MBOX в ~/.claude/skills и перезаписывается синхронизацией,
-// а доступ к менеджерке, сессия и результаты живут в рабочей папке человека.
+// а скачанные туры и результаты живут в рабочей папке человека.
 const MBOX_DIR = path.join(os.homedir(), "Desktop", "Mbox");
 const DEFAULT_DATA_DIR = path.join(MBOX_DIR, "route-compressor-corp");
 const LEGACY_DATA_DIR = path.join(MBOX_DIR, "route-operator-skill");

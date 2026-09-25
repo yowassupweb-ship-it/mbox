@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { documentToDocx } from "./docx.mjs";
 
 // Локальные рабочие папки: файлы лежат на компьютере с MBOX Desktop, сервер их не видит.
 // Здесь три вещи, общие для прод-сервера и dev-API (vite.config.ts):
@@ -51,7 +52,11 @@ CREATE TABLE IF NOT EXISTS workspace_ops (
 CREATE INDEX IF NOT EXISTS idx_workspace_ops_pending ON workspace_ops(workspace_id, status, created_at);
 `;
 
-export const WORKSPACE_OPS = ["list", "read", "write", "find", "git_log"];
+// read_table / write_cells / read_doc выполняет страница MBOX Desktop (src/app/workbench/officeOps.ts),
+// write_data — запись готового двоичного файла (base64). write_docx сюда приходит markdown-ом и
+// превращается в write_data на сервере: конвертер Word живёт в server/docx.mjs.
+export const WORKSPACE_OPS = ["list", "read", "write", "find", "git_log", "read_table", "write_cells", "read_doc", "write_data", "write_docx"];
+const WRITE_OPS = new Set(["write", "write_cells", "write_data", "write_docx"]);
 const VERSIONS_PER_FILE = 100;
 const MAX_VERSION_BYTES = 1024 * 1024;
 const ONLINE_MS = 3 * 60 * 1000;
@@ -138,7 +143,13 @@ export async function listVersions(query, workspaceId, path, limit = 50) {
 /** Поставить операцию и дождаться, пока приложение на компьютере её выполнит. */
 export async function requestWorkspaceOp(query, { workspace, op, path = "", content = null, message = "", requestedBy = "", waitMs = OP_WAIT_MS }) {
   if (!WORKSPACE_OPS.includes(op)) throw new Error(`unknown_op:${op}`);
-  if (op === "write" && !workspace.agent_write) throw new Error("agent_write_disabled");
+  if (WRITE_OPS.has(op) && !workspace.agent_write) throw new Error("agent_write_disabled");
+  if (op === "write_docx") {
+    if (!/\.docx$/i.test(String(path || ""))) throw new Error("docx_path_required");
+    const buffer = documentToDocx({ content: String(content ?? ""), name: String(path).split("/").pop() || "" });
+    op = "write_data";
+    content = Buffer.from(buffer).toString("base64");
+  }
   if (!workspace.online) throw new Error("workspace_offline");
   const clean = op === "find" ? String(path || "") : normalizeWorkspacePath(path);
   const created = (await query(
@@ -161,6 +172,7 @@ export function describeWorkspaceError(error, workspace) {
   if (code === "agent_write_disabled") return `в папке «${workspace?.name ?? "?"}» агентам запрещено записывать файлы (переключатель в MBOX Desktop)`;
   if (code === "timeout") return "приложение не ответило за 25 секунд";
   if (code === "path_outside_workspace") return "путь выходит за пределы папки";
+  if (code === "docx_path_required") return "для Word нужен путь с расширением .docx";
   return code;
 }
 

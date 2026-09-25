@@ -44,7 +44,8 @@ export function formatTokens(value: number): string {
 
 export function formatLastUsed(value: string | null): string {
   if (!value) return "ни разу";
-  const at = new Date(value.replace(" ", "T"));
+  // Postgres отдаёт «2026-09-22 14:47:59.19+00» — смещение без минут JS не разбирает (NaN → «ни разу»).
+  const at = new Date(value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00"));
   if (Number.isNaN(at.getTime())) return "ни разу";
   const days = Math.floor((Date.now() - at.getTime()) / 86_400_000);
   if (days <= 0) return "сегодня";

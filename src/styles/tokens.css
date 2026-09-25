@@ -56,6 +56,11 @@
   --accent-color: #4da3ff;
   --accent-2: #4da3ff;
   --accent-chin: #245f9d;
+  /* Заливка основной кнопки. #4da3ff хорош для ссылок и фокуса на тёмном, но белый текст на нём — 2.6:1.
+     #0071e3 держит белый текст на 4.7:1 (AA) и заметен на фоне (3.4:1). */
+  --accent-fill: #0071e3;
+  --accent-fill-hover: #0077ed;
+  --on-accent: #ffffff;
   --accent-edge: #245f9d;
 
   --green: #22c55e;
@@ -187,6 +192,9 @@
   --accent-color: #007aff;
   --accent-2: #007aff;
   --accent-chin: #0059bd;
+  /* Белый на #007aff — 4.0:1, ниже AA для обычного текста. */
+  --accent-fill: #0071e3;
+  --accent-fill-hover: #0068d1;
   --accent-edge: #0059bd;
   --chin-color: #d7d7dc;
   --chin-shadow: 0 1px 2px rgba(31, 35, 42, 0.09);

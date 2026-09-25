@@ -5,9 +5,17 @@ import { formatBytes, formatDateTime } from "../../lib/format";
 import { usePersistentState } from "./tabs";
 import { askText } from "../../ui/askText";
 import { uploadToStorage, type UploadMode } from "../../lib/storageUpload";
+import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
 
-type StorageConfig = { configured: boolean; endpoint: string; region: string; bucket: string; access_key_id: string; has_secret: boolean };
-type Listing = { prefix: string; folders: string[]; objects: Array<{ key: string; size: number; last_modified: string }>; next_token: string | null };
+/** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
+function openSheetTab(key: string) {
+  window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: { kind: "tab", key: `${STORAGE_SHEET_TAB}${key}`, actor: "", reply_to: "", title: "", note: "", quiet: true } }));
+}
+
+/** member — участник: видит только папки своих проектов, настроек бакета у него нет. */
+type StorageConfig = { configured: boolean; endpoint: string; region: string; bucket: string; access_key_id: string; has_secret: boolean; member?: boolean };
+/** labels — подписи папок проектов: «projects/4/» → «Вокруг света». */
+type Listing = { prefix: string; folders: string[]; objects: Array<{ key: string; size: number; last_modified: string }>; next_token: string | null; labels?: Record<string, string> };
 type Upload = { name: string; loaded: number; total: number; error?: string; mode?: UploadMode; startedAt?: number; done?: boolean };
 
 /** Статус строки загрузки: байты, скорость и сколько осталось; через сервер прогресса нет — честно пишем это. */
@@ -51,7 +59,7 @@ export function StorageDocument() {
   useEffect(() => {
     fetchJson<{ config: StorageConfig }>("/api/mbox/storage/config").then(({ config: loaded }) => {
       setConfig(loaded);
-      setEditing(!loaded.configured);
+      setEditing(!loaded.configured && !loaded.member);
     }).catch(() => setError("Не удалось прочитать настройки хранилища"));
   }, []);
 
@@ -116,9 +124,14 @@ export function StorageDocument() {
   }
 
   if (!config) return <div className="wb-doc-missing">{error || "Загрузка…"}</div>;
+  if (config.member && !config.configured) return <div className="wb-doc-missing">Хранилище ещё не подключено — это делает владелец MBOX.</div>;
   if (editing) return <StorageSettings config={config} onSaved={(next) => { setConfig(next); setEditing(!next.configured); }} onCancel={config.configured ? () => setEditing(false) : undefined} />;
 
   const crumbs = prefix.split("/").filter(Boolean);
+  const labels = listing?.labels ?? {};
+  const folderName = (folder: string) => labels[folder] || folder.slice(prefix.length).replace(/\/$/, "");
+  // Участник в корне хранилища видит только папки своих проектов: грузить и создавать папки — внутри них.
+  const rootLocked = Boolean(config.member) && !prefix;
 
   return (
     <div
@@ -133,15 +146,15 @@ export function StorageDocument() {
           {crumbs.map((part, index) => (
             <span key={index}>
               <ChevronRight size={12} />
-              <button type="button" onClick={() => setPrefix(`${crumbs.slice(0, index + 1).join("/")}/`)}>{part}</button>
+              <button type="button" onClick={() => setPrefix(`${crumbs.slice(0, index + 1).join("/")}/`)}>{labels[`${crumbs.slice(0, index + 1).join("/")}/`] || part}</button>
             </span>
           ))}
         </nav>
         <div className="wb-doc-actions">
-          <button type="button" className="is-primary" onClick={() => inputRef.current?.click()}><Upload size={14} /> Загрузить</button>
-          <button type="button" onClick={() => void createFolder()} title="Новая папка"><FolderPlus size={14} /></button>
+          <button type="button" className="is-primary" disabled={rootLocked} onClick={() => inputRef.current?.click()} title={rootLocked ? "Откройте папку проекта" : undefined}><Upload size={14} /> Загрузить</button>
+          <button type="button" disabled={rootLocked} onClick={() => void createFolder()} title={rootLocked ? "Откройте папку проекта" : "Новая папка"}><FolderPlus size={14} /></button>
           <button type="button" onClick={() => void load(prefix)} title="Обновить"><RefreshCw size={13} /></button>
-          <button type="button" onClick={() => setEditing(true)} title="Настройки подключения"><Settings2 size={14} /></button>
+          {!config.member && <button type="button" onClick={() => setEditing(true)} title="Настройки подключения"><Settings2 size={14} /></button>}
           <input ref={inputRef} type="file" multiple hidden onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.target.value = ""; }} />
         </div>
       </div>
@@ -170,7 +183,7 @@ export function StorageDocument() {
               )}
               {listing.folders.map((folder) => (
                 <tr key={folder} className="is-folder">
-                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><img src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />{folder.slice(prefix.length).replace(/\/$/, "")}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><img src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />{folderName(folder)}</button></td>
                   <td className="is-num">—</td>
                   <td />
                   <td className="wb-storage-actions"><button type="button" onClick={() => void remove(folder)} title="Удалить папку"><Trash2 size={13} /></button></td>
@@ -178,7 +191,7 @@ export function StorageDocument() {
               ))}
               {listing.objects.map((object) => (
                 <tr key={object.key}>
-                  <td><button type="button" className="wb-storage-name" onClick={async () => { const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title="Открыть в новом окне"><img src={`${PROJECT_ICONS}/documents.png`} width={16} height={16} alt="" />{object.key.slice(prefix.length)}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={async () => { if (isSheetFile(object.key)) { openSheetTab(object.key); return; } const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title={isSheetFile(object.key) ? "Открыть таблицу в редакторе" : "Открыть в новом окне"}><img src={`${PROJECT_ICONS}/documents.png`} width={16} height={16} alt="" />{object.key.slice(prefix.length)}</button></td>
                   <td className="is-num">{formatBytes(object.size)}</td>
                   <td>{object.last_modified ? formatDateTime(object.last_modified) : ""}</td>
                   <td className="wb-storage-actions">

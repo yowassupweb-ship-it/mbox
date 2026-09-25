@@ -31,11 +31,18 @@ const broadcastAliases = (config.MBOX_BROADCAST_ALIASES || "Всем,Все,All,
   .filter(Boolean);
 const codexCommand = resolveCodexCommand(config.CODEX_COMMAND || "codex");
 const codexModel = config.CODEX_WATCH_MODEL || "";
-const workdir = config.CODEX_WATCH_WORKDIR || root;
-const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 30);
-const CODEX_MODEL_CHOICES = new Set(["gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1", "gpt-5", "gpt-5.5"]);
+const workdir = resolveWatchWorkdir(config.CODEX_WATCH_WORKDIR || root);
+const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 10);
+const contextLineLimit = Number(config.MBOX_WATCH_CONTEXT_LINE_LIMIT || 420);
+const codexEffort = config.CODEX_WATCH_EFFORT || "low";
 const CODEX_EFFORT_CHOICES = new Set(["low", "medium", "high", "xhigh"]);
-const pickModel = (value) => (CODEX_MODEL_CHOICES.has(String(value || "")) ? String(value) : "");
+const pickModel = (value) => {
+  const model = String(value || "").trim();
+  if (!model || ["default", "auto", "codex default", "codex-cli-default"].includes(model.toLowerCase())) return "";
+  // Модели Claude и Джарвиса (Gemini, Groq) Codex не знает — их выбор из чужого чата игнорируем.
+  if (/^(claude|opus|sonnet|haiku|fable|gemini|openai\/|llama|meta-)/i.test(model)) return "";
+  return /^[A-Za-z0-9._:/@-]{1,120}$/.test(model) ? model : "";
+};
 const pickEffort = (value) => (CODEX_EFFORT_CHOICES.has(String(value || "")) ? String(value) : "");
 const logPrefix = `[${agentName} inbox]`;
 
@@ -69,6 +76,28 @@ while (!stopping) {
 }
 
 console.log(`${logPrefix} stopped`);
+
+function resolveWatchWorkdir(preferred) {
+  const candidates = [
+    preferred,
+    root,
+    process.env.MBOX_REPO_ROOT,
+    path.resolve(process.cwd()),
+    path.join(path.dirname(process.cwd()), "mbox"),
+    path.join(process.cwd(), "mbox"),
+    path.join(os.homedir(), "Desktop", "Mbox", "mbox"),
+    path.join(os.homedir(), "Desktop", "MBOX", "mbox"),
+    path.join(os.homedir(), "Projects", "Mbox", "mbox"),
+    path.join(os.homedir(), "Projects", "MBOX", "mbox"),
+    "E:\\Projects\\Mbox\\mbox",
+    "E:\\Projects\\MBOX\\mbox",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (fs.existsSync(path.join(resolved, "package.json")) && fs.existsSync(path.join(resolved, "scripts"))) return resolved;
+  }
+  return path.resolve(preferred || root);
+}
 
 function loadConfig() {
   const env = { ...process.env };
@@ -389,9 +418,23 @@ function formatContextLine(entry) {
   const actor = entry.agent_name || "unknown";
   const to = entry.props?.to ? ` -> ${entry.props.to}` : "";
   const re = entry.props?.re || entry.props?.in_reply_to ? `, reply to #${entry.props.re || entry.props.in_reply_to}` : "";
-  const text = String(entry.body || entry.title || "").replace(/\s+/g, " ").trim();
-  const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  const text = compactContextText(entry.body || entry.title || "");
+  const clipped = clip(text, contextLineLimit);
   return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}${re}): ${clipped}`;
+}
+
+function clip(value, limit) {
+  const text = String(value || "");
+  return text.length > limit ? `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…` : text;
+}
+
+function compactContextText(value) {
+  return String(value || "")
+    .replace(/```[\s\S]*?```/g, "[code block]")
+    .replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "[inline image]")
+    .replace(/[A-Za-z0-9+/]{180,}={0,2}/g, "[long encoded data]")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function runCodex(item) {
@@ -403,6 +446,7 @@ async function runCodex(item) {
     "Answer the inbox item below. If the user asks you to do code work, do it in the repo and summarize the result.",
     "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
     "Keep the final answer concise and directly useful.",
+    "Spend tokens carefully: avoid broad repo scans and huge command outputs; prefer targeted rg with explicit paths and exclusions for build artifacts, binaries and generated assets.",
     "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
     // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
     "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
@@ -423,12 +467,13 @@ async function runCodex(item) {
     workdir,
     "--sandbox",
     "danger-full-access",
+    "--skip-git-repo-check",
     "--json",
     "--output-last-message",
     outputFile,
   ];
-  const wantedModel = pickModel(item.props?.model) || codexModel;
-  const wantedEffort = pickEffort(item.props?.effort);
+  const wantedModel = pickModel(item.props?.model) || pickModel(codexModel);
+  const wantedEffort = pickEffort(item.props?.effort) || pickEffort(codexEffort);
   if (wantedModel) args.push("-m", wantedModel);
   if (wantedEffort) args.push("-c", `model_reasoning_effort="${wantedEffort}"`);
   args.push(prompt);
@@ -552,6 +597,8 @@ function codexStats(usage, durationMs) {
 function codexToolName(item) {
   const type = String(item.type || "");
   if (type === "agent_message") return "";
+  // Вызов MCP у Codex: имя инструмента в item.tool, а type — общее «mcp_tool_call».
+  if (item.tool) return item.server ? `mcp__${item.server}__${item.tool}` : String(item.tool);
   if (item.name || item.tool_name) return String(item.name || item.tool_name).trim();
   if (item.command || item.cmd) return "shell_command";
   if (/patch/i.test(type)) return "apply_patch";

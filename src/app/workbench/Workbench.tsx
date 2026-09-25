@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Columns2, Database, GitBranch, MessageSquare, PanelBottom, PanelLeft, PanelRight, Power, RotateCcw, TerminalSquare, Trash2, X } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
-import { AgentChat } from "../../features/agents/AgentChat";
+import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
@@ -15,7 +15,7 @@ import { ArtifactsBoard } from "../../pages/Artifacts";
 import { Overview } from "../../pages/Overview";
 import type { Project, Todo } from "../../types";
 import { SkillDocument, ToolDocument } from "./CatalogDocuments";
-import { ConsoleArea, ConsolePaneDocument, PANE_MIME, TERMINAL_TAB } from "./ConsoleArea";
+import { ConsoleArea, ConsolePaneDocument, PANE_MIME, TERMINAL_TAB, type ChatDebug } from "./ConsoleArea";
 import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
@@ -32,6 +32,7 @@ import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
+import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
 import { CommitDocument, GitDiffDocument, LocalFileDocument } from "./LocalFileDocument";
@@ -39,7 +40,7 @@ import { IMAGE_FILE, OFFICE_FILE, setAgentHint, setWorkspaceUser, useLocalWorksp
 import { MemoryDocument } from "./MemoryDocument";
 import { SearchView } from "./SearchView";
 import { tabMeta } from "./tabMeta";
-import { encodeTabParam, projectIdOfTab, usePersistentState, useTabs, type TabsApi } from "./tabs";
+import { encodeTabParam, projectIdOfTab, setWorkbenchStorageUser, usePersistentState, useTabs, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent, type OpenTabResult } from "./agentTabs";
 import { SkillPageDocument } from "./SkillPageDocument";
@@ -79,7 +80,7 @@ type Props = {
   renderers: WorkbenchRenderers;
   realtime: { state: string; label: string };
   status: { state: string; label: string };
-  user: { username: string; role: string };
+  user: { username: string; role: string; jarvis_enabled?: boolean };
   onProjectContext: (project: Project, position: { x: number; y: number }) => void;
 };
 
@@ -101,8 +102,11 @@ function useDrag(onMove: (event: PointerEvent) => void) {
 }
 
 export function Workbench({ data, titleBar, renderers, status, user, onProjectContext }: Props) {
+  setWorkbenchStorageUser(user.username);
   const tabs = useTabs();
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const defaultNoteProjectId = user.role === "owner" ? null : data.projects[0]?.id;
+
   useEffect(() => {
     let frame = 0;
     const onResize = () => {
@@ -303,7 +307,12 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       else if (mod && !event.shiftKey && event.code === "KeyJ") { event.preventDefault(); setPanelOpen((value) => !value); }
       else if (mod && event.code === "Backquote") { event.preventDefault(); toggleConsole(); }
       else if (event.altKey && event.code === "KeyW" && tabs.active) { event.preventDefault(); closeTab(tabs.active); }
-      else if (mod && event.altKey && event.code === "KeyN") { event.preventDefault(); setActivity("notes"); setSidebarOpen(true); void createNoteAndOpen(tabs); }
+      else if (mod && event.altKey && event.code === "KeyN") {
+        event.preventDefault();
+        setActivity("notes");
+        setSidebarOpen(true);
+        if (defaultNoteProjectId !== undefined) void createNoteAndOpen(tabs, defaultNoteProjectId);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -437,6 +446,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
+      case "s3sheet":
+        return <StorageSheetDocument storageKey={key.slice(STORAGE_SHEET_TAB.length)} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "web":
         return <BrowserDocument tabKey={key} visible={documentVisible} tabs={tabs} onTitle={onTitle} />;
       case "local":
@@ -452,9 +463,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "skill":
         return <SkillDocument skillId={first} tabs={tabs} />;
       case "skillblocks":
-        return <SkillPageDocument skill={first} file="library.html" tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
+        return <SkillPageDocument skill={first} file="library.html" tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id ?? defaultNoteProjectId ?? data.projects[0]?.id} />;
       case "skillpage":
-        return <SkillPageDocument skill={first} file={rest} tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id} />;
+        return <SkillPageDocument skill={first} file={rest} tabKey={key} tabs={tabs} projectId={data.projects.find((item) => item.name === "MBOX")?.id ?? defaultNoteProjectId ?? data.projects[0]?.id} />;
       case "tool":
         return <ToolDocument toolId={first} tabs={tabs} />;
       case "file":
@@ -483,8 +494,46 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   };
 
   const consoleVisible = consoleDock === "right" ? rightOpen : panelOpen && panelTab === "console";
-  const renderChat = (visible: boolean, paneId: string) => (
-    <AgentChat embedded visible={visible} peer={chatPeer(paneId)} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
+  // Что открыто сейчас: активная вкладка и вторая область. Агент получает это с сообщением и не ищет файл сам.
+  const chatFocus = useMemo<FocusItem[]>(() => {
+    const keys = [tabs.active, splitKey].filter((key): key is string => Boolean(key));
+    return keys.flatMap((key): FocusItem[] => {
+      const [kind, first] = key.split(":");
+      const rest = key.split(":").slice(2).join(":");
+      const title = tabMeta(key, data, catalogTitles).title;
+      switch (kind) {
+        case "local":
+        case "gitdiff": {
+          const root = localWorkspace.roots.find((item) => item.key === first);
+          const path = root ? `${root.path.replace(/[\\/]+$/, "")}/${rest}` : rest;
+          return [{ key, kind: kind === "local" ? "file" : "diff", title, detail: path }];
+        }
+        case "note":
+        case "todo":
+        case "memory":
+          return [{ key, kind, title, id: first }];
+        case "file":
+          return [{ key, kind: "mbox-file", title, id: first }];
+        case "s3sheet":
+          return [{ key, kind: "storage", title, detail: key.slice("s3sheet:".length) }];
+        case "web": {
+          const url = browserTabUrl(key);
+          return url ? [{ key, kind: "web", title, detail: url }] : [];
+        }
+        case "todos":
+        case "project":
+          return [{ key, kind: "project", title, id: first }];
+        case "skill":
+        case "skillpage":
+        case "skillblocks":
+          return [{ key, kind: "skill", title, id: first, ...(rest ? { detail: rest } : {}) }];
+        default:
+          return [];
+      }
+    });
+  }, [tabs.active, splitKey, data, catalogTitles, localWorkspace.roots]);
+  const renderChat = (visible: boolean, paneId: string, debug?: ChatDebug) => (
+    <AgentChat embedded visible={visible} peer={chatPeer(paneId)} debug={debug} jarvisEnabled={user.role === "owner" || user.jarvis_enabled !== false} focus={chatFocus} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
   );
   const chat = (
     <ConsoleArea
@@ -492,7 +541,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       agentGoals={agentGoals}
       agentsOnline={agentsOnline}
       tabs={tabs}
-      renderChat={(paneId) => renderChat(consoleVisible, paneId)}
+      renderChat={(paneId, debug, active) => renderChat(consoleVisible && active !== false, paneId, debug)}
+      ownerOnlyAgents={user.role !== "owner"}
+      actions={consoleDock === "right" ? (
+        <>
+          <button type="button" className="wb-icon-btn" onClick={() => dockConsole("bottom")} title="Перенести чат вниз"><PanelBottom size={14} /></button>
+          <button type="button" className="wb-icon-btn" onClick={() => setRightOpen(false)} title="Скрыть чат (Ctrl+`)"><X size={14} /></button>
+        </>
+      ) : undefined}
     />
   );
 
@@ -532,9 +588,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           );
         })}
         <span className="wb-activity-fill" />
-        <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Консоль агентов">
+        <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Чат с агентами">
           <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
-          <span className="wb-activity-tip" role="tooltip">Консоль агентов</span>
+          <span className="wb-activity-tip" role="tooltip">Чат с агентами</span>
         </button>
         <ActivityButton label="Настройки" icon={systemIcon("settings.png")} active={tabs.active === "settings"} onClick={() => tabs.open("settings", true)} />
       </nav>
@@ -543,7 +599,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "explorer" && <ExplorerView data={data} tabs={tabs} onProjectContext={onProjectContext} />}
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
-        {activity === "notes" && <NotesView tabs={tabs} />}
+        {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} />}
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
         {activity === "skills" && <SkillsView tabs={tabs} />}
@@ -660,12 +716,12 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <section className="wb-panel" aria-label="Нижняя панель">
           <div className="wb-sash is-horizontal" onPointerDown={resizePanel} role="separator" aria-orientation="horizontal" aria-label="Высота нижней панели" />
           <div className="wb-panel-tabs" role="tablist">
-            {consoleDock === "bottom" && <PanelTabButton active={effectivePanelTab === "console"} onClick={() => setPanelTab("console")} label="Консоль" badge={working.length ? "●" : undefined} />}
+            {consoleDock === "bottom" && <PanelTabButton active={effectivePanelTab === "console"} onClick={() => setPanelTab("console")} label="Чат" badge={working.length ? "●" : undefined} />}
             <PanelTabButton active={effectivePanelTab === "attention"} onClick={() => setPanelTab("attention")} label="Внимание" badge={attentionCount || undefined} warn={needsHuman.length > 0} />
             <PanelTabButton active={effectivePanelTab === "journal"} onClick={() => setPanelTab("journal")} label="Журнал" />
             <span className="wb-panel-fill" />
             {consoleDock === "bottom" && effectivePanelTab === "console" && (
-              <button type="button" className="wb-icon-btn" onClick={() => dockConsole("right")} title="Перенести консоль вправо"><PanelRight size={15} /></button>
+              <button type="button" className="wb-icon-btn" onClick={() => dockConsole("right")} title="Перенести чат вправо"><PanelRight size={15} /></button>
             )}
             <button type="button" className="wb-icon-btn" onClick={() => setPanelMaximized((value) => !value)} title={panelMaximized ? "Восстановить" : "Развернуть"}>
               {panelMaximized ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
@@ -707,17 +763,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         </section>
       </div>
 
-      <aside className="wb-right" aria-label="Консоль агентов">
+      <aside className="wb-right" aria-label="Чат с агентами">
         {consoleDock === "right" && (
           <>
             <div className="wb-sash is-vertical is-left" onPointerDown={resizeRight} role="separator" aria-orientation="vertical" aria-label="Ширина консоли" />
-            <header className="wb-right-head">
-              <span>Консоль{working.length > 0 && <i className="wb-live-dot" title="Агенты в работе" />}</span>
-              <div className="wb-view-actions">
-                <button type="button" onClick={() => dockConsole("bottom")} title="Перенести консоль вниз"><PanelBottom size={14} /></button>
-                <button type="button" onClick={() => setRightOpen(false)} title="Скрыть консоль (Ctrl+`)"><X size={14} /></button>
-              </div>
-            </header>
             <div className="wb-right-body">{chat}</div>
           </>
         )}
@@ -727,8 +776,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <button type="button" className={`wb-status-item is-state state-${status.state}`} onClick={() => showActivity("agents")} title="Состояние агентов">
           <i className="wb-state-dot" />{status.label}
         </button>
-        <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Консоль агентов (Ctrl+`)">
-          <TerminalSquare size={12} /> {working.length > 0 ? `${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : "Консоль"}
+        <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
+          <TerminalSquare size={12} /> {working.length > 0 ? `${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : "Чат"}
         </button>
         <span className="wb-status-fill" />
         {(() => {
@@ -760,7 +809,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         >
           <Columns2 size={12} />
         </button>
-        <button type="button" className="wb-status-item" onClick={() => dockConsole(consoleDock === "right" ? "bottom" : "right")} title={consoleDock === "right" ? "Консоль вниз" : "Консоль справа"}><PanelRight size={12} /></button>
+        <button type="button" className="wb-status-item" onClick={() => dockConsole(consoleDock === "right" ? "bottom" : "right")} title={consoleDock === "right" ? "Чат вниз" : "Чат справа"}><PanelRight size={12} /></button>
         <span className="wb-status-item is-static">{user.username}</span>
       </footer>
 
@@ -922,12 +971,15 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                 ? run?.goal || "в работе"
                 : `${agentStatusLabels[status] || status} · ${formatSince(agent.last_seen)}`;
               return (
-                <li key={agent.id} className={[live ? "is-live" : "", staleAgent ? "is-stale" : ""].filter(Boolean).join(" ")}>
+                <li
+                  key={agent.id}
+                  className={[live ? "is-live" : "", staleAgent ? "is-stale" : ""].filter(Boolean).join(" ")}
+                  title={[agent.client || agent.kind, agent.runs ? `${agent.runs} запусков` : "", outside && !session ? "работает вне этого окна" : ""].filter(Boolean).join(" · ")}
+                >
                   <AgentAvatar name={agent.name} status={status} live={live} size={28} />
                   <div className="wb-agent-main">
-                    <strong>{agent.name}</strong>
-                    <span>{stateText}</span>
-                    <small>{agent.client || agent.kind}{agent.runs ? ` · ${agent.runs} запусков` : ""}{outside && !session ? " · вне этого окна" : ""}</small>
+                    <strong>{agent.name}<small>{agentClientLabel(agent.client || agent.kind)}</small></strong>
+                    <span className={live ? "is-live" : status === "active" ? "is-ok" : undefined}>{stateText}</span>
                   </div>
                   <div className="wb-agent-actions">
                     <button type="button" onClick={() => openChat(agent.name)} title="Открыть чат">
@@ -961,6 +1013,17 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
       </div>
     </div>
   );
+}
+
+/** «claude-inbox-watcher» и «mbox-prod MCP» — внутренние имена; человеку достаточно, через что агент работает. */
+function agentClientLabel(client: string) {
+  const value = String(client || "").toLowerCase();
+  if (/claude-inbox-watcher|claude-code/.test(value)) return "Claude Code";
+  if (/codex/.test(value)) return "Codex CLI";
+  if (/mcp/.test(value)) return "через MCP";
+  if (/jarvis|server/.test(value)) return "сервер MBOX";
+  if (/vscode|vs code/.test(value)) return "VS Code";
+  return "";
 }
 
 const ACTIVITY_PX = 44;

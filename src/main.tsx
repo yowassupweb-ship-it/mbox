@@ -38,6 +38,7 @@ import { EmptyState, ManualForm, Panel } from "./ui";
 import { bootstrapSeen, loadSeen } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
+import { HistoryDocument } from "./app/workbench/HistoryDocument";
 import { Workbench } from "./app/workbench/Workbench";
 import { RAIL_GROUPS, setRailHidden, useRailHidden, type RailItemId } from "./app/workbench/rail";
 import type {
@@ -78,7 +79,7 @@ function App() {
   if (!me.user) return <LoginScreen onLogin={setMe} />;
   return <Workspace user={me.user} onLogout={() => setMe({ user: null })} theme={theme} onThemeChange={setTheme} />;
 }
-function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string; jarvis_enabled?: boolean }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
   // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
   const data = useMboxData("", onLogout);
@@ -200,7 +201,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
           />
         )}
         renderers={{
-          history: () => <HistoryBoard events={data.auditEvents} />,
+          history: () => <HistoryDocument events={data.auditEvents} />,
           settings: () => (
             <SettingsBoard
               theme={theme}
@@ -548,31 +549,6 @@ function consoleTime(iso: string): string {
   return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function HistoryBoard({ events }: { events: AuditEvent[] }) {
-  return (
-    <Panel title="История" className="panel-bare">
-      <div className="console" role="log" aria-label="Журнал аудита">
-        <div className="console-bar">
-          <span className="console-title">mbox — журнал аудита</span>
-          <span className="console-count">{events.length} {plural(events.length, "событие", "события", "событий")}</span>
-        </div>
-        <div className="console-body">
-          {events.length ? events.map((event) => (
-            <div className={`console-line act-${(event.action || "").toLowerCase()}`} key={event.id}>
-              <span className="console-line-top">
-                <span className="c-time">{consoleTime(event.created_at)}</span>
-                <span className="c-actor">{event.actor || "system"}</span>
-                <span className="c-act">{event.action}</span>
-              </span>
-              <span className="c-entity">{event.entity_type}{event.entity_id ? `#${event.entity_id}` : ""}</span>
-              <span className="c-msg">{event.summary || "—"}</span>
-            </div>
-          )) : <div className="console-line muted"><span className="c-msg">— журнал пуст —</span></div>}
-        </div>
-      </div>
-    </Panel>
-  );
-}
 type SettingsTab = "appearance" | "server" | "access" | "team" | "passwords" | "logs";
 
 function SettingsBoard({ server, access, team, passwords, logs, theme, onThemeChange }: { server: ReactNode; access: ReactNode; team: ReactNode; passwords: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
@@ -886,27 +862,29 @@ function TeamBoard({ user, projects }: { user: { username: string; role: string 
       {user.role === "owner"
         ? <AccountManager projects={projects} />
         : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
-      <ResponderAccess username={user.username} />
+      <ResponderAccess username={user.username} projects={projects} />
     </div>
   );
 }
 
 type AccountToken = { id: string; label: string; created_at: string; last_used_at: string | null };
 
-function ResponderAccess({ username }: { username: string }) {
+function ResponderAccess({ username, projects }: { username: string; projects: Project[] }) {
   const [tokens, setTokens] = useState<AccountToken[]>([]);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => fetchJson<{ tokens: AccountToken[] }>("/api/mbox/account/tokens").then((result) => setTokens(result.tokens)), []);
   useEffect(() => { void load(); }, [load]);
   const agentName = `ChatGPT-${username.replace(/\s+/g, "-")}`;
+  const responderProject = projects.find((project) => project.name === "MBOX") ?? projects[0];
   const command = token ? [
     `$env:MBOX_URL='https://mbox.shar-os.ru'`,
     `$env:MBOX_USERNAME='${username.replace(/'/g, "''")}'`,
     `$env:MBOX_TOKEN='${token}'`,
     `$env:MBOX_AGENT_NAME='${agentName.replace(/'/g, "''")}'`,
+    responderProject ? `$env:MBOX_PROJECT='${responderProject.name.replace(/'/g, "''")}'` : "",
     `node scripts/codex-chat-watcher.mjs`,
-  ].join("\n") : "";
+  ].filter(Boolean).join("\n") : "";
 
   async function createToken() {
     setBusy(true);
@@ -1060,6 +1038,7 @@ type AccountUser = {
   email: string;
   username: string;
   role: "owner" | "member";
+  jarvis_enabled?: boolean;
   projects: Array<{ project_id: string; project_name: string; role: string }>;
 };
 
@@ -1138,6 +1117,24 @@ function AccountManager({ projects }: { projects: Project[] }) {
     }
   }
 
+  // Свой Джарвис у участника: история и чаты только его, видит только его проекты. Выключен — вопросы его не будят.
+  async function toggleJarvis(account: AccountUser, enabled: boolean) {
+    setBusy(`jarvis:${account.id}`);
+    setError("");
+    try {
+      await fetchJson(`/api/mbox/admin/users/${account.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jarvis_enabled: enabled }),
+      });
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось переключить Джарвиса");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <Panel title="Команда и общие проекты" icon={KeyRound}>
       <div className="account-manager">
@@ -1145,7 +1142,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
           <div className="account-create-fields">
             <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Имя аккаунта" minLength={2} required />
             <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email (необязательно)" type="email" />
-            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль, минимум 8 знаков" type="password" minLength={8} required />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль, минимум 8 знаков" type="password" minLength={8} autoComplete="new-password" required />
           </div>
           <ProjectAccessPicker projects={projects} selected={projectIds} onChange={setProjectIds} />
           <button className="primary-action" disabled={busy === "new"} type="submit"><Plus size={16} />{busy === "new" ? "Создаю…" : "Создать аккаунт"}</button>
@@ -1167,6 +1164,10 @@ function AccountManager({ projects }: { projects: Project[] }) {
                 ) : (
                   <>
                     <ProjectAccessPicker projects={projects} selected={selected} onChange={(ids) => setDraftProjects((current) => ({ ...current, [account.id]: ids }))} />
+                    <label className="account-jarvis" title="Свой Джарвис: отдельная история и чаты, видит только проекты этого аккаунта. Claude и ChatGPT участникам не отвечают — они работают на компьютере владельца.">
+                      <input type="checkbox" checked={account.jarvis_enabled !== false} disabled={busy === `jarvis:${account.id}`} onChange={(event) => void toggleJarvis(account, event.target.checked)} />
+                      Свой Джарвис
+                    </label>
                     <button className="account-save" type="button" disabled={!changed || busy === account.id} onClick={() => saveAccess(account)}>{busy === account.id ? "Сохраняю…" : "Сохранить доступ"}</button>
                   </>
                 )}
@@ -1239,7 +1240,7 @@ function SecretForm({ projects, onSubmit, initial, submitLabel = "Сохрани
       </select>
       <input value={login} onChange={(event) => setLogin(event.target.value)} placeholder="Логин" />
       <label className="password-field">
-        <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder={initial ? "Новый пароль, если меняем" : "Пароль"} type={showPassword ? "text" : "password"} />
+        <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder={initial ? "Новый пароль, если меняем" : "Пароль"} type={showPassword ? "text" : "password"} autoComplete="new-password" name={`secret-password-${initial?.id || "new"}`} />
         <button aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"} type="button" onClick={() => setShowPassword((value) => !value)}>
           {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
         </button>

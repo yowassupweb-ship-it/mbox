@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { scopedStorageKey } from "./tabs";
 
 /**
  * Каркас документа во вкладке по важности: текст занимает всё место, сведения (свойства, связи,
@@ -9,7 +10,7 @@ import { PanelRightClose, PanelRightOpen } from "lucide-react";
 export function useDrawer(storageKey: string, defaultOpen = false) {
   const [open, setOpen] = useState<boolean>(() => {
     try {
-      const raw = window.localStorage.getItem(storageKey);
+      const raw = window.localStorage.getItem(scopedStorageKey(storageKey));
       return raw === null ? defaultOpen : raw === "1";
     } catch {
       return defaultOpen;
@@ -17,7 +18,7 @@ export function useDrawer(storageKey: string, defaultOpen = false) {
   });
   const set = (next: boolean) => {
     setOpen(next);
-    try { window.localStorage.setItem(storageKey, next ? "1" : "0"); } catch { /* без памяти */ }
+    try { window.localStorage.setItem(scopedStorageKey(storageKey), next ? "1" : "0"); } catch { /* без памяти */ }
   };
   return [open, set] as const;
 }

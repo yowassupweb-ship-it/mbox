@@ -1332,3 +1332,6 @@
   color: var(--text-dim);
   font-size: var(--text-xs);
 }
+
+.account-jarvis { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+.account-jarvis input { accent-color: var(--accent-color); }

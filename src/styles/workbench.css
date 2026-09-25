@@ -918,8 +918,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-doc-actions button:not(:has(span)) { justify-content: center; padding-inline: 6px; }
 
 .wb-doc-actions button:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
-.wb-doc-actions button.is-primary { background: var(--accent-color); border-color: var(--accent-color); color: #031312; font-weight: var(--weight-medium); }
-.wb-doc-actions button.is-primary kbd { border-color: rgba(0, 0, 0, 0.25); color: rgba(0, 0, 0, 0.6); }
+.wb-doc-actions button.is-primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-medium); }
+.wb-doc-actions button.is-primary kbd { border-color: rgba(255, 255, 255, 0.3); color: rgba(255, 255, 255, 0.78); }
 .wb-doc-actions button.is-danger:hover { color: var(--state-danger); border-color: var(--state-danger); }
 
 .wb-memory-title {
@@ -1153,7 +1153,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 30px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border-left: 1px solid var(--wb-line);
   background: var(--wb-surface-2);
@@ -1909,6 +1909,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-banner.is-warn { background: color-mix(in srgb, var(--state-warn) 12%, var(--wb-surface)); color: #ffd98a; }
 .wb-banner.is-error { background: color-mix(in srgb, var(--state-danger) 12%, var(--wb-surface)); color: #ffb3bb; }
+.wb-banner.is-live { background: color-mix(in srgb, var(--state-live) 10%, var(--wb-surface)); color: #bfe9ff; }
 .wb-banner button { height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-main); font: inherit; cursor: pointer; }
 .wb-banner button.is-on { border-color: var(--accent-color); color: var(--accent-color); }
 
@@ -2339,7 +2340,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-storage-form details label { margin-top: 8px; }
 .wb-storage-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .wb-storage-form-actions button { height: 30px; padding: 0 14px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
-.wb-storage-form-actions button.is-primary { border-color: var(--accent-color); background: var(--accent-color); color: #031312; font-weight: 600; }
+.wb-storage-form-actions button.is-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
 .wb-howto { margin-top: 8px; padding: 14px 18px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
 .wb-howto h3 { margin: 0 0 8px; font-size: 13px; }
 .wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
@@ -2471,13 +2472,209 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 /* ─── SSH ───────────────────────────────────────────── */
 
-.wb-ssh-connect { margin-top: 2px; }
-.wb-ssh-item { position: relative; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 8px; padding-right: 30px; }
-.wb-ssh-item > .wb-dot { grid-row: span 2; align-self: center; justify-self: center; }
-.wb-ssh-item > img { grid-row: 1; }
-.wb-ssh-stop { position: absolute; top: 50%; right: 8px; width: 20px; height: 20px; display: grid; place-items: center; transform: translateY(-50%); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; opacity: 0; }
-.wb-ssh-item:hover .wb-ssh-stop { opacity: 1; }
-.wb-ssh-stop:hover { background: var(--wb-hover); color: var(--state-danger); }
+.wb-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.wb-ssh-new { flex: none; display: grid; gap: var(--space-2); padding: 2px var(--space-2) var(--space-3); border-bottom: 1px solid var(--wb-line); }
+.wb-ssh-field { position: relative; display: block; }
+.wb-ssh-field input {
+  width: 100%;
+  height: 30px;
+  padding: 0 36px 0 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-color);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+.wb-ssh-field input::placeholder { color: var(--text-muted); font-family: var(--font-sans); }
+.wb-ssh-field input:hover { border-color: color-mix(in srgb, var(--text-muted) 60%, var(--wb-line)); }
+.wb-ssh-field input:focus-visible { border-color: var(--accent-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 28%, transparent); }
+.wb-ssh-field input[aria-invalid="true"] { border-color: var(--state-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-danger) 22%, transparent); }
+.wb-ssh-go {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+.wb-ssh-go:hover:not(:disabled) { background: var(--accent-fill-hover); }
+.wb-ssh-go:active:not(:disabled) { transform: scale(0.94); }
+.wb-ssh-go:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.wb-ssh-go:disabled { background: var(--wb-hover); color: var(--text-muted); cursor: default; }
+.wb-ssh-spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: wb-ssh-spin 0.8s linear infinite; }
+@keyframes wb-ssh-spin { to { transform: rotate(360deg); } }
+
+.wb-ssh-route { display: grid; grid-template-columns: 1fr 1fr; padding: 2px; border-radius: var(--radius-sm); background: var(--wb-hover); }
+.wb-ssh-route button {
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.wb-ssh-route button:hover { color: var(--text-main); }
+.wb-ssh-route button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
+.wb-ssh-route button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-ssh-error { margin: 0; color: var(--state-danger); font-size: var(--text-xs); line-height: 1.4; }
+
+.wb-ssh-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  margin: 0 var(--space-2);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  outline: none;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.wb-ssh-row:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-ssh-row:active { background: var(--wb-selected); }
+.wb-ssh-row:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.wb-ssh-row.is-open { color: var(--text-main); }
+.wb-ssh-glyph {
+  position: relative;
+  grid-row: span 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--wb-hover);
+  color: var(--text-muted);
+}
+.wb-ssh-row.is-open .wb-ssh-glyph { color: var(--text-main); }
+.wb-ssh-glyph > i {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--wb-surface);
+  border-radius: 50%;
+  background: var(--state-off);
+}
+.wb-ssh-glyph.is-live > i { background: var(--state-ok); }
+.wb-ssh-glyph.is-warn > i { background: var(--state-warn); }
+.wb-ssh-glyph.is-danger > i { background: var(--state-danger); }
+.wb-ssh-glyph.is-busy > i { background: var(--accent-color); animation: wb-ssh-pulse 1.2s var(--ease-out) infinite; }
+@keyframes wb-ssh-pulse { 50% { opacity: 0.35; } }
+.wb-ssh-name { min-width: 0; overflow: hidden; padding-right: 4px; font-family: var(--font-mono); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.wb-ssh-meta { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wb-ssh-meta.is-live { color: var(--state-ok); }
+.wb-ssh-meta.is-warn { color: var(--state-warn); }
+.wb-ssh-meta.is-danger { color: var(--state-danger); }
+.wb-ssh-actions { position: absolute; top: 50%; right: 6px; display: flex; gap: 2px; transform: translateY(-50%); opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.wb-ssh-row:hover .wb-ssh-actions,
+.wb-ssh-row:focus-within .wb-ssh-actions { opacity: 1; }
+.wb-ssh-row:hover .wb-ssh-name,
+.wb-ssh-row:focus-within .wb-ssh-name,
+.wb-ssh-row:hover .wb-ssh-meta,
+.wb-ssh-row:focus-within .wb-ssh-meta { padding-right: 56px; }
+.wb-ssh-actions button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--wb-surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.wb-ssh-actions button:hover { background: var(--wb-selected); color: var(--text-main); }
+.wb-ssh-actions button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
+.wb-ssh-actions button[aria-label^="Отключить"]:hover,
+.wb-ssh-actions button[aria-label^="Убрать"]:hover { color: var(--state-danger); }
+
+.wb-ssh-empty { display: grid; justify-items: center; gap: 6px; padding: var(--space-7) var(--space-5); color: var(--text-muted); text-align: center; }
+.wb-ssh-empty strong { color: var(--text-2); font-size: var(--text-md); font-weight: var(--weight-medium); }
+.wb-ssh-empty p { max-width: 30ch; margin: 0; font-size: var(--text-xs); line-height: 1.5; }
+
+/* Плашка поверх терминала: соединение упало или переподключается — действие рядом с причиной. */
+.wb-terminal-wrap { position: relative; height: 100%; min-height: 0; }
+.wb-terminal-banner {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--wb-surface-2) 88%, transparent);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px) saturate(1.4);
+  animation: wb-banner-in var(--duration-base) var(--ease-out);
+}
+@keyframes wb-banner-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+.wb-terminal-banner > svg { flex: none; }
+.wb-terminal-banner.is-danger > svg { color: var(--state-danger); }
+.wb-terminal-banner.is-warn > svg { color: var(--state-warn); }
+.wb-terminal-banner.is-off > svg { color: var(--text-muted); }
+.wb-terminal-banner-text { display: grid; min-width: 0; }
+.wb-terminal-banner-text strong { font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
+.wb-terminal-banner-text span { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.wb-terminal-banner-actions { display: flex; flex: none; gap: 6px; }
+.wb-terminal-banner button {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--wb-hover);
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+.wb-terminal-banner button:hover { background: var(--wb-selected); }
+.wb-terminal-banner button:active { transform: scale(0.97); }
+.wb-terminal-banner button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.wb-terminal-banner button.is-primary { background: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-medium); }
+.wb-terminal-banner button.is-primary:hover { background: var(--accent-fill-hover); }
+
+.wb-session-state.is-live { color: var(--state-ok); }
+.wb-session-state.is-warn { color: var(--state-warn); }
+.wb-session-state.is-danger { color: var(--state-danger); }
+.wb-session-state.is-busy { color: var(--accent-color); }
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-ssh-spinner, .wb-ssh-glyph.is-busy > i, .wb-terminal-banner { animation: none; }
+}
 
 /* ─── Строка состояния ──────────────────────────────── */
 
@@ -2869,7 +3066,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-skill-launch button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 15px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wb-skill-launch button:hover { border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); color: var(--text-main); }
 .wb-skill-launch button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
-.wb-skill-launch button.is-primary { border-color: var(--accent-color); background: var(--accent-color); color: #fff; font-weight: var(--weight-medium); }
+.wb-skill-launch button.is-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-medium); }
 .wb-skill-launch button:disabled { opacity: .45; cursor: not-allowed; }
 .wb-menu-item-row { position: relative; }
 .wb-menu-item-row > .wb-menu-item { padding-right: 36px; }
@@ -3089,3 +3286,567 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-share-panel button.is-danger:hover { color: var(--state-danger); }
 .wb-share-panel button:disabled { opacity: 0.5; cursor: default; }
 .wb-share-create { justify-self: start; color: var(--accent-color) !important; }
+
+/* Консоль = один чат: вкладки «Общий · Claude · ChatGPT» и сам разговор (см. ConsoleArea.tsx). */
+.wb-console { grid-template-rows: 34px minmax(0, 1fr); }
+.wb-chat-kinds {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--wb-line);
+  overflow: hidden;
+}
+.wb-chat-kind {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wb-chat-kind:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-chat-kind.is-active { background: var(--wb-selected); color: var(--text-main); font-weight: 500; }
+.wb-chat-kind:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-chat-kind-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); opacity: 0.45; }
+.wb-chat-kind-dot.is-online { background: var(--state-ok); opacity: 1; }
+.wb-chat-kind-dot.is-working { background: var(--state-live); opacity: 1; animation: wb-kind-pulse 1.4s ease-in-out infinite; }
+@keyframes wb-kind-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .wb-chat-kind-dot.is-working { animation: none; } }
+.wb-chat-kinds > .wb-icon-btn { flex: none; }
+.wb-console-chats { position: relative; min-height: 0; overflow: hidden; }
+.wb-console-chat { height: 100%; min-height: 0; }
+
+/* Режим отладки в шапке чата: вывод наблюдателя агента, выдвигается над перепиской. */
+.console-debug {
+  flex: none;
+  height: 34%;
+  min-height: 90px;
+  max-height: 70%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  resize: vertical;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-sunken, var(--wb-surface-2));
+}
+.chat-debug { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 11.5px; }
+.chat-debug-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 6px 2px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent); color: var(--text-2); }
+.chat-debug-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-debug-btn { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 6px; background: transparent; color: var(--accent-color); font: inherit; cursor: pointer; white-space: nowrap; }
+.chat-debug-btn:hover { background: var(--wb-hover); }
+.chat-debug-log { flex: 1; min-height: 0; overflow: hidden; }
+.chat-debug-log > * { height: 100%; }
+.chat-debug-note { margin: 0; padding: 8px 10px; color: var(--text-muted); }
+.chat-debug-list { margin: 0; padding: 4px; list-style: none; overflow: auto; }
+.chat-debug-list li { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px; }
+.chat-debug-list li:hover { background: var(--wb-hover); }
+.chat-debug-list span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-debug-list em { color: var(--text-muted); font-style: normal; }
+
+/* ─── Продвинутый редактор таблиц (SheetEditor.tsx): виртуальная сетка ─── */
+.wb-sheet-shell.is-advanced { grid-template-rows: 34px 32px minmax(0, 1fr) 30px; }
+.wb-sheet-toolbar { display: flex; align-items: center; gap: 2px; min-width: 0; padding: 0 6px; overflow-x: auto; border-bottom: 1px solid var(--wb-line); background: var(--surface-2); }
+.wb-sheet-toolbar > button { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 26px; min-width: 28px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.wb-sheet-toolbar > button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-main); }
+.wb-sheet-toolbar > button:disabled { opacity: 0.35; cursor: default; }
+.wb-sheet-toolbar > button.is-on { background: var(--wb-selected, var(--surface-selected)); color: var(--accent-color); }
+.wb-sheet-toolbar > button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-sheet-sep { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--wb-line); }
+.wb-sheet-find { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+.wb-sheet-find input { width: 170px; height: 24px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 5px; background: var(--surface-1); color: var(--text-main); font: inherit; font-size: 12px; }
+.wb-sheet-find em { color: var(--text-muted); font-style: normal; font-size: 11px; white-space: nowrap; }
+.wb-sheet-find button { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
+
+.wb-sheet-shell.is-advanced .wb-sheet-formula { grid-template-columns: 96px minmax(160px, 1fr); }
+
+.wb-grid { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; background: var(--surface-1); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wb-grid-canvas { position: relative; }
+.wb-grid-cell {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 0 6px;
+  overflow: hidden;
+  border-right: 1px solid var(--wb-line);
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--cell-fill, transparent);
+  color: var(--text-main);
+  line-height: 23px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: cell;
+  user-select: none;
+}
+.wb-grid-cell.is-num { text-align: right; }
+.wb-grid-cell.is-in-range { background: color-mix(in srgb, var(--accent-color) 12%, var(--cell-fill, var(--surface-1))); }
+.wb-grid-cell.is-focus { z-index: 1; box-shadow: inset 0 0 0 2px var(--accent-color); background: var(--cell-fill, var(--surface-1)); }
+.wb-grid-cell.is-formula-empty { color: var(--text-muted); font-style: italic; }
+.wb-grid-cell.is-frozen { z-index: 3; background: var(--cell-fill, var(--surface-2)); font-weight: 600; border-bottom-color: var(--text-muted); }
+.wb-grid-cell.is-frozen.is-in-range { background: color-mix(in srgb, var(--accent-color) 14%, var(--cell-fill, var(--surface-2))); }
+.wb-grid-colhead, .wb-grid-rowhead, .wb-grid-corner {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-right: 1px solid var(--wb-line);
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+  cursor: default;
+}
+.wb-grid-rowhead { width: 52px; z-index: 5; }
+.wb-grid-rowhead.is-frozen { z-index: 6; }
+.wb-grid-corner { z-index: 7; }
+.wb-grid-colhead.is-active, .wb-grid-rowhead.is-active { background: color-mix(in srgb, var(--accent-color) 20%, var(--surface-2)); color: var(--text-main); }
+.wb-grid-filter-mark { color: var(--accent-color); }
+.wb-grid-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 1; }
+.wb-grid-resize:hover { background: color-mix(in srgb, var(--accent-color) 50%, transparent); }
+.wb-grid-editor {
+  position: absolute;
+  z-index: 8;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 2px solid var(--accent-color);
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  background: var(--surface-1);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.wb-sheet-footer { display: flex; align-items: stretch; min-width: 0; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
+.wb-sheet-footer .wb-sheet-tabs { flex: 1 1 auto; min-width: 0; border-top: 0; }
+.wb-sheet-add { min-width: 32px !important; padding: 0 !important; display: inline-grid; place-items: center; }
+.wb-sheet-rename { width: 120px; margin: 3px; padding: 0 6px; border: 1px solid var(--accent-color); border-radius: 4px; background: var(--surface-1); color: var(--text-main); font: inherit; font-size: 11.5px; }
+.wb-sheet-stats { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--text-2); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wb-sheet-filter { display: grid; gap: 6px; padding: 6px; min-width: 230px; }
+.wb-sheet-filter label { color: var(--text-2); font-size: 12px; }
+.wb-sheet-filter input { height: 28px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 5px; background: var(--surface-1); color: var(--text-main); font: inherit; }
+.wb-sheet-filter > div { display: flex; gap: 6px; justify-content: flex-end; }
+.wb-sheet-filter > div button { height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: 5px; background: transparent; color: var(--text-main); font: inherit; font-size: 12px; cursor: pointer; }
+.wb-sheet-filter > div button:first-child { border-color: var(--accent-color); color: var(--accent-color); }
+@media (max-width: 640px) { .wb-sheet-stats { display: none; } }
+
+/* ─── Тулбар заметки ───────────────────────────────────
+   Слева — состояние (когда изменена, сохранилась ли), справа — три группы по частоте: режим,
+   кто видит и где лежит, поделиться/история. Редкое (закрепить, фон, метка, удалить) — в меню «Ещё». */
+
+.wb-note-status { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 10px; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
+.wb-note-save { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.wb-note-save > svg { color: color-mix(in srgb, var(--state-ok) 70%, var(--text-muted)); }
+.wb-note-save.is-busy { color: var(--text-2); }
+.wb-note-save.is-error { color: var(--state-danger); }
+.wb-note-save.is-error > svg { color: currentColor; }
+.wb-note-spinner { width: 11px; height: 11px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: wb-ssh-spin 0.8s linear infinite; }
+.wb-note-flag { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: 10.5px; }
+.wb-note-notice { overflow: hidden; color: var(--state-warn); text-overflow: ellipsis; }
+
+.wb-note-tools { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
+.wb-note-divider { width: 1px; height: 16px; margin: 0 6px; background: var(--wb-line); }
+
+.wb-note-mode { display: inline-flex; padding: 2px; border-radius: var(--radius-sm); background: var(--wb-hover); }
+.wb-note-mode button {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.wb-note-mode button:hover { color: var(--text-main); }
+.wb-note-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
+.wb-note-mode button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+
+/* Всплывающая кнопка macOS: подпись и шеврон без рамки, рамка — только под курсором. Сам select прозрачен поверх. */
+.wb-note-popup {
+  position: relative;
+  height: 26px;
+  max-width: 180px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.wb-note-popup > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-note-popup > span.is-muted { color: var(--text-muted); }
+.wb-note-popup > svg { flex: none; color: var(--text-muted); }
+.wb-note-popup:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-note-popup:has(select:focus-visible) { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.wb-note-popup select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font: inherit; }
+.wb-note-popup select option { background: var(--wb-surface-2); color: var(--text-main); }
+
+.wb-note-icon,
+.wb-note-tools .wb-share > button {
+  position: relative;
+  min-width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.wb-note-icon:hover,
+.wb-note-tools .wb-share > button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-note-icon:active,
+.wb-note-tools .wb-share > button:active { background: var(--wb-selected); }
+.wb-note-icon.is-on,
+.wb-note-tools .wb-share > button[aria-expanded="true"] { background: var(--wb-selected); color: var(--accent-color); }
+.wb-note-tools .wb-share > button.is-on { color: var(--accent-color); }
+.wb-note-icon:focus-visible,
+.wb-note-tools .wb-share > button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-note-icon b { min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: 10px; font-weight: var(--weight-medium); line-height: 16px; text-align: center; }
+
+.wb-note-menu { display: grid; min-width: 224px; }
+.wb-note-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.wb-note-menu > button > svg { color: var(--accent-color); }
+.wb-note-menu-label { padding: 4px 10px 2px; color: var(--text-muted); font-size: 10.5px; }
+.wb-note-theme-swatch { display: inline-block; width: 14px; height: 14px; margin-right: 8px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--wb-line); vertical-align: -3px; }
+.wb-note-theme-swatch.is-light { background: var(--doc-light-bg); }
+.wb-note-theme-swatch.is-graphite { background: var(--doc-graphite-bg); }
+.wb-note-theme-swatch.is-black { background: var(--doc-black-bg); }
+.wb-note-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px 8px; }
+.wb-menu .wb-note-swatch {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.wb-menu .wb-note-swatch:hover { background-color: inherit; transform: scale(1.12); }
+.wb-menu .wb-note-swatch.is-on { box-shadow: 0 0 0 2px var(--wb-surface-2), 0 0 0 3.5px var(--text-main); }
+.wb-menu .wb-note-swatch:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.wb-note-swatch.is-default, .wb-menu .wb-note-swatch.is-default:hover { background: var(--wb-hover); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.wb-note-swatch.is-red, .wb-menu .wb-note-swatch.is-red:hover { background: var(--note-red); }
+.wb-note-swatch.is-orange, .wb-menu .wb-note-swatch.is-orange:hover { background: var(--note-orange); }
+.wb-note-swatch.is-yellow, .wb-menu .wb-note-swatch.is-yellow:hover { background: var(--note-yellow); }
+.wb-note-swatch.is-green, .wb-menu .wb-note-swatch.is-green:hover { background: var(--note-green); }
+.wb-note-swatch.is-cyan, .wb-menu .wb-note-swatch.is-cyan:hover { background: var(--note-cyan); }
+.wb-note-swatch.is-blue, .wb-menu .wb-note-swatch.is-blue:hover { background: var(--note-blue); }
+.wb-note-swatch.is-purple, .wb-menu .wb-note-swatch.is-purple:hover { background: var(--note-purple); }
+.wb-note-swatch.is-gray, .wb-menu .wb-note-swatch.is-gray:hover { background: var(--note-gray); }
+.wb-menu .wb-note-swatch.is-default.is-on,
+.wb-menu .wb-note-swatch.is-on { box-shadow: 0 0 0 2px var(--wb-surface-2), 0 0 0 3.5px var(--text-main); }
+
+/* Узкая вкладка: подписи режимов и флаги уходят первыми, значки остаются. */
+@container (max-width: 760px) {
+  .wb-note-mode button > span, .wb-note-flag { display: none; }
+  .wb-note-popup { max-width: 120px; }
+}
+@container (max-width: 560px) {
+  .wb-note-popup > span { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-note-spinner { animation: none; }
+}
+.wb-note-menu > button.is-danger, .wb-note-menu > button.is-danger:hover { color: var(--state-danger); }
+.wb-note-menu > button.is-danger:hover { background: color-mix(in srgb, var(--state-danger) 16%, transparent); }
+
+/* ─── Шапка: одна полоса ───────────────────────────────
+   Системной рамки Windows больше нет — кнопки окна нарисованы поверх шапки (Window Controls Overlay),
+   поэтому шапка тянет окно, а справа оставляет место под кнопки. Слева — вкладка одной строкой,
+   справа — только значки: логотип и слово «Desktop» не повторяются. */
+
+.topbar-context { gap: 8px; }
+.topbar-context img { width: 18px; height: 18px; flex: none; opacity: 0.85; }
+.topbar-context strong { flex: 0 1 auto; font-size: var(--text-sm); line-height: 1.2; }
+.topbar-context span { flex: 0 10 auto; font-size: var(--text-xs); line-height: 1.2; }
+.topbar-context span::before { content: "·"; margin-right: 6px; color: var(--text-muted); }
+.topbar-dirty { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--state-warn); }
+.topbar-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.wb-titlebar .command-center { flex: 0 1 320px; height: 26px; border-color: transparent; background: var(--wb-hover); }
+.wb-titlebar .command-center:hover { border-color: var(--wb-line); background: var(--wb-surface-2); }
+.wb-titlebar .command-center kbd { padding: 0 5px; border: 0; border-radius: 4px; background: var(--wb-hover); color: var(--text-muted); font-size: 10px; }
+
+.wb-titlebar .topbar-actions { gap: 2px; }
+.wb-titlebar .topbar-icon-action,
+.wb-titlebar .topbar-logout {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  box-shadow: none;
+}
+.wb-titlebar .topbar-icon-action:hover,
+.wb-titlebar .topbar-logout:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-titlebar .topbar-icon-action svg,
+.wb-titlebar .topbar-logout svg { width: 15px; height: 15px; }
+
+.wb-titlebar .desktop-pill {
+  position: relative;
+  min-width: 0;
+  max-width: none;
+  height: 28px;
+  min-height: 28px;
+  gap: 0;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+}
+.wb-titlebar .desktop-pill:hover,
+.wb-titlebar .desktop-pill[aria-expanded="true"] { background: var(--wb-hover); }
+.wb-titlebar .desktop-pill-logo { width: 18px; height: 18px; }
+.wb-titlebar .desktop-pill .desktop-pill-count {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1.5px solid var(--wb-surface);
+  border-radius: var(--radius-pill);
+  background: var(--state-ok);
+  color: #0b1a10;
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  line-height: 11px;
+  text-align: center;
+}
+.wb-titlebar .desktop-pill .desktop-pill-count.is-zero { background: var(--state-off); color: var(--text-main); }
+
+.wb-titlebar .realtime-pill { height: 28px; min-height: 28px; gap: 4px; padding: 0 6px; border: 0; background: none; }
+.wb-titlebar .realtime-pill:hover,
+.wb-titlebar .realtime-pill[aria-expanded="true"] { background: var(--wb-hover); }
+.wb-titlebar .realtime-pill .topbar-logo { width: 20px; height: 20px; }
+.wb-titlebar .realtime-pill strong { font-size: var(--text-xs); }
+
+html[data-mbox-desktop="true"] .wb-titlebar { -webkit-app-region: drag; }
+html[data-mbox-desktop="true"] .wb-titlebar :is(button, a, input, select, kbd, [role="dialog"], .desktop-popover, .agent-status-popover) { -webkit-app-region: no-drag; }
+/* titlebar-area-* — область без кнопок окна: справа на Windows, слева (светофор) на macOS. Вне приложения env() не задан — остаётся обычный отступ. */
+html[data-mbox-desktop="true"] .wb-titlebar .topbar {
+  padding-left: calc(env(titlebar-area-x, 0px) + 10px);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px);
+}
+
+/* Страница навыка: плотнее. Заголовок на всю ширину (1–2 строки вместо 4), результат — строкой, статистика — справкой. */
+.wb-skill-doc .wb-skill-hero { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 20px 22px; }
+.wb-skill-doc .wb-skill-hero h1 { max-width: none; margin: 10px 0 8px; font-size: clamp(24px, 2.4vw, 32px); line-height: 1.12; letter-spacing: -0.02em; }
+.wb-skill-doc .wb-skill-hero-main > p { max-width: 68ch; font-size: var(--text-md); line-height: 1.55; }
+.wb-skill-doc .wb-skill-hero-main > p.wb-skill-outcome-line { display: flex; align-items: flex-start; gap: 7px; margin-top: 10px; color: var(--text-2); font-size: var(--text-sm); }
+.wb-skill-outcome-line > svg { flex: none; margin-top: 2px; color: var(--state-ok); }
+.wb-skill-outcome-line b { color: var(--text-main); font-weight: var(--weight-medium); }
+.wb-skill-doc .wb-skill-launch { margin-top: 16px; }
+.wb-skill-usage { margin: 10px 2px 0; color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.wb-skill-doc .wb-skill-flow { margin-top: 16px; }
+.wb-skill-doc .wb-skill-flow > div { min-height: 0; padding: 10px 14px; }
+
+/* ─── Попапы шапки ─────────────────────────────────────
+   Сплошной фон: полупрозрачность держалась на backdrop-filter, а в приложении он выключен ради скорости —
+   сквозь попап читался чат. Строки 30px, действия — пунктами меню, не сеткой больших кнопок. */
+
+.tb-pop {
+  position: absolute;
+  top: 36px;
+  z-index: 120;
+  width: 300px;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--radius-md);
+  background: var(--wb-surface-2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  text-align: left;
+  animation: tb-pop-in var(--duration-fast) var(--ease-out);
+}
+@keyframes tb-pop-in { from { opacity: 0; transform: translateY(-4px); } }
+.tb-pop-desktop { right: 0; }
+.wb-titlebar .tb-pop-agents { right: 44px; width: 340px; }
+html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 44px); }
+
+.tb-pop section + section { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--wb-line); }
+.tb-pop-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 6px 8px; }
+.tb-pop-head strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.tb-pop-label { display: flex; align-items: center; gap: 5px; margin: 0; padding: 6px 8px 4px; color: var(--text-muted); font-size: 10.5px; font-weight: var(--weight-medium); }
+.tb-pop-label.is-warn { color: var(--state-warn); }
+
+.tb-pop-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.tb-pop-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border-radius: var(--radius-sm); }
+.tb-pop-row.is-action { grid-template-columns: minmax(0, 1fr) auto; gap: 2px; padding: 0; }
+.tb-pop-rowbtn { display: grid; grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; align-items: center; min-width: 0; padding: 5px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tb-pop-rowbtn > .tb-dot { grid-row: span 2; justify-self: center; }
+.tb-pop-rowbtn small { grid-column: 2; }
+.tb-pop-rowbtn:hover { background: var(--wb-hover); }
+.tb-pop-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-pop-row small, .tb-pop-rowbtn small { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.tb-pop-row small.is-ok { color: var(--state-ok); }
+.tb-pop-row small.is-live { color: var(--accent-color); }
+.tb-dot { justify-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--state-off); }
+.tb-dot.is-live { background: var(--state-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-ok) 22%, transparent); }
+.tb-dot.is-warn { background: var(--state-warn); }
+.tb-dot.is-danger { background: var(--state-danger); }
+
+.tb-pop-icon { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; }
+.tb-pop-icon:hover:not(:disabled) { background: var(--wb-hover); color: var(--text-main); }
+.tb-pop-row.is-action .tb-pop-icon:hover { color: var(--state-ok); }
+
+.tb-pop-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px 4px 4px; }
+.tb-pop-buttons button { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--radius-sm); background: var(--wb-hover); color: var(--text-main); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.tb-pop-buttons button:hover:not(:disabled) { background: var(--wb-selected); }
+.tb-pop-buttons button.is-primary { background: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-medium); }
+.tb-pop-buttons button.is-primary:hover:not(:disabled) { background: var(--accent-fill-hover); }
+.tb-pop-buttons button:disabled { opacity: 0.45; cursor: default; }
+
+.tb-pop-sep { height: 1px; margin: 4px 2px; background: var(--wb-line); }
+.tb-pop-menu { display: grid; }
+.tb-pop-menu button { display: flex; align-items: center; gap: 9px; min-height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.tb-pop-menu button svg { flex: none; color: var(--text-muted); }
+.tb-pop-menu button:hover:not(:disabled) { background: var(--wb-selected); color: var(--text-main); }
+.tb-pop-menu button:hover:not(:disabled) svg { color: var(--accent-color); }
+.tb-pop-menu button:disabled { opacity: 0.45; cursor: default; }
+.tb-pop-foot { margin: 4px 2px 0; padding: 6px 8px 2px; border-top: 1px solid var(--wb-line); color: var(--text-muted); font-size: 10.5px; line-height: 1.4; }
+.tb-pop-foot.is-error { color: var(--state-danger); }
+
+.tb-pop-note { margin: 0; padding: 4px 8px 6px; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; }
+.tb-pop-feed { display: grid; margin: 0; padding: 0 0 2px; list-style: none; }
+.tb-pop-feed li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 26px; padding: 4px 8px; border-radius: var(--radius-sm); }
+.tb-pop-feed li span { min-width: 0; color: var(--text-2); font-size: var(--text-xs); line-height: 1.35; }
+.tb-pop-feed li b { color: var(--text-muted); font-weight: var(--weight-medium); }
+.tb-pop-feed li time { flex: none; color: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+.tb-pop :is(button):focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .tb-pop { animation: none; } }
+
+/* Одна строка хрома над чатом: «Общий · Claude · ChatGPT», затем шапка активного чата (портал из AgentChat:
+   список чатов, название, нагрузка контекста, новый чат, отладка), затем кнопки панели. */
+.wb-console { container-type: inline-size; }
+.wb-chat-kinds { position: relative; z-index: 4; overflow: visible; gap: 2px; }
+.wb-chat-kind { flex: none; height: 26px; padding: 0 8px; }
+.wb-chat-head-slot { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+.wb-chat-head-slot:empty { flex: 1 1 auto; }
+.wb-chat-head-slot > .console-threads {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 0 0 0 6px;
+  border: 0;
+  border-left: 1px solid var(--wb-line);
+  background: none;
+}
+.wb-chat-head-slot .console-thread-current { flex: 1 1 auto; justify-content: flex-start; min-width: 0; height: 26px; padding: 0 6px; font-size: var(--text-sm); }
+.wb-chat-head-slot .console-thread-title { font-weight: var(--weight-medium); }
+.wb-chat-head-slot .console-context { flex: none; }
+.wb-chat-head-slot .console-thread-menu { top: calc(100% + 4px); left: 0; z-index: 30; }
+/* Узкая панель: у неактивных чатов — только аватар, ещё уже — и у активного. Подпись есть в подсказке. */
+@container (max-width: 760px) { .wb-chat-kind:not(.is-active) > .wb-chat-kind-label { display: none; } .wb-chat-kind:not(.is-active) { padding: 0 6px; } }
+@container (max-width: 520px) { .wb-chat-kind > .wb-chat-kind-label { display: none; } .wb-chat-kind { padding: 0 6px; } .wb-chat-head-slot .console-context-bar { display: none; } }
+
+/* ─── Агенты: строка — аватар, имя с каналом, состояние; кнопки — по наведению ─── */
+.wb-agent-list li { position: relative; border-radius: var(--radius-sm); }
+.wb-agent-list li:hover { background: var(--wb-hover); }
+.wb-agent-main strong { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.wb-agent-main strong small { overflow: hidden; color: var(--text-muted); font-size: 10.5px; font-weight: var(--weight-normal); text-overflow: ellipsis; white-space: nowrap; }
+.wb-agent-main span.is-ok { color: var(--state-ok); }
+.wb-agent-main span.is-live { color: var(--accent-color); }
+.wb-agent-actions { opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.wb-agent-list li:hover .wb-agent-actions,
+.wb-agent-list li:focus-within .wb-agent-actions { opacity: 1; }
+
+/* ─── Инструменты: группы и точка состояния на значке ─── */
+.wb-tool-glyph { position: relative; grid-row: span 2; width: 22px; height: 22px; display: grid; place-items: center; }
+.wb-tool-glyph img, .wb-tool-glyph .wb-menu-item-icon { width: 22px !important; height: 22px !important; border-radius: 5px; }
+.wb-tool-glyph > i { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border: 2px solid var(--wb-surface); border-radius: 50%; background: var(--state-off); }
+.wb-tool-glyph.is-ok > i { background: var(--state-ok); }
+.wb-tool-glyph.is-warn > i { background: var(--state-warn); }
+.wb-tool-glyph.is-planned > i { display: none; }
+.wb-tool-item.is-planned .wb-menu-item-title { color: var(--text-2); }
+.wb-tool-item.is-planned .wb-tool-glyph .wb-menu-item-icon { border-style: dashed; color: var(--text-muted); background: none; }
+.wb-tool-soon { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-muted); font-size: 9.5px; font-style: normal; letter-spacing: 0; text-transform: none; }
+.wb-tool-planned { margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--wb-line); border-radius: var(--radius-md); color: var(--text-2); font-size: var(--text-sm); line-height: 1.5; }
+.wb-tool-planned b { color: var(--text-main); font-weight: var(--weight-medium); }
+
+/* ─── История: лента по дням вместо журнала аудита ─── */
+.wb-history { max-width: 920px; }
+.wb-history-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.wb-history-head h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.02em; }
+.wb-history-head p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+.wb-history-mode { display: inline-flex; flex: none; padding: 2px; border-radius: var(--radius-sm); background: var(--wb-hover); }
+.wb-history-mode button { height: 24px; padding: 0 12px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.wb-history-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
+.wb-history-tools { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 -4px 6px; padding: 8px 4px; background: var(--bg-color); }
+.wb-history-search { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; min-width: 220px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); color: var(--text-muted); }
+.wb-history-search:focus-within { border-color: var(--accent-color); }
+.wb-history-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.wb-history-search button { display: grid; place-items: center; padding: 2px; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.wb-history-actors { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-history-actors button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 1px solid var(--wb-line); border-radius: var(--radius-pill); background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.wb-history-actors button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-history-actors button.is-on { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); background: var(--wb-selected); color: var(--text-main); }
+.wb-history-day h2 { position: sticky; top: 44px; z-index: 1; margin: 14px 0 4px; padding: 4px 0; background: var(--bg-color); color: var(--text-muted); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.wb-history-day ol { display: grid; margin: 0; padding: 0; list-style: none; }
+.wb-history-day li { display: grid; grid-template-columns: 44px minmax(120px, 170px) minmax(0, 1fr); align-items: center; gap: 10px; min-height: 32px; padding: 3px 8px; border-radius: var(--radius-sm); font-size: var(--text-sm); }
+.wb-history-day li:hover { background: var(--wb-hover); }
+.wb-history-day li.is-service { opacity: 0.6; }
+.wb-history-day time { color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.wb-history-who { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.wb-history-who b { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.wb-history-human { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--wb-selected); color: var(--text-main); font-size: 10px; font-weight: var(--weight-bold); }
+.wb-history-what { display: flex; align-items: baseline; gap: 7px; min-width: 0; color: var(--text-2); }
+.wb-history-what em { flex: none; font-size: var(--text-xs); font-style: normal; font-weight: var(--weight-medium); }
+.wb-history-what em.is-new { color: var(--state-ok); }
+.wb-history-what em.is-edit { color: var(--accent-color); }
+.wb-history-what em.is-delete { color: var(--state-danger); }
+.wb-history-what > span { flex: none; }
+.wb-history-what small { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.wb-history-what q { overflow: hidden; color: var(--text-main); text-overflow: ellipsis; white-space: nowrap; quotes: "«" "»"; }
+.wb-history-count { flex: none; padding: 0 5px; border-radius: var(--radius-pill); background: var(--wb-hover); }
+@container (max-width: 620px) {
+  .wb-history-day li { grid-template-columns: 40px minmax(0, 1fr); }
+  .wb-history-what { grid-column: 2; }
+}
+
+/* Переключатель чатов: одна точка статуса — своя у кнопки; собственный значок аватара здесь не нужен. */
+.wb-chat-kind .agent-avatar::after { display: none; }
+.wb-chat-kind { height: 28px; gap: 5px; }
+.wb-chat-kind-dot { width: 7px; height: 7px; }

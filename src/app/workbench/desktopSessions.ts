@@ -14,13 +14,20 @@ export type SessionMeta = {
   endedAt: number | null;
   /** Сессия в псевдотерминале (SSH): вывод — сырой поток для xterm.js, а не строки. */
   terminal?: boolean;
+  /** SSH: что с соединением прямо сейчас — главный процесс следит за потоком ssh. */
+  phase?: SshPhase;
+  retryAt?: number | null;
+  connectedAt?: number | null;
+  direct?: boolean;
+  jump?: string;
 };
+export type SshPhase = "connecting" | "auth" | "connected" | "reconnecting" | "auth_failed" | "failed" | "stopped";
 export type Session = SessionMeta & { lines: SessionLine[]; lastOutputAt?: number };
 type AgentProcess = { pid: number; agent: string };
 
 type SessionEvent = {
   id: string;
-  event: "started" | "output" | "data" | "exited" | "failed" | "removed";
+  event: "started" | "output" | "data" | "exited" | "failed" | "removed" | "meta";
   data?: string;
   reveal?: boolean;
   session?: SessionMeta;
@@ -34,7 +41,7 @@ type Bridge = {
   start: (name: string) => Promise<AgentProcess[]>;
   stop: (name: string) => Promise<AgentProcess[]>;
   restartAgent?: (name: string) => Promise<AgentProcess[]>;
-  startSsh?: (target: string, cols?: number, rows?: number) => Promise<{ ok: boolean; id?: string; pid?: number; target?: string }>;
+  startSsh?: (target: string, cols?: number, rows?: number, options?: { direct?: boolean }) => Promise<{ ok: boolean; id?: string; pid?: number; target?: string }>;
   resizeSession?: (id: string, cols: number, rows: number) => Promise<unknown>;
   sessions?: () => Promise<Array<Session & { buffer?: string }>>;
   sendSessionInput?: (id: string, input: string) => Promise<unknown>;
@@ -126,6 +133,8 @@ function ensureStarted() {
       const lines = payload.message ? [...current.lines, { stream: "err" as const, line: payload.message }] : current.lines;
       store.sessions.set(payload.id, { ...current, ...(payload.session ?? {}), ...(payload.event === "failed" ? { status: "failed" as const } : {}), lines });
       void refreshAgents();
+    } else if (payload.event === "meta" && current && payload.session) {
+      store.sessions.set(payload.id, { ...current, ...payload.session });
     } else if (payload.event === "removed") {
       store.sessions.delete(payload.id);
       store.terminalBuffers.delete(payload.id);
@@ -173,8 +182,9 @@ export function useDesktopSessions() {
   }, []);
 
   const sessions = [...store.sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
-  const inApp = new Set(sessions.filter((session) => session.kind === "agent" && session.status === "running").map((session) => session.id.slice(6)));
-  const outside = store.agents.filter((row) => !inApp.has(row.agent));
+  const family = (name: string) => (/^(codex|chatgpt)$/i.test(name) ? "chatgpt" : name.toLowerCase());
+  const inApp = new Set(sessions.filter((session) => session.kind === "agent" && session.status === "running").map((session) => family(session.id.slice(6))));
+  const outside = store.agents.filter((row) => !inApp.has(family(row.agent)));
 
   return {
     supported,
@@ -184,11 +194,11 @@ export function useDesktopSessions() {
     startAgent: async (name: "ChatGPT" | "Codex" | "Claude" | "All") => { await bridge()?.start(name === "ChatGPT" ? "Codex" : name); void refreshAgents(); },
     stopAgent: async (name: string) => { await bridge()?.stop(name); void refreshAgents(); },
     restartAgent: async (name: string) => { await bridge()?.restartAgent?.(name); void refreshAgents(); },
-    startSsh: async (target: string) => {
+    startSsh: async (target: string, options: { direct?: boolean } = {}) => {
       const api = bridge();
       if (!api?.startSsh) throw new Error("Эта версия MBOX Desktop не умеет SSH — обнови приложение.");
       try {
-        await api.startSsh(target, 120, 32);
+        await api.startSsh(target, 120, 32, options);
       } catch (error) {
         // Страница свежая, а главный процесс приложения запущен до обновления — обработчика в нём ещё нет.
         if (/No handler registered/.test(String((error as Error)?.message))) throw new Error("MBOX Desktop запущен со старой версией — перезапусти приложение, чтобы появился SSH.");
@@ -216,4 +226,43 @@ export function revealSession(id: string) {
 export function onSessionReveal(listener: (id: string) => void) {
   store.revealListeners.add(listener);
   return () => { store.revealListeners.delete(listener); };
+}
+
+export type SshTone = "live" | "busy" | "warn" | "danger" | "off";
+
+/** Состояние SSH-сессии словами — одно на боковой раздел, заголовок терминала и плашку в нём. */
+export function sshStatus(session: Session, now = Date.now()): { text: string; tone: SshTone } {
+  if (session.status !== "running") {
+    if (session.phase === "auth_failed") return { text: "Вход не удался", tone: "danger" };
+    if (session.status === "stopped" || session.phase === "stopped") return { text: "Отключено", tone: "off" };
+    return { text: "Не удалось подключиться", tone: "danger" };
+  }
+  switch (session.phase) {
+    case "auth": return { text: "Ждёт пароль", tone: "warn" };
+    case "connected": return { text: session.connectedAt ? `Подключено · ${sinceText(now - session.connectedAt)}` : "Подключено", tone: "live" };
+    case "reconnecting": {
+      const left = session.retryAt ? Math.max(0, Math.ceil((session.retryAt - now) / 1000)) : 0;
+      return { text: left ? `Переподключение через ${left} с` : "Переподключение…", tone: "warn" };
+    }
+    default: return { text: "Подключение…", tone: "busy" };
+  }
+}
+
+function sinceText(ms: number) {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "только что";
+  if (minutes < 60) return `${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} ч ${minutes % 60} мин` : `${Math.floor(hours / 24)} д`;
+}
+
+/** Секундный тик для обратного отсчёта переподключения и «подключено N мин». */
+export function useNow(active: boolean, intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [active, intervalMs]);
+  return now;
 }

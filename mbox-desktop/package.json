@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.38",
+  "version": "0.1.44",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
@@ -51,6 +51,9 @@
           "start-claude-responder.cmd",
           "codex-chat-watcher.mjs",
           "claude-inbox-watcher.mjs",
+          "chat-threads.mjs",
+          "inbox-wake.mjs",
+          "model-catalog.mjs",
           "sync-skills.mjs"
         ]
       }

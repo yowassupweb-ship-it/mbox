@@ -10,6 +10,7 @@ export type RealtimeNotice = { id: string; text: string; at: string };
  * через useMboxData: открытая заметка, документ файла. detail — имя сущности («notes») или "".
  */
 export const ENTITY_CHANGED_EVENT = "mbox:entity-changed";
+export const WORKSPACE_VERSION_EVENT = "mbox:workspace-version";
 
 /**
  * Шаг работы агента в реальном времени: агент прислал его через POST /agent/ping, сервер разослал
@@ -95,6 +96,10 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
           }
           if (message.type === "agent_step") {
             window.dispatchEvent(new CustomEvent(AGENT_STEP_EVENT, { detail: message }));
+            return;
+          }
+          if (message.type === "workspace_version") {
+            window.dispatchEvent(new CustomEvent(WORKSPACE_VERSION_EVENT, { detail: message }));
             return;
           }
           if (message.type === "agent_presence") {

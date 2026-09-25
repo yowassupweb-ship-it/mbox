@@ -3,6 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createInboxWake } from "./inbox-wake.mjs";
+import { codexContextUsage, createSessionStore, focusLines, isLostSession, sameThread, threadOf } from "./chat-threads.mjs";
+import { codexCachedModels, publishModelCatalog } from "./model-catalog.mjs";
+
+const FETCH_TIMEOUT_MS = 30_000;
+const LOCK_TOUCH_MS = 30_000;
+const LOCK_STALE_MS = 3 * 60_000;
+// Потолок на один ответ: зависший CLI раньше держал наблюдателя бесконечно. 45 минут хватает и на большую работу.
+const RUN_TIMEOUT_MS = Number(process.env.MBOX_WATCH_RUN_TIMEOUT_MS || 45 * 60_000);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -15,18 +24,32 @@ const accessToken = String(config.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
 const agentName = config.MBOX_AGENT_NAME || "ChatGPT";
 const project = config.MBOX_PROJECT || "MBOX";
-const pollMs = Number(config.MBOX_WATCH_POLL_MS || 5000);
+// Опрос — запасной путь: обычно наблюдателя будит вебсокет (inbox-wake.mjs). Но сообщения из dev-окна
+// (локальный vite) прод не рассылает, и там ответ начинается только по опросу — поэтому он частый.
+const pollMs = Number(config.MBOX_WATCH_POLL_MS || 2000);
+// Heartbeat — не на каждый круг опроса: присутствие считается живым минутами, лишний POST раз в 2 с не нужен.
+const HEARTBEAT_MS = 20_000;
+let lastHeartbeat = 0;
 const startGraceMs = Number(config.MBOX_WATCH_START_GRACE_MS || 15 * 60 * 1000);
 const includeBacklog = ["1", "true", "yes"].includes(String(config.MBOX_WATCH_BACKLOG || "").toLowerCase());
 const startedAt = new Date();
 const cutoffAt = new Date(startedAt.getTime() - startGraceMs);
 const codexCommand = resolveCodexCommand(config.CODEX_COMMAND || "codex");
 const codexModel = config.CODEX_WATCH_MODEL || "";
-const workdir = config.CODEX_WATCH_WORKDIR || root;
-const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 30);
-const CODEX_MODEL_CHOICES = new Set(["gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1", "gpt-5", "gpt-5.5"]);
-const CODEX_EFFORT_CHOICES = new Set(["low", "medium", "high", "xhigh"]);
-const pickModel = (value) => (CODEX_MODEL_CHOICES.has(String(value || "")) ? String(value) : "");
+const workdir = resolveWatchWorkdir(config.CODEX_WATCH_WORKDIR || root);
+const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 10);
+const contextLineLimit = Number(config.MBOX_WATCH_CONTEXT_LINE_LIMIT || 420);
+const codexEffort = config.CODEX_WATCH_EFFORT || "low";
+const sessions = createSessionStore(`codex-${agentName}`);
+// Весь набор уровней из каталога Codex (models_cache.json): у новых моделей есть max и ultra.
+const CODEX_EFFORT_CHOICES = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+const pickModel = (value) => {
+  const model = String(value || "").trim();
+  if (!model || ["default", "auto", "codex default", "codex-cli-default"].includes(model.toLowerCase())) return "";
+  // Модели Claude и Джарвиса (Gemini, Groq) Codex не знает — их выбор из чужого чата игнорируем.
+  if (/^(claude|opus|sonnet|haiku|fable|gemini|openai\/|llama|meta-)/i.test(model)) return "";
+  return /^[A-Za-z0-9._:/@-]{1,120}$/.test(model) ? model : "";
+};
 const pickEffort = (value) => (CODEX_EFFORT_CHOICES.has(String(value || "")) ? String(value) : "");
 const aliases = (config.CODEX_CHAT_ALIASES || "codex,Codex,chatgpt,ChatGPT,кодекс,Кодекс")
   .split(",")
@@ -36,9 +59,9 @@ const accountKey = username.replace(/[^a-z0-9_-]+/gi, "_");
 const seenPath = path.join(os.tmpdir(), `codex-chat-watcher-seen-${accountKey}-${agentName}-${project}.json`);
 const lockPath = path.join(os.tmpdir(), `codex-chat-watcher-${accountKey}-${agentName}-${project}.lock`);
 const logPrefix = `[${agentName} chat]`;
-const MAX_STEP_INPUT = 700;
-const MAX_STEP_OUTPUT = 1500;
-const MAX_STEPS = 60;
+const MAX_STEP_INPUT = Number(config.MBOX_WATCH_STEP_INPUT_LIMIT || 360);
+const MAX_STEP_OUTPUT = Number(config.MBOX_WATCH_STEP_OUTPUT_LIMIT || 600);
+const MAX_STEPS = Number(config.MBOX_WATCH_MAX_STEPS || 24);
 
 let cookie = "";
 let stopping = false;
@@ -46,6 +69,7 @@ let seen = loadSeen();
 let lockFd = null;
 
 acquireSingleInstanceLock();
+setInterval(touchLock, LOCK_TOUCH_MS).unref();
 
 process.on("SIGINT", () => {
   stopping = true;
@@ -58,19 +82,31 @@ process.on("SIGTERM", () => {
 process.on("exit", releaseSingleInstanceLock);
 
 await ping("session_start");
+// Список моделей для чата — кеш каталога самого Codex (~/.codex/models_cache.json, список OpenAI для аккаунта).
+publishModelCatalog({
+  agent: "ChatGPT",
+  collect: async () => codexCachedModels(process.env.CODEX_HOME || path.join(os.homedir(), ".codex")),
+  post: (body) => mboxFetch("/api/mbox/agent/models", { method: "POST", body: JSON.stringify(body) }),
+  log: (message) => console.log(`${logPrefix} ${message}`),
+});
+const wake = createInboxWake({
+  baseUrl,
+  authHeaders: () => ({ ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }), "x-mbox-agent": encodeURIComponent(agentName) }),
+  log: (message) => console.log(`${logPrefix} ${message}`),
+});
 console.log(`${logPrefix} watching @codex mentions on ${baseUrl} project=${project} every ${pollMs}ms`);
 console.log(`${logPrefix} using Codex CLI: ${codexCommand}`);
 console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring chat before ${cutoffAt.toISOString()}`}`);
 
 while (!stopping) {
   try {
-    await ping("heartbeat");
+    if (Date.now() - lastHeartbeat > HEARTBEAT_MS) { lastHeartbeat = Date.now(); await ping("heartbeat"); }
     const item = await nextMention();
-    if (item) await handleMention(item);
+    if (item) { await handleMention(item); continue; }
   } catch (error) {
     console.error(`${logPrefix} ${error.stack || error.message}`);
   }
-  await sleep(pollMs);
+  await wake.wait(pollMs);
 }
 
 console.log(`${logPrefix} stopped`);
@@ -82,7 +118,7 @@ function acquireSingleInstanceLock() {
     fs.writeFileSync(lockFd, String(process.pid));
   } catch (error) {
     const pid = readLockPid();
-    if (pid && isProcessAlive(pid)) {
+    if (pid && isProcessAlive(pid) && lockIsFresh()) {
       console.error(`${logPrefix} another watcher is already running pid=${pid}; exiting`);
       process.exit(0);
     }
@@ -94,6 +130,29 @@ function acquireSingleInstanceLock() {
       console.error(`${logPrefix} could not acquire lock ${lockPath}: ${retryError.message}`);
       process.exit(1);
     }
+  }
+}
+
+/**
+ * Живой наблюдатель трогает lock-файл каждые LOCK_TOUCH_MS (таймер идёт и во время долгого ответа).
+ * Проверки одного pid мало: Windows переиспользует номера процессов, и после сбоя новый наблюдатель
+ * видел «живой» чужой pid в старом lock и молча выходил — чат не отвечал до ручного перезапуска.
+ */
+function lockIsFresh() {
+  try {
+    return Date.now() - fs.statSync(lockPath).mtimeMs < LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function touchLock() {
+  if (lockFd === null) return;
+  try {
+    const now = new Date();
+    fs.utimesSync(lockPath, now, now);
+  } catch {
+    // lock удалили снаружи — следующий запуск просто создаст новый
   }
 }
 
@@ -226,6 +285,7 @@ function saveSeen() {
 
 async function login() {
   const response = await fetch(`${baseUrl}/api/mbox/auth/login`, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -237,6 +297,9 @@ async function login() {
 async function mboxFetch(apiPath, init = {}) {
   if (!accessToken && !cookie) await login();
   const response = await fetch(`${baseUrl}${apiPath}`, {
+    // Без таймаута запрос при обрыве сети висел вечно, и вместе с ним — весь наблюдатель: чат молчал,
+    // пока человек не перезапустит ответчик вручную.
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -268,6 +331,28 @@ async function ping(event, phase, extra) {
       ...(extra || {}),
     }),
   });
+}
+
+function resolveWatchWorkdir(preferred) {
+  const candidates = [
+    preferred,
+    root,
+    process.env.MBOX_REPO_ROOT,
+    path.resolve(process.cwd()),
+    path.join(path.dirname(process.cwd()), "mbox"),
+    path.join(process.cwd(), "mbox"),
+    path.join(os.homedir(), "Desktop", "Mbox", "mbox"),
+    path.join(os.homedir(), "Desktop", "MBOX", "mbox"),
+    path.join(os.homedir(), "Projects", "Mbox", "mbox"),
+    path.join(os.homedir(), "Projects", "MBOX", "mbox"),
+    "E:\\Projects\\Mbox\\mbox",
+    "E:\\Projects\\MBOX\\mbox",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (fs.existsSync(path.join(resolved, "package.json")) && fs.existsSync(path.join(resolved, "scripts"))) return resolved;
+  }
+  return path.resolve(preferred || root);
 }
 
 function clip(value, limit) {
@@ -315,6 +400,9 @@ async function nextMention() {
 }
 
 function isMentionForCodex(item) {
+  // Наблюдатель работает под аккаунтом владельца и с его диском — отвечает только владельцу.
+  // Участникам (mbox_owner: false) отвечает Джарвис, если он у них включён.
+  if (item.props?.mbox_owner === false) return false;
   const to = String(item.props?.to || item.props?.target || item.props?.agent || "");
   if (aliases.some((alias) => to.toLowerCase() === alias.toLowerCase())) return true;
   const text = `${item.title || ""}\n${item.body || ""}`;
@@ -349,6 +437,7 @@ async function handleMention(item) {
         in_reply_to: item.id,
         to: item.agent_name || "Человек",
         source: "codex-chat-watcher",
+        ...(threadOf(item) ? { thread: threadOf(item) } : {}),
         tools_used: outcome.toolsUsed,
         trace: outcome.trace,
         steps: outcome.steps,
@@ -370,7 +459,7 @@ async function handleMention(item) {
       body: message,
       item_type: "agent_error",
       priority: "high",
-      props: { in_reply_to: item.id, source: "codex-chat-watcher" },
+      props: { in_reply_to: item.id, source: "codex-chat-watcher", ...(threadOf(item) ? { thread: threadOf(item) } : {}) },
     });
     await patchInbox(item.id, {
       status: "open",
@@ -436,6 +525,8 @@ async function recentConversationContext(item) {
   const rows = (data.inbox || [])
     .filter((entry) => ["question", "chat", "answer", "agent_response"].includes(entry.item_type))
     .filter((entry) => String(entry.project_id || "") === targetProjectId)
+    .filter((entry) => sameThread(entry, item))
+    .filter((entry) => String(entry.id) !== String(item.id))
     .filter((entry) => new Date(entry.created_at || 0).getTime() <= currentCreatedAt)
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
     .slice(-contextLimit);
@@ -452,57 +543,111 @@ function formatContextLine(entry) {
   const actor = entry.agent_name || "unknown";
   const to = entry.props?.to ? ` -> ${entry.props.to}` : "";
   const re = entry.props?.re || entry.props?.in_reply_to ? `, reply to #${entry.props.re || entry.props.in_reply_to}` : "";
-  const text = String(entry.body || entry.title || "").replace(/\s+/g, " ").trim();
-  const clipped = text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  const text = compactContextText(entry.body || entry.title || "");
+  const clipped = clip(text, contextLineLimit);
   return `[${at}] ${actor}${to} (${entry.item_type} #${entry.id}${re}): ${clipped}`;
 }
 
+function compactContextText(value) {
+  return String(value || "")
+    .replace(/```[\s\S]*?```/g, "[code block]")
+    .replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "[inline image]")
+    .replace(/[A-Za-z0-9+/]{180,}={0,2}/g, "[long encoded data]")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Ответ в чате. Первый запрос чата начинает сессию Codex, следующие продолжают её
+ * (`codex exec resume`) — история уже внутри и идёт из кеша, в запрос уходит только новое сообщение.
+ * См. scripts/chat-threads.mjs.
+ */
 async function runCodex(item) {
-  const outputFile = path.join(os.tmpdir(), `codex-mbox-chat-${item.id}-${Date.now()}.txt`);
+  const thread = threadOf(item);
+  const sessionId = sessions.get(thread);
+  if (sessionId) {
+    try {
+      const outcome = await runCodexTurn(item, sessionId);
+      sessions.remember(thread, outcome.sessionId || sessionId);
+      return outcome;
+    } catch (error) {
+      if (!isLostSession(error)) throw error;
+      console.log(`${logPrefix} сессия чата ${thread} потеряна — начинаю заново`);
+      sessions.forget(thread);
+    }
+  }
+  const outcome = await runCodexTurn(item, "");
+  sessions.remember(thread, outcome.sessionId);
+  return outcome;
+}
+
+function messageLines(item) {
+  return [
+    `Chat item id: ${item.id}`,
+    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id.
+    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to}.`] : []),
+    `From: ${item.agent_name || "unknown"}`,
+    `Title: ${item.title || ""}`,
+    `Body:\n${item.body || ""}`,
+    ...focusLines(item),
+  ];
+}
+
+async function freshPrompt(item) {
   const conversationContext = await recentConversationContext(item);
-  const prompt = [
+  return [
     "You were woken by an @codex mention in the MBOX project chat.",
     `Your canonical agent name is ${agentName}.`,
     "Answer the chat message below. If the user asks for code work, do it in the repo and summarize the result.",
     "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
     "Keep the final answer concise and directly useful.",
+    "Spend tokens carefully: avoid broad repo scans and huge command outputs; prefer targeted rg with explicit paths and exclusions for build artifacts, binaries and generated assets.",
     "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
     // См. claude-inbox-watcher.mjs — тот же пробел без языкового сигнала уводил ответы на английский.
     "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
+    // 24.09: Codex правил .docx встроенным PowerShell (Expand-Archive в %TEMP%, регулярки по XML, Compress-Archive
+    // и перезапись файла в «Загрузках») — Defender принял это за шифровальщик (Trojan:Win32/Commando.A!ml) и блокировал.
+    "Editing Word/Excel/PowerPoint files: never unzip/rezip them with inline PowerShell (Expand-Archive, Compress-Archive, [IO.Compression]) or rewrite their XML with regex in %TEMP% — Windows Defender flags that pattern as ransomware and blocks it. Use the mbox-prod MCP tools (workspace_read_document, workspace_write_docx, workspace_read_table, workspace_write_cells, workspace_format_cells) for files in MBOX local folders — colors, fonts, borders and number formats go through workspace_format_cells, checked with workspace_read_table styles=true, not through Python; otherwise write a small Python script with python-docx/openpyxl. Always keep the original: save the result next to it (e.g. name.edited.docx) unless the owner explicitly asked to overwrite.",
+    // 24.09: «сделай шрифт не жирным» стоило 20+ шагов и 580k токенов — агент искал render_docx.py, LibreOffice
+    // и Word COM, чтобы визуально проверить результат. Каждый шаг пересылает весь контекст заново.
+    "Routine requests (edit a file, fix formatting, rename, small change): do it in the fewest possible steps — ideally one tool call to change and one to verify by reading the result back. Do not search for renderers, converters or viewers (LibreOffice/soffice, Word COM, render scripts) and do not verify visually unless the owner asked for it. Do not explore the filesystem beyond what the task needs. If a skill's instructions demand heavier verification, skip it for routine edits.",
+    "If a command or tool fails with access denied / permission denied / EACCES / EPERM, do not work around it (no copying elsewhere, no elevation, no retries under another path): stop and end your answer with a short question to the owner naming exactly what access is needed and why.",
     // Длинный отчёт в чате терялся — теперь он всегда отдельным файлом со ссылкой (MCP save_report).
     "If the answer is a report, audit, research or anything longer than ~20 lines, first save the full text as Markdown with the mbox-prod MCP tool save_report, then reply in chat with a short summary (5-10 lines) and the returned markdown_link — the owner must get a clickable link.",
     // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
     "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
+    "Documents and tables: MBOX notes (note_search, note_read, note_write, note_edit) and files in the owner's local folders (workspace_edit_file for small text edits instead of rewriting a whole file, workspace_read_table / workspace_write_cells / workspace_format_cells for .xlsx/.csv, workspace_read_document / workspace_write_docx for Word). Pass show=true when the owner should watch the change happen — the document opens as a tab in MBOX.",
     "",
     conversationContext,
     "",
-    `Chat item id: ${item.id}`,
-    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id, текст есть в контексте выше.
-    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to} — read that message in the context above and answer in its thread.`] : []),
-    `From: ${item.agent_name || "unknown"}`,
-    `Title: ${item.title || ""}`,
-    `Body:\n${item.body || ""}`,
+    ...messageLines(item),
   ].join("\n");
+}
 
-  const args = [
-    "exec",
-    "-C",
-    workdir,
-    "--sandbox",
-    "danger-full-access",
-    "--json",
-    "--output-last-message",
-    outputFile,
-  ];
-  const wantedModel = pickModel(item.props?.model) || codexModel;
-  const wantedEffort = pickEffort(item.props?.effort);
+async function runCodexTurn(item, resumeId) {
+  const outputFile = path.join(os.tmpdir(), `codex-mbox-chat-${item.id}-${Date.now()}.txt`);
+  const prompt = resumeId
+    ? ["New message in this same MBOX chat. Answer it the same way as before (Russian, concise; the watcher posts your final answer).", "", ...messageLines(item)].join("\n")
+    : await freshPrompt(item);
+
+  // resume не знает -C и --sandbox: папка берётся из сессии, режим песочницы — через -c.
+  const args = resumeId
+    ? ["exec", "resume", "-c", 'sandbox_mode="danger-full-access"', "--skip-git-repo-check", "--json", "--output-last-message", outputFile]
+    : ["exec", "-C", workdir, "--sandbox", "danger-full-access", "--skip-git-repo-check", "--json", "--output-last-message", outputFile];
+  const wantedModel = pickModel(item.props?.model) || pickModel(codexModel);
+  const wantedEffort = pickEffort(item.props?.effort) || pickEffort(codexEffort);
   if (wantedModel) args.push("-m", wantedModel);
   if (wantedEffort) args.push("-c", `model_reasoning_effort="${wantedEffort}"`);
+  if (resumeId) args.push(resumeId);
   args.push(prompt);
 
-  const outcome = await spawnCodex(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName } }, item.id);
+  const outcome = await spawnCodex(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName, MBOX_AGENT_CLIENT: "codex-chat-watcher", MBOX_MCP_PUSH: "off" } }, item.id);
   const answer = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8").trim() : "";
   fs.rmSync(outputFile, { force: true });
+  if (outcome.stats) {
+    outcome.stats.resumed = Boolean(resumeId);
+    Object.assign(outcome.stats, codexContextUsage(outcome.sessionId || resumeId) || {});
+  }
   return { ...outcome, text: answer || outcome.text, model: wantedModel || "codex default", effort: wantedEffort || "" };
 }
 
@@ -510,8 +655,9 @@ function spawnCodex(command, args, options, inboxId = "") {
   return new Promise((resolve, reject) => {
     // windowsHide: без него Windows открывала CLI агента в отдельном видимом окне консоли.
     const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const runTimer = armRunTimeout(child);
     const startedAt = Date.now();
-    const state = { text: "", toolsUsed: [], trace: [], steps: [], stats: null, failure: "" };
+    const state = { text: "", toolsUsed: [], trace: [], steps: [], stats: null, failure: "", sessionId: "" };
     let stderr = "";
     let stdout = "";
     let buffer = "";
@@ -540,6 +686,7 @@ function spawnCodex(command, args, options, inboxId = "") {
     });
     child.on("error", reject);
     child.on("close", (code) => {
+      clearTimeout(runTimer);
       if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase, inboxId);
       ping("heartbeat", "").catch(() => {});
       if (code === 0) {
@@ -565,6 +712,10 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
   try {
     event = JSON.parse(trimmed);
   } catch {
+    return;
+  }
+  if (event.type === "thread.started" && event.thread_id) {
+    state.sessionId = String(event.thread_id);
     return;
   }
   if (event.type === "turn.started") {
@@ -630,6 +781,8 @@ function codexStats(usage, durationMs) {
 function codexToolName(item) {
   const type = String(item.type || "");
   if (type === "agent_message") return "";
+  // Вызов MCP у Codex: имя инструмента в item.tool, а type — общее «mcp_tool_call».
+  if (item.tool) return item.server ? `mcp__${item.server}__${item.tool}` : String(item.tool);
   if (item.name || item.tool_name) return String(item.name || item.tool_name).trim();
   if (item.command || item.cmd) return "shell_command";
   if (/patch/i.test(type)) return "apply_patch";
@@ -650,11 +803,26 @@ function codexToolInput(item) {
 }
 
 function codexToolOutput(item) {
+  // Вывод команды Codex кладёт в aggregated_output; без него в чате у упавшей команды было только «failed».
+  if (typeof item.aggregated_output === "string") {
+    const exit = item.exit_code ? `[exit ${item.exit_code}]` : "";
+    return compactToolOutput([item.aggregated_output.trim(), exit].filter(Boolean).join("\n"));
+  }
   const raw = item.output || item.result || item.content || item.text || item.status || "";
-  if (typeof raw === "string") return raw;
+  if (typeof raw === "string") return compactToolOutput(raw);
   if (Array.isArray(raw)) return raw.map((part) => (typeof part === "string" ? part : part?.text || "")).filter(Boolean).join("\n");
-  if (raw && typeof raw === "object") { try { return JSON.stringify(raw, null, 1); } catch { return ""; } }
+  if (raw && typeof raw === "object") { try { return compactToolOutput(JSON.stringify(raw, null, 1)); } catch { return ""; } }
   return "";
+}
+
+function compactToolOutput(value) {
+  return String(value || "")
+    .replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi, "[inline image]")
+    .replace(/[A-Za-z0-9+/]{240,}={0,2}/g, "[long encoded data]")
+    .split(/\r?\n/)
+    .slice(0, 80)
+    .map((line) => line.length > 220 ? `${line.slice(0, 220)}...` : line)
+    .join("\n");
 }
 
 function codexToolError(item) {
@@ -696,3 +864,11 @@ function describeCliFailure(command, code, stdout, stderr) {
   return error;
 }
 
+/** Зависший CLI (сеть, ожидание ввода) снимаем по таймауту — вместе с дочерними процессами. */
+function armRunTimeout(child) {
+  return setTimeout(() => {
+    console.error(`${logPrefix} ответ дольше ${Math.round(RUN_TIMEOUT_MS / 60000)} мин — останавливаю CLI`);
+    if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+    else child.kill("SIGKILL");
+  }, RUN_TIMEOUT_MS);
+}

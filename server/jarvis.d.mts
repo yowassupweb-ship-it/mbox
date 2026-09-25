@@ -23,12 +23,13 @@ export function groqComplete(messages: Row[], tools?: unknown[] | null, purpose?
 export function geminiComplete(messages: Row[], tools?: unknown[] | null, purpose?: string, signal?: AbortSignal, effort?: string, model?: string, withThinking?: boolean): Promise<Row>;
 export function bulkUpsertTourSheets(sourceId: string, items: TourSheetItem[]): Promise<{ upserted: number; removed: number }>;
 export function refreshDataSourceById(id: string, options?: { inboxId?: unknown }): Promise<{ ok: boolean; summary: string; error?: string }>;
-export function runJarvisTool(client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: Row[] }> }, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[], inboxId?: unknown): Promise<string>;
+export function runJarvisTool(client: { query: (sql: string, values?: unknown[]) => Promise<{ rows: Row[] }> }, name: string | undefined, rawArgs: string | undefined, projectList: { id: string; name: string }[], inboxId?: unknown, viewer?: { userId: string; all: boolean; projectIds: string[] } | null): Promise<string>;
 export function searchTerms(query: unknown): string[];
 export function replyAsJarvis(item: { id: unknown; project_id?: unknown; title?: unknown; body?: unknown; props?: Record<string, unknown> }): Promise<void>;
 
 export type JarvisEffort = { id: string; label: string; hint: string };
-export type JarvisModel = { id: string; provider: string; label: string; role: string; available: boolean; agent?: string };
+export type JarvisModel = { id: string; provider: string; label: string; role: string; available: boolean; agent?: string; efforts?: string[]; default_effort?: string };
 export const JARVIS_EFFORTS: JarvisEffort[];
-export function jarvisModels(): { models: JarvisModel[]; efforts: JarvisEffort[]; default_model: string; default_effort: string };
+export function jarvisModels(): Promise<{ models: JarvisModel[]; efforts: JarvisEffort[]; effort_labels: Record<string, { label: string; hint: string }>; default_model: string; defaults: Record<string, string>; sources: Record<string, { source: string; fetched_at?: string; live: boolean }>; default_effort: string }>;
+export function publishAgentModels(body: unknown): Promise<{ agent: string; models: number; default_model: string }>;
 export function describeRateLimit(info: { provider?: string; model?: string; wait_seconds?: number; detail?: string } | null, prefix?: string): string;

@@ -11,9 +11,11 @@ import { WebSocket, WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
-import { ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
+import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
+import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
+import { TOOL_CATALOG } from "./server/tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
@@ -21,7 +23,7 @@ import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import {
   configureJarvis, JARVIS_NAME, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
-  bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, jarvisModels, type TourSheetItem,
+  bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, jarvisModels, publishAgentModels, type TourSheetItem,
 } from "./server/jarvis.mjs";
 
 function loadLocalEnv() {
@@ -143,6 +145,58 @@ function broadcastRealtime(clients: Set<WebSocket>, type: string, payload: Recor
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) client.send(message);
   }
+}
+
+/**
+ * Dev-окно слушает вебсокет локального vite, а наблюдатели Claude и ChatGPT пишут ответы на прод —
+ * прод рассылает entity_changed только своим клиентам, и dev-окно их не видело: ответ лежал в базе,
+ * а в чате висело «работает… 80с». Подписываемся на прод и пересылаем его события сюда как есть.
+ * Нужны MBOX_PASSWORD (или MBOX_TOKEN) в окружении; без них ретрансляции просто нет.
+ */
+function relayRemoteRealtime(clients: Set<WebSocket>) {
+  const remote = (process.env.MBOX_URL || "https://mbox.shar-os.ru").replace(/\/+$/, "");
+  const token = String(process.env.MBOX_TOKEN || "").trim();
+  const password = String(process.env.MBOX_PASSWORD || "");
+  if (process.env.MBOX_REMOTE_REALTIME === "off" || (!token && !password)) return () => {};
+  const RELAYED = new Set(["entity_changed", "agent_presence", "agent_step", "open_tab", "skill_file_changed"]);
+  let stopped = false;
+  let socket: WebSocket | null = null;
+  let cookie = "";
+
+  async function connect() {
+    if (stopped) return;
+    try {
+      if (!token && !cookie) {
+        const response = await fetch(`${remote}/api/mbox/auth/login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: process.env.MBOX_USERNAME || "Admin", password }),
+          signal: AbortSignal.timeout(15000),
+        });
+        cookie = response.ok ? response.headers.get("set-cookie")?.split(";")[0] || "" : "";
+        if (!cookie) throw new Error(`login ${response.status}`);
+      }
+      socket = new WebSocket(`${remote.replace(/^http/i, "ws")}/api/mbox/realtime`, { headers: token ? { authorization: `Bearer ${token}` } : { cookie } });
+      socket.on("message", (data) => {
+        const text = String(data);
+        try {
+          if (!RELAYED.has(String(JSON.parse(text).type))) return;
+        } catch {
+          return;
+        }
+        for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(text);
+      });
+      socket.on("error", () => {});
+      socket.on("unexpected-response", () => { cookie = ""; });
+      socket.on("close", () => { if (!stopped) setTimeout(() => void connect(), 5000); });
+    } catch (error) {
+      console.error(`remote realtime relay: ${(error as Error).message}`);
+      if (!stopped) setTimeout(() => void connect(), 15000);
+    }
+  }
+
+  void connect();
+  return () => { stopped = true; socket?.close(); };
 }
 
 type MemoryEmbeddingRow = {
@@ -374,95 +428,7 @@ async function queryPostgres<T extends QueryResultRow>(sql: string, values: unkn
 // во фронтенде, по двум причинам: страницу «Инструменты» видно из любого клиента одинаково, и
 // desktop-оболочка берёт команды ИМЕННО отсюда, а не из того, что прислал интерфейс. Второе
 // важно: Electron открывает удалённую страницу, и запускать произвольную строку из неё нельзя.
-const TOOL_CATALOG = [
-  {
-    id: "obscura",
-    name: "Obscura",
-    kind: "headless browser",
-    status: "локально подключается",
-    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\obscura",
-    repo: "https://github.com/h4ckf0r0day/obscura",
-    docs: "https://docs.obscura.sh",
-    icon: "/assets/icons/tools/obscura.png",
-    summary: "Лёгкий браузерный движок для агентной автоматизации: загрузка страниц, stealth, CDP, скриншоты, PDF и MCP без запуска Chromium.",
-    capabilities: ["web extraction", "screenshots", "PDF export", "CDP", "Playwright/Puppeteer", "MCP browser"],
-    commands: [
-      { label: "Сборка с render", command: "cargo build --release -p obscura-cli --bins --features render", env: { CARGO_INCREMENTAL: "0", CARGO_BUILD_JOBS: "2" }, runnable: true },
-      { label: "Сервер CDP", command: "target\\release\\obscura.exe serve --port 9222", runnable: true, long_running: true },
-      { label: "MCP stdio", command: "target\\release\\obscura.exe mcp", runnable: false },
-      { label: "MCP HTTP", command: "target\\release\\obscura.exe mcp --http --port 3000", runnable: true, long_running: true },
-    ],
-  },
-  {
-    id: "figma",
-    name: "Figma MCP",
-    kind: "design context",
-    status: "нужна авторизация Figma",
-    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox",
-    repo: "https://www.figma.com/mcp-catalog/",
-    docs: "https://developers.figma.com/docs/figma-mcp-server/",
-    icon: "/assets/icons/tools/figma.png",
-    summary: "Официальный MCP Figma: читает дизайн-контекст, компоненты, переменные и Dev Mode данные; remote MCP требует авторизации, desktop MCP включается в Figma Desktop.",
-    capabilities: ["design context", "components", "variables", "Dev Mode", "write to canvas"],
-    commands: [
-      { label: "Открыть Figma", command: "start \"\" \"figma://\"", runnable: true },
-      { label: "Проверить desktop MCP", command: "powershell -NoProfile -Command \"try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3845/mcp -TimeoutSec 3).StatusCode } catch { $_.Exception.Message }\"", runnable: true },
-      { label: "Codex remote MCP", command: "codex mcp add figma --url https://mcp.figma.com/mcp", runnable: true },
-      { label: "Claude desktop MCP", command: "claude mcp add --transport http figma-desktop http://127.0.0.1:3845/mcp", runnable: true },
-    ],
-  },
-  {
-    id: "playwright-mcp",
-    name: "Playwright MCP",
-    kind: "browser automation",
-    status: "установлен npm",
-    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
-    repo: "https://github.com/microsoft/playwright-mcp",
-    docs: "https://playwright.dev/docs/getting-started-mcp",
-    icon: "/assets/icons/tools/playwright.png",
-    summary: "Официальный Playwright MCP для кликов, форм, снимков accessibility tree, скриншотов и browser QA. Настроен на системный Chrome, чтобы не ждать отдельный Chromium.",
-    capabilities: ["clicks", "forms", "accessibility snapshots", "screenshots", "PDF", "local QA"],
-    commands: [
-      { label: "MCP HTTP", command: "npx @playwright/mcp --browser chrome --host 127.0.0.1 --port 9310 --caps vision,pdf", runnable: true, long_running: true },
-      { label: "MCP stdio", command: "npx @playwright/mcp --browser chrome --caps vision,pdf", runnable: false },
-      { label: "Установить Chromium", command: "npx playwright install chromium", env: { PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000" }, runnable: true },
-    ],
-  },
-  {
-    id: "chrome-devtools-mcp",
-    name: "Chrome DevTools MCP",
-    kind: "browser debugger",
-    status: "установлен npm",
-    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
-    repo: "https://github.com/ChromeDevTools/chrome-devtools-mcp",
-    docs: "https://developer.chrome.com/docs/devtools/agents/get-started",
-    icon: "/assets/icons/tools/chrome-devtools.png",
-    summary: "Официальный Chrome DevTools MCP для console/network/performance/DOM аудита и проверки живого Chrome из агента.",
-    capabilities: ["console", "network", "performance", "DOM", "screenshots", "debugging"],
-    commands: [
-      { label: "MCP stable Chrome", command: "npx chrome-devtools-mcp --channel stable --viewport 1440x900", runnable: true, long_running: true },
-      { label: "MCP slim", command: "npx chrome-devtools-mcp --channel stable --slim --viewport 1440x900", runnable: true, long_running: true },
-      { label: "Chrome debug 9222", command: "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --remote-debugging-port=9222 --user-data-dir=\"%TEMP%\\mbox-chrome-debug\"", runnable: true, long_running: true },
-      { label: "Подключиться к 9222", command: "npx chrome-devtools-mcp --browserUrl http://127.0.0.1:9222", runnable: true, long_running: true },
-    ],
-  },
-  {
-    id: "browserbase-stagehand",
-    name: "Browserbase + Stagehand",
-    kind: "cloud browser",
-    status: "пакеты установлены, нужны ключи",
-    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
-    repo: "https://github.com/browserbase/mcp-server-browserbase",
-    docs: "https://docs.browserbase.com/",
-    icon: "/assets/icons/tools/browserbase.png",
-    summary: "Облачный браузерный MCP на Browserbase со Stagehand для долгих web-сценариев, извлечения данных и сессий с прокси. Требует BROWSERBASE_API_KEY и BROWSERBASE_PROJECT_ID.",
-    capabilities: ["cloud sessions", "Stagehand act/extract/observe", "proxies", "stealth", "long-running browsing"],
-    commands: [
-      { label: "MCP HTTP", command: "npx @browserbasehq/mcp --browserbaseApiKey %BROWSERBASE_API_KEY% --browserbaseProjectId %BROWSERBASE_PROJECT_ID% --host 127.0.0.1 --port 9320 --browserWidth 1440 --browserHeight 900", runnable: true, long_running: true },
-      { label: "Stagehand check", command: "node -e \"import('@browserbasehq/stagehand').then(() => console.log('Stagehand OK'))\"", runnable: true },
-    ],
-  },
-];
+// Каталог инструментов — server/tool-catalog.mjs (общий с прод-сервером).
 
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) {
   if (!memoryId || !action) return null;
@@ -885,8 +851,8 @@ async function currentUser(req: IncomingMessage) {
   const apiToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : String(req.headers["x-mbox-token"] || "").trim();
   if (apiToken) {
     const tokenHash = createHash("sha256").update(apiToken).digest("hex");
-    const result = await queryPostgres<{ id: string; username: string; role: string; token_id: string; last_used_at: string | null }>(
-      `SELECT u.id::text, u.username, u.role, t.id::text AS token_id, t.last_used_at::text
+    const result = await queryPostgres<{ id: string; username: string; role: string; jarvis_enabled: boolean; token_id: string; last_used_at: string | null }>(
+      `SELECT u.id::text, u.username, u.role, COALESCE((to_jsonb(u)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled, t.id::text AS token_id, t.last_used_at::text
        FROM account_tokens t JOIN users u ON u.id = t.user_id
        WHERE t.token_hash = $1`,
       [tokenHash],
@@ -895,19 +861,26 @@ async function currentUser(req: IncomingMessage) {
     if (found && (!found.last_used_at || Date.now() - Date.parse(found.last_used_at) > 300000)) {
       await queryPostgres("UPDATE account_tokens SET last_used_at = now() WHERE id = $1", [found.token_id]);
     }
-    return found ? { id: found.id, username: found.username, role: found.role } : null;
+    return found ? { id: found.id, username: found.username, role: found.role, jarvis_enabled: found.jarvis_enabled } : null;
   }
   const token = getCookie(req, "mbox_session");
   if (!token) return null;
-  const result = await queryPostgres<{ id: string; username: string; role: string }>(
-    `SELECT u.id::text, u.username, u.role
+  const result = await queryPostgres<{ id: string; username: string; role: string; jarvis_enabled: boolean; session_id: string; last_used_at: string | null }>(
+    `SELECT u.id::text, u.username, u.role, COALESCE((to_jsonb(u)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled,
+            s.id::text AS session_id, (to_jsonb(s)->>'last_used_at') AS last_used_at
      FROM auth_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = encode(sha256($1::bytea), 'hex')
        AND s.expires_at > now()`,
     [token],
   );
-  return result.rows[0] ?? null;
+  const found = result.rows[0];
+  if (!found) return null;
+  // Та же отметка «пользовались», что в прод-сервере: по ней при входе вытесняются забытые сессии.
+  if (!found.last_used_at || Date.now() - new Date(found.last_used_at).getTime() > 300000) {
+    queryPostgres("UPDATE auth_sessions SET last_used_at = now() WHERE id = $1", [found.session_id]).catch(() => {});
+  }
+  return { id: found.id, username: found.username, role: found.role, jarvis_enabled: found.jarvis_enabled };
 }
 
 async function requireUser(req: IncomingMessage, res: ServerResponse) {
@@ -959,6 +932,7 @@ function mboxDevApi() {
       });
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
+      ensureChatThreadsSchema(queryPostgres).catch((error: Error) => console.error(`chat threads schema: ${error.message}`));
       ensureBrowserStateSchema(queryPostgres).catch((error: Error) => console.error(`browser state schema: ${error.message}`));
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
@@ -987,7 +961,8 @@ function mboxDevApi() {
       });
 
       const realtimeTimer = setInterval(() => broadcastRealtime(realtimeClients, "server_tick"), 5000);
-      server.httpServer?.on("close", () => clearInterval(realtimeTimer));
+      const stopRelay = relayRemoteRealtime(realtimeClients);
+      server.httpServer?.on("close", () => { clearInterval(realtimeTimer); stopRelay(); });
 
       // publicDir: false (ниже в defineConfig) отключает автораздачу public/ — сделано специально,
       // чтобы Vite не путал его с outDir build (тоже public/, иначе предупреждение о конфликте).
@@ -1091,10 +1066,28 @@ function mboxDevApi() {
           })) return;
           const ownerOnly = sessionUser.role === "owner";
           const devActor = actor || await resolveRequestActor(req);
-          if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: ownerOnly })) return;
-          if (await handleStorageApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+          if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: true, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (url.pathname.startsWith("/api/mbox/storage")) {
+            // Зеркало прод-логики: папки хранилища по проектам, участнику — только свои (см. storageAccessFor на проде).
+            const projects = (await queryPostgres<{ id: string; name: string }>(
+              "SELECT id::text, name FROM projects WHERE $1::boolean OR id = ANY($2::bigint[]) ORDER BY name",
+              [devScope.all, devScope.projectIds],
+            )).rows;
+            const labels = Object.fromEntries(projects.map((project) => [`projects/${project.id}/`, project.name]));
+            const roots = projects.map((project) => ({ prefix: `projects/${project.id}/`, label: project.name }));
+            const viewer = { ...devScope, userId: String(sessionUser.id) };
+            const access = ownerOnly ? null : {
+              roots,
+              canUse: async (key: string) => {
+                if (roots.some((root) => key.startsWith(root.prefix))) return true;
+                const note = key.match(/^notes\/(\d+)\//);
+                return Boolean(note) && canAccessNote(queryPostgres, note![1], viewer);
+              },
+            };
+            if (await handleStorageApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, access, labels, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+          }
           // Зеркало прод-ручек состояния встроенного браузера (см. server/browser-state.mjs).
-          if (await handleBrowserStateApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, userId: sessionUser.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+          if (await handleBrowserStateApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: true, userId: sessionUser.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
           if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
 
           if (url.pathname === "/api/mbox/agent/structure") {
@@ -1267,7 +1260,15 @@ function mboxDevApi() {
 
           // Зеркало прод-ручки: список моделей и «усилий» для чата (см. server/jarvis.mjs).
           if (url.pathname === "/api/mbox/agent/models" && req.method === "GET") {
-            return sendJson(res, 200, jarvisModels());
+            return sendJson(res, 200, await jarvisModels());
+          }
+          if (url.pathname === "/api/mbox/agent/models" && req.method === "POST") {
+            if (sessionUser.role !== "owner") return sendJson(res, 403, { error: "owner_required" });
+            try {
+              return sendJson(res, 200, await publishAgentModels(await readBody(req)));
+            } catch (error) {
+              return sendJson(res, 400, { error: (error as Error).message });
+            }
           }
 
           if (url.pathname === "/api/mbox/agent/groq-usage" && req.method === "GET") {
@@ -2413,7 +2414,8 @@ function mboxDevApi() {
             // См. server/mbox-server.mjs — только вопросы, служебные agent_error/agent_response не будят Джарвиса.
             const isQuestion = String(body.item_type || "") === "question";
             const isReplyToJarvis = String(body.item_type || "") === "answer" && senderName === "Человек" && addressedTo === JARVIS_NAME;
-            if (result.rows[0] && ((isQuestion && (senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME)) || isReplyToJarvis)) {
+            const jarvisOn = sessionUser.role === "owner" || (sessionUser as { jarvis_enabled?: boolean }).jarvis_enabled !== false;
+            if (result.rows[0] && jarvisOn && ((isQuestion && (senderName === "Человек" || senderName === "Claude") && (!addressedTo || addressedTo === JARVIS_NAME)) || isReplyToJarvis)) {
               // См. server/mbox-server.mjs — тот же лимит против зацикливания агентов.
               let allowChain = senderName === "Человек";
               if (!allowChain) {
@@ -2439,6 +2441,8 @@ function mboxDevApi() {
             return sendJson(res, 201, { inbox_item: result.rows[0] });
           }
 
+          if (await handleChatThreadsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, owner: sessionUser.role === "owner" })) return;
+
           if (url.pathname === "/api/mbox/agent/inbox" && req.method === "GET") {
             // См. server/mbox-server.mjs — фильтры для MCP list_inbox; без параметров ответ прежний.
             const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 500);
@@ -2447,7 +2451,8 @@ function mboxDevApi() {
             const search = url.searchParams.get("q")?.trim() || "";
             const beforeParam = url.searchParams.get("before_id") || "";
             const beforeId = /^\d+$/.test(beforeParam) ? beforeParam : "";
-            const filtered = Boolean(agent || itemType || search || beforeId);
+            const thread = THREAD_ID.test(url.searchParams.get("thread") || "") ? String(url.searchParams.get("thread")) : "";
+            const filtered = Boolean(agent || itemType || search || beforeId || thread);
             const result = await queryPostgres(
               `SELECT ${INBOX_COLUMNS} FROM agent_inbox
                WHERE ($1 = '' OR agent_name = $1)
@@ -2455,9 +2460,10 @@ function mboxDevApi() {
                  AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%')
                  AND (NULLIF($4, '') IS NULL OR id < NULLIF($4, '')::bigint)
                  AND (props->>'mbox_user_id' = $6 OR ($7::boolean AND NOT (props ? 'mbox_user_id')))
+                 AND ($8 = '' OR props->>'thread' = $8)
                ORDER BY ${filtered ? "id DESC" : "updated_at DESC"}
                LIMIT $5`,
-              [agent, itemType, search, beforeId, limit, String(sessionUser.id), sessionUser.role === "owner"],
+              [agent, itemType, search, beforeId, limit, String(sessionUser.id), sessionUser.role === "owner", thread],
             );
             return sendJson(res, 200, { inbox: result.rows });
           }
