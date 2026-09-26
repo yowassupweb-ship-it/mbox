@@ -208,7 +208,8 @@ body.wb-resizing * {
   border: 1px solid var(--wb-line);
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.03);
-  color: var(--text-muted);
+  /* --text-muted на подложке поиска — 4.3:1, ниже AA. */
+  color: var(--text-2);
   font: inherit;
   font-size: 10px;
 }
@@ -3297,6 +3298,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 /* Консоль = один чат: вкладки «Общий · Claude · ChatGPT» и сам разговор (см. ConsoleArea.tsx). */
 .wb-console { grid-template-rows: 34px minmax(0, 1fr); }
+/* Обёртка роли tablist: в раскладке её нет, дети ведут себя как прямые потомки ленты. */
+.wb-tablist-contents { display: contents; }
+
 .wb-chat-kinds {
   display: flex;
   align-items: center;

@@ -1089,12 +1089,12 @@
 /* Строка под вводом: слева подсказки (обрезаются на узком окне), справа пикеры. Разделены,
    потому что overflow: hidden у подсказок срезал раскрытое меню пикера. */
 .console-input-meta { min-width: 0; display: flex; align-items: center; gap: 9px; }
-.console-input-hints { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 9.5px; line-height: 1; white-space: nowrap; }
+.console-input-hints { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; overflow: hidden; color: var(--text-muted); font-size: 10px; line-height: 1; white-space: nowrap; }
 .console-input-pickers { flex: none; display: flex; align-items: center; gap: 6px; }
 .console-input-pickers .console-picker-menu { left: auto; right: 0; max-width: min(280px, calc(100vw - 24px)); }
 .console-input-hints b { color: var(--text-2); font-weight: var(--weight-medium); }
 .console-input-newline { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
-.console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--surface-chrome); color: var(--text-muted); font: inherit; text-align: center; }
+.console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--surface-chrome); color: var(--text-2); font: inherit; text-align: center; }
 
 /* Подсказки по @/,/,$,# — плавающий список над composer'ом, не над логом. Раньше был голый список
    строк текста; теперь каждая строка — иконка триггера в цветном кружке + значение + пояснение,

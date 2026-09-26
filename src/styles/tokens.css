@@ -44,7 +44,8 @@
   /* Текст — чуть холодный белый, в тон акцентному циану */
   --text-main: #f5f5f7;
   --text-2: rgba(245, 245, 247, 0.72);
-  --text-muted: rgba(245, 245, 247, 0.5);
+  /* 0.5 давало 4.1:1 на --bg-raised — ниже AA (4.5); 0.56 проходит на всех фонах темы. */
+  --text-muted: rgba(245, 245, 247, 0.56);
 
   /* Границы видимые, не декоративные — терминальные боксы читаются по контуру, не по тени */
   --border-color: rgba(255, 255, 255, 0.11);
@@ -87,7 +88,8 @@
   --state-live: #4da3ff;
   --state-warn: #ffb000;
   --state-off: #5b6b66;
-  --state-danger: #ff4d5e;
+  /* #ff4d5e на --element-bg — 4.2:1; как текст (ошибки, «нет») нужен AA. */
+  --state-danger: #ff7582;
 
   --eyebrow: #88bdff;
   --code-bg: rgba(255, 255, 255, 0.06);
@@ -186,11 +188,13 @@
   --surface-selected: rgba(0, 122, 255, 0.12);
   --text-main: #1d1d1f;
   --text-2: rgba(29, 29, 31, 0.72);
-  --text-muted: rgba(29, 29, 31, 0.5);
+  /* 0.5 — 3.2:1 на белом, подписи не проходили AA. */
+  --text-muted: rgba(29, 29, 31, 0.64);
   --border-color: rgba(22, 24, 29, 0.12);
   --hairline: rgba(22, 24, 29, 0.12);
-  --accent-color: #007aff;
-  --accent-2: #007aff;
+  /* #007aff как текст (ссылки, активные вкладки) — 3.7–4.0:1; #0066cc проходит AA на всех фонах. */
+  --accent-color: #0066cc;
+  --accent-2: #0066cc;
   --accent-chin: #0059bd;
   /* Белый на #007aff — 4.0:1, ниже AA для обычного текста. */
   --accent-fill: #0071e3;
@@ -203,7 +207,13 @@
   --glass: rgba(255, 255, 255, 0.82);
   --glass-brd: rgba(22, 24, 29, 0.12);
   --glass-shadow: 0 18px 48px rgba(31, 35, 42, 0.14), 0 0 0 1px var(--border-color);
-  --state-live: #007aff;
+  --state-live: #0066cc;
+  /* Цвета состояний тёмной темы (#35c759, #ffb000, #ff4d5e) на белом — 1.8–3.2:1: галочки и
+     предупреждения почти не читались. Свои, проходящие AA. */
+  --state-ok: #1a7f37;
+  --state-ok-soft: #248a3d;
+  --state-warn: #9a5b00;
+  --state-danger: #d70015;
   --eyebrow: #0066cc;
   --code-bg: rgba(22, 24, 29, 0.055);
   --code-text: #0b6b63;
@@ -222,7 +232,7 @@
   --surface-selected: rgba(77, 163, 255, 0.17);
   --text-main: #f5f5f7;
   --text-2: rgba(245, 245, 247, 0.72);
-  --text-muted: rgba(245, 245, 247, 0.46);
+  --text-muted: rgba(245, 245, 247, 0.5);
   --border-color: rgba(255, 255, 255, 0.1);
   --hairline: rgba(255, 255, 255, 0.1);
   --glass: rgba(10, 10, 12, 0.84);

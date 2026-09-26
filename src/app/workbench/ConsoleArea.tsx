@@ -107,7 +107,8 @@ export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, ta
 
   return (
     <div className="wb-console">
-      <div className="wb-chat-kinds" role="tablist" aria-label="Чаты">
+      <div className="wb-chat-kinds">
+        <div className="wb-tablist-contents" role="tablist" aria-label="Чаты">
         {kinds.map((item) => {
           const state = stateOf(item);
           const active = item.peer === kind.peer;
@@ -127,6 +128,7 @@ export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, ta
             </button>
           );
         })}
+        </div>
         <div className="wb-chat-head-slot" ref={setHeadSlot} />
         {actions}
       </div>

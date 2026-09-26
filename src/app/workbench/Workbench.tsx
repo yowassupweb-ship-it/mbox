@@ -719,10 +719,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
         <section className="wb-panel" aria-label="Нижняя панель">
           <div className="wb-sash is-horizontal" onPointerDown={resizePanel} role="separator" aria-orientation="horizontal" aria-label="Высота нижней панели" />
-          <div className="wb-panel-tabs" role="tablist">
-            {consoleDock === "bottom" && <PanelTabButton active={effectivePanelTab === "console"} onClick={() => setPanelTab("console")} label="Чат" badge={working.length ? "●" : undefined} />}
-            <PanelTabButton active={effectivePanelTab === "attention"} onClick={() => setPanelTab("attention")} label="Внимание" badge={attentionCount || undefined} warn={needsHuman.length > 0} />
-            <PanelTabButton active={effectivePanelTab === "journal"} onClick={() => setPanelTab("journal")} label="Журнал" />
+          <div className="wb-panel-tabs">
+            {/* В tablist — только вкладки: кнопки «развернуть/скрыть» внутри него ломали роль для скринридеров (axe aria-required-children). */}
+            <div className="wb-tablist-contents" role="tablist" aria-label="Нижняя панель">
+              {consoleDock === "bottom" && <PanelTabButton active={effectivePanelTab === "console"} onClick={() => setPanelTab("console")} label="Чат" badge={working.length ? "●" : undefined} />}
+              <PanelTabButton active={effectivePanelTab === "attention"} onClick={() => setPanelTab("attention")} label="Внимание" badge={attentionCount || undefined} warn={needsHuman.length > 0} />
+              <PanelTabButton active={effectivePanelTab === "journal"} onClick={() => setPanelTab("journal")} label="Журнал" />
+            </div>
             <span className="wb-panel-fill" />
             {consoleDock === "bottom" && effectivePanelTab === "console" && (
               <button type="button" className="wb-icon-btn" onClick={() => dockConsole("right")} title="Перенести чат вправо"><PanelRight size={15} /></button>

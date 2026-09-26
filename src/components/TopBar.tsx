@@ -298,7 +298,7 @@ export function TopBar({
             <span>мост не подключен</span>
           </button>
         ) : (
-          <a className="desktop-pill download" href={desktopDownloadUrl} target="_blank" rel="noreferrer">
+          <a className="desktop-pill download" href={desktopDownloadUrl} target="_blank" rel="noreferrer" aria-label="Скачать приложение MBOX Desktop">
             <Download size={17} />
             <strong>Скачать приложение</strong>
           </a>

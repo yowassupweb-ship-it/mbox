@@ -1993,7 +1993,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             </div>
           )}
 
-          <div className="console-log" ref={scrollRef} data-scroll-memory="off">
+          <div className="console-log" ref={scrollRef} data-scroll-memory="off" tabIndex={0} role="log" aria-label="Сообщения чата">
             {lines.length === 0 && (
               <div className="console-empty">
                 {peer ? <AgentAvatar name={peer} size={64} /> : <MessagesSquare size={48} strokeWidth={1.5} />}
