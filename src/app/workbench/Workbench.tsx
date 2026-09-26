@@ -131,6 +131,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const [sidebarOpen, setSidebarOpen] = usePersistentState("mbox.wb.sidebarOpen", true);
   const [sidebarWidth, setSidebarWidth] = usePersistentState("mbox.wb.sidebarWidth", 300);
   const [panelOpen, setPanelOpen] = usePersistentState("mbox.wb.panelOpen", true);
+  // Группировка верхних вкладок по видам (todo #328): браузер, документы и задачи не вперемешку.
+  const [groupTabs, setGroupTabs] = usePersistentState("mbox.wb.groupTabs", true);
   const [panelHeight, setPanelHeight] = usePersistentState("mbox.wb.panelHeight", 300);
   const [panelMaximized, setPanelMaximized] = usePersistentState("mbox.wb.panelMaximized", false);
   const [panelTab, setPanelTab] = usePersistentState<PanelTab>("mbox.wb.panelTab", "console");
@@ -649,8 +651,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               tabs.open(`${TERMINAL_TAB}${pane}`, true);
             }}
           >
-            {tabs.tabs.filter((tab) => tab.key !== splitKey).map((tab) => {
+            {orderTabs(tabs.tabs.filter((tab) => tab.key !== splitKey), groupTabs).map((tab, index, list) => {
               const meta = tabMeta(tab.key, data, catalogTitles);
+              const group = tabGroupOf(tab.key);
+              // Разделитель — там, где начинается новая группа; подпись группы — в подсказке.
+              const groupStart = groupTabs && index > 0 && tabGroupOf(list[index - 1].key) !== group;
               const active = tab.key === tabs.active;
               const isFileTab = tab.key.startsWith("file:") || tab.key.startsWith("local:");
               const browserUrl = tab.key.startsWith("web:") ? browserTabUrl(tab.key) : "";
@@ -662,7 +667,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   key={tab.key}
                   role="tab"
                   aria-selected={active}
-                  className={["wb-tab", active ? "is-active" : "", tab.pinned ? "" : "is-preview", dirty[tab.key] ? "is-dirty" : "", draggedTab && draggedTab !== tab.key ? "is-drop-zone" : ""].filter(Boolean).join(" ")}
+                  data-tab-group={groupTabs ? group : undefined}
+                  className={["wb-tab", active ? "is-active" : "", tab.pinned ? "" : "is-preview", dirty[tab.key] ? "is-dirty" : "", draggedTab && draggedTab !== tab.key ? "is-drop-zone" : "", groupStart ? "is-group-start" : ""].filter(Boolean).join(" ")}
                   title={meta.hint}
                   onClick={() => tabs.open(tab.key)}
                   onDoubleClick={() => tabs.pin(tab.key)}
@@ -863,6 +869,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <button type="button" role="menuitem" onClick={() => { splitTab(tabMenu.key); setTabMenu(null); }}>Открыть во второй области</button>
           {splitKey && <button type="button" role="menuitem" onClick={() => { setSplitKey(null); setTabMenu(null); }}>Убрать вторую область</button>}
           <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}>Копировать ссылку</button>
+          <button type="button" role="menuitemcheckbox" aria-checked={groupTabs} onClick={() => { setGroupTabs(!groupTabs); setTabMenu(null); }}>{groupTabs ? "Не группировать вкладки" : "Группировать вкладки по видам"}</button>
         </WbMenu>
       )}
     </div>
@@ -1044,6 +1051,24 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
 }
 
 /** «claude-inbox-watcher» и «mbox-prod MCP» — внутренние имена; человеку достаточно, через что агент работает. */
+/** Вид вкладки для группировки строки: задачи, документы, браузер, сервисные разделы. */
+type TabGroup = "work" | "docs" | "web" | "system";
+const TAB_GROUP_ORDER: TabGroup[] = ["work", "docs", "web", "system"];
+
+function tabGroupOf(key: string): TabGroup {
+  const kind = key.split(":")[0];
+  if (kind === "web") return "web";
+  if (["note", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
+  if (["todo", "todos", "entity", "folder", "project", "welcome"].includes(kind)) return "work";
+  return "system";
+}
+
+/** Порядок внутри группы — тот, что задал человек (перетаскивание); группы — в фиксированном порядке. */
+function orderTabs<T extends { key: string }>(list: T[], grouped: boolean): T[] {
+  if (!grouped) return list;
+  return TAB_GROUP_ORDER.flatMap((group) => list.filter((tab) => tabGroupOf(tab.key) === group));
+}
+
 function agentClientLabel(client: string) {
   const value = String(client || "").toLowerCase();
   if (/claude-inbox-watcher|claude-code/.test(value)) return "Claude Code";

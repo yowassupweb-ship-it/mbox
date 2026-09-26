@@ -722,6 +722,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 .wb-editor.is-split { border-left: 1px solid var(--wb-line); }
 .wb-editor.is-split .wb-tab { cursor: default; }
+/* Группы вкладок (todo #328): отступ и черта перед первой вкладкой новой группы, у браузерных — акцентная
+   полоска сверху, чтобы страницы сайтов не терялись среди заметок и задач. */
+.wb-tab.is-group-start { margin-left: 10px; }
+.wb-tab.is-group-start::before { content: ""; position: absolute; left: -6px; top: 8px; bottom: 8px; width: 1px; background: var(--wb-line); pointer-events: none; }
+.wb-tab[data-tab-group="web"] { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--accent-color) 45%, transparent); }
+.wb-tab[data-tab-group="web"].is-active { box-shadow: inset 0 2px 0 var(--accent-color); }
 
 .wb-tabs {
   display: flex;
