@@ -5,6 +5,7 @@
 1. Прочитай пакет: `seo_read_package` со `scenario = "monday"`.
 2. Прочитай историю: `seo_read_history`.
 3. Отметь свежесть данных: что собрано, что не настроено или упало.
+   Для доказательств читай рабочие таблицы через `seo_read_view`: `opportunities` и `ctr` (клики), `cannibal`, `positions`, `serp`, `traffic` — те же, что владелец видит на экране SEO Wizard.
 4. Разбери `candidates`:
    - `high` и высокий `potential_score` сначала;
    - групповые проблемы по шаблону выше одиночных страниц;

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
 
 const DEFAULT_SITE = "https://www.vs-travel.ru";
 const DEFAULT_PROJECT = "Вокруг света";
@@ -1070,13 +1071,19 @@ const SEO_TABLE_VIEWS = [
   { id: "changes", table: "seo_changes", order: "created_at DESC", columns: ["id::text AS id", "issue_id::text", "todo_id::text", "change_type", "url", "description", "baseline", "result", "status", "detected_at::text", "measure_after::text", "created_at::text", "updated_at::text"] },
 ];
 
-export async function getSeoTables(query, { limit = 80 } = {}) {
+export async function getSeoTables(query, { limit = 80, table = "", offset = 0 } = {}) {
   await ensureSeoWizardSchema(query);
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 80, 300));
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 80, 500));
+  const safeOffset = Math.max(0, Number(offset) || 0);
   const tables = [];
+  // Без table — только список и счётчики (вкладка «Данные» грузит строки одной выбранной таблицы).
   for (const view of SEO_TABLE_VIEWS) {
     const count = await query(`SELECT count(*)::int AS count FROM ${view.table}`);
-    const rows = await query(`SELECT ${view.columns.join(", ")} FROM ${view.table} ORDER BY ${view.order} LIMIT $1`, [safeLimit]);
+    if (view.id !== table) {
+      tables.push({ id: view.id, table: view.table, count: count.rows[0]?.count || 0, columns: [], rows: [] });
+      continue;
+    }
+    const rows = await query(`SELECT ${view.columns.join(", ")} FROM ${view.table} ORDER BY ${view.order} LIMIT $1 OFFSET $2`, [safeLimit, safeOffset]);
     tables.push({
       id: view.id,
       table: view.table,
@@ -1192,7 +1199,34 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
       return reply(200, await getSeoHistory(query));
     }
     if (url.pathname === "/api/mbox/seo/tables" && req.method === "GET") {
-      return reply(200, await getSeoTables(query, { limit: url.searchParams.get("limit") || 80 }));
+      return reply(200, await getSeoTables(query, { limit: url.searchParams.get("limit") || 80, table: url.searchParams.get("table") || "", offset: url.searchParams.get("offset") || 0 }));
+    }
+    if (url.pathname === "/api/mbox/seo/dashboard" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      return reply(200, await seoDashboard(query, await getSeoSettings(query)));
+    }
+    const viewMatch = url.pathname.match(/^\/api\/mbox\/seo\/view\/([a-z0-9_]+)$/);
+    if (viewMatch && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      const view = await seoView(query, viewMatch[1], await getSeoSettings(query));
+      return view ? reply(200, view) : reply(404, { error: "unknown_view" });
+    }
+    const urlMatch = url.pathname.match(/^\/api\/mbox\/seo\/urls\/(\d+)$/);
+    if (urlMatch && req.method === "PATCH") {
+      const body = await readBody(req);
+      return reply(200, { url: await setUrlDecision(query, { id: urlMatch[1], decision: String(body.decision || ""), note: body.note || "" }) });
+    }
+    const outreachMatch = url.pathname.match(/^\/api\/mbox\/seo\/outreach(?:\/(\d+))?$/);
+    if (outreachMatch && (req.method === "POST" || req.method === "PATCH")) {
+      const body = await readBody(req);
+      return reply(200, { outreach: await saveOutreach(query, { ...body, id: outreachMatch[1] || body.id || "" }) });
+    }
+    if (outreachMatch?.[1] && req.method === "DELETE") {
+      await query("DELETE FROM seo_outreach WHERE id = $1", [outreachMatch[1]]);
+      return reply(200, { ok: true });
+    }
+    if (url.pathname === "/api/mbox/seo/changes" && req.method === "POST") {
+      return reply(201, { change: await recordChange(query, await readBody(req)) });
     }
     if (url.pathname === "/api/mbox/seo/settings" && req.method === "GET") {
       return reply(200, await getSeoSettings(query));

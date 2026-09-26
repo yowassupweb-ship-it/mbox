@@ -305,6 +305,51 @@ server.registerTool(
 );
 
 server.registerTool(
+  "seo_read_view",
+  {
+    title: "Read SEO Wizard table or report",
+    description: "Read one working table or report of SEO Wizard (the same data the owner sees on the SEO Wizard screen). Views: registry (URL registry), index (index composition), filters, links (internal links audit), cannibal, quality, competitors, ctr, opportunities, positions, serp, demand, traffic, outreach, queue, decisions, changes, report10, report20, report25, sessions, packages, runs, issues, scenarios. Rows are capped by `limit` so large tables do not flood the context.",
+    inputSchema: {
+      view: z.string(),
+      limit: z.number().int().min(1).max(500).default(60),
+    },
+  },
+  async ({ view, limit }) => {
+    const data = await mboxFetch(`/api/mbox/seo/view/${encodeURIComponent(view)}`);
+    const sections = (data.sections || []).map((section) => ({
+      id: section.id,
+      title: section.title,
+      total: section.total,
+      note: section.note,
+      empty: section.rows.length ? undefined : section.empty,
+      columns: section.columns.map((column) => column.key),
+      rows: section.rows.slice(0, limit),
+    }));
+    const sources = (data.sources || []).map((source) => `${source.label}: ${source.status}${source.updated_at ? ` @ ${source.updated_at}` : ""}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify({ view, sources, sections }, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "seo_record_change",
+  {
+    title: "Record SEO change with baseline",
+    description: "Write an implemented site change to the SEO change log. The server snapshots the 28-day baseline (impressions, clicks, position, CTR, visits) and schedules the measurement in 28 days. Use in the Thursday scenario when a task is seen live on the site.",
+    inputSchema: {
+      url: z.string().describe("Full page URL, e.g. https://www.vs-travel.ru/odnodnevnye/tula"),
+      change_type: z.string().default(""),
+      description: z.string().default(""),
+      issue_id: z.string().default(""),
+      todo_id: z.string().default(""),
+    },
+  },
+  async (input) => {
+    const data = await mboxFetch("/api/mbox/seo/changes", { method: "POST", body: JSON.stringify(input) });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data.change, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "create_project_relation",
   {
     title: "Create MBOX project relation",
