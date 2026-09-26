@@ -27,10 +27,20 @@ fi
 
 # Рабочая копия репозитория без секретов сервера и без дистрибутивов desktop.
 mkdir -p "$WORKDIR"
-rsync -a --delete \
-  --exclude '.env' --exclude 'archivist.env' --exclude 'public/downloads/' --exclude 'node_modules/' \
-  --exclude 'mbox.tar.gz' --exclude 'out/' \
-  "$SRC/" "$WORKDIR/"
+# rsync есть не на каждом сервере; без него (set -e) скрипт обрывался до копирования, и агенты
+# оставались на старом коде, хотя службы перезапускались. Тогда — tar с теми же исключениями
+# (без удаления лишнего, как у --delete: старые файлы не мешают).
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a --delete \
+    --exclude '.env' --exclude 'archivist.env' --exclude 'public/downloads/' --exclude 'node_modules/' \
+    --exclude 'mbox.tar.gz' --exclude 'out/' \
+    "$SRC/" "$WORKDIR/"
+else
+  tar -C "$SRC" \
+    --exclude './.env' --exclude './archivist.env' --exclude './public/downloads' --exclude './node_modules' \
+    --exclude './mbox.tar.gz' --exclude './out' \
+    -cf - . | tar -C "$WORKDIR" -xf -
+fi
 chown -R "$AGENT_USER:$AGENT_USER" "$WORKDIR"
 # npm install, а не npm ci: lock-файл проекта расходится с package.json (так же ставит Dockerfile.mbox).
 su - "$AGENT_USER" -c "cd '$WORKDIR' && npm install --omit=dev --no-audit --no-fund >/dev/null"
