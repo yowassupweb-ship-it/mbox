@@ -33,13 +33,14 @@ const HEARTBEAT_MS = 20_000;
 let lastHeartbeat = 0;
 const startGraceMs = Number(config.MBOX_WATCH_START_GRACE_MS || 15 * 60 * 1000);
 const includeBacklog = ["1", "true", "yes"].includes(String(config.MBOX_WATCH_BACKLOG || "").toLowerCase());
+const includeUnaddressed = ["1", "true", "yes"].includes(String(config.MBOX_WATCH_UNADDRESSED || "").toLowerCase());
 const startedAt = new Date();
 const cutoffAt = new Date(startedAt.getTime() - startGraceMs);
 const codexCommand = resolveCodexCommand(config.CODEX_COMMAND || "codex");
 const codexModel = config.CODEX_WATCH_MODEL || "";
 const workdir = resolveWatchWorkdir(config.CODEX_WATCH_WORKDIR || root);
-const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 10);
-const contextLineLimit = Number(config.MBOX_WATCH_CONTEXT_LINE_LIMIT || 420);
+const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 12);
+const contextLineLimit = Number(config.MBOX_WATCH_CONTEXT_LINE_LIMIT || 1200);
 const codexEffort = config.CODEX_WATCH_EFFORT || "low";
 const sessions = createSessionStore(`codex-${agentName}`);
 // Сколько чатов отвечаем одновременно (см. parallelLimit в chat-threads.mjs).
@@ -61,13 +62,22 @@ const aliases = (config.CODEX_CHAT_ALIASES || "codex,Codex,chatgpt,ChatGPT,ко�
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+const broadcastAliases = (config.MBOX_BROADCAST_ALIASES || "\u0412\u0441\u0435\u043c,\u0412\u0441\u0435,All,Everyone,Everybody")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+if (!aliases.some((alias) => alias.toLowerCase() === agentName.toLowerCase())) aliases.unshift(agentName);
+for (const alias of String(config.MBOX_AGENT_ALIASES || "").split(",").map((value) => value.trim()).filter(Boolean)) {
+  if (!aliases.some((item) => item.toLowerCase() === alias.toLowerCase())) aliases.push(alias);
+}
 const accountKey = username.replace(/[^a-z0-9_-]+/gi, "_");
 const seenPath = path.join(os.tmpdir(), `codex-chat-watcher-seen-${accountKey}-${agentName}-${project}.json`);
 const lockPath = path.join(os.tmpdir(), `codex-chat-watcher-${accountKey}-${agentName}-${project}.lock`);
 const logPrefix = `[${agentName} chat]`;
-const MAX_STEP_INPUT = Number(config.MBOX_WATCH_STEP_INPUT_LIMIT || 360);
-const MAX_STEP_OUTPUT = Number(config.MBOX_WATCH_STEP_OUTPUT_LIMIT || 600);
-const MAX_STEPS = Number(config.MBOX_WATCH_MAX_STEPS || 24);
+const MAX_STEP_INPUT = Number(config.MBOX_WATCH_STEP_INPUT_LIMIT || 700);
+const MAX_STEP_OUTPUT = Number(config.MBOX_WATCH_STEP_OUTPUT_LIMIT || 1500);
+const MAX_STEP_TEXT = Number(config.MBOX_WATCH_STEP_TEXT_LIMIT || 700);
+const MAX_STEPS = Number(config.MBOX_WATCH_MAX_STEPS || 60);
 
 let cookie = "";
 let stopping = false;
@@ -455,7 +465,7 @@ async function pendingMentions() {
     .filter((item) => item.agent_name !== agentName)
     .filter((item) => !["agent_response", "agent_error"].includes(item.item_type))
     .filter((item) => includeBacklog || new Date(item.created_at) >= cutoffAt)
-    .filter((item) => !target || String(item.project_id || "") === String(target.id || ""))
+    .filter((item) => !target || item.project_id == null || String(item.project_id) === String(target.id || ""))
     .filter((item) => isMentionForCodex(item))
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
@@ -466,8 +476,13 @@ function isMentionForCodex(item) {
   if (item.props?.mbox_owner === false) return false;
   const to = String(item.props?.to || item.props?.target || item.props?.agent || "");
   if (aliases.some((alias) => to.toLowerCase() === alias.toLowerCase())) return true;
+  if (broadcastAliases.some((alias) => to.toLowerCase() === alias.toLowerCase())) return true;
   const text = `${item.title || ""}\n${item.body || ""}`;
-  return aliases.some((alias) => new RegExp(`@${escapeRegExp(alias)}\\b`, "iu").test(text));
+  if (aliases.some((alias) => new RegExp(`@${escapeRegExp(alias)}\\b`, "iu").test(text))) return true;
+  if (broadcastAliases.some((alias) => new RegExp(`@${escapeRegExp(alias)}\\b`, "iu").test(text))) return true;
+  if (to.trim()) return false;
+  if (!includeUnaddressed) return false;
+  return ["Human", "User"].includes(item.agent_name) || item.item_type === "question";
 }
 
 function escapeRegExp(value) {
@@ -736,6 +751,7 @@ function spawnCodex(command, args, options, inboxId = "") {
     let stderr = "";
     let stdout = "";
     let buffer = "";
+    const pendingTools = new Map();
     let lastPhaseAt = 0;
     let lastPhase = "Запускается";
 
@@ -760,7 +776,7 @@ function spawnCodex(command, args, options, inboxId = "") {
         // Первая строка JSON — CLI поднялся (thread.started), первый item.* — модель начала работу.
         if (line.startsWith("{")) timings.mark(inboxId, "readyAt");
         if (line.includes('"type":"item.')) timings.mark(inboxId, "replyAt");
-        handleCodexLine(line, state, startedAt, pushPhase, inboxId);
+        handleCodexLine(line, state, startedAt, pushPhase, inboxId, pendingTools);
       }
     });
     child.stderr.on("data", (chunk) => {
@@ -770,7 +786,7 @@ function spawnCodex(command, args, options, inboxId = "") {
     child.on("error", reject);
     child.on("close", (code) => {
       clearTimeout(runTimer);
-      if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase, inboxId);
+      if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase, inboxId, pendingTools);
       reportPhase(inboxId, "");
       if (code === 0) {
         if (!state.stats) state.stats = { duration_ms: Date.now() - startedAt };
@@ -788,7 +804,7 @@ function spawnCodex(command, args, options, inboxId = "") {
   });
 }
 
-function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
+function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "", pendingTools = new Map()) {
   const trimmed = String(line || "").trim();
   if (!trimmed || !trimmed.startsWith("{")) return;
   let event;
@@ -810,6 +826,37 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
     pushPhase("Готовит ответ");
     return;
   }
+  if (event.type === "item.started" && event.item) {
+    const item = event.item;
+    const tool = codexToolName(item);
+    if (tool) {
+      const hint = toolHint(item);
+      const key = codexItemKey(item);
+      const pending = key ? pendingTools.get(key) : null;
+      if (pending) {
+        pendingTools.delete(key);
+        pending.output = clip(codexToolOutput(item), MAX_STEP_OUTPUT);
+        pending.is_error = codexToolError(item);
+        pending.ms = pending.at ? Date.now() - pending.at : 0;
+        delete pending.at;
+        streamStep(inboxId, pending.i, { output: pending.output, is_error: pending.is_error, ms: pending.ms });
+        pushPhase("\u0420\u0430\u0431\u043e\u0442\u0430\u0435\u0442");
+        return;
+      }
+      if (!state.toolsUsed.includes(tool)) state.toolsUsed.push(tool);
+      state.trace.push(`${state.trace.length + 1}. ${tool}${hint ? `\n   ${hint}` : ""}`);
+      const index = state.steps.length;
+      const step = { kind: "tool", name: tool, hint, input: clip(stringifyInput(codexToolInput(item)), MAX_STEP_INPUT), at: Date.now() };
+      if (addStep(state, step)) {
+        step.i = index;
+        const key = codexItemKey(item);
+        if (key) pendingTools.set(key, step);
+        streamStep(inboxId, index, { kind: "tool", name: tool, hint, input: step.input });
+      }
+      pushPhase("\u0420\u0430\u0431\u043e\u0442\u0430\u0435\u0442");
+    }
+    return;
+  }
   if (event.type === "item.completed" && event.item) {
     const item = event.item;
     if (item.type === "agent_message" && item.text) {
@@ -822,7 +869,7 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
       pushPhase("Думает");
       if (text) {
         const index = state.steps.length;
-        const step = { kind: "text", text: clip(text, MAX_STEP_INPUT) };
+        const step = { kind: "text", text: clip(text, MAX_STEP_TEXT) };
         if (addStep(state, step)) streamStep(inboxId, index, step);
       }
       return;
@@ -830,6 +877,18 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
     const tool = codexToolName(item);
     if (tool) {
       const hint = toolHint(item);
+      const key = codexItemKey(item);
+      const pending = key ? pendingTools.get(key) : null;
+      if (pending) {
+        pendingTools.delete(key);
+        pending.output = clip(codexToolOutput(item), MAX_STEP_OUTPUT);
+        pending.is_error = codexToolError(item);
+        pending.ms = pending.at ? Date.now() - pending.at : 0;
+        delete pending.at;
+        streamStep(inboxId, pending.i, { output: pending.output, is_error: pending.is_error, ms: pending.ms });
+        pushPhase("\u0420\u0430\u0431\u043e\u0442\u0430\u0435\u0442");
+        return;
+      }
       if (!state.toolsUsed.includes(tool)) state.toolsUsed.push(tool);
       state.trace.push(`${state.trace.length + 1}. ${tool}${hint ? `\n   ${hint}` : ""}`);
       const index = state.steps.length;
@@ -870,6 +929,10 @@ function codexStats(usage, durationMs) {
     duration_ms: Number(durationMs) || 0,
     turns: 1,
   };
+}
+
+function codexItemKey(item) {
+  return String(item?.id || item?.call_id || item?.tool_call_id || item?.item_id || "").trim();
 }
 
 function codexToolName(item) {
