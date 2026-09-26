@@ -1503,7 +1503,7 @@
   /* Вертикальная нить, вдоль которой идут точки шагов. */
   border-left: 1px solid var(--border-color);
 }
-.console-chain > li { position: relative; padding: 0 0 5px 12px; }
+.console-chain > li { position: relative; padding: 0 0 3px 12px; }
 .console-chain > li:last-child { padding-bottom: 0; }
 .console-chain > li::before {
   content: "";
@@ -1523,8 +1523,9 @@
 .console-chain-step > summary {
   display: flex;
   align-items: baseline;
-  gap: 7px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
   cursor: pointer;
   list-style: none;
 }
@@ -1557,9 +1558,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
 }
+.console-chain-say.is-open { display: block; -webkit-line-clamp: unset; white-space: pre-wrap; }
 
 .console-chain-more {
   margin: 0 0 4px;

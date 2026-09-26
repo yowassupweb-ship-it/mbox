@@ -50,10 +50,14 @@ export function createSessionStore(agentName) {
     get(thread) {
       return thread ? sessions[thread]?.id || "" : "";
     },
-    remember(thread, id) {
+    /** context — сколько токенов контекста сессия тащила в последнем ходе (для ротации, см. rotateLimit). */
+    remember(thread, id, context = 0) {
       if (!thread || !id) return;
-      sessions[thread] = { id: String(id), at: new Date().toISOString() };
+      sessions[thread] = { id: String(id), at: new Date().toISOString(), context: Number(context) || 0 };
       save();
+    },
+    contextOf(thread) {
+      return thread ? Number(sessions[thread]?.context) || 0 : 0;
     },
     forget(thread) {
       if (!thread || !sessions[thread]) return;
@@ -62,6 +66,15 @@ export function createSessionStore(agentName) {
     },
   };
 }
+
+/**
+ * Порог ротации сессии чата. Продолженная сессия (--resume) дешёвая, пока маленькая: каждый шаг
+ * заново отправляет весь её контекст. Замер 26.09.2026 по props.work ответов: у Codex сессии чатов
+ * route-compressor-corp дорастали до 130–225k контекста, и ответ стоил 2–9 млн входных токенов
+ * (топ-5 ответов — 59% всего расхода). Выше порога начинаем свежую сессию: короткую историю чата
+ * наблюдатель и так кладёт в первый промпт, нить разговора не теряется.
+ */
+export const ROTATE_CONTEXT_TOKENS = Number(process.env.MBOX_WATCH_ROTATE_TOKENS || 120_000);
 
 /** CLI не нашёл сессию (удалили файлы, сменилась папка) — тогда начинаем чат заново. */
 export function isLostSession(error) {
@@ -122,4 +135,22 @@ export function focusLines(item) {
   return lines.length
     ? ["Open in the owner's MBOX right now — the message most likely refers to these; use them directly instead of searching:", ...lines]
     : [];
+}
+
+/**
+ * Правила из разбора ошибок агентов 26.09.2026 (56 ошибок инструментов за 41 ответ): каждая строка —
+ * реальная повторяющаяся ошибка, стоившая шагов и токенов. Держать коротко: промпт идёт в каждый чат.
+ */
+export function agentLessons({ windows = process.platform === "win32" } = {}) {
+  return [
+    "Lessons from past MBOX sessions (each cost many steps):",
+    ...(windows ? [
+      "- Shell here is Windows PowerShell: `rg`/`grep` are not installed — use `Select-String -Path <files> -Pattern <re>` and `Get-ChildItem -Recurse -Include *.md`; `Select-Object -Index (20..65)` needs the parentheses; `-Filter` takes one pattern, not a list.",
+    ] : []),
+    "- MBOX local folders: workspace_* tools need the folder key. If a call answers «Не понял, какая папка», call workspace_list once and retry with the right key — never repeat an identical failing call.",
+    "- note_edit answering «old_text not found»: note_read that tab again before the next edit.",
+    "- Read each SKILL.md, note or file once per answer and keep it; do not re-read the same thing.",
+    "- Batch work (many tours, files, pages): run the skill script once for the whole batch and print only a short summary (counts, failures, paths). Long command output is resent to the model on every following step.",
+    "- A step failed twice the same way: stop, say what blocks you, do not loop.",
+  ].join("\n");
 }

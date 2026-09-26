@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { syncSkills } from "./sync-skills.mjs";
 import { createInboxWake } from "./inbox-wake.mjs";
 import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
-import { createSessionStore, focusLines, isLostSession, sameThread, threadOf } from "./chat-threads.mjs";
+import { agentLessons, createSessionStore, focusLines, isLostSession, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const LOCK_TOUCH_MS = 30_000;
@@ -590,11 +590,18 @@ function formatContextLine(entry) {
  */
 async function runClaude(item) {
   const thread = threadOf(item);
-  const sessionId = sessions.get(thread);
+  let sessionId = sessions.get(thread);
+  // Раздутая сессия дороже новой: каждый шаг пересылает весь контекст (см. ROTATE_CONTEXT_TOKENS).
+  const rotated = Boolean(sessionId && sessions.contextOf(thread) > ROTATE_CONTEXT_TOKENS);
+  if (rotated) {
+    console.log(`${logPrefix} чат ${thread}: контекст ${sessions.contextOf(thread)} > ${ROTATE_CONTEXT_TOKENS} — начинаю новую сессию`);
+    sessions.forget(thread);
+    sessionId = "";
+  }
   if (sessionId) {
     try {
       const outcome = await runClaudeTurn(item, sessionId);
-      sessions.remember(thread, outcome.sessionId || sessionId);
+      sessions.remember(thread, outcome.sessionId || sessionId, outcome.stats?.context_tokens);
       return outcome;
     } catch (error) {
       if (!isLostSession(error)) throw error;
@@ -603,7 +610,8 @@ async function runClaude(item) {
     }
   }
   const outcome = await runClaudeTurn(item, "");
-  sessions.remember(thread, outcome.sessionId);
+  sessions.remember(thread, outcome.sessionId, outcome.stats?.context_tokens);
+  if (rotated && outcome.stats) outcome.stats.session_rotated = true;
   return outcome;
 }
 
@@ -672,8 +680,9 @@ async function freshPrompt(item) {
     "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
     // Навыки ставятся с сервера MBOX (refreshSkills); без явного списка Claude в -p режиме их не замечал.
     installedSkills.length
-      ? `MBOX skills are installed from the MBOX server in ~/.claude/skills. If the request matches one, invoke it with the Skill tool and follow its SKILL.md exactly: ${installedSkills.map((skill) => `${skill.id} — ${skill.description}`).join(" | ")}`
+      ? `MBOX skills are installed in ~/.claude/skills (the Skill tool lists them with descriptions): ${installedSkills.map((skill) => skill.id).join(", ")}. If the request matches one, invoke it with the Skill tool and follow its SKILL.md exactly.`
       : "",
+    agentLessons(),
     // Инструменты «на глазах»: агент работает в документах и таблицах, а человек видит правку во вкладке.
     "Documents and tables: MBOX notes (note_search, note_read, note_write, note_edit) and files in the owner's local folders (workspace_edit_file for small text edits instead of rewriting a whole file, workspace_read_table / workspace_write_cells / workspace_format_cells for .xlsx/.csv, workspace_read_document / workspace_write_docx for Word). Pass show=true when the owner should watch the change happen — the document opens as a tab in MBOX.",
     "Save tokens: read only the parts you need, prefer targeted search over broad scans, do not repeat large file contents in the answer.",
@@ -725,19 +734,22 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
     let plain = "";
     let stderr = "";
     let lastPhaseAt = 0;
+    let lastPhase = "Запускается";
 
-    // Фаза уходит на сервер не чаще раза в три секунды. Чаще незачем и вредно: каждая фаза — это
-    // broadcast по вебсокету, а на него интерфейс перечитывает список агентов. Раз в три секунды
-    // строка всё ещё читается как живая, но не дёргает клиент десятки раз в минуту.
+    // Новая фаза уходит сразу, повтор той же — не чаще раза в три секунды (каждая фаза — broadcast по
+    // вебсокету, на него интерфейс перечитывает агентов). Раньше троттлилась любая фаза, а текст
+    // рассуждения фазу не менял вовсе — чат писал «Запускается», пока агент уже писал рассуждения.
     const pushPhase = (phase) => {
       const now = Date.now();
-      if (now - lastPhaseAt < 3000) return;
+      if (phase === lastPhase && now - lastPhaseAt < 3000) return;
+      lastPhase = phase;
       lastPhaseAt = now;
       ping("heartbeat", phase).catch(() => {});
     };
 
     const handle = (event) => {
       if (event.session_id) state.sessionId = String(event.session_id);
+      if (event.type === "assistant" && lastPhase === "Запускается") pushPhase("Думает");
       if (event.type === "system" && event.subtype === "thinking_tokens") {
         state.thinkingTokens = Math.max(state.thinkingTokens, Number(event.estimated_tokens) || 0);
         pushPhase("Думает");
@@ -758,6 +770,7 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
           if (block.type === "text") {
             // Реплика между шагами («сейчас проверю тесты») — часть цепочки, а не сам ответ.
             const text = String(block.text || "").trim();
+            if (text) pushPhase("Пишет");
             if (text) {
               const index = state.steps.length;
               if (addStep(state, { kind: "text", text: clip(text, MAX_STEP_TEXT) })) {

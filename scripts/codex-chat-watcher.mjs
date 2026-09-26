@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInboxWake } from "./inbox-wake.mjs";
-import { codexContextUsage, createSessionStore, focusLines, isLostSession, sameThread, threadOf } from "./chat-threads.mjs";
+import { agentLessons, codexContextUsage, createSessionStore, focusLines, isLostSession, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 import { codexCachedModels, publishModelCatalog } from "./model-catalog.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -606,11 +606,18 @@ function compactContextText(value) {
  */
 async function runCodex(item) {
   const thread = threadOf(item);
-  const sessionId = sessions.get(thread);
+  let sessionId = sessions.get(thread);
+  // См. ROTATE_CONTEXT_TOKENS: сессии чатов Codex дорастали до 225k контекста и 9 млн входа на ответ.
+  const rotated = Boolean(sessionId && sessions.contextOf(thread) > ROTATE_CONTEXT_TOKENS);
+  if (rotated) {
+    console.log(`${logPrefix} чат ${thread}: контекст ${sessions.contextOf(thread)} > ${ROTATE_CONTEXT_TOKENS} — начинаю новую сессию`);
+    sessions.forget(thread);
+    sessionId = "";
+  }
   if (sessionId) {
     try {
       const outcome = await runCodexTurn(item, sessionId);
-      sessions.remember(thread, outcome.sessionId || sessionId);
+      sessions.remember(thread, outcome.sessionId || sessionId, outcome.stats?.context_tokens);
       return outcome;
     } catch (error) {
       if (!isLostSession(error)) throw error;
@@ -619,7 +626,8 @@ async function runCodex(item) {
     }
   }
   const outcome = await runCodexTurn(item, "");
-  sessions.remember(thread, outcome.sessionId);
+  sessions.remember(thread, outcome.sessionId, outcome.stats?.context_tokens);
+  if (rotated && outcome.stats) outcome.stats.session_rotated = true;
   return outcome;
 }
 
@@ -643,7 +651,8 @@ async function freshPrompt(item) {
     "Answer the chat message below. If the user asks for code work, do it in the repo and summarize the result.",
     "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
     "Keep the final answer concise and directly useful.",
-    "Spend tokens carefully: avoid broad repo scans and huge command outputs; prefer targeted rg with explicit paths and exclusions for build artifacts, binaries and generated assets.",
+    "Spend tokens carefully: avoid broad repo scans and huge command outputs; search with explicit paths and exclude build artifacts, binaries and generated assets.",
+    agentLessons(),
     "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
     // См. claude-inbox-watcher.mjs — тот же пробел без языкового сигнала уводил ответы на английский.
     "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
@@ -704,12 +713,15 @@ function spawnCodex(command, args, options, inboxId = "") {
     let stdout = "";
     let buffer = "";
     let lastPhaseAt = 0;
+    let lastPhase = "Запускается";
 
     ping("heartbeat", "Запускается").catch(() => {});
 
+    // Новая фаза — сразу, повтор той же — не чаще раза в 3 с (см. claude-inbox-watcher.mjs).
     const pushPhase = (phase) => {
       const now = Date.now();
-      if (now - lastPhaseAt < 3000) return;
+      if (phase === lastPhase && now - lastPhaseAt < 3000) return;
+      lastPhase = phase;
       lastPhaseAt = now;
       ping("heartbeat", phase).catch(() => {});
     };
@@ -773,6 +785,17 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "") {
     const item = event.item;
     if (item.type === "agent_message" && item.text) {
       state.text = String(item.text || "").trim();
+      pushPhase("Пишет");
+      return;
+    }
+    if (item.type === "reasoning") {
+      const text = String(item.text || item.summary || "").replace(/\*\*/g, "").trim();
+      pushPhase("Думает");
+      if (text) {
+        const index = state.steps.length;
+        const step = { kind: "text", text: clip(text, MAX_STEP_INPUT) };
+        if (addStep(state, step)) streamStep(inboxId, index, step);
+      }
       return;
     }
     const tool = codexToolName(item);

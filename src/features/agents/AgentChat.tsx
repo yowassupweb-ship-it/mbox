@@ -515,7 +515,8 @@ function ChainTimeline({ steps }: { steps: ChainStep[] }) {
           if (step.kind === "text") {
             return (
               <li key={hidden + index} className="is-text">
-                <p className="console-chain-say">{step.text}</p>
+                {/* Реплика рассуждения — две строки; щелчок разворачивает целиком. */}
+                <p className="console-chain-say" onClick={(event) => event.currentTarget.classList.toggle("is-open")} title="Показать целиком">{step.text}</p>
               </li>
             );
           }
@@ -634,7 +635,7 @@ function ComposerPicker({ label, value, onChange, options, placeholder, defaultV
 }
 
 /** Сколько шагов цепочки показывать без разворота — остальные прячутся за кнопкой. */
-const VISIBLE_STEPS = 6;
+const VISIBLE_STEPS = 4;
 
 const EFFORT_LABEL: Record<string, string> = { low: "быстро", medium: "обычно", high: "тщательно" };
 
