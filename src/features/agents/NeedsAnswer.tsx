@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Send, X } from "lucide-react";
+import { Check, CheckCheck, Send, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { fetchJson } from "../../lib/api";
 import type { AgentInboxItem } from "../../types";
@@ -62,6 +62,32 @@ export function NeedsAnswer({ inbox, onSaved }: { inbox: AgentInboxItem[]; onSav
     }
   }
 
+  /** Галочка на карточке (todo #339): закрыть запрос как обработанный, ничего не отвечая агенту —
+   *  например, когда вопрос уже решён в чате или больше не актуален. */
+  async function dismiss(item: AgentInboxItem) {
+    if (busy[item.id]) return;
+    setError("");
+    setBusy((current) => ({ ...current, [item.id]: true }));
+    setResolved((current) => ({ ...current, [item.id]: true }));
+    try {
+      await fetchJson(`/api/mbox/agent/inbox/${item.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "done", props: { ...(item.props || {}), dismissed_by_human: true } }),
+      });
+      onSaved();
+    } catch (cause) {
+      setResolved((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setError(`Не удалось закрыть запрос: ${String(cause)}`);
+    } finally {
+      setBusy((current) => ({ ...current, [item.id]: false }));
+    }
+  }
+
   const visible = pending.filter((item) => !resolved[item.id]);
   if (!visible.length && !error) return null;
 
@@ -89,6 +115,9 @@ export function NeedsAnswer({ inbox, onSaved }: { inbox: AgentInboxItem[]; onSav
               </div>
             </div>
             <div className="needs-item-actions">
+              <button type="button" className="needs-item-dismiss" onClick={() => void dismiss(item)} disabled={busy[item.id]} title="Обработано — закрыть без ответа агенту" aria-label={`Обработано: ${item.title}`}>
+                <CheckCheck size={15} />
+              </button>
               <Button variant="ghost" icon={Check} disabled={busy[item.id]} onClick={() => void answer(item, "Да, одобряю")}>Одобрить</Button>
               <Button variant="ghost" icon={X} disabled={busy[item.id]} onClick={() => void answer(item, "Нет, отклоняю")}>Отклонить</Button>
             </div>

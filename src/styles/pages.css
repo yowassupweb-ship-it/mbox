@@ -2459,6 +2459,23 @@ time {
 }
 
 .needs-item-body { min-width: 0; display: grid; gap: 3px; }
+
+/* Галочка «обработано» (todo #339): закрыть запрос без ответа агенту. */
+.needs-item-dismiss {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  justify-self: end;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.needs-item-dismiss:hover:not(:disabled) { border-color: color-mix(in srgb, var(--state-ok) 55%, var(--border-color)); color: var(--state-ok); }
+.needs-item-dismiss:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.needs-item-dismiss:disabled { opacity: .5; cursor: not-allowed; }
 .needs-item-body strong { font-size: var(--text-md); line-height: 1.3; }
 .needs-item-body p { color: var(--text-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
