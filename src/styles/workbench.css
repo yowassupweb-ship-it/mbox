@@ -17,7 +17,9 @@
      технических идентификаторов через --font-mono и специализированные классы. */
   --weight-text: 400;
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", "Liberation Mono", monospace;
+  /* Cascadia Mono раньше Consolas: в Consolas нет →, и стрелку подставлял пропорциональный шрифт —
+     ASCII-схемы в заметках разъезжались (todo #334). Cascadia есть в Windows 11, стрелки и кириллица в ней моноширинные. */
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-family: var(--font-sans);
   font-optical-sizing: auto;
   --weight-normal: 400;

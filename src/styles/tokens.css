@@ -148,7 +148,7 @@
 
   /* Inter — обычный текст, mono — только код и технические поверхности, pixel — брендовые акценты. */
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
-  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "Fira Code", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
   --font-pixel: "Press Start 2P", var(--font-mono);
   --text-xs: 11px;
   --text-sm: 12.5px;
