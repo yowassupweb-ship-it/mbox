@@ -1689,6 +1689,128 @@ server.registerTool(
   },
 );
 
+// ─── Встроенный браузер MBOX Desktop: агент видит страницу владельца и действует на ней с подсветкой ───
+// Путь: POST /api/mbox/browser/agent → окно MBOX Desktop → вкладка (server/browser-agent.mjs, mbox-desktop/browser.js).
+
+const BROWSER_TAB = z.string().default("").describe("Browser tab key (web:…) from browser_tabs; empty = the tab the owner is looking at now");
+const BROWSER_NOTE = z.string().default("").describe("Short Russian caption shown to the owner next to the highlight, e.g. «заполняю из заметки #12»");
+
+async function browserOp(action, args = {}, tab = "", note = "") {
+  try {
+    return await mboxFetch("/api/mbox/browser/agent", { method: "POST", body: JSON.stringify({ action, args, tab, note }) });
+  } catch (error) {
+    const raw = String(error?.message || error);
+    const body = raw.match(/^MBOX \d+: ([\s\S]*)$/)?.[1];
+    try { return JSON.parse(body); } catch { return { ok: false, error: raw }; }
+  }
+}
+
+function browserText(data) {
+  if (data?.ok === false) {
+    const reason = data.message || ({ timeout: "MBOX Desktop did not answer in 25 s", no_window: "MBOX is not open in any window of the owner", no_tab: "no browser tab is open in MBOX" })[data.error] || data.error;
+    return textResult(`Browser action failed: ${reason}`);
+  }
+  return textResult(JSON.stringify(data, null, 1));
+}
+
+server.registerTool(
+  "browser_tabs",
+  {
+    title: "List the owner's MBOX browser tabs",
+    description: "Browser tabs open in MBOX Desktop with url, title and which one the owner is looking at (active). The chat message's <open_tabs> usually already names the page — call this only when unsure.",
+    inputSchema: {},
+  },
+  async () => browserText(await browserOp("tabs")),
+);
+
+server.registerTool(
+  "browser_snapshot",
+  {
+    title: "Read the page open in the owner's MBOX browser",
+    description: [
+      "Read the page the owner has open in the MBOX browser: url, title, the text the owner selected, headings, visible text (clipped), every visible form field with a ref (f12), label, kind, current value, options for selects, and clickable buttons/links with refs (b7).",
+      "Use refs with browser_fill / browser_click / browser_highlight. Refs live until the page reloads — take a new snapshot after navigation.",
+      "Password values are never returned. Frames (iframes) are not read.",
+    ].join("\n"),
+    inputSchema: { tab: BROWSER_TAB, max_text: z.number().default(6000).describe("How many characters of page text to return") },
+  },
+  async ({ tab, max_text }) => browserText(await browserOp("snapshot", { max_text }, tab, "читаю страницу")),
+);
+
+server.registerTool(
+  "browser_fill",
+  {
+    title: "Fill fields on the owner's page, visibly",
+    description: [
+      "Fill form fields in the owner's MBOX browser tab. Each field scrolls into view and is highlighted with your caption while it fills, then turns green — the owner watches it happen.",
+      "fields: [{ref, value}] from browser_snapshot (preferred) or [{label, value}] matched by visible label. Selects take the option value or text, checkboxes true/false.",
+      "Typical flow: note_read the note → browser_snapshot → browser_fill with values from the note → tell the owner in chat what you filled and what is left.",
+      "NEVER submit/send/pay on your own: filling is fine, pressing the final button needs the owner's explicit request. Returns each field's value read back.",
+    ].join("\n"),
+    inputSchema: {
+      fields: z.array(z.object({ ref: z.string().default(""), label: z.string().default(""), value: z.union([z.string(), z.number(), z.boolean()]) })),
+      tab: BROWSER_TAB,
+      note: BROWSER_NOTE,
+    },
+  },
+  async ({ fields, tab, note }) => browserText(await browserOp("fill", { fields }, tab, note || "заполняю")),
+);
+
+server.registerTool(
+  "browser_click",
+  {
+    title: "Click a button or link on the owner's page, visibly",
+    description: "Click an element by ref from browser_snapshot; it is highlighted with your caption first. Do not click submit/send/buy/delete buttons unless the owner explicitly asked for exactly that.",
+    inputSchema: { ref: z.string(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ ref, tab, note }) => browserText(await browserOp("click", { ref }, tab, note)),
+);
+
+server.registerTool(
+  "browser_highlight",
+  {
+    title: "Point at elements on the owner's page",
+    description: "Highlight elements by ref with a caption — to show the owner where something is, what you are about to change, or which fields still need their input. ms = how long it stays (0 = until cleared); clear=true removes all highlights.",
+    inputSchema: { refs: z.array(z.string()).default([]), tab: BROWSER_TAB, note: BROWSER_NOTE, ms: z.number().default(8000), clear: z.boolean().default(false) },
+  },
+  async ({ refs, tab, note, ms, clear }) => browserText(await browserOp("highlight", { refs, ms, clear }, tab, note)),
+);
+
+server.registerTool(
+  "browser_navigate",
+  {
+    title: "Open a URL in the owner's MBOX browser",
+    description: "Navigate the owner's current browser tab (or the given one) to a URL. If no browser tab is open in MBOX, a new one opens — call browser_snapshot a couple of seconds later.",
+    inputSchema: { url: z.string(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ url, tab, note }) => browserText(await browserOp("navigate", { url }, tab, note)),
+);
+
+server.registerTool(
+  "browser_scroll",
+  {
+    title: "Scroll the owner's page",
+    description: "Scroll to an element (ref) or by direction: down, up, top, bottom.",
+    inputSchema: { ref: z.string().default(""), to: z.enum(["down", "up", "top", "bottom"]).default("down"), tab: BROWSER_TAB },
+  },
+  async ({ ref, to, tab }) => browserText(await browserOp("scroll", { ref, to }, tab)),
+);
+
+server.registerTool(
+  "browser_screenshot",
+  {
+    title: "See the owner's page as an image",
+    description: "Screenshot of the visible part of the owner's browser tab (JPEG, up to 1280 px wide). Use when layout matters — the snapshot text is cheaper for reading fields.",
+    inputSchema: { tab: BROWSER_TAB },
+  },
+  async ({ tab }) => {
+    const data = await browserOp("screenshot", {}, tab, "смотрю на страницу");
+    const match = String(data?.image || "").match(/^data:(image\/[a-z]+);base64,(.+)$/);
+    if (!match) return browserText(data);
+    return withPush({ content: [{ type: "image", mimeType: match[1], data: match[2] }, { type: "text", text: `Screenshot of ${data.url}` }] });
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

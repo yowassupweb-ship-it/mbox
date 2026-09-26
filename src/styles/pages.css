@@ -160,6 +160,10 @@
 .seo-subtabs button:hover { background: var(--surface-hover); color: var(--text-main); }
 .seo-subtabs button.is-active { border-color: var(--border-color); background: var(--element-bg); color: var(--text-main); font-weight: var(--weight-medium); }
 
+/* Третий уровень — таблицы представления: мельче и с отступом, чтобы не спорить с разделами. */
+.seo-tabletabs { padding-left: var(--space-3); border-left: 2px solid var(--border-color); }
+.seo-tabletabs button { min-height: 24px; font-size: var(--text-xs); }
+
 .seo-body {
   display: flex;
   flex-direction: column;

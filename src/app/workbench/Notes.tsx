@@ -7,6 +7,7 @@ import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
 import { askText } from "../../ui/askText";
 import { DocShell, useDrawer } from "./docLayout";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { WbMenu } from "./WbMenu";
 import { DiffLines, lineDiff } from "./LocalFileDocument";
 import { renderDocument } from "./MemoryDocument";
@@ -60,16 +61,24 @@ const NOTE_THEME_LABEL: Record<NoteTheme, string> = { light: "светлая", g
 const notesStore = {
   list: [] as Note[],
   query: "",
+  // До первого ответа сервера пустой список — не «заметок нет»: при большом числе заметок это длилось секунды.
+  loading: true,
+  failed: false,
   listeners: new Set<() => void>(),
 };
 
 async function refreshNotes() {
+  const q = notesStore.query.trim();
+  // Поиск тоже ждёт ответа: без спиннера «Ничего не нашлось» мелькало раньше результата.
+  if (q || !notesStore.list.length) { notesStore.loading = true; notesStore.listeners.forEach((listener) => listener()); }
   try {
-    const q = notesStore.query.trim();
     notesStore.list = (await fetchJson<{ notes: Note[] }>(`/api/mbox/notes${q ? `?q=${encodeURIComponent(q)}` : ""}`)).notes;
+    notesStore.failed = false;
   } catch {
     // сеть моргнула — оставляем прежний список
+    notesStore.failed = true;
   }
+  notesStore.loading = false;
   notesStore.listeners.forEach((listener) => listener());
 }
 
@@ -158,7 +167,14 @@ export function NotesView({ tabs, defaultProjectId = null }: { tabs: TabsApi; de
         {pinned.map(renderItem)}
         {pinned.length > 0 && rest.length > 0 && <div className="wb-menu-group-head is-static">Остальные</div>}
         {rest.map(renderItem)}
-        {!notesStore.list.length && (
+        {notesStore.loading && !notesStore.list.length && <OctopusSpinner label={query ? "Ищу в заметках…" : "Загружаю заметки…"} />}
+        {!notesStore.loading && notesStore.failed && !notesStore.list.length && (
+          <div className="wb-session-empty">
+            <p>Не удалось загрузить заметки.</p>
+            <button type="button" onClick={() => void refreshNotes()}><RefreshCw size={13} /> Повторить</button>
+          </div>
+        )}
+        {!notesStore.loading && !notesStore.failed && !notesStore.list.length && (
           <div className="wb-session-empty">
             <p>{query ? "Ничего не нашлось." : "Заметок пока нет."}</p>
             {!query && <button type="button" disabled={!canCreate} onClick={() => void createNoteAndOpen(tabs, defaultProjectId ?? null)}><Plus size={13} /> Новая заметка</button>}

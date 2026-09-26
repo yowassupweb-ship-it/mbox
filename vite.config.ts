@@ -22,6 +22,7 @@ import { handleEmailCheckerApi } from "./server/email-checker.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./server/seo-wizard.mjs";
 import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
+import { handleBrowserAgentApi } from "./server/browser-agent.mjs";
 import {
   configureJarvis, JARVIS_NAME, JARVIS_AUTOREPLY, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, jarvisModels, publishAgentModels, type TourSheetItem,
@@ -1090,6 +1091,8 @@ function mboxDevApi() {
             if (await handleStorageApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: ownerOnly, access, labels, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
           }
           // Зеркало прод-ручек состояния встроенного браузера (см. server/browser-state.mjs).
+          // Агент во встроенном браузере — общий модуль server/browser-agent.mjs, как у прода.
+          if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user: sessionUser, owner: sessionUser.role === "owner", actor: actorFromReq(req), clients: realtimeClients })) return;
           if (await handleBrowserStateApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: true, userId: sessionUser.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
           if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
           // Зеркало прод-ручек SEO Wizard (server/seo-wizard.mjs), доступ — только владельцу, как scope.all в проде.
@@ -2458,10 +2461,13 @@ function mboxDevApi() {
             const beforeParam = url.searchParams.get("before_id") || "";
             const beforeId = /^\d+$/.test(beforeParam) ? beforeParam : "";
             const thread = THREAD_ID.test(url.searchParams.get("thread") || "") ? String(url.searchParams.get("thread")) : "";
-            const filtered = Boolean(agent || itemType || search || beforeId || thread);
+            const status = /^[a-z_]{1,20}$/.test(url.searchParams.get("status") || "") ? String(url.searchParams.get("status")) : "";
+            const light = url.searchParams.get("light") === "1";
+            const filtered = Boolean(agent || itemType || search || beforeId || thread || status);
             const result = await queryPostgres(
-              `SELECT ${INBOX_COLUMNS} FROM agent_inbox
+              `SELECT ${light ? INBOX_COLUMNS.replace("props,", "props - 'steps' - 'trace' - 'last_error' AS props,") : INBOX_COLUMNS} FROM agent_inbox
                WHERE ($1 = '' OR agent_name = $1)
+                 AND ($9 = '' OR status = $9)
                  AND ($2 = '' OR item_type = $2)
                  AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%')
                  AND (NULLIF($4, '') IS NULL OR id < NULLIF($4, '')::bigint)
@@ -2469,7 +2475,7 @@ function mboxDevApi() {
                  AND ($8 = '' OR props->>'thread' = $8)
                ORDER BY ${filtered ? "id DESC" : "updated_at DESC"}
                LIMIT $5`,
-              [agent, itemType, search, beforeId, limit, String(sessionUser.id), sessionUser.role === "owner", thread],
+              [agent, itemType, search, beforeId, limit, String(sessionUser.id), sessionUser.role === "owner", thread, status],
             );
             return sendJson(res, 200, { inbox: result.rows });
           }
@@ -2517,7 +2523,7 @@ function mboxDevApi() {
               `UPDATE agent_inbox SET status = COALESCE(NULLIF($1, ''), status), priority = COALESCE(NULLIF($2, ''), priority), body = COALESCE($3, body), props = COALESCE($4, props), updated_at = now()
                WHERE id = $5 AND ($6 = '' OR status = $6)
                  AND (props->>'mbox_user_id' = $7 OR ($8::boolean AND NOT (props ? 'mbox_user_id')))
-               RETURNING id::text`,
+               RETURNING id::text, (EXTRACT(EPOCH FROM (now() - created_at)) * 1000)::bigint AS age_ms`,
               [String(body.status ?? ""), String(body.priority ?? ""), body.body ?? null, body.props && typeof body.props === "object" ? JSON.stringify({ ...body.props, mbox_user_id: String(sessionUser.id), mbox_owner: sessionUser.role === "owner" }) : null, inboxMatch[1], ifStatus, String(sessionUser.id), sessionUser.role === "owner"],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox" });

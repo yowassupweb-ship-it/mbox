@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInboxWake } from "./inbox-wake.mjs";
-import { agentLessons, codexContextUsage, createSessionStore, focusLines, isLostSession, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
+import { chatRules, clipError, codexContextUsage, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, RESUME_REMINDER, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 import { codexCachedModels, publishModelCatalog } from "./model-catalog.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -42,6 +42,11 @@ const contextLimit = Number(config.MBOX_WATCH_CONTEXT_LIMIT || 10);
 const contextLineLimit = Number(config.MBOX_WATCH_CONTEXT_LINE_LIMIT || 420);
 const codexEffort = config.CODEX_WATCH_EFFORT || "low";
 const sessions = createSessionStore(`codex-${agentName}`);
+// Сколько чатов отвечаем одновременно (см. parallelLimit в chat-threads.mjs).
+const MAX_PARALLEL = parallelLimit(config.MBOX_WATCH_PARALLEL);
+const activeLanes = new Map();
+const reportPhase = createPhaseBoard((phase) => { ping("heartbeat", phase).catch(() => {}); });
+const timings = createRunTimings();
 // Весь набор уровней из каталога Codex (models_cache.json): у новых моделей есть max и ultra.
 const CODEX_EFFORT_CHOICES = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const pickModel = (value) => {
@@ -103,8 +108,16 @@ console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring cha
 while (!stopping) {
   try {
     if (Date.now() - lastHeartbeat > HEARTBEAT_MS) { lastHeartbeat = Date.now(); await ping("heartbeat"); }
-    const item = await nextMention();
-    if (item) { await handleMention(item); continue; }
+    for (const item of await pendingMentions()) {
+      // Чат уже отвечает или места нет — сообщение остаётся open и берётся, когда освободится.
+      const lane = laneOf(item);
+      if (activeLanes.has(lane) || activeLanes.size >= MAX_PARALLEL) continue;
+      seen.add(String(item.id));
+      saveSeen();
+      activeLanes.set(lane, handleMention(item)
+        .catch((error) => console.error(`${logPrefix} #${item.id}: ${error.stack || error.message}`))
+        .finally(() => { activeLanes.delete(lane); wake.poke(); }));
+    }
   } catch (error) {
     console.error(`${logPrefix} ${error.stack || error.message}`);
   }
@@ -421,14 +434,20 @@ function streamStep(inboxId, index, step) {
   ping("heartbeat", undefined, { inbox_id: String(inboxId), step: { i: index, ...step } }).catch(() => {});
 }
 
+/** Проект наблюдателя почти не меняется — раньше его перечитывали на каждом круге опроса. */
+let projectCache = null;
 async function targetProject() {
+  if (projectCache && Date.now() - projectCache.at < 10 * 60_000) return projectCache.target;
   const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}&detail=short`);
-  return projects.projects?.find((item) => item.name === project) || projects.projects?.[0] || null;
+  const target = projects.projects?.find((item) => item.name === project) || projects.projects?.[0] || null;
+  projectCache = { at: Date.now(), target };
+  return target;
 }
 
-async function nextMention() {
+async function pendingMentions() {
   const target = await targetProject();
-  const data = await mboxFetch("/api/mbox/agent/inbox");
+  // status=open и light=1: без них каждый круг опроса тянул 200 записей со шагами и ошибками — 1,5 МБ.
+  const data = await mboxFetch("/api/mbox/agent/inbox?status=open&light=1&limit=100");
   const inbox = data.inbox || [];
   return inbox
     .filter((item) => item.status === "open")
@@ -438,7 +457,7 @@ async function nextMention() {
     .filter((item) => includeBacklog || new Date(item.created_at) >= cutoffAt)
     .filter((item) => !target || String(item.project_id || "") === String(target.id || ""))
     .filter((item) => isMentionForCodex(item))
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
 
 function isMentionForCodex(item) {
@@ -456,29 +475,42 @@ function escapeRegExp(value) {
 }
 
 async function handleMention(item) {
-  seen.add(String(item.id));
-  saveSeen();
   console.log(`${logPrefix} handling chat #${item.id}: ${item.title}`);
-  if (!(await claimInbox(item.id, { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString(), source: "codex-chat-watcher" }))) {
+  const claimed = await claimInbox(item.id, { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString(), source: "codex-chat-watcher" });
+  if (!claimed) {
     console.log(`${logPrefix} chat #${item.id} already taken by another watcher; skipping`);
     return;
   }
+  // Старый сервер age_ms не отдаёт — тогда по своим часам (могут расходиться с серверными на секунды).
+  timings.start(item.id, claimed.age_ms !== undefined ? Number(claimed.age_ms) : Date.now() - Date.parse(item.created_at));
 
-  const run = await createRun(item);
+  // «Принял» — сразу после захвата: до «Запускается» ещё история чата и старт CLI.
+  reportPhase(item.id, "Принял");
+  // Папка картинок хода: путь уходит агенту в сообщении, после ответа всё оттуда загружается в чат.
+  const imageDir = turnImageDir(agentName, item.id);
+  item = { ...item, imageDir };
+  const runPromise = createRun(item).catch((error) => { console.error(`${logPrefix} agent run: ${error.message}`); return null; });
   const startedAt = Date.now();
+  let run = null;
   try {
     const outcome = await runCodex(item);
+    run = await runPromise;
+    const images = await attachTurnImages(item, imageDir, outcome.text, startedAt);
+    const timing = timings.finish(item.id);
+    outcome.stats = { ...(outcome.stats || {}), ...timing };
+    console.log(`${logPrefix} #${item.id}: ${describeTimings(timing)}`);
     const answer = outcome.text;
     await createInboxItem({
       project_id: item.project_id || null,
       title: `ChatGPT: ответ на #${item.id}`,
-      body: answer || "Готово.",
+      body: images.body || "Готово.",
       item_type: "agent_response",
       priority: "normal",
       props: {
         in_reply_to: item.id,
         to: item.agent_name || "Человек",
         source: "codex-chat-watcher",
+        ...(images.attachments.length ? { attachments: images.attachments } : {}),
         ...(threadOf(item) ? { thread: threadOf(item) } : {}),
         tools_used: outcome.toolsUsed,
         trace: outcome.trace,
@@ -495,6 +527,9 @@ async function handleMention(item) {
     await finishRun(run?.id, "done", answer, Date.now() - startedAt);
   } catch (error) {
     const message = error.cliFailure ? error.message : error.stack || error.message;
+    timings.finish(item.id);
+    reportPhase(item.id, "");
+    run = await runPromise;
     await createInboxItem({
       project_id: item.project_id || null,
       title: `ChatGPT не смог ответить на #${item.id}`,
@@ -505,19 +540,39 @@ async function handleMention(item) {
     });
     await patchInbox(item.id, {
       status: "open",
-      props: { ...(item.props || {}), handled_by: agentName, last_error: error.message, source: "codex-chat-watcher" },
+      props: { ...(item.props || {}), handled_by: agentName, last_error: clipError(error.message), source: "codex-chat-watcher" },
     });
     await finishRun(run?.id, "failed", message, Date.now() - startedAt);
+  } finally {
+    dropTurnImageDir(imageDir);
   }
 }
 
-/** Захват сообщения: false, если его уже взял другой наблюдатель (сервер вернул 409 на if_status). */
+/** Загрузка картинки хода в хранилище MBOX (см. uploadTurnImages). Размер fetch ставит сам по Buffer. */
+async function uploadStorage(key, buffer, type) {
+  return mboxFetch(`/api/mbox/storage/upload?key=${encodeURIComponent(key)}`, { method: "POST", body: buffer, headers: { "content-type": type } });
+}
+
+/** Картинки хода — в хранилище и ссылками в конец текста: карточки в чате строятся по props.attachments,
+ *  а агенты в следующих ходах читают текст (тот же формат «Вложения:», что у сообщений человека). */
+async function attachTurnImages(item, dir, text, since) {
+  const images = turnImages(dir, text, since);
+  if (!images.length) return { attachments: [], body: text };
+  const projectId = item.project_id || (await targetProject())?.id || "";
+  const attachments = await uploadTurnImages({ images, projectId, inboxId: item.id, upload: uploadStorage, log: (message) => console.log(`${logPrefix} ${message}`) });
+  if (!attachments.length) return { attachments, body: text };
+  const list = attachments.map((file) => `- [${file.name}](${baseUrl}/api/mbox/storage/file?key=${encodeURIComponent(file.key)})`);
+  return { attachments, body: [text, ["Вложения:", ...list].join("\n")].filter(Boolean).join("\n\n") };
+}
+
+
+/** Захват сообщения: null, если его уже взял другой наблюдатель (сервер вернул 409 на if_status). */
 async function claimInbox(id, props) {
   try {
-    await mboxFetch(`/api/mbox/agent/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "doing", if_status: "open", props }) });
-    return true;
+    const data = await mboxFetch(`/api/mbox/agent/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "doing", if_status: "open", props }) });
+    return data.inbox_item || {};
   } catch (error) {
-    if (/^MBOX 409/.test(error.message)) return false;
+    if (/^MBOX 409\b/.test(error.message)) return null;
     throw error;
   }
 }
@@ -561,7 +616,9 @@ async function finishRun(id, status, result, elapsedMs) {
 
 async function recentConversationContext(item) {
   if (!contextLimit) return "";
-  const data = await mboxFetch("/api/mbox/agent/inbox");
+  // Чат с id — только его сообщения, а не 200 последних записей всей консоли.
+  const thread = threadOf(item);
+  const data = await mboxFetch(thread ? `/api/mbox/agent/inbox?thread=${thread}&light=1&limit=${contextLimit * 3}` : "/api/mbox/agent/inbox?light=1");
   const targetProjectId = String(item.project_id || "");
   const currentCreatedAt = new Date(item.created_at || Date.now()).getTime();
   const rows = (data.inbox || [])
@@ -573,11 +630,7 @@ async function recentConversationContext(item) {
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
     .slice(-contextLimit);
 
-  if (!rows.length) return "";
-  return [
-    "Recent MBOX console context, oldest to newest:",
-    ...rows.map(formatContextLine),
-  ].join("\n");
+  return historyBlock(rows.map(formatContextLine));
 }
 
 function formatContextLine(entry) {
@@ -631,54 +684,24 @@ async function runCodex(item) {
   return outcome;
 }
 
-function messageLines(item) {
-  return [
-    `Chat item id: ${item.id}`,
-    // Ответ на конкретное сообщение (кнопка «Ответить» в чате MBOX): props.re — его id.
-    ...(item.props?.re || item.props?.in_reply_to ? [`In reply to message #${item.props.re || item.props.in_reply_to}.`] : []),
-    `From: ${item.agent_name || "unknown"}`,
-    `Title: ${item.title || ""}`,
-    `Body:\n${item.body || ""}`,
-    ...focusLines(item),
-  ];
-}
-
+/**
+ * Первый ход сессии: правила (общие с Claude, см. chatRules), история чата и сообщение. Системного промпта
+ * на каждый ход у codex exec нет, поэтому в продолженной сессии — короткое напоминание (RESUME_REMINDER).
+ */
 async function freshPrompt(item) {
-  const conversationContext = await recentConversationContext(item);
   return [
-    "You were woken by an @codex mention in the MBOX project chat.",
-    `Your canonical agent name is ${agentName}.`,
-    "Answer the chat message below. If the user asks for code work, do it in the repo and summarize the result.",
-    "Do not create an MBOX inbox response yourself; the watcher will post your final answer.",
-    "Keep the final answer concise and directly useful.",
-    "Spend tokens carefully: avoid broad repo scans and huge command outputs; search with explicit paths and exclude build artifacts, binaries and generated assets.",
-    agentLessons(),
-    "Use the recent MBOX console context to resolve short messages, pronouns, follow-ups, and @mentions.",
-    // См. claude-inbox-watcher.mjs — тот же пробел без языкового сигнала уводил ответы на английский.
-    "MBOX is a Russian-language project — the owner and all other agents communicate in Russian. Write your final answer in Russian, unless the user explicitly wrote in another language.",
-    // 24.09: Codex правил .docx встроенным PowerShell (Expand-Archive в %TEMP%, регулярки по XML, Compress-Archive
-    // и перезапись файла в «Загрузках») — Defender принял это за шифровальщик (Trojan:Win32/Commando.A!ml) и блокировал.
-    "Editing Word/Excel/PowerPoint files: never unzip/rezip them with inline PowerShell (Expand-Archive, Compress-Archive, [IO.Compression]) or rewrite their XML with regex in %TEMP% — Windows Defender flags that pattern as ransomware and blocks it. Use the mbox-prod MCP tools (workspace_read_document, workspace_write_docx, workspace_read_table, workspace_write_cells, workspace_format_cells) for files in MBOX local folders — colors, fonts, borders and number formats go through workspace_format_cells, checked with workspace_read_table styles=true, not through Python; otherwise write a small Python script with python-docx/openpyxl. Always keep the original: save the result next to it (e.g. name.edited.docx) unless the owner explicitly asked to overwrite.",
-    // 24.09: «сделай шрифт не жирным» стоило 20+ шагов и 580k токенов — агент искал render_docx.py, LibreOffice
-    // и Word COM, чтобы визуально проверить результат. Каждый шаг пересылает весь контекст заново.
-    "Routine requests (edit a file, fix formatting, rename, small change): do it in the fewest possible steps — ideally one tool call to change and one to verify by reading the result back. Do not search for renderers, converters or viewers (LibreOffice/soffice, Word COM, render scripts) and do not verify visually unless the owner asked for it. Do not explore the filesystem beyond what the task needs. If a skill's instructions demand heavier verification, skip it for routine edits.",
-    "If a command or tool fails with access denied / permission denied / EACCES / EPERM, do not work around it (no copying elsewhere, no elevation, no retries under another path): stop and end your answer with a short question to the owner naming exactly what access is needed and why.",
-    // Длинный отчёт в чате терялся — теперь он всегда отдельным файлом со ссылкой (MCP save_report).
-    "If the answer is a report, audit, research or anything longer than ~20 lines, first save the full text as Markdown with the mbox-prod MCP tool save_report, then reply in chat with a short summary (5-10 lines) and the returned markdown_link — the owner must get a clickable link.",
-    // Навык ведёт сценарий через интерфейс MBOX: форма, результат, папка открываются вкладкой, файлы навыка правятся на лету.
-    "MBOX UI: to show the owner a skill form, a finished file or folder, use the MBOX MCP tool open_tab (skill-file:<skill>/<file>, skill-blocks:<skill>, path:<absolute path>). To change a skill's files (SKILL.md, forms, templates) use edit_skill_file / write_skill_file — live immediately, no deploy.",
-    "Documents and tables: MBOX notes (note_search, note_read, note_write, note_edit) and files in the owner's local folders (workspace_edit_file for small text edits instead of rewriting a whole file, workspace_read_table / workspace_write_cells / workspace_format_cells for .xlsx/.csv, workspace_read_document / workspace_write_docx for Word). Pass show=true when the owner should watch the change happen — the document opens as a tab in MBOX.",
-    "",
-    conversationContext,
-    "",
-    ...messageLines(item),
-  ].join("\n");
+    chatRules({ agentName }),
+    "Spend tokens carefully: search with explicit paths and exclude build artifacts, binaries and generated assets.",
+    await recentConversationContext(item),
+    messageBlock(item),
+    item.imageDir ? imageLine(item.imageDir) : "",
+  ].filter(Boolean).join("\n\n");
 }
 
 async function runCodexTurn(item, resumeId) {
   const outputFile = path.join(os.tmpdir(), `codex-mbox-chat-${item.id}-${Date.now()}.txt`);
   const prompt = resumeId
-    ? ["New message in this same MBOX chat. Answer it the same way as before (Russian, concise; the watcher posts your final answer).", "", ...messageLines(item)].join("\n")
+    ? [RESUME_REMINDER, messageBlock(item), item.imageDir ? imageLine(item.imageDir) : ""].filter(Boolean).join("\n\n")
     : await freshPrompt(item);
 
   // resume не знает -C и --sandbox: папка берётся из сессии, режим песочницы — через -c.
@@ -692,6 +715,7 @@ async function runCodexTurn(item, resumeId) {
   if (resumeId) args.push(resumeId);
   args.push(prompt);
 
+  timings.spawn(item.id);
   const outcome = await spawnCodex(codexCommand, args, { cwd: workdir, env: { ...process.env, MBOX_AGENT_NAME: agentName, MBOX_AGENT_CLIENT: "codex-chat-watcher", MBOX_MCP_PUSH: "off" } }, item.id);
   const answer = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, "utf8").trim() : "";
   fs.rmSync(outputFile, { force: true });
@@ -715,7 +739,7 @@ function spawnCodex(command, args, options, inboxId = "") {
     let lastPhaseAt = 0;
     let lastPhase = "Запускается";
 
-    ping("heartbeat", "Запускается").catch(() => {});
+    reportPhase(inboxId, "Запускается");
 
     // Новая фаза — сразу, повтор той же — не чаще раза в 3 с (см. claude-inbox-watcher.mjs).
     const pushPhase = (phase) => {
@@ -723,7 +747,7 @@ function spawnCodex(command, args, options, inboxId = "") {
       if (phase === lastPhase && now - lastPhaseAt < 3000) return;
       lastPhase = phase;
       lastPhaseAt = now;
-      ping("heartbeat", phase).catch(() => {});
+      reportPhase(inboxId, phase);
     };
 
     child.stdout.on("data", (chunk) => {
@@ -732,7 +756,12 @@ function spawnCodex(command, args, options, inboxId = "") {
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
-      for (const line of lines) handleCodexLine(line, state, startedAt, pushPhase, inboxId);
+      for (const line of lines) {
+        // Первая строка JSON — CLI поднялся (thread.started), первый item.* — модель начала работу.
+        if (line.startsWith("{")) timings.mark(inboxId, "readyAt");
+        if (line.includes('"type":"item.')) timings.mark(inboxId, "replyAt");
+        handleCodexLine(line, state, startedAt, pushPhase, inboxId);
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
@@ -742,7 +771,7 @@ function spawnCodex(command, args, options, inboxId = "") {
     child.on("close", (code) => {
       clearTimeout(runTimer);
       if (buffer.trim()) handleCodexLine(buffer, state, startedAt, pushPhase, inboxId);
-      ping("heartbeat", "").catch(() => {});
+      reportPhase(inboxId, "");
       if (code === 0) {
         if (!state.stats) state.stats = { duration_ms: Date.now() - startedAt };
         if (state.failure) {

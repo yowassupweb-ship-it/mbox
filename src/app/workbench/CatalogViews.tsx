@@ -3,6 +3,7 @@ import { Play, RefreshCw, X } from "lucide-react";
 import { openSkillPage } from "./agentTabs";
 import { formatLastUsed, skillGroup, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { usePersistentState, type TabsApi } from "./tabs";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 function Filter({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
@@ -39,7 +40,7 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
       </header>
       <Filter value={filter} onChange={setFilter} placeholder="Что нужно сделать?" />
       <div className="wb-view-body">
-        {loading && <p className="wb-empty">Загрузка…</p>}
+        {loading && <OctopusSpinner />}
         {groups.map(([group, skills]) => {
           const open = Boolean(needle) || !collapsed.includes(group);
           return (
@@ -127,7 +128,7 @@ export function ToolsView({ tabs }: { tabs: TabsApi }) {
       </header>
       <Filter value={filter} onChange={setFilter} placeholder="Найти инструмент" />
       <div className="wb-view-body">
-        {loading && <p className="wb-empty">Загрузка…</p>}
+        {loading && <OctopusSpinner />}
         {groups.map(([group, items]) => {
           const open = Boolean(needle) || !collapsed.includes(group);
           const planned = items.every((tool) => tool.planned);

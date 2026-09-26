@@ -44,6 +44,7 @@ import { tabMeta } from "./tabMeta";
 import { encodeTabParam, projectIdOfTab, setWorkbenchStorageUser, usePersistentState, useTabs, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent, type OpenTabResult } from "./agentTabs";
+import { installBrowserAgent } from "./browserAgent";
 import { SkillPageDocument } from "./SkillPageDocument";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
@@ -256,6 +257,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       })
       .catch((cause) => setAgentNotice({ tone: "warn", text: `Не открылось: ${cause instanceof Error ? cause.message : String(cause)}` }));
   };
+  // Агент во встроенном браузере: действия приходят вебсокетом, выполняет главный процесс MBOX Desktop.
+  useEffect(() => { installBrowserAgent(); }, []);
   useEffect(() => {
     const listener = (event: Event) => openTabHandler.current((event as CustomEvent<OpenTabEvent>).detail);
     window.addEventListener("mbox:open-tab", listener);

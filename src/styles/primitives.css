@@ -297,3 +297,8 @@
   overflow: auto;
   overscroll-behavior: contain;
 }
+
+/* Спиннер ожидания — маскот MBOX (components/OctopusSpinner.tsx). */
+.octopus-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 12px; color: var(--text-muted); font-size: var(--text-sm); text-align: center; }
+.octopus-spinner img { display: block; image-rendering: pixelated; }
+.octopus-spinner.is-compact { flex-direction: row; justify-content: flex-start; gap: 8px; padding: 8px 12px; }

@@ -199,7 +199,25 @@ function setBookmark({ title, url, folder, source, imported }) {
     source: String(source ?? existing.source ?? "bookmark_bar"),
     imported: Boolean(imported ?? existing.imported),
   };
-  items.unshift(next);
+  // Правка (переименование) оставляет закладку на её месте; новая встаёт первой.
+  const at = current.findIndex((item) => item.url === valid.href);
+  items.splice(at < 0 ? 0 : at, 0, next);
+  writeJson("bookmarks.json", { savedAt: Date.now(), items });
+  return items;
+}
+
+const inFolder = (item, folder) => item.folder === folder || String(item.folder || "").startsWith(`${folder} / `);
+
+/** Переименовать папку вместе с вложенными «Папка / Подпапка». */
+function renameFolder(folder, to) {
+  const name = String(to || "").trim().replace(/\s*\/\s*/g, " ").slice(0, 120);
+  const items = getBookmarks().map((item) => (folder && name && inFolder(item, folder) ? { ...item, folder: name + String(item.folder).slice(folder.length) } : item));
+  writeJson("bookmarks.json", { savedAt: Date.now(), items });
+  return items;
+}
+
+function removeFolder(folder) {
+  const items = getBookmarks().filter((item) => !(folder && inFolder(item, folder)));
   writeJson("bookmarks.json", { savedAt: Date.now(), items });
   return items;
 }
@@ -261,5 +279,7 @@ module.exports = {
   setBookmark,
   removeBookmark,
   moveBookmark,
+  renameFolder,
+  removeFolder,
   credentialsFor,
 };

@@ -56,6 +56,8 @@ export function createInboxWake({ baseUrl, authHeaders, log = () => {} }) {
         wake = done;
       });
     },
+    /** Разбудить круг сразу — освободилось место под чат, ждавший своей очереди. */
+    poke: fire,
     stop() { stopped = true; wake?.(); },
   };
 }

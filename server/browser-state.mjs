@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS browser_bookmarks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_bookmarks_url ON browser_bookmarks(mbox_user_id, url);
+-- Порядок в панели. Без него список шёл по created_at DESC, и импорт (вставка по одной в порядке Chrome)
+-- выходил перевёрнутым. NULL у строк до этой правки — они идут следом по id, то есть в порядке вставки.
+ALTER TABLE browser_bookmarks ADD COLUMN IF NOT EXISTS position DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS browser_history (
   id BIGSERIAL PRIMARY KEY,
@@ -69,7 +72,7 @@ function validUrl(raw) {
 
 async function listBookmarks(query, userId) {
   return (await query(
-    "SELECT url, title, folder, source, imported FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 ORDER BY imported, created_at DESC",
+    "SELECT url, title, folder, source, imported FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 ORDER BY position NULLS LAST, id",
     [userId],
   )).rows;
 }
@@ -106,16 +109,54 @@ export async function handleBrowserStateApi({ req, res, url, query, readBody, se
       }
       if (req.method === "POST") {
         const body = await readBody(req);
-        // Массив — это импорт (из Chrome или с другой машины): дописываем, не трогая уже сохранённое.
-        const items = Array.isArray(body.bookmarks) ? body.bookmarks : [body];
+        // Массив — это импорт (из Chrome или с другой машины): дописываем, не трогая уже сохранённое,
+        // и ставим позиции по порядку массива — так панель повторяет порядок Chrome.
+        const batch = Array.isArray(body.bookmarks);
+        const items = batch ? body.bookmarks : [body];
+        let index = 0;
         for (const item of items.slice(0, 5000)) {
           const href = validUrl(item.url);
           if (!href) continue;
+          index += 1;
+          // Одиночная новая закладка (звёздочка) встаёт первой; переименование место не меняет.
           await query(
-            `INSERT INTO browser_bookmarks(mbox_user_id, url, title, folder, source, imported)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (mbox_user_id, url) DO UPDATE SET title = EXCLUDED.title, folder = EXCLUDED.folder`,
-            [owner, href, String(item.title || "").slice(0, 200), String(item.folder || "").slice(0, 200), String(item.source || "bookmark_bar").slice(0, 40), Boolean(item.imported)],
+            `INSERT INTO browser_bookmarks(mbox_user_id, url, title, folder, source, imported, position)
+             VALUES ($1, $2, $3, $4, $5, $6,
+                     CASE WHEN $7::boolean THEN $8::double precision
+                          ELSE (SELECT COALESCE(MIN(position), 0) - 1 FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1) END)
+             ON CONFLICT (mbox_user_id, url) DO UPDATE SET title = EXCLUDED.title, folder = EXCLUDED.folder,
+               position = CASE WHEN $7::boolean THEN EXCLUDED.position ELSE browser_bookmarks.position END`,
+            [owner, href, String(item.title || "").slice(0, 200), String(item.folder || "").slice(0, 200), String(item.source || "bookmark_bar").slice(0, 40), Boolean(item.imported), batch, index],
+          );
+        }
+        sendJson(res, 200, { bookmarks: await listBookmarks(query, owner) });
+        return true;
+      }
+      if (req.method === "PATCH") {
+        const body = await readBody(req);
+        // Перетаскивание: закладка url встаёт перед before_url (пусто — в конец). Позиции переписываем
+        // всему списку одним запросом — он короткий, а дробные «между соседями» со временем слипаются.
+        const href = validUrl(body.url);
+        if (href) {
+          const order = (await listBookmarks(query, owner)).map((item) => item.url).filter((item) => item !== href);
+          const before = validUrl(body.before_url);
+          const at = before ? order.indexOf(before) : -1;
+          order.splice(at < 0 ? order.length : at, 0, href);
+          await query(
+            `UPDATE browser_bookmarks b SET position = o.pos
+               FROM unnest($2::text[]) WITH ORDINALITY AS o(url, pos)
+              WHERE b.mbox_user_id IS NOT DISTINCT FROM $1 AND b.url = o.url`,
+            [owner, order],
+          );
+        }
+        // Папка: переименовать (folder + to) со всеми вложенными «Папка / Подпапка».
+        const folder = String(body.folder || "").trim();
+        const to = String(body.to || "").trim().replace(/\s*\/\s*/g, " ").slice(0, 120);
+        if (folder && to && folder !== to) {
+          await query(
+            `UPDATE browser_bookmarks SET folder = $3 || substr(folder, length($2) + 1)
+              WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND (folder = $2 OR left(folder, length($2) + 3) = $2 || ' / ')`,
+            [owner, folder, to],
           );
         }
         sendJson(res, 200, { bookmarks: await listBookmarks(query, owner) });
@@ -123,7 +164,14 @@ export async function handleBrowserStateApi({ req, res, url, query, readBody, se
       }
       if (req.method === "DELETE") {
         const href = validUrl(url.searchParams.get("url"));
+        const folder = String(url.searchParams.get("folder") || "").trim();
         if (href) await query("DELETE FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND url = $2", [owner, href]);
+        else if (folder) {
+          await query(
+            "DELETE FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND (folder = $2 OR left(folder, length($2) + 3) = $2 || ' / ')",
+            [owner, folder],
+          );
+        }
         sendJson(res, 200, { bookmarks: await listBookmarks(query, owner) });
         return true;
       }

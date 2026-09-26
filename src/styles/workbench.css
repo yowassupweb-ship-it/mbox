@@ -3213,11 +3213,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: color-mix(in srgb, var(--doc-bg) 92%, transparent);
   backdrop-filter: blur(10px);
 }
-.share-brand { color: var(--accent-color); font-weight: 700; letter-spacing: 0.08em; font-size: 12px; }
+.share-brand { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--text-main); font-size: 13px; font-weight: 650; }
+.share-brand img { display: block; image-rendering: pixelated; }
 .share-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
 .share-status.is-pending, .share-status.is-saving { color: var(--state-warn); }
 .share-status.is-error { color: var(--state-danger); }
-.share-access { flex: none; color: var(--text-2); font-size: 12px; white-space: nowrap; }
+/* Доступ — меткой справа: кто открыл ссылку, сразу видит, можно ли тут писать. */
+.share-access { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 3px 9px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .share-theme-button {
   display: inline-flex;
   flex: none;
@@ -3236,15 +3238,18 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-theme-button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 .share-bar .wb-md-toolbar { flex: 1 1 auto; }
 .share-page > .wb-doc-find { position: fixed; top: calc(52px + env(safe-area-inset-top, 0px)); }
-.share-toggle { display: inline-flex; flex: none; margin-left: auto; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); overflow: hidden; }
+.share-toggle { display: inline-flex; flex: none; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); overflow: hidden; }
 .share-toggle button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
 .share-toggle button.is-on { background: var(--wb-hover); color: var(--accent-color); }
 .share-notice { max-width: 820px; margin: 12px auto 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--state-warn) 45%, transparent); border-radius: var(--radius-sm); color: var(--state-warn); font-size: 12.5px; }
 .share-workspace { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 820px) minmax(0, 1fr); gap: var(--space-7); margin: 0 auto; padding: 0 var(--space-6); box-sizing: border-box; }
 .share-doc { grid-column: 2; min-width: 0; padding: 40px 0 30vh; box-sizing: border-box; }
-.share-note-tabs { grid-column: 1; grid-row: 1; position: sticky; top: calc(44px + 40px); align-self: start; justify-self: end; width: 220px; max-width: 100%; max-height: calc(100dvh - 44px - var(--space-8)); display: grid; gap: var(--space-1); margin-top: 40px; overflow: auto; }
+.share-note-tabs { grid-column: 1; grid-row: 1; position: sticky; top: calc(44px + 40px); align-self: start; justify-self: end; width: min(220px, 100%); max-height: calc(100dvh - 44px - var(--space-8)); display: grid; gap: var(--space-1); margin-top: 40px; overflow-x: hidden; overflow-y: auto; }
+/* Есть колонка вкладок — левое поле не уже 180px: при равных полях на средней ширине список в 220px
+   вылезал за левый край окна, и «Вкладки» читались как «…ладки». */
+.share-workspace:has(> .share-note-tabs:not(.is-collapsed)) { grid-template-columns: minmax(180px, 1fr) minmax(0, 820px) minmax(0, 1fr); }
 .share-note-tabs.is-collapsed { width: var(--space-8); overflow: hidden; }
-.share-note-tabs-head { height: var(--space-8); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-1) 0 var(--space-2); color: var(--text-muted); font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: uppercase; letter-spacing: 0.08em; }
+.share-note-tabs-head { height: var(--space-8); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-1) 0 var(--space-2); color: var(--text-muted); font-size: 12px; font-weight: 650; }
 .share-note-tabs-head > div { display: flex; align-items: center; }
 .share-note-tabs.is-collapsed .share-note-tabs-head { padding: 0; justify-content: center; }
 .share-note-tabs-list { display: grid; gap: var(--space-1); }
@@ -3254,7 +3259,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-note-tabs-head button:hover { background: var(--wb-hover); color: var(--text-main); }
 .share-note-tab { min-height: var(--space-8); display: flex; align-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); }
 .share-note-tab:hover { background: var(--wb-hover); }
-.share-note-tab.is-active { border-color: color-mix(in srgb, var(--accent-color) 36%, var(--wb-line)); background: color-mix(in srgb, var(--accent-color) 10%, transparent); color: var(--text-main); }
+.share-note-tab.is-active { background: color-mix(in srgb, var(--accent-color) 14%, transparent); color: var(--text-main); font-weight: 550; }
 .share-note-tab > [role="tab"] { min-width: 0; flex: 1; min-height: var(--space-8); padding: 0 var(--space-3); overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .share-note-tab > button:last-child:not(:first-child) { width: var(--space-7); height: var(--space-7); display: grid; flex: none; place-items: center; margin-right: var(--space-1); border-radius: var(--radius-sm); color: var(--text-muted); opacity: 0; }
 .share-note-tab:hover > button:last-child:not(:first-child),

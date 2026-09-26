@@ -187,7 +187,12 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
   useEffect(() => {
     const state = pump.current;
     state.alive = true;
-    state.qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    // StrictMode в dev монтирует эффект дважды: вторая постановка всех 12 ручек, пока первая волна ещё
+    // в пути, давала второй такой же пакет (~10 МБ). Через туннель к базе и лимит в 6 соединений HTTP/1.1
+    // у vite это держало в очереди остальные запросы окна — заметки открывались по полминуты.
+    if (state.running && state.qs === qs) return;
+    state.qs = qs;
     state.raw.clear();
     ALL_KEYS.forEach((key) => state.pending.add(key));
     // Смена запроса — сразу, без паузы между перечитываниями.

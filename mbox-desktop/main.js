@@ -249,7 +249,10 @@ function createWindow() {
   // Сквозная сессия: забираем с сервера куки сайтов (до того, как человек откроет первую вкладку),
   // и дальше досылаем изменения. Проверка доступности — она же проверка, что вход в MBOX есть.
   serverState.configure(mboxUrl);
+  // Чистка кук Google — до первой вкладки и независимо от связи с сервером (см. repairGoogleCookies).
+  const googleRepair = serverState.repairGoogleCookies(browser.PARTITION).catch(() => 0);
   void serverState.probe().then(async (on) => {
+    await googleRepair;
     if (!on) return;
     await serverState.restoreCookies(browser.PARTITION).catch(() => {});
     serverState.watchCookies(browser.PARTITION);
@@ -743,6 +746,11 @@ ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrows
 ipcMain.handle("mbox-desktop:browser-capture", async (event, key) => { assertBrowserHost(event); return browser.capture(String(key)); });
 ipcMain.handle("mbox-desktop:browser-favicon", async (event, url) => { assertBrowserHost(event); return browser.favicon(String(url || "")); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
+// Действие агента во вкладке браузера (server/browser-agent.mjs → страница MBOX → сюда).
+ipcMain.handle("mbox-desktop:browser-agent", async (event, key, action, args, actor, note) => {
+  assertBrowserHost(event);
+  return browser.agentAction(String(key || ""), String(action || ""), args && typeof args === "object" ? args : {}, String(actor || "Агент"), String(note || ""));
+});
 // Ответ на HTTP-авторизацию сайта (Basic Auth): имя и пароль идут только в Chromium этой вкладки.
 ipcMain.handle("mbox-desktop:browser-auth", async (event, id, username, password) => {
   assertBrowserHost(event);
@@ -777,7 +785,83 @@ function bookmarkMenuLabel(item) {
   try { return new URL(String(item?.url || "")).hostname || String(item?.url || ""); }
   catch { return String(item?.url || ""); }
 }
-function promptBookmarkTitle(currentTitle) {
+async function moveBrowserBookmark(url, beforeUrl) {
+  const local = chromeImport.moveBookmark(url, beforeUrl);
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.moveBookmark(url, beforeUrl)); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+}
+async function renameBrowserFolder(folder, to) {
+  const local = chromeImport.renameFolder(folder, to);
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.renameFolder(folder, to)); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+}
+async function removeBrowserFolder(folder) {
+  const local = chromeImport.removeFolder(folder);
+  if (serverState.isOn()) {
+    try { return publishBookmarks(await serverState.removeFolder(folder)); } catch { /* ниже отдадим локальные */ }
+  }
+  return publishBookmarks(local);
+}
+/** Пункты правки одной закладки — в её меню и в подменю «Изменить» у папки. */
+function bookmarkEditItems(item) {
+  return [
+    {
+      label: "Переименовать…",
+      click: async () => {
+        const nextTitle = await promptBookmarkTitle(item.title || bookmarkMenuLabel(item));
+        if (!nextTitle || nextTitle === item.title) return;
+        await setBrowserBookmark({ ...item, title: nextTitle });
+      },
+    },
+    {
+      label: "Удалить",
+      click: () => { void removeBrowserBookmark(item.url); },
+    },
+  ];
+}
+/** Пункты правки папки: для кнопки папки в панели и низа её выпадающего списка. */
+function folderEditItems(folderName, count) {
+  return [
+    {
+      label: "Переименовать папку…",
+      click: async () => {
+        const next = await promptBookmarkTitle(folderName, { heading: "Переименовать папку", label: "Название папки" });
+        if (!next || next === folderName) return;
+        await renameBrowserFolder(folderName, next);
+      },
+    },
+    {
+      label: `Удалить папку (${count})…`,
+      click: async () => {
+        const answer = await dialog.showMessageBox(mainWindow, {
+          type: "question",
+          buttons: ["Удалить", "Отмена"],
+          defaultId: 1,
+          cancelId: 1,
+          message: `Удалить папку «${folderName}»?`,
+          detail: `Вместе с ней удалятся закладки внутри: ${count}.`,
+        });
+        if (answer.response === 0) await removeBrowserFolder(folderName);
+      },
+    },
+  ];
+}
+async function browserBookmarkList() {
+  return serverState.isOn()
+    ? serverState.bookmarks().catch(() => chromeImport.getBookmarks())
+    : chromeImport.getBookmarks();
+}
+function folderBookmarks(all, folderName) {
+  return all.filter((item) => {
+    if (folderName === "Другие") return item.source !== "bookmark_bar";
+    return item.source === "bookmark_bar" && String(item.folder || "").split(" / ")[0] === folderName;
+  });
+}
+function promptBookmarkTitle(currentTitle, { heading = "Переименовать закладку", label = "Название закладки" } = {}) {
   return new Promise((resolve) => {
     if (!mainWindow || mainWindow.isDestroyed()) return resolve(null);
     const promptWindow = new BrowserWindow({
@@ -789,7 +873,7 @@ function promptBookmarkTitle(currentTitle) {
       minimizable: false,
       maximizable: false,
       show: false,
-      title: "Переименовать закладку",
+      title: heading,
       webPreferences: {
         contextIsolation: false,
         nodeIntegration: true,
@@ -811,7 +895,7 @@ function promptBookmarkTitle(currentTitle) {
 </head>
 <body>
   <form>
-    <label for="title">Название закладки</label>
+    <label for="title">${label}</label>
     <input id="title" value="${cleanTitle.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}" spellcheck="false">
     <div class="actions">
       <button type="button" id="cancel">Отмена</button>
@@ -855,13 +939,7 @@ function promptBookmarkTitle(currentTitle) {
 ipcMain.handle("mbox-desktop:browser-bookmark-folder-popup", async (event, key, name, x, y) => {
   assertBrowserHost(event);
   const folderName = String(name || "");
-  const all = serverState.isOn()
-    ? await serverState.bookmarks().catch(() => chromeImport.getBookmarks())
-    : chromeImport.getBookmarks();
-  const items = all.filter((item) => {
-    if (folderName === "Другие") return item.source !== "bookmark_bar";
-    return item.source === "bookmark_bar" && String(item.folder || "").split(" / ")[0] === folderName;
-  });
+  const items = folderBookmarks(await browserBookmarkList(), folderName);
   const labelOf = (item) => {
     const title = String(item.title || "").trim();
     if (title && !/^https?:\/\//i.test(title)) return title;
@@ -875,6 +953,15 @@ ipcMain.handle("mbox-desktop:browser-bookmark-folder-popup", async (event, key, 
       click: () => browser.act(String(key), "navigate", String(item.url || "")),
     }))
     : [{ label: "Папка пуста", enabled: false }];
+  // По пункту системного меню нельзя щёлкнуть правой кнопкой — правка закладок папки и самой папки
+  // вынесена вниз списка, как «Изменить…» в Chrome.
+  if (items.length) {
+    template.push({ type: "separator" }, {
+      label: "Изменить закладки",
+      submenu: items.map((item) => ({ label: labelOf(item), submenu: bookmarkEditItems(item) })),
+    });
+  }
+  if (folderName !== "Другие" && items.length) template.push(...folderEditItems(folderName, items.length));
   Menu.buildFromTemplate(template).popup({
     window: mainWindow,
     x: Math.max(0, Math.round(Number(x) || 0)),
@@ -902,18 +989,7 @@ ipcMain.handle("mbox-desktop:browser-bookmark-popup", async (event, key, bookmar
       click: () => mainWindow?.webContents.send("mbox-desktop:browser", { type: "open", url: item.url }),
     },
     { type: "separator" },
-    {
-      label: "Переименовать",
-      click: async () => {
-        const nextTitle = await promptBookmarkTitle(item.title || bookmarkMenuLabel(item));
-        if (!nextTitle || nextTitle === item.title) return;
-        await setBrowserBookmark({ ...item, title: nextTitle });
-      },
-    },
-    {
-      label: "Удалить",
-      click: () => { void removeBrowserBookmark(item.url); },
-    },
+    ...bookmarkEditItems(item),
   ];
   Menu.buildFromTemplate(template).popup({
     window: mainWindow,
@@ -945,9 +1021,22 @@ ipcMain.handle("mbox-desktop:browser-bookmark-add", async (event, bookmark) => {
 });
 ipcMain.handle("mbox-desktop:browser-bookmark-move", async (event, url, beforeUrl) => {
   assertBrowserHost(event);
-  // Порядок ведём в локальном файле: на сервере у закладок его нет, а панель должна слушаться
-  // перетаскивания сразу. Серверный список остаётся источником состава, локальный — порядка.
-  return publishBookmarks(chromeImport.moveBookmark(String(url || ""), String(beforeUrl || "")));
+  // Порядок хранится и на сервере (browser_bookmarks.position) — раньше он жил только в локальном
+  // файле, а панель показывала серверный список, и перетаскивание ничего не меняло.
+  return moveBrowserBookmark(String(url || ""), String(beforeUrl || ""));
+});
+// Правый щелчок по папке в панели: переименовать или удалить её.
+ipcMain.handle("mbox-desktop:browser-bookmark-folder-menu", async (event, name, x, y) => {
+  assertBrowserHost(event);
+  const folderName = String(name || "");
+  if (!folderName || folderName === "Другие") return { ok: false };
+  const count = folderBookmarks(await browserBookmarkList(), folderName).length;
+  Menu.buildFromTemplate(folderEditItems(folderName, count)).popup({
+    window: mainWindow,
+    x: Math.max(0, Math.round(Number(x) || 0)),
+    y: Math.max(0, Math.round(Number(y) || 0)),
+  });
+  return { ok: true };
 });
 ipcMain.handle("mbox-desktop:browser-bookmark-remove", async (event, url) => {
   assertBrowserHost(event);

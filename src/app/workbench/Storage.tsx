@@ -6,6 +6,7 @@ import { usePersistentState } from "./tabs";
 import { askText } from "../../ui/askText";
 import { uploadToStorage, type UploadMode } from "../../lib/storageUpload";
 import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 /** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
 function openSheetTab(key: string) {
@@ -172,7 +173,7 @@ export function StorageDocument() {
         </div>
       )}
       <div className="wb-storage-list">
-        {!listing ? <p className="wb-empty">Загрузка…</p> : (
+        {!listing ? <OctopusSpinner /> : (
           <table>
             <thead><tr><th>Имя</th><th className="is-num">Размер</th><th>Изменён</th><th /></tr></thead>
             <tbody>

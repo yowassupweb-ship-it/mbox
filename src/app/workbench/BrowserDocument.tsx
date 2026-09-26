@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Folder, Globe, History, RotateCw, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Folder, Globe, History, RotateCw, Sparkles, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
 
 /**
@@ -36,6 +36,7 @@ type BrowserBridge = {
   favicon?: (url: string) => Promise<string>;
   moveBookmark?: (url: string, beforeUrl: string) => Promise<BrowserBookmark[]>;
   openBookmarkFolder?: (key: string, name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
+  openBookmarkFolderMenu?: (name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
   openBookmarkMenu?: (key: string, bookmark: BrowserBookmark, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
   act: (key: string, command: string, payload?: string) => Promise<BrowserState | null>;
   bookmarks: () => Promise<BrowserBookmark[]>;
@@ -63,6 +64,16 @@ export function browserBridge(): BrowserBridge | undefined {
 
 /** Адрес вкладки: ключ вида «web:https://example.com». */
 export const browserTabKey = (url: string) => `web:${url}`;
+
+const AGENT_ACTION_LABEL: Record<string, string> = {
+  snapshot: "читает страницу",
+  fill: "заполняет поля",
+  click: "нажимает",
+  highlight: "показывает",
+  navigate: "открывает страницу",
+  scroll: "прокручивает",
+  screenshot: "смотрит на экран",
+};
 export const browserTabUrl = (key: string) => key.slice(4);
 
 export const BROWSER_FAVICON_EVENT = "mbox:browser-favicon";
@@ -198,6 +209,13 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   const [profile, setProfile] = useState("Default");
   const [credentials, setCredentials] = useState<{ username: string }[]>([]);
   const [message, setMessage] = useState("");
+  // Агент сейчас действует в этой вкладке (browser.js подсвечивает поля на самой странице, здесь — кто и что).
+  const [agentNote, setAgentNote] = useState<{ actor: string; text: string } | null>(null);
+  useEffect(() => {
+    if (!agentNote) return;
+    const timer = window.setTimeout(() => setAgentNote(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [agentNote]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { if (bridge) void bridge.bookmarks().then(setBookmarks); }, [bridge]);
@@ -241,6 +259,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       }
       // Закладки общие: добавили звёздочкой в одной вкладке — панель обновляется во всех сразу.
       if (payload.type === "bookmarks") { setBookmarks(payload.bookmarks || []); return; }
+      if (payload.type === "agent") {
+        const agentPayload = payload as { key?: string; actor?: string; action?: string; note?: string };
+        if (agentPayload.key === tabKey) setAgentNote({ actor: agentPayload.actor || "Агент", text: agentPayload.note || AGENT_ACTION_LABEL[agentPayload.action || ""] || "работает на странице" });
+        return;
+      }
       if (payload.type !== "state" || payload.key !== tabKey) return;
       setState(payload as BrowserState);
       if (payload.favicon) publishFavicon({ key: tabKey, url: payload.url || url, favicon: payload.favicon });
@@ -335,8 +358,17 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
 
   const pageUrl = state?.url || url;
   const saved = bookmarks.some((item) => item.url === pageUrl);
-  const bar = bookmarks.filter((item) => item.source === "bookmark_bar" && !item.folder);
-  const folders = [...new Set(bookmarks.filter((item) => item.source === "bookmark_bar" && item.folder).map((item) => item.folder!.split(" / ")[0]))];
+  // Панель в порядке списка, как в Chrome: папка стоит там, где её первая закладка, а не после всех закладок.
+  const barEntries: Array<{ kind: "bookmark"; item: BrowserBookmark } | { kind: "folder"; name: string }> = [];
+  const placedFolders = new Set<string>();
+  for (const item of bookmarks) {
+    if (item.source !== "bookmark_bar") continue;
+    if (!item.folder) { barEntries.push({ kind: "bookmark", item }); continue; }
+    const name = item.folder.split(" / ")[0];
+    if (placedFolders.has(name)) continue;
+    placedFolders.add(name);
+    barEntries.push({ kind: "folder", name });
+  }
   const hasOther = bookmarks.some((item) => item.source !== "bookmark_bar");
   const folderItems = bookmarks.filter((item) => folderOpen?.name === "Другие" ? item.source !== "bookmark_bar" : item.source === "bookmark_bar" && item.folder?.split(" / ")[0] === folderOpen?.name);
 
@@ -404,6 +436,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
             {state?.loading ? <X size={15} /> : <RotateCw size={14} />}
           </button>
         </div>
+        {agentNote && <span className="wb-browser-agent" role="status"><Sparkles size={13} aria-hidden="true" />{agentNote.actor}: {agentNote.text}</span>}
         <form className="wb-browser-address" onSubmit={submit}>
           <Favicon tabKey={tabKey} url={pageUrl} size={13} />
           <input
@@ -435,7 +468,32 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       </div>
       <div className="wb-browser-bookmarks" aria-label="Панель закладок">
         <Bookmark size={14} aria-hidden="true" />
-        {bar.map((item) => {
+        {barEntries.map((entry) => {
+          if (entry.kind === "folder") {
+            const name = entry.name;
+            return (
+              <button
+                type="button"
+                className="wb-bookmark-folder"
+                key={`folder:${name}`}
+                aria-expanded={folderOpen?.name === name}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  if (folderOpen?.name === name) setFolderOpen(null);
+                  else openBookmarkFolder(name, rect.left, rect.bottom + 4);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setFolderOpen(null);
+                  void bridge.openBookmarkFolderMenu?.(name, event.clientX, event.clientY).catch((error) => setMessage(String(error)));
+                }}
+              >
+                <Folder size={13} />
+                <span>{name}</span>
+              </button>
+            );
+          }
+          const item = entry.item;
           const label = bookmarkLabel(item);
           return (
           <button
@@ -473,23 +531,7 @@ ${item.url}` : item.url}
           </button>
           );
         })}
-        {!bar.length && !folders.length && !hasOther && <span>Добавьте страницу звёздочкой или импортируйте закладки Chrome</span>}
-        {folders.map((name) => (
-          <button
-            type="button"
-            className="wb-bookmark-folder"
-            key={name}
-            aria-expanded={folderOpen?.name === name}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              if (folderOpen?.name === name) setFolderOpen(null);
-              else openBookmarkFolder(name, rect.left, rect.bottom + 4);
-            }}
-          >
-            <Folder size={13} />
-            <span>{name}</span>
-          </button>
-        ))}
+        {!barEntries.length && !hasOther && <span>Добавьте страницу звёздочкой или импортируйте закладки Chrome</span>}
         {hasOther && (
           <button
             type="button"

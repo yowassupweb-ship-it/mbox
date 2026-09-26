@@ -12,6 +12,7 @@ import type { Project } from "../../types";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { folderIcon } from "./tabMeta";
 import { usePersistentState, type TabsApi } from "./tabs";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 const SYSTEM_ICONS = "/assets/icons/system";
 const PROJECT_ICONS = "/assets/icons/project";
@@ -240,7 +241,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
             {group.label && <h3 className="wb-tree-group-label">{group.label}</h3>}
             <ul className="wb-tree">{group.projects.map(renderProject)}</ul>
           </section>
-        )) : <p className="wb-empty">{data.loading ? "Загрузка…" : needle ? "Ничего не найдено" : "Проектов пока нет"}</p>}
+        )) : data.loading ? <OctopusSpinner label="Загружаю проекты…" /> : <p className="wb-empty">{needle ? "Ничего не найдено" : "Проектов пока нет"}</p>}
       </div>
     </div>
   );

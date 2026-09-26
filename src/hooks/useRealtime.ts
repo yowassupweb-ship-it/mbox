@@ -110,6 +110,11 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
           if (message.type === "open_tab") {
             window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: message }));
           }
+          // Агент действует во встроенном браузере (server/browser-agent.mjs → app/workbench/browserAgent.ts).
+          if (message.type === "browser_op") {
+            window.dispatchEvent(new CustomEvent("mbox:browser-op", { detail: message }));
+            return;
+          }
           // Агент поправил файл навыка (MCP edit_skill_file) — открытые вкладки навыка перечитывают его.
           if (message.type === "skill_file_changed") {
             window.dispatchEvent(new CustomEvent("mbox:skill-file-changed", { detail: message }));

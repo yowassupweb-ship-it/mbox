@@ -344,7 +344,7 @@ async function claimInbox(id, props) {
     await mboxFetch(`/api/mbox/agent/inbox/${id}`, { method: "PATCH", body: JSON.stringify({ status: "doing", if_status: "open", props }) });
     return true;
   } catch (error) {
-    if (/^MBOX 409/.test(error.message)) return false;
+    if (/^MBOX 409\b/.test(error.message)) return false;
     throw error;
   }
 }

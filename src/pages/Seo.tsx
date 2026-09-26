@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Download, ExternalLink, Play, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchJson, fetchOr } from "../lib/api";
+import { OctopusSpinner } from "../components/OctopusSpinner";
 
 /**
  * SEO Wizard — рабочее место SEO-сценария vs-travel.ru. Таблицы и отчёты — из стратегии (заметка #27) и
@@ -152,6 +153,10 @@ function SeoWizard() {
   const [views, setViews] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem("mbox.seo.views") || "{}"); } catch { return {}; }
   });
+  // Какая таблица открыта в представлении с несколькими таблицами: одна таблица — одна вкладка.
+  const [tables, setTables] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem("mbox.seo.tables") || "{}"); } catch { return {}; }
+  });
   const [cache, setCache] = useState<Record<string, ViewData>>({});
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<SeoSettings>(EMPTY_SETTINGS);
@@ -163,7 +168,7 @@ function SeoWizard() {
   const current = TABS.find((item) => item.id === tab) ?? TABS[0];
   const viewId = current.views ? (current.views.some((item) => item.id === views[current.id]) ? views[current.id] : current.views[0].id) : current.id;
 
-  useEffect(() => { try { localStorage.setItem("mbox.seo.tab", tab); localStorage.setItem("mbox.seo.views", JSON.stringify(views)); } catch { /* приватный режим */ } }, [tab, views]);
+  useEffect(() => { try { localStorage.setItem("mbox.seo.tab", tab); localStorage.setItem("mbox.seo.views", JSON.stringify(views)); localStorage.setItem("mbox.seo.tables", JSON.stringify(tables)); } catch { /* приватный режим */ } }, [tab, views, tables]);
 
   const loadView = useCallback(async (id: string, force = false) => {
     setError("");
@@ -250,6 +255,11 @@ function SeoWizard() {
   };
 
   const data = viewId !== "overview" ? cache[viewId] : undefined;
+  const tableTabs = data ? [
+    ...data.sections.map((item) => ({ id: item.id, label: tableLabel(item) })),
+    ...(viewId === "scenarios" ? [{ id: SOURCES_TABLE, label: "Источники данных" }] : []),
+  ] : [];
+  const tableId = tableTabs.some((item) => item.id === tables[viewId]) ? tables[viewId] : tableTabs[0]?.id;
 
   return (
     <div className="seo-board">
@@ -281,6 +291,15 @@ function SeoWizard() {
           ))}
         </nav>
       )}
+      {tableTabs.length > 1 && (
+        <nav className="seo-subtabs seo-tabletabs" role="tablist" aria-label="Таблицы">
+          {tableTabs.map((item) => (
+            <button key={item.id} type="button" role="tab" aria-selected={item.id === tableId} className={item.id === tableId ? "is-active" : undefined} onClick={() => setTables((value) => ({ ...value, [viewId]: item.id }))}>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       {error && <p className="seo-error" role="alert">{error}</p>}
       {running && <p className="seo-running" role="status">Сервер собирает данные: sitemap, проверка страниц, детекторы, пакет. Это до четырёх минут.</p>}
@@ -293,8 +312,8 @@ function SeoWizard() {
           <>
             {viewId === "outreach" && <OutreachForm onSaved={() => loadView("outreach", true)} />}
             {viewId === "changes" && <ChangeForm onSaved={() => loadView("changes", true)} />}
-            {data.sections.map((item) => <SeoTable key={item.id} section={item} options={data.options} actions={actions} />)}
-            {viewId === "scenarios" && <SourcesTable sources={data.sources} />}
+            {data.sections.filter((item) => item.id === tableId).map((item) => <SeoTable key={item.id} section={item} options={data.options} actions={actions} />)}
+            {tableId === SOURCES_TABLE && <SourcesTable sources={data.sources} />}
           </>
         ) : <SeoLoading />)}
       </div>
@@ -302,8 +321,39 @@ function SeoWizard() {
   );
 }
 
+const SOURCES_TABLE = "__sources";
+
+// Короткие подписи вкладок таблиц; заголовок таблицы целиком остаётся над ней.
+const TABLE_LABELS: Record<string, string> = {
+  cannibal_queries: "Запросы",
+  cannibal_slugs: "Окончания адресов",
+  quality_types: "По шаблонам",
+  quality: "По страницам",
+  positions_dist: "Срез мониторинга",
+  positions: "Позиции по запросам",
+  potential: "Потенциал страниц",
+  demand: "Спрос (Wordstat)",
+  pending: "Ждут решения",
+  decision_log: "Журнал решений",
+  report10_metrics: "Сводка",
+  report10_index: "Index Health",
+  report10_issues: "Находки 01–03",
+  report20_status: "Авторитет",
+  report20_recent: "Движение за месяц",
+  report25_summary: "Итоги 28 дней",
+  report25_ranks: "Top-3 / 10 / 20",
+  report25_up: "Выросшие URL",
+  report25_down: "Упавшие URL",
+  report25_experiments: "Эксперименты",
+  scenarios: "Расписание",
+};
+
+function tableLabel(section: Section) {
+  return TABLE_LABELS[section.id] || section.title.split(" — ")[0];
+}
+
 function SeoLoading() {
-  return <p className="seo-loading" role="status">Загрузка…</p>;
+  return <OctopusSpinner />;
 }
 
 // ─── Дашборд ─────────────────────────────────────────────────────────────────

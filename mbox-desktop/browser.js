@@ -166,7 +166,7 @@ function setBounds(key, bounds) {
 /** Показываем страницы только у видимых вкладок. В split-режиме браузеров может быть два:
  *  активная вкладка и документ во второй области. */
 function show(key) {
-  if (key) visibleKeys.add(key);
+  if (key) { visibleKeys.add(key); lastShownKey = key; }
   else visibleKeys.clear();
   for (const [current, tab] of tabs) {
     const visible = visibleKeys.has(current) && !tab.auth;
@@ -357,6 +357,242 @@ async function fillPassword(key, username) {
   return filled ? { ok: true } : { ok: false, error: "На странице нет поля пароля" };
 }
 
+// ─── Агент во вкладке браузера ──────────────────────────────────────────────────────────────
+//
+// Агент (MCP browser_* → сервер → страница MBOX → сюда) видит страницу, открытую у человека, и действует
+// на ней на глазах: каждое поле, которое он заполняет, и каждая кнопка, которую нажимает, подсвечиваются
+// рамкой с подписью «Claude: …». Страницу агент читает как список полей и кнопок с короткими метками
+// (f1, b7) — по ним он потом и действует, без хрупких CSS-селекторов. Значения паролей наружу не уходят.
+
+let lastShownKey = "";
+
+/** Набор функций агента внутри страницы. Ставится один раз на документ; повторная установка ничего не ломает. */
+const AGENT_KIT = String.raw`(() => {
+  if (window.__mboxAgent) return true;
+  const style = document.createElement("style");
+  style.textContent = [
+    ".__mbox-hl{outline:2px solid #0a84ff !important;outline-offset:2px !important;box-shadow:0 0 0 6px rgba(10,132,255,.22) !important;border-radius:4px;transition:outline-color .3s,box-shadow .3s}",
+    ".__mbox-hl.__mbox-done{outline-color:#30d158 !important;box-shadow:0 0 0 6px rgba(48,209,88,.2) !important}",
+    ".__mbox-badge{position:absolute;z-index:2147483647;max-width:320px;padding:3px 8px;border-radius:6px;background:#0a84ff;color:#fff;font:600 12px/1.35 -apple-system,'Segoe UI',Inter,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;white-space:normal}",
+    ".__mbox-badge.__mbox-done{background:#248a3d}",
+  ].join("");
+  (document.head || document.documentElement).appendChild(style);
+  let seq = 0;
+  const badges = new Set();
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const s = getComputedStyle(el);
+    return s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) > 0.05;
+  };
+  const clean = (text, max = 120) => String(text || "").replace(/\s+/g, " ").trim().slice(0, max);
+  const labelOf = (el) => {
+    const by = el.getAttribute("aria-labelledby");
+    if (by) { const t = by.split(/\s+/).map((id) => document.getElementById(id)?.innerText || "").join(" "); if (clean(t)) return clean(t); }
+    if (el.getAttribute("aria-label")) return clean(el.getAttribute("aria-label"));
+    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l && clean(l.innerText)) return clean(l.innerText); }
+    const wrap = el.closest("label"); if (wrap && clean(wrap.innerText)) return clean(wrap.innerText);
+    if (el.placeholder) return clean(el.placeholder);
+    if (el.title) return clean(el.title);
+    let prev = el.previousElementSibling;
+    for (let i = 0; i < 3 && prev; i += 1, prev = prev.previousElementSibling) if (clean(prev.innerText)) return clean(prev.innerText, 80);
+    // Текст родителя — подпись, только если он короткий: иначе полю доставалась в подпись вся форма.
+    const parentText = clean(el.parentElement?.innerText, 200);
+    return (parentText.length <= 60 ? parentText : "") || clean(el.name || el.id);
+  };
+  const refOf = (el, prefix) => {
+    if (!el.dataset.mboxRef) el.dataset.mboxRef = prefix + (++seq);
+    return el.dataset.mboxRef;
+  };
+  const find = (ref) => document.querySelector('[data-mbox-ref="' + CSS.escape(String(ref)) + '"]');
+  const byLabel = (label) => {
+    const want = clean(label).toLowerCase();
+    if (!want) return null;
+    const fields = [...document.querySelectorAll("input,textarea,select,[contenteditable=''],[contenteditable='true'],[role='textbox'],[role='combobox']")].filter(visible);
+    return fields.find((el) => labelOf(el).toLowerCase() === want) || fields.find((el) => labelOf(el).toLowerCase().includes(want)) || fields.find((el) => clean(el.name).toLowerCase() === want) || null;
+  };
+  const clearMarks = () => {
+    document.querySelectorAll(".__mbox-hl").forEach((el) => el.classList.remove("__mbox-hl", "__mbox-done"));
+    badges.forEach((b) => b.remove()); badges.clear();
+  };
+  const mark = (el, text, done) => {
+    el.classList.add("__mbox-hl");
+    el.classList.toggle("__mbox-done", Boolean(done));
+    if (!text) return;
+    const r = el.getBoundingClientRect();
+    const badge = document.createElement("div");
+    badge.className = "__mbox-badge" + (done ? " __mbox-done" : "");
+    badge.textContent = text;
+    badge.style.left = Math.max(4, r.left + scrollX) + "px";
+    badge.style.top = Math.max(4, r.top + scrollY - 26) + "px";
+    document.body.appendChild(badge);
+    badges.add(badge);
+  };
+  const later = (ms, fn) => setTimeout(fn, ms);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const fieldValue = (el) => {
+    if (el.type === "password") return el.value ? "(заполнен, скрыт)" : "";
+    if (el.type === "checkbox" || el.type === "radio") return el.checked;
+    if (el.isContentEditable) return clean(el.innerText, 500);
+    if (el.tagName === "SELECT") return el.selectedOptions?.[0] ? clean(el.selectedOptions[0].text) : "";
+    return String(el.value ?? "").slice(0, 500);
+  };
+  const setValue = (el, value) => {
+    el.focus();
+    if (el.tagName === "SELECT") {
+      const want = String(value).toLowerCase();
+      const option = [...el.options].find((o) => o.value.toLowerCase() === want) || [...el.options].find((o) => clean(o.text).toLowerCase() === want) || [...el.options].find((o) => clean(o.text).toLowerCase().includes(want));
+      if (!option) return "нет такого варианта";
+      el.value = option.value;
+    } else if (el.type === "checkbox" || el.type === "radio") {
+      const on = value === true || /^(1|true|да|yes|on)$/i.test(String(value));
+      if (el.checked !== on) el.click();
+      return "";
+    } else if (el.isContentEditable) {
+      el.textContent = String(value);
+    } else {
+      const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, String(value));
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.blur();
+    return "";
+  };
+  window.__mboxAgent = {
+    snapshot(maxText) {
+      const fields = [];
+      for (const el of document.querySelectorAll("input,textarea,select,[contenteditable=''],[contenteditable='true'],[role='textbox'],[role='combobox'],[role='checkbox']")) {
+        if (fields.length >= 150 || !visible(el)) continue;
+        if (el.tagName === "INPUT" && ["hidden", "submit", "button", "image", "reset", "file"].includes(el.type)) continue;
+        const item = { ref: refOf(el, "f"), label: labelOf(el), kind: el.tagName === "SELECT" ? "select" : el.isContentEditable ? "editable" : (el.type || el.tagName.toLowerCase()), value: fieldValue(el) };
+        if (el.name) item.name = el.name;
+        if (el.required || el.getAttribute("aria-required") === "true") item.required = true;
+        if (el.disabled || el.readOnly) item.disabled = true;
+        if (el.tagName === "SELECT") item.options = [...el.options].slice(0, 40).map((o) => clean(o.text, 60));
+        fields.push(item);
+      }
+      const actions = [];
+      for (const el of document.querySelectorAll("button,a[href],input[type=submit],input[type=button],[role=button],[role=link],[role=tab],[role=menuitem]")) {
+        if (actions.length >= 120 || !visible(el)) continue;
+        const text = clean(el.innerText || el.value || el.getAttribute("aria-label") || el.title, 80);
+        if (!text) continue;
+        const item = { ref: refOf(el, "b"), text, kind: el.tagName === "A" ? "link" : "button" };
+        if (el.tagName === "A") item.href = el.href.slice(0, 200);
+        actions.push(item);
+      }
+      const headings = [...document.querySelectorAll("h1,h2,h3")].filter(visible).slice(0, 30).map((h) => clean(h.innerText, 100)).filter(Boolean);
+      const text = clean(document.body?.innerText || "", Number(maxText) || 6000);
+      return { url: location.href, title: document.title, selection: clean(String(getSelection() || ""), 2000), headings, fields, actions, text, frames: document.querySelectorAll("iframe").length };
+    },
+    async fill(items, actor, note) {
+      clearMarks();
+      const results = [];
+      for (const item of items) {
+        const el = (item.ref && find(item.ref)) || (item.label && byLabel(item.label));
+        if (!el) { results.push({ ref: item.ref, label: item.label, ok: false, error: "поле не найдено — обновите снимок" }); continue; }
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        await sleep(180);
+        const name = labelOf(el) || item.ref;
+        mark(el, actor + ": " + (note || "заполняет") + " · " + name);
+        await sleep(260);
+        const error = el.type === "file" ? "файл агент не выбирает" : setValue(el, item.value);
+        badges.forEach((b) => b.remove()); badges.clear();
+        mark(el, "", !error);
+        results.push({ ref: refOf(el, "f"), label: name, ok: !error, ...(error ? { error } : {}), value: fieldValue(el) });
+      }
+      later(6000, clearMarks);
+      return results;
+    },
+    async click(ref, actor, note) {
+      const el = find(ref);
+      if (!el) return { ok: false, error: "элемент не найден — обновите снимок" };
+      clearMarks();
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      await sleep(200);
+      mark(el, actor + ": " + (note || "нажимает") + " · " + clean(el.innerText || el.value || el.getAttribute("aria-label"), 60));
+      await sleep(450);
+      el.click();
+      later(2500, clearMarks);
+      return { ok: true };
+    },
+    highlight(refs, actor, note, ms) {
+      clearMarks();
+      const found = refs.map(find).filter(Boolean);
+      found[0]?.scrollIntoView({ block: "center", behavior: "smooth" });
+      found.forEach((el, index) => mark(el, index === 0 ? actor + (note ? ": " + note : "") : ""));
+      if (ms !== 0) later(Number(ms) || 8000, clearMarks);
+      return { ok: true, found: found.length, missing: refs.length - found.length };
+    },
+    clear() { clearMarks(); return { ok: true }; },
+    scroll(ref, to) {
+      if (ref) { const el = find(ref); if (!el) return { ok: false, error: "элемент не найден" }; el.scrollIntoView({ block: "center", behavior: "smooth" }); return { ok: true }; }
+      const height = innerHeight * 0.85;
+      if (to === "top") scrollTo({ top: 0, behavior: "smooth" });
+      else if (to === "bottom") scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+      else scrollBy({ top: to === "up" ? -height : height, behavior: "smooth" });
+      return { ok: true };
+    },
+  };
+  return true;
+})()`;
+
+function agentTab(key) {
+  const wanted = key && tabs.get(key) ? key : [...visibleKeys].find((item) => tabs.has(item)) || (tabs.has(lastShownKey) ? lastShownKey : "");
+  return wanted ? { key: wanted, tab: tabs.get(wanted) } : null;
+}
+
+async function inPage(contents, call) {
+  await contents.executeJavaScript(AGENT_KIT, true);
+  return contents.executeJavaScript(`(async () => window.__mboxAgent.${call})()`, true);
+}
+
+/** Действие агента во вкладке. key пустой — вкладка, которую человек видит сейчас. */
+async function agentAction(key, action, args = {}, actor = "Агент", note = "") {
+  if (action === "tabs") {
+    return { ok: true, active: agentTab("")?.key || "", tabs: [...tabs.keys()].map((item) => ({ ...stateOf(item), visible: tabs.get(item).visible })) };
+  }
+  // Без вкладки браузера navigate тоже вернёт no_tab: новую вкладку открывает страница MBOX (browserAgent.ts).
+  const target = agentTab(key);
+  if (!target) return { ok: false, error: "no_tab", message: "В MBOX не открыта ни одна вкладка браузера. Откройте страницу (browser_navigate) или попросите человека." };
+  const contents = target.tab.view.webContents;
+  const who = JSON.stringify(String(actor || "Агент").slice(0, 40));
+  const say = JSON.stringify(String(note || "").slice(0, 160));
+  emit({ type: "agent", key: target.key, actor: String(actor || "Агент"), action, note: String(note || "") });
+  try {
+    if (action === "navigate") {
+      open(target.key, args.url);
+      return { ok: true, key: target.key, url: normalizeUrl(args.url) };
+    }
+    if (action === "snapshot") {
+      if (contents.isLoading()) await new Promise((resolve) => { contents.once("did-stop-loading", resolve); setTimeout(resolve, 8000); });
+      return { ok: true, key: target.key, ...(await inPage(contents, `snapshot(${Number(args.max_text) || 6000})`)) };
+    }
+    if (action === "fill") {
+      const items = (Array.isArray(args.fields) ? args.fields : []).slice(0, 80).map((item) => ({ ref: item?.ref ? String(item.ref) : "", label: item?.label ? String(item.label) : "", value: item?.value ?? "" }));
+      if (!items.length) return { ok: false, error: "fields_required" };
+      return { ok: true, key: target.key, results: await inPage(contents, `fill(${JSON.stringify(items)}, ${who}, ${say})`) };
+    }
+    if (action === "click") return { key: target.key, ...(await inPage(contents, `click(${JSON.stringify(String(args.ref || ""))}, ${who}, ${say})`)) };
+    if (action === "highlight") {
+      if (args.clear) return { key: target.key, ...(await inPage(contents, "clear()")) };
+      const refs = (Array.isArray(args.refs) ? args.refs : [args.ref]).filter(Boolean).map(String).slice(0, 40);
+      return { key: target.key, ...(await inPage(contents, `highlight(${JSON.stringify(refs)}, ${who}, ${say}, ${Number(args.ms ?? 8000)})`)) };
+    }
+    if (action === "scroll") return { key: target.key, ...(await inPage(contents, `scroll(${JSON.stringify(String(args.ref || ""))}, ${JSON.stringify(String(args.to || "down"))})`)) };
+    if (action === "screenshot") {
+      if (!target.tab.visible) return { ok: false, error: "tab_hidden", message: "Вкладка сейчас не на экране — снимок был бы пустым." };
+      const image = await contents.capturePage();
+      const size = image.getSize();
+      const scaled = size.width > 1280 ? image.resize({ width: 1280 }) : image;
+      return { ok: true, key: target.key, url: contents.getURL(), image: `data:image/jpeg;base64,${scaled.toJPEG(72).toString("base64")}` };
+    }
+    return { ok: false, error: `unknown_action:${action}` };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+}
+
 /**
  * Подключает браузер к окну MBOX. Вызывается один раз при создании окна: виды живут внутри окна и
  * пересоздаются вместе с ним.
@@ -379,4 +615,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, state: stateOf, PARTITION };
+module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, state: stateOf, PARTITION };

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Eye, PanelLeftClose, PanelLeftOpen, Pencil, Plus, X } from "lucide-react";
+import { Contrast, Eye, Lock, PanelLeftClose, PanelLeftOpen, Pencil, Plus, X } from "lucide-react";
+import { OctopusSpinner } from "../components/OctopusSpinner";
+import { WORKING_FRAMES } from "../components/AgentAvatar";
 import { renderDocument } from "../app/workbench/MemoryDocument";
 import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "../app/workbench/MarkdownToolbar";
 import { CodeEditor } from "../app/workbench/CodeEditor";
@@ -271,9 +273,10 @@ export function SharedNotePage({ token }: { token: string }) {
   return (
     <div className={`share-page doc-theme-${activeTheme}`}>
       <header className="share-bar">
-        <span className="share-brand">MBOX</span>
-        <span className={`share-status is-${status}`}>{statusLabel[status]}</span>
-        <span className="share-access">{canEdit ? "Только редактирование" : "Только просмотр"}</span>
+        <span className="share-brand"><img src={WORKING_FRAMES[0]} width={24} height={24} alt="" />MBOX</span>
+        {/* «Документ открыт» у читателя — шум; статус сохранения нужен только тому, кто правит. */}
+        {canEdit && <span className={`share-status is-${status}`}>{statusLabel[status]}</span>}
+        <span className="share-access">{canEdit ? <><Pencil size={12} /> Можно редактировать</> : <><Lock size={12} /> Только просмотр</>}</span>
         <button
           type="button"
           className={`share-theme-button doc-theme-button is-${activeTheme}`}
@@ -281,7 +284,7 @@ export function SharedNotePage({ token }: { token: string }) {
           aria-label={`Сменить тему. Сейчас ${THEME_LABEL[activeTheme].toLowerCase()}`}
           title="Сменить тему"
         >
-          <span className="doc-theme-dot" aria-hidden="true" />
+          <Contrast size={15} aria-hidden="true" />
         </button>
         {showEditor && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
         {canEdit && (
@@ -296,7 +299,7 @@ export function SharedNotePage({ token }: { token: string }) {
       <div className="share-workspace">
         <main className="share-doc">
           {status === "loading" ? (
-            <p className="share-muted">Открываю заметку…</p>
+            <OctopusSpinner label="Открываю заметку…" />
           ) : showEditor ? (
             <>
               <input
@@ -334,7 +337,8 @@ export function SharedNotePage({ token }: { token: string }) {
             </article>
           )}
         </main>
-        <aside className={tabsOpen ? "share-note-tabs" : "share-note-tabs is-collapsed"} aria-label="Панель вкладок заметки">
+        {/* Одна вкладка у читателя — переключать нечего, колонка только отнимала место у текста. */}
+        {(canEdit || tabs.length > 1) && <aside className={tabsOpen ? "share-note-tabs" : "share-note-tabs is-collapsed"} aria-label="Панель вкладок заметки">
           <div className="share-note-tabs-head">
             {tabsOpen && <span>Вкладки</span>}
             <div>
@@ -352,7 +356,7 @@ export function SharedNotePage({ token }: { token: string }) {
               </div>
             ))}
           </div>}
-        </aside>
+        </aside>}
       </div>
       <DocumentContextMenu point={contextMenu} onClose={() => setContextMenu(null)} editorRef={textareaRef} previewRef={previewRef} onFind={find.openFind} markdown={canEdit} />
     </div>

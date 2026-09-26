@@ -1,0 +1,167 @@
+/* Human Interface — отделка в духе macOS поверх раскладки рабочего места.
+   Раскладку (панели, сетку, размеры областей) этот слой не трогает: только то, как выглядят и
+   ощущаются элементы. Подключён последним в styles.css и пользуется теми же токенами, что и всё
+   остальное, поэтому три темы (графит, светлая, чёрная) получают правки одинаково. */
+
+/* ─── Полосы прокрутки: тонкий ползунок без дорожки и стрелок, как в macOS ───
+   В base.css стоял стандартный scrollbar-color: при нём Chromium игнорирует ::-webkit-scrollbar и
+   рисует системные полосы Windows со стрелками. auto возвращает управление оформлению ниже;
+   элементы со scrollbar-width: none (у них селектор сильнее *) остаются без полос. */
+* {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+*::-webkit-scrollbar { width: 11px; height: 11px; background: transparent; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--text-main) 22%, transparent);
+}
+*::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text-main) 38%, transparent); }
+*::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--text-main) 48%, transparent); }
+
+/* ─── Фокус: мягкое кольцо акцентного цвета вокруг элемента, как у контролов macOS ─── */
+:where(button, a, summary, [role="button"], [role="tab"], [role="menuitem"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent);
+}
+/* Полям ввода отдельного кольца нет: их фокус почти везде рисует контейнер (адресная строка браузера,
+   поле чата, фильтры) — второе кольцо на самом input давало двойную подсветку. */
+/* Поле ввода чата подсвечивает рамка вокруг всего композера (:focus-within) — второе кольцо на самом
+   текстовом поле внутри неё было лишним. */
+.console-input-row textarea:focus,
+.console-input-row textarea:focus-visible,
+.console-input-row input:focus-visible { outline: none; box-shadow: none; }
+/* Лента сообщений фокусируема ради клавиатурной прокрутки — кольцо вокруг всей переписки было бы шумом. */
+.console-log:focus-visible { box-shadow: none; }
+.wb-chat-kind:focus-visible { outline: none; }
+
+/* ─── Заголовки разделов: обычный регистр, как подписи боковой панели macOS ───
+   Заглавные с разрядкой — язык VS Code и терминала; в macOS заголовок раздела — короткая
+   приглушённая строка полужирным. */
+.wb-view-head,
+.wb-tree-group-label,
+.wb-side-section h3,
+.wb-memory-side h3,
+.wb-right-head,
+.wb-menu-group-head,
+.wb-commands h3,
+.wb-drawer h3,
+.wb-console-label,
+.wb-board-column > header,
+.share-note-tabs-head,
+.appearance-heading p,
+.rail-group h3 {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.wb-view-head { font-size: 12px; font-weight: 650; color: var(--text-2); }
+.wb-tree-group-label,
+.wb-side-section h3,
+.wb-memory-side h3,
+.wb-menu-group-head,
+.wb-commands h3,
+.wb-drawer h3 { font-size: 11px; font-weight: 650; }
+.wb-console-label { font-size: 11px; }
+
+/* ─── Боковая панель: строки со скруглённым выделением внутри поля, а не на всю ширину ─── */
+.wb-tree-row {
+  margin-inline: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+.wb-tree-row.is-active { background: var(--wb-selected); }
+/* Имена проектов — обычным начертанием: в источниках macOS жирным бывает только заголовок раздела. */
+.wb-tree-project { font-weight: 500; }
+.wb-tree-group-label { margin: 12px 14px 4px; }
+
+/* ─── Вкладки нижней панели (Чат · Внимание · Журнал): сегменты, а не подчёркнутые ярлыки ─── */
+.wb-panel-tabs { gap: 2px; }
+.wb-panel-tab {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.wb-panel-tab:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-panel-tab.is-active {
+  border-bottom-color: transparent;
+  background: var(--bg-raised);
+  color: var(--text-main);
+  font-weight: 550;
+  box-shadow: 0 0 0 1px var(--border-color), 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* ─── Меню и всплывающие списки: полупрозрачный материал с размытием, как меню macOS ─── */
+.wb-menu,
+.console-picker-menu {
+  border-color: var(--glass-brd);
+  border-radius: var(--radius-md);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(1.6);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.6);
+  box-shadow: var(--glass-shadow);
+}
+.wb-menu { padding: 5px; }
+.wb-menu button { border-radius: 5px; }
+.wb-menu button:hover { background: var(--accent-fill); color: var(--on-accent); }
+
+/* ─── Чат ─── */
+/* Строка собеседников — те же сегменты, что вкладки панели. */
+.wb-chat-kind { height: 24px; border-radius: var(--radius-sm); }
+.wb-chat-kind.is-active {
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--border-color), 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* Поле ввода — одна мягкая «капсула», как в «Сообщениях»: скругление крупнее, рамка тоньше. */
+.console-input-row {
+  border-color: var(--border-color);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--element-bg) 60%, transparent);
+}
+.console-input-row:focus-within {
+  border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+.console-input-hints kbd { border-radius: 4px; }
+
+/* Заставка пустого чата выше невысокой нижней панели, а лента прокручена к низу — иконку срезало
+   сверху. Компактнее: влезает в панель по умолчанию. */
+.console-log > .console-empty { gap: 6px; padding: 12px; }
+.console-log > .console-empty > svg { width: 32px; height: 32px; }
+.console-log > .console-empty > img,
+.console-log > .console-empty > .agent-avatar { width: 40px; height: 40px; }
+
+/* Ход работы и вложения — те же скругления, что поле ввода. */
+.console-attachment { border-radius: var(--radius-md); }
+
+/* Агент действует во вкладке браузера — плашка рядом с адресом, пока он работает (BrowserDocument.tsx). */
+.wb-browser-agent {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 280px;
+  height: 24px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-fill) 18%, transparent);
+  color: var(--accent-color);
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Адресная строка: одно мягкое кольцо на капсуле целиком, как у поля поиска в Safari. */
+.wb-browser-address:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent); }
