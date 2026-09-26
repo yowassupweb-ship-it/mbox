@@ -19,6 +19,10 @@ const HOME = "about:blank";
 
 const tabs = new Map();
 const visibleKeys = new Set();
+// Запросы HTTP-авторизации (Basic/Digest, прокси): id → callback Chromium. Пока ответа нет, страница
+// вкладки спрятана — она рисуется поверх окна и закрыла бы форму входа, которую показывает интерфейс.
+const pendingAuth = new Map();
+let authSeq = 0;
 let window = null;
 let emit = () => {};
 
@@ -47,6 +51,7 @@ function stateOf(key) {
     error: tab.error || "",
     zoom: Math.round((contents.getZoomFactor() || 1) * 100),
     favicon: tab.favicon || "",
+    auth: tab.auth ? { id: tab.auth.id, host: tab.auth.host, realm: tab.auth.realm, isProxy: tab.auth.isProxy, failed: tab.auth.failed } : null,
   };
 }
 
@@ -66,7 +71,7 @@ function create(key) {
       spellcheck: false,
     },
   });
-  const tab = { view, bounds: null, visible: false, error: "", pending: "", favicon: "" };
+  const tab = { view, bounds: null, visible: false, error: "", pending: "", favicon: "", auth: null, authTries: 0 };
   tabs.set(key, tab);
 
   const contents = view.webContents;
@@ -98,11 +103,30 @@ function create(key) {
     publish(key);
   });
 
-  // Новое окно сайта — новая вкладка MBOX, а не отдельное окно Chromium мимо интерфейса.
+  // Новое окно сайта — новая вкладка MBOX, а не отдельное окно Chromium мимо интерфейса. from — какая
+  // вкладка попросила: только она открывает новую (раньше открывали все браузеры сразу), и если она во
+  // второй области, новая встаёт туда же.
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) emit({ type: "open", url });
+    if (/^https?:/i.test(url)) emit({ type: "open", url, from: key });
     return { action: "deny" };
   });
+
+  // Сайт за Basic Auth (nginx «401 Authorization Required»): без обработчика Chromium молча отменял
+  // вход и показывал 401 — ввести логин было негде. Спрашиваем интерфейс MBOX.
+  contents.on("login", (event, details, authInfo, callback) => {
+    event.preventDefault();
+    const id = `${key}#${++authSeq}`;
+    const failed = tab.authTries > 0 && tab.auth === null;
+    tab.authTries += 1;
+    for (const [pendingId, entry] of pendingAuth) {
+      if (entry.key === key) { pendingAuth.delete(pendingId); try { entry.callback(); } catch { /* уже отменён */ } }
+    }
+    pendingAuth.set(id, { key, callback });
+    tab.auth = { id, host: authInfo?.host || "", realm: authInfo?.realm || "", isProxy: Boolean(authInfo?.isProxy), failed, url: details?.url || "" };
+    if (tab.visible) { tab.visible = false; view.setVisible(false); }
+    publish(key);
+  });
+  contents.on("did-navigate", () => { if (!tab.auth) tab.authTries = 0; });
   contents.on("will-navigate", (event, url) => {
     if (/^https?:/i.test(url) || /^about:blank$/i.test(url)) return;
     event.preventDefault();
@@ -145,7 +169,7 @@ function show(key) {
   if (key) visibleKeys.add(key);
   else visibleKeys.clear();
   for (const [current, tab] of tabs) {
-    const visible = visibleKeys.has(current);
+    const visible = visibleKeys.has(current) && !tab.auth;
     if (tab.visible === visible) continue;
     tab.visible = visible;
     tab.view.setVisible(visible);
@@ -184,9 +208,47 @@ function hide(key) {
   tab.view.setVisible(false);
 }
 
+/** Ответ на запрос входа: имя и пароль — войти, null — отменить (Chromium покажет страницу 401). */
+function answerAuth(id, username, password) {
+  const entry = pendingAuth.get(id);
+  if (!entry) return { ok: false, error: "Запрос входа уже закрыт" };
+  pendingAuth.delete(id);
+  const tab = tabs.get(entry.key);
+  if (tab) tab.auth = null;
+  try {
+    if (typeof username === "string" && username) entry.callback(username, String(password || ""));
+    else entry.callback();
+  } catch {
+    // вкладку закрыли, пока человек вводил пароль
+  }
+  if (tab && visibleKeys.has(entry.key) && !tab.visible) {
+    tab.visible = true;
+    tab.view.setVisible(true);
+    applyBounds(tab);
+  }
+  publish(entry.key);
+  return { ok: true };
+}
+
+/**
+ * User-Agent обычного Chrome той же версии. По умолчанию в нём «Electron/…» и имя приложения, и Google
+ * по ним отказывает во входе («Включите JavaScript в Chrome… поддерживаемый браузер»): встроенные
+ * браузеры он не пускает. Версия — только major, как у самого Chrome с урезанным UA.
+ */
+function chromeUserAgent() {
+  const major = String(process.versions.chrome || "130").split(".")[0];
+  const platform = process.platform === "darwin"
+    ? "Macintosh; Intel Mac OS X 10_15_7"
+    : process.platform === "win32" ? "Windows NT 10.0; Win64; x64" : "X11; Linux x86_64";
+  return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
 function close(key) {
   const tab = tabs.get(key);
   if (!tab) return;
+  for (const [pendingId, entry] of pendingAuth) {
+    if (entry.key === key) { pendingAuth.delete(pendingId); try { entry.callback(); } catch { /* вкладка уже закрыта */ } }
+  }
   tabs.delete(key);
   visibleKeys.delete(key);
   try {
@@ -306,6 +368,7 @@ function attach(mainWindow, sendToUi) {
   };
 
   const browserSession = session.fromPartition(PARTITION);
+  browserSession.setUserAgent(chromeUserAgent());
   // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
@@ -316,4 +379,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, state: stateOf, PARTITION };
+module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, state: stateOf, PARTITION };

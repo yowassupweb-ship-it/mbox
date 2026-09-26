@@ -86,6 +86,7 @@ const desktopApi = {
     importPasswords: () => ipcRenderer.invoke("mbox-desktop:browser-import-passwords"),
     credentials: (url) => ipcRenderer.invoke("mbox-desktop:browser-credentials", url),
     fillPassword: (key, username) => ipcRenderer.invoke("mbox-desktop:browser-fill-password", key, username),
+    auth: (id, username, password) => ipcRenderer.invoke("mbox-desktop:browser-auth", id, username, password),
     onEvent: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on("mbox-desktop:browser", listener);

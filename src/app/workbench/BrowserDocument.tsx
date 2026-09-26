@@ -22,6 +22,8 @@ type BrowserState = {
   /** Масштаб страницы в процентах — меняется Ctrl+колесом над самой страницей. */
   zoom?: number;
   favicon?: string;
+  /** Сайт просит HTTP-вход (Basic Auth): пока не ответили, страница спрятана и видна форма MBOX. */
+  auth?: { id: string; host: string; realm: string; isProxy: boolean; failed?: boolean } | null;
 };
 
 type BrowserBridge = {
@@ -47,7 +49,9 @@ type BrowserBridge = {
   importPasswords: () => Promise<{ ok?: boolean; count?: number; error?: string; canceled?: boolean }>;
   credentials: (url: string) => Promise<{ username: string }[]>;
   fillPassword: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
-  onEvent: (handler: (payload: { type: string; url?: string; bookmarks?: BrowserBookmark[] } & Partial<BrowserState>) => void) => () => void;
+  /** Ответ на HTTP-вход сайта: null вместо имени — отменить. Нет у старых версий приложения. */
+  auth?: (id: string, username: string | null, password?: string) => Promise<{ ok: boolean; error?: string }>;
+  onEvent: (handler: (payload: { type: string; url?: string; from?: string; bookmarks?: BrowserBookmark[] } & Partial<BrowserState>) => void) => () => void;
 };
 
 type BrowserBookmark = { title: string; url: string; folder?: string; source?: string; imported?: boolean };
@@ -174,7 +178,7 @@ function claimVisibleBrowser(bridge: BrowserBridge, key: string) {
   };
 }
 
-export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: string; visible: boolean; tabs: TabsApi; onTitle: (key: string, title: string) => void }) {
+export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: { tabKey: string; visible: boolean; tabs: TabsApi; onTitle: (key: string, title: string) => void; onOpenUrl?: (fromKey: string, url: string) => void }) {
   const bridge = browserBridge();
   const url = browserTabUrl(tabKey);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -227,7 +231,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
     if (!bridge) return;
     return bridge.onEvent((payload) => {
       // Сайт попросил новое окно — открываем его вкладкой MBOX, а не отдельным окном мимо интерфейса.
-      if (payload.type === "open" && payload.url) { tabs.open(browserTabKey(payload.url), true); return; }
+      // from — вкладка, которую попросил сайт: открывает только она (события приходят во все браузеры),
+      // а Workbench решает, в какой области — во второй, если просящий браузер стоит там.
+      if (payload.type === "open" && payload.url) {
+        if (payload.from && payload.from !== tabKey) return;
+        if (onOpenUrl) onOpenUrl(tabKey, payload.url);
+        else tabs.open(browserTabKey(payload.url), true);
+        return;
+      }
       // Закладки общие: добавили звёздочкой в одной вкладке — панель обновляется во всех сразу.
       if (payload.type === "bookmarks") { setBookmarks(payload.bookmarks || []); return; }
       if (payload.type !== "state" || payload.key !== tabKey) return;
@@ -237,7 +248,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle }: { tabKey: st
       if (payload.title) onTitle(tabKey, payload.title);
       if (!editing && payload.url) setAddress(payload.url);
     });
-  }, [bridge, tabKey, url, editing, tabs, onTitle]);
+  }, [bridge, tabKey, url, editing, tabs, onTitle, onOpenUrl]);
 
   useEffect(() => {
     if (!bridge?.favicon) return;
@@ -576,8 +587,45 @@ ${item.url}` : item.url}
       {state?.error && <div className="wb-banner is-error">{state.error}</div>}
       {/* Пустое место под страницу: её рисует поверх главный процесс по этим координатам. */}
       <div ref={stageRef} className="wb-browser-stage" data-scroll-memory="off">
-        {frozen && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} />}
+        {frozen && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} />}
+        {state?.auth && bridge?.auth && <BrowserAuthForm key={state.auth.id} auth={state.auth} answer={bridge.auth} />}
       </div>
     </div>
   );
 }
+
+/**
+ * Вход на сайт по HTTP-авторизации (Basic/Digest, nginx «401 Authorization Required»). Chromium
+ * спрашивает имя и пароль сам, но встроенному браузеру показать своё окно негде — страница спрятана,
+ * и на её месте эта форма. Пароль уходит только в Chromium этой вкладки; Chromium сам помнит вход до
+ * конца сессии браузера.
+ */
+function BrowserAuthForm({ auth, answer }: { auth: NonNullable<BrowserState["auth"]>; answer: NonNullable<BrowserBridge["auth"]> }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = (cancel = false) => {
+    setBusy(true);
+    void answer(auth.id, cancel ? null : username, cancel ? "" : password).finally(() => setBusy(false));
+  };
+  return (
+    <form className="wb-browser-auth" onSubmit={(event) => { event.preventDefault(); submit(); }} aria-label="Вход на сайт">
+      <strong>{auth.isProxy ? "Вход на прокси-сервер" : "Сайт просит вход"}</strong>
+      <span className="wb-browser-auth-host">{auth.host}{auth.realm ? ` · ${auth.realm}` : ""}</span>
+      {auth.failed && <span className="wb-browser-auth-error" role="alert">Имя или пароль не подошли — попробуйте ещё раз.</span>}
+      <label>
+        <span>Имя пользователя</span>
+        <input autoFocus autoComplete="username" value={username} onChange={(event) => setUsername(event.currentTarget.value)} />
+      </label>
+      <label>
+        <span>Пароль</span>
+        <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} />
+      </label>
+      <div className="wb-browser-auth-actions">
+        <button type="submit" className="is-primary" disabled={busy || !username}>Войти</button>
+        <button type="button" onClick={() => submit(true)} disabled={busy}>Отмена</button>
+      </div>
+    </form>
+  );
+}
+

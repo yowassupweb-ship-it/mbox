@@ -22,7 +22,7 @@ import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
-import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBridge, browserFaviconOrigin, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail } from "./BrowserDocument";
+import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
@@ -284,6 +284,26 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     tabs.close(key);
   }
 
+  // Ссылка сайта на новое окно. Браузер во второй области открывает её там же: вкладка встаёт во вторую
+  // область вместо него (он уходит в основной список вкладок), основная область не меняется. Через ref —
+  // отрисованные документы кешируются и держат старое замыкание.
+  const splitKeyRef = useRef(splitKey);
+  splitKeyRef.current = splitKey;
+  const tabsApiRef = useRef(tabs);
+  tabsApiRef.current = tabs;
+  const openFromBrowser = useCallback((fromKey: string, url: string) => {
+    const key = browserTabKey(url);
+    const api = tabsApiRef.current;
+    if (splitKeyRef.current === fromKey) {
+      const mainActive = api.active;
+      api.open(key, true);
+      setSplitKey(key);
+      if (mainActive && mainActive !== key) api.open(mainActive);
+      return;
+    }
+    api.open(key, true);
+  }, [setSplitKey]);
+
   /** Отправить вкладку во вторую область. Активной она при этом быть не может — иначе в основной
    *  группе не останется документа, и левая половина будет пустой. */
   function splitTab(key: string) {
@@ -451,7 +471,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "s3sheet":
         return <StorageSheetDocument storageKey={key.slice(STORAGE_SHEET_TAB.length)} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "web":
-        return <BrowserDocument tabKey={key} visible={documentVisible} tabs={tabs} onTitle={onTitle} />;
+        return <BrowserDocument tabKey={key} visible={documentVisible} tabs={tabs} onTitle={onTitle} onOpenUrl={openFromBrowser} />;
       case "local":
         return IMAGE_FILE.test(rest)
           ? <LocalImageDocument rootKey={first} path={rest} />

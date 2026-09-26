@@ -743,6 +743,11 @@ ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrows
 ipcMain.handle("mbox-desktop:browser-capture", async (event, key) => { assertBrowserHost(event); return browser.capture(String(key)); });
 ipcMain.handle("mbox-desktop:browser-favicon", async (event, url) => { assertBrowserHost(event); return browser.favicon(String(url || "")); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
+// Ответ на HTTP-авторизацию сайта (Basic Auth): имя и пароль идут только в Chromium этой вкладки.
+ipcMain.handle("mbox-desktop:browser-auth", async (event, id, username, password) => {
+  assertBrowserHost(event);
+  return browser.answerAuth(String(id || ""), username === null || username === undefined ? null : String(username), password === null || password === undefined ? "" : String(password));
+});
 // Закладки, история и куки живут на сервере (server/browser-state.mjs) — так они одни и те же на
 // всех компьютерах. Локальный файл остаётся запасным: без сети браузер обязан работать.
 ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => {
