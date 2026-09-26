@@ -391,7 +391,7 @@ function streamStep(inboxId, index, step) {
 }
 
 /** Проект наблюдателя почти не меняется — раньше его перечитывали на каждом круге опроса и перед каждой записью. */
-let projectCache = null;
+var projectCache = null;
 async function targetProject() {
   if (projectCache && Date.now() - projectCache.at < 10 * 60_000) return projectCache.target;
   const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}&detail=short`);
