@@ -71,6 +71,7 @@ let lockFd = null;
 
 acquireSingleInstanceLock();
 setInterval(touchLock, LOCK_TOUCH_MS).unref();
+ensureCodexMcp();
 
 process.on("SIGINT", () => {
   stopping = true;
@@ -182,6 +183,46 @@ function releaseSingleInstanceLock() {
   }
   if (readLockPid() === process.pid) {
     try { fs.rmSync(lockPath, { force: true }); } catch {}
+  }
+}
+
+/**
+ * MBOX-инструменты (note_*, open_tab, workspace_*, save_report…) Codex берёт из [mcp_servers.mbox-prod]
+ * своего ~/.codex/config.toml. На компьютере владельца блок вписан руками, а у облачного агента на сервере
+ * его не было — CodexCloud честно отвечал «инструментов mbox-prod нет». Дописываем блок, если его нет:
+ * тот же сервер и вход, что у самого наблюдателя. Есть — не трогаем.
+ */
+function ensureCodexMcp() {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const file = path.join(home, "config.toml");
+  let text = "";
+  try { text = fs.readFileSync(file, "utf8"); } catch { /* конфига ещё нет */ }
+  if (/\[mcp_servers\.mbox-prod\]/.test(text)) return;
+  const toml = (value) => JSON.stringify(String(value));
+  const env = {
+    MBOX_URL: baseUrl,
+    MBOX_AGENT_NAME: agentName,
+    MBOX_AGENT_CLIENT: "codex-chat-watcher",
+    MBOX_MCP_PUSH: "off",
+    ...(accessToken ? { MBOX_TOKEN: accessToken } : { MBOX_USERNAME: username, MBOX_PASSWORD: password }),
+  };
+  const block = [
+    "",
+    "# MBOX: дописано наблюдателем codex-chat-watcher — инструменты MBOX для Codex.",
+    "[mcp_servers.mbox-prod]",
+    `command = ${toml(process.execPath)}`,
+    `args = [${toml(path.join(__dirname, "mbox-mcp-server.mjs"))}]`,
+    "",
+    "[mcp_servers.mbox-prod.env]",
+    ...Object.entries(env).map(([key, value]) => `${key} = ${toml(value)}`),
+    "",
+  ].join("\n");
+  try {
+    fs.mkdirSync(home, { recursive: true });
+    fs.appendFileSync(file, block, { mode: 0o600 });
+    console.log(`${logPrefix} MCP mbox-prod добавлен в ${file}`);
+  } catch (error) {
+    console.error(`${logPrefix} не удалось дописать MCP в ${file}: ${error.message}`);
   }
 }
 
