@@ -631,7 +631,8 @@ async function viewOpportunities(query, sources) {
 async function viewPositions(query, sources) {
   const list = await rows(query, `
     WITH latest AS (SELECT DISTINCT ON (query) query, url, position, captured_at FROM seo_rank_snapshots ORDER BY query, captured_at DESC),
-         week AS (SELECT DISTINCT ON (query) query, position FROM seo_rank_snapshots WHERE captured_at < now() - interval '6 days' ORDER BY query, captured_at DESC)
+         week AS (SELECT DISTINCT ON (s.query) s.query, s.position FROM seo_rank_snapshots s JOIN latest l ON l.query = s.query
+                  WHERE s.captured_at::date < l.captured_at::date ORDER BY s.query, s.captured_at DESC)
     SELECT l.query, l.url, l.position, w.position AS week_position, l.captured_at::text
     FROM latest l LEFT JOIN week w ON w.query = l.query ORDER BY l.position NULLS LAST`);
   const buckets = [["Топ-3", 1, 3], ["Топ-10", 1, 10], ["11–20", 11, 20], ["4–20", 4, 20], ["21–50", 21, 50], ["Дальше 50 или нет", 51, 10000]];
@@ -650,9 +651,9 @@ async function viewPositions(query, sources) {
   }));
   return {
     sections: [
-      section("positions_dist", "Срез мониторинга", [col("label", "Диапазон"), col("now", "Сейчас", "int"), col("week", "Неделю назад", "int")], list.length ? dist : [], { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции", note: list.length ? `${list.length} отслеживаемых запросов.` : "" }),
+      section("positions_dist", "Срез мониторинга", [col("label", "Диапазон"), col("now", "Последняя проверка", "int"), col("week", "Прошлая проверка", "int")], list.length ? dist : [], { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции", note: list.length ? `${list.length} отслеживаемых запросов.` : "" }),
       section("positions", "Позиции по запросам", [
-        col("query", "Запрос"), col("path", "Ранжируется URL", "url"), col("position", "Позиция", "num"), col("change", "За неделю", "delta"),
+        col("query", "Запрос"), col("path", "Ранжируется URL", "url"), col("position", "Позиция", "num"), col("change", "К прошлой проверке", "delta"),
         col("stale", "Устаревший (год в запросе)", "bool"), col("at", "Снимок", "datetime"),
       ], outRows, { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции", note: "Запросы с годами 2023–2025 — кандидаты на чистку ядра: мониторинг мёртвого спроса." }),
     ],

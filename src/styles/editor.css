@@ -1,0 +1,44 @@
+/* Цветная разметка markdown в заметках (CodeEditor variant="document"). Подключён последним.
+   Слой подсветки <pre> под прозрачным textarea был выключен (коммит a0f6fe1): слои расходились. Причины —
+   у textarea есть полоса прокрутки, у слоя нет (перенос строк на разной ширине), и курсив комментариев
+   меняет ширину букв. Здесь обе убраны: одинаковое место под полосу у обоих слоёв, токены без смены
+   начертания — метрики текста совпадают символ в символ. */
+
+.wb-code-wrap.is-document .wb-code-layer {
+  display: block;
+  color: var(--text-main);
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+.wb-code-wrap.is-document .wb-code-layer::-webkit-scrollbar-thumb { background: transparent; }
+.wb-code-wrap.is-document .wb-code-editor.is-layered {
+  color: transparent;
+  caret-color: var(--text-main);
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+.wb-code-wrap.is-document .wb-code-editor.is-layered::selection {
+  background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+  color: transparent;
+}
+.wb-code-wrap.is-document .wb-code-editor.is-layered::placeholder { color: var(--text-muted); }
+
+/* Токены markdown: только цвет — ни жирного, ни курсива, иначе поедет перенос. */
+.wb-code-wrap.is-document [class^="tok-"],
+.wb-code-wrap.is-document [class*=" tok-"] { font-style: normal; font-weight: inherit; }
+/* # заголовки */
+.wb-code-wrap.is-document .tok-keyword { color: var(--accent-color); }
+/* `код` и ```блоки``` */
+.wb-code-wrap.is-document .tok-string { color: var(--code-text); background: var(--code-bg); border-radius: 3px; }
+/* **жирный** */
+.wb-code-wrap.is-document .tok-tag { color: color-mix(in srgb, var(--note-orange) 75%, var(--text-main)); }
+/* [ссылки](адрес) */
+.wb-code-wrap.is-document .tok-attr { color: color-mix(in srgb, var(--note-blue) 80%, var(--text-main)); }
+/* маркеры списков и чекбоксы */
+.wb-code-wrap.is-document .tok-punct { color: color-mix(in srgb, var(--note-purple) 80%, var(--text-main)); }
+/* > цитаты */
+.wb-code-wrap.is-document .tok-comment { color: var(--text-muted); }
+
+/* Автовысота (заметка растёт вместе с текстом): прокрутки нет — места под полосу не резервируем ни у кого. */
+.wb-code-wrap.is-document.is-autogrow .wb-code-layer,
+.wb-code-wrap.is-document.is-autogrow .wb-code-editor.is-layered { overflow: hidden; scrollbar-gutter: auto; }

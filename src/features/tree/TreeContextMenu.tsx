@@ -1,7 +1,7 @@
 import type { FolderTreeNode } from "../../components/FolderTree";
 import { fetchJson } from "../../lib/api";
 import type { Project } from "../../types";
-import { askText } from "../../ui/askText";
+import { askText, askConfirm, showNotice } from "../../ui/askText";
 
 export type TreeMenuState = {
   node: FolderTreeNode;
@@ -28,7 +28,7 @@ export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: 
   async function colorNode() {
     const color = await askText({ title: "Цвет в формате #RRGGBB", value: node.color || "#2c2c2e" });
     if (!color) return;
-    if (!/^#[0-9a-fA-F]{6}$/.test(color)) return window.alert("Нужен цвет вида #2c2c2e");
+    if (!/^#[0-9a-fA-F]{6}$/.test(color)) return void showNotice("Нужен цвет вида #2c2c2e");
     await fetchJson(node.type === "project" ? `/api/mbox/projects/${node.id}` : `/api/mbox/folders/${node.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -65,7 +65,7 @@ export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: 
 
   async function deleteNode() {
     if (!node.id || !node.type) return;
-    if (!window.confirm(`Удалить "${node.name}"?`)) return;
+    if (!(await askConfirm({ title: `Удалить "${node.name}"?`, confirmLabel: "Удалить", danger: true }))) return;
     const paths: Record<string, string> = {
       folder: "folders",
       project: "projects",

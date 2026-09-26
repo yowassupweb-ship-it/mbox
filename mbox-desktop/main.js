@@ -744,6 +744,8 @@ ipcMain.handle("mbox-desktop:browser-show", async (event, key) => { assertBrowse
 ipcMain.handle("mbox-desktop:browser-hide", async (event, key) => { assertBrowserHost(event); browser.hide(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-close", async (event, key) => { assertBrowserHost(event); browser.close(String(key)); return { ok: true }; });
 ipcMain.handle("mbox-desktop:browser-capture", async (event, key) => { assertBrowserHost(event); return browser.capture(String(key)); });
+ipcMain.handle("mbox-desktop:browser-search-engine", async (event, id) => { assertBrowserHost(event); return browser.setSearchEngine(String(id || "")); });
+ipcMain.handle("mbox-desktop:browser-clear-cache", async (event) => { assertBrowserHost(event); return browser.clearCache(); });
 ipcMain.handle("mbox-desktop:browser-favicon", async (event, url) => { assertBrowserHost(event); return browser.favicon(String(url || "")); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
 // Действие агента во вкладке браузера (server/browser-agent.mjs → страница MBOX → сюда).

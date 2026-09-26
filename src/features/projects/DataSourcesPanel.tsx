@@ -4,6 +4,7 @@ import { fetchJson, saveEntity } from "../../lib/api";
 import { formatSince } from "../../lib/format";
 import type { DataSource, Project } from "../../types";
 import { Button, EmptyState, SaveButton, TextInput, type SaveState } from "../../ui";
+import { askConfirm } from "../../ui/askText";
 
 /**
  * Источники данных проекта: внешний URL, который MBOX сам перечитывает по графику (см.
@@ -88,7 +89,7 @@ function SourceRow({ source, onSaved }: { source: DataSource; onSaved: () => voi
   const [refreshing, setRefreshing] = useState(false);
 
   async function remove() {
-    if (!window.confirm(`Удалить источник «${source.name}»?`)) return;
+    if (!(await askConfirm({ title: `Удалить источник «${source.name}»?`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/data-sources/${source.id}`, { method: "DELETE" });
     onSaved();
   }

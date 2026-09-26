@@ -89,7 +89,7 @@
 
 .tree-row.tree-project_entity {
   background: color-mix(in srgb, #34343a 66%, var(--element-bg));
-  border-color: rgba(255, 255, 255, .08);
+  border-color: color-mix(in srgb, var(--text-main) 8%, transparent);
 }
 
 .tree-row.tree-project_entity svg {
@@ -101,7 +101,7 @@
 
 .tree-row[data-kind] {
   position: relative;
-  border-color: color-mix(in srgb, var(--kind-accent, #d4dceb) 22%, rgba(255, 255, 255, .08));
+  border-color: color-mix(in srgb, var(--kind-accent, #d4dceb) 22%, color-mix(in srgb, var(--text-main) 8%, transparent));
 }
 
 .tree-row[data-kind]::after {
@@ -135,7 +135,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 780;
+  font-weight: var(--weight-bold);
 }
 
 .tree-label-button {
@@ -149,7 +149,7 @@
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 780;
+  font-weight: var(--weight-bold);
 }
 
 .tree-row small {

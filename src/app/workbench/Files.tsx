@@ -11,7 +11,8 @@ import { hasDraft, useDraft } from "./uiMemory";
 import { CodeEditor } from "./CodeEditor";
 import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
-import { FileTypeIcon } from "./FileTypeIcon";
+import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
+import { askConfirm, showNotice } from "../../ui/askText";
 
 const PROJECT_ICONS = "/assets/icons/project";
 const FILE_ICONS = "/assets/icons/files";
@@ -199,7 +200,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                         <li key={category.name}>
                           <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(key)}>
                             <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
-                            <img className="wb-folder-icon" src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />
+                            <FolderIcon open={open} />
                             <span className="wb-tree-label">{category.name}</span>
                             <span className="wb-tree-count">{category.files.length}</span>
                           </div>
@@ -284,8 +285,8 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
     tabs.pin(tabKey);
   }, [file, tabs, tabKey]);
 
-  function cancelEdit() {
-    if (dirty && !window.confirm("Отменить несохранённые правки?")) return;
+  async function cancelEdit() {
+    if (dirty && !(await askConfirm({ title: "Отменить несохранённые правки?", confirmLabel: "Отменить правки", danger: true }))) return;
     discardDraft();
     if (isNew) return tabs.close(tabKey);
     setEditing(false);
@@ -293,7 +294,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
 
   async function save() {
     if (saveState === "saving") return;
-    if (!draft.name.trim()) { window.alert("Нужно имя файла"); return; }
+    if (!draft.name.trim()) { showNotice("Нужно имя файла"); return; }
     setSaveState("saving");
     const body = {
       name: draft.name.trim(),
@@ -325,7 +326,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
   }
 
   async function remove() {
-    if (!file || !window.confirm(`Удалить файл «${file.name || `#${file.id}`}»?`)) return;
+    if (!file || !(await askConfirm({ title: `Удалить файл «${file.name || `#${file.id}`}»?`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/artifacts/${file.id}`, { method: "DELETE" });
     data.reload();
     tabs.close(tabKey);

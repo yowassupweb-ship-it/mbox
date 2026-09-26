@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Play, RefreshCw, X } from "lucide-react";
+import { BarChart3, Bug, Cloud, Figma, Globe, LineChart, Play, RefreshCw, Rss, Theater, TrendingUp, X, type LucideIcon } from "lucide-react";
 import { openSkillPage } from "./agentTabs";
 import { formatLastUsed, skillGroup, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { usePersistentState, type TabsApi } from "./tabs";
@@ -96,11 +96,37 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
   );
 }
 
-/** Картинки есть не у всех инструментов — вместо битой иконки первая буква названия. */
-export function ToolIcon({ src, name, size }: { src: string; name: string; size: number }) {
-  const [failed, setFailed] = useState(!src);
-  if (failed) return <span className="wb-menu-item-icon" style={{ width: size, height: size }}>{name.slice(0, 1)}</span>;
-  return <img src={src} width={size} height={size} alt="" onError={() => setFailed(true)} />;
+/** Плитки инструментов в духе значков приложений macOS: свой символ и цвет у каждого, а не одна картинка на всех. */
+const TOOL_GLYPHS: Record<string, { icon: LucideIcon; color: string }> = {
+  "tour-feed": { icon: Rss, color: "#f59e0b" },
+  "wordstat-api": { icon: TrendingUp, color: "#ef4444" },
+  "topvisor-api": { icon: BarChart3, color: "#3b82f6" },
+  "metrica-api": { icon: LineChart, color: "#ec4899" },
+  "webmaster-api": { icon: Globe, color: "#8b5cf6" },
+  "playwright-mcp": { icon: Theater, color: "#16a34a" },
+  "chrome-devtools-mcp": { icon: Bug, color: "#0ea5e9" },
+  "browserbase-stagehand": { icon: Cloud, color: "#f97316" },
+  figma: { icon: Figma, color: "#a259ff" },
+};
+
+function tileColor(name: string) {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 360;
+  return `hsl(${hash} 55% 48%)`;
+}
+
+/** Своя картинка — если есть и загрузилась (кроме общей заглушки), иначе символ на цветной плитке или первая буква. */
+export function ToolIcon({ id = "", src, name, size }: { id?: string; src: string; name: string; size: number }) {
+  const generic = !src || /\/project\/sources\.png$/.test(src);
+  const [failed, setFailed] = useState(generic);
+  const glyph = TOOL_GLYPHS[id];
+  if (!failed && !glyph) return <img className="wb-tool-tile is-image" src={src} width={size} height={size} alt="" onError={() => setFailed(true)} />;
+  const Icon = glyph?.icon;
+  return (
+    <span className="wb-tool-tile" style={{ width: size, height: size, ["--tile" as string]: glyph?.color || tileColor(name) }} aria-hidden="true">
+      {Icon ? <Icon size={Math.round(size * 0.56)} strokeWidth={2} /> : <b style={{ fontSize: Math.round(size * 0.46) }}>{name.slice(0, 1)}</b>}
+    </span>
+  );
 }
 
 /** Готов, нужна настройка или заготовка — по полю status/planned каталога. */
@@ -149,7 +175,7 @@ export function ToolsView({ tabs }: { tabs: TabsApi }) {
                     title={`${tool.summary}\n\n${tool.status}`}
                   >
                     <span className={`wb-tool-glyph ${toolTone(tool)}`}>
-                      <ToolIcon src={tool.planned ? "" : tool.icon} name={tool.name} size={20} />
+                      <ToolIcon id={tool.id} src={tool.planned ? "" : tool.icon} name={tool.name} size={28} />
                       <i aria-hidden="true" />
                     </span>
                     <span className="wb-menu-item-title">{tool.name}</span>

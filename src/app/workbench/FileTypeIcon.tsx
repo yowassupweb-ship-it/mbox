@@ -1,51 +1,84 @@
-import {
-  Database,
-  File,
-  FileArchive,
-  FileAudio,
-  FileCode2,
-  FileCog,
-  FileImage,
-  FileJson2,
-  FileKey2,
-  FileSpreadsheet,
-  FileText,
-  FileVideo,
-  Link2,
-  Mail,
-  Presentation,
-  type LucideIcon,
-} from "lucide-react";
+/**
+ * Значки файлов и папок из Material Icon Theme — того же набора, что стоит по умолчанию у большинства
+ * в VS Code: у каждого языка и формата свой узнаваемый значок вместо одного глифа разного цвета.
+ * В сборку попадают только перечисленные здесь SVG (мелкие Vite встраивает data-URI).
+ */
+const ICONS = import.meta.glob(
+  "../../../node_modules/material-icon-theme/icons/{typescript,javascript,react_ts,react,python,markdown,json,html,css,sass,document,pdf,word,table,powerpoint,image,video,audio,zip,database,settings,yaml,xml,console,git,docker,lock,key,email,url,file,svg,log,toml,rust,go,java,c,cpp,csharp,php,ruby,kotlin,swift,vue,svelte,lua,powershell,readme,tune,certificate,license,changelog,makefile,nodejs,npm,tsconfig,vite,font,exe,http,todo,folder,folder-open}.svg",
+  { eager: true, query: "?url", import: "default" },
+) as Record<string, string>;
 
-type FileVisual = {
-  icon: LucideIcon;
-  tone: "archive" | "audio" | "code" | "config" | "data" | "document" | "image" | "link" | "mail" | "presentation" | "security" | "sheet" | "video" | "generic";
+const icon = (name: string) => ICONS[`../../../node_modules/material-icon-theme/icons/${name}.svg`] ?? ICONS["../../../node_modules/material-icon-theme/icons/file.svg"];
+
+const BY_NAME: Array<[RegExp, string]> = [
+  [/^readme(\.|$)/i, "readme"],
+  [/^(license|licence|copying)(\.|$)/i, "license"],
+  [/^(changelog|changes|history)(\.md)?$/i, "changelog"],
+  [/^todo(\.|$)/i, "todo"],
+  [/^(dockerfile|docker-compose.*\.ya?ml|compose\.ya?ml)$/i, "docker"],
+  [/^makefile$/i, "makefile"],
+  [/^\.git(ignore|attributes|modules|keep)$/i, "git"],
+  [/^\.env(\.|$)/i, "tune"],
+  [/^package(-lock)?\.json$/i, "npm"],
+  [/^tsconfig.*\.json$/i, "tsconfig"],
+  [/^vite\.config\.[cm]?[jt]s$/i, "vite"],
+  [/^\.?(nvmrc|node-version)$/i, "nodejs"],
+];
+
+const BY_EXT: Record<string, string> = {
+  ts: "typescript", mts: "typescript", cts: "typescript",
+  tsx: "react_ts", jsx: "react",
+  js: "javascript", mjs: "javascript", cjs: "javascript",
+  py: "python", pyw: "python", ipynb: "python",
+  md: "markdown", mdx: "markdown", markdown: "markdown",
+  json: "json", jsonc: "json", geojson: "json",
+  html: "html", htm: "html",
+  css: "css", scss: "sass", sass: "sass", less: "css",
+  txt: "document", rtf: "document", odt: "word", pages: "document",
+  pdf: "pdf",
+  doc: "word", docx: "word",
+  xls: "table", xlsx: "table", xlsm: "table", ods: "table", csv: "table", tsv: "table", numbers: "table",
+  ppt: "powerpoint", pptx: "powerpoint", odp: "powerpoint", key: "powerpoint",
+  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", bmp: "image", ico: "image", avif: "image", tif: "image", tiff: "image", heic: "image",
+  svg: "svg",
+  mp4: "video", mov: "video", mkv: "video", webm: "video", avi: "video", m4v: "video", wmv: "video", mpeg: "video", mpg: "video",
+  mp3: "audio", wav: "audio", flac: "audio", m4a: "audio", aac: "audio", ogg: "audio", opus: "audio", wma: "audio", aiff: "audio",
+  zip: "zip", rar: "zip", "7z": "zip", tar: "zip", gz: "zip", tgz: "zip", bz2: "zip", xz: "zip", cab: "zip", iso: "zip", dmg: "zip",
+  db: "database", sqlite: "database", sqlite3: "database", sql: "database", parquet: "database", avro: "database",
+  ini: "settings", cfg: "settings", conf: "settings", config: "settings", properties: "settings",
+  env: "tune",
+  yaml: "yaml", yml: "yaml", toml: "toml", lock: "lock",
+  xml: "xml", plist: "xml",
+  sh: "console", bash: "console", zsh: "console", fish: "console", bat: "console", cmd: "console",
+  ps1: "powershell", psm1: "powershell",
+  pem: "certificate", crt: "certificate", cer: "certificate", pfx: "certificate", p12: "certificate",
+  pub: "key", asc: "key", gpg: "key",
+  eml: "email", msg: "email", mbox: "email",
+  url: "url", webloc: "url", lnk: "url",
+  http: "http", rest: "http",
+  log: "log",
+  rs: "rust", go: "go", java: "java", kt: "kotlin", kts: "kotlin", swift: "swift",
+  c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp", cs: "csharp",
+  php: "php", rb: "ruby", lua: "lua", vue: "vue", svelte: "svelte",
+  ttf: "font", otf: "font", woff: "font", woff2: "font",
+  exe: "exe", msi: "exe",
 };
 
-const extensionOf = (name: string) => name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
-
-/** Иконки файлов из lucide-react: один полный набор вместо случайных PNG и generic-document. */
-export function fileVisual(name: string): FileVisual {
-  const ext = extensionOf(name);
-  if (/^(zip|rar|7z|tar|gz|tgz|bz2|xz|cab|iso|dmg)$/.test(ext)) return { icon: FileArchive, tone: "archive" };
-  if (/^(mp3|wav|flac|m4a|aac|ogg|opus|wma|aiff)$/.test(ext)) return { icon: FileAudio, tone: "audio" };
-  if (/^(mp4|mov|mkv|webm|avi|m4v|wmv|mpeg|mpg)$/.test(ext)) return { icon: FileVideo, tone: "video" };
-  if (/^(png|jpe?g|gif|webp|bmp|ico|avif|svg|tiff?|heic)$/.test(ext)) return { icon: FileImage, tone: "image" };
-  if (/^(csv|tsv|xls|xlsx|xlsm|ods|numbers)$/.test(ext)) return { icon: FileSpreadsheet, tone: "sheet" };
-  if (/^(ppt|pptx|key|odp)$/.test(ext)) return { icon: Presentation, tone: "presentation" };
-  if (/^(json|jsonc|geojson|ipynb)$/.test(ext)) return { icon: FileJson2, tone: "data" };
-  if (/^(db|sqlite|sqlite3|sql|parquet|avro)$/.test(ext)) return { icon: Database, tone: "data" };
-  if (/^(env|ini|cfg|conf|config|toml|yaml|yml|properties|lock)$/.test(ext) || /^\.env(?:\.|$)/i.test(name)) return { icon: FileCog, tone: "config" };
-  if (/^(pem|crt|cer|pfx|p12|key|pub|asc|gpg)$/.test(ext)) return { icon: FileKey2, tone: "security" };
-  if (/^(eml|msg|mbox)$/.test(ext)) return { icon: Mail, tone: "mail" };
-  if (/^(url|webloc|lnk)$/.test(ext)) return { icon: Link2, tone: "link" };
-  if (/^(js|mjs|cjs|jsx|ts|tsx|css|scss|sass|less|html?|vue|svelte|py|rb|php|java|kt|kts|swift|go|rs|c|cc|cpp|h|hpp|cs|fs|fsx|sh|bash|zsh|fish|ps1|bat|cmd|xml|graphql|gql|proto|dockerfile)$/.test(ext) || /^(dockerfile|makefile)$/i.test(name)) return { icon: FileCode2, tone: "code" };
-  if (/^(md|mdx|markdown|txt|rtf|doc|docx|odt|pages|pdf|log)$/.test(ext)) return { icon: FileText, tone: "document" };
-  return { icon: File, tone: "generic" };
+function baseName(path: string) {
+  return path.split(/[\\/]/).pop() || path;
 }
 
-export function FileTypeIcon({ name, size = 20, className = "" }: { name: string; size?: number; className?: string }) {
-  const visual = fileVisual(name);
-  const Icon = visual.icon;
-  return <Icon className={`wb-file-type-icon is-${visual.tone} ${className}`.trim()} width={size} height={size} strokeWidth={1.7} aria-hidden="true" />;
+export function fileIconUrl(name: string): string {
+  const base = baseName(name);
+  for (const [pattern, iconName] of BY_NAME) if (pattern.test(base)) return icon(iconName);
+  const ext = base.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  return icon(BY_EXT[ext] ?? "file");
+}
+
+export function FileTypeIcon({ name, size = 18, className = "" }: { name: string; size?: number; className?: string }) {
+  return <img className={`wb-file-type-icon ${className}`.trim()} src={fileIconUrl(name)} width={size} height={size} alt="" draggable={false} />;
+}
+
+export function FolderIcon({ open = false, size = 18, className = "" }: { open?: boolean; size?: number; className?: string }) {
+  return <img className={`wb-folder-icon ${className}`.trim()} src={icon(open ? "folder-open" : "folder")} width={size} height={size} alt="" draggable={false} />;
 }

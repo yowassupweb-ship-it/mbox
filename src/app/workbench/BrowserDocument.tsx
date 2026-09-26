@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, Download, ExternalLink, Folder, Globe, History, RotateCw, Sparkles, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, Download, Eraser, ExternalLink, Folder, Globe, History, KeyRound, MoreHorizontal, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
+import { FolderIcon } from "./FileTypeIcon";
+import { askConfirm } from "../../ui/askText";
+import { readBrowserSettings, SEARCH_ENGINES, useBrowserSettings } from "./browserSettings";
 
 /**
  * Вкладка встроенного браузера.
@@ -34,6 +37,8 @@ type BrowserBridge = {
   close: (key: string) => Promise<unknown>;
   capture?: (key: string) => Promise<string>;
   favicon?: (url: string) => Promise<string>;
+  setSearchEngine?: (id: string) => Promise<string>;
+  clearCache?: () => Promise<{ ok: boolean }>;
   moveBookmark?: (url: string, beforeUrl: string) => Promise<BrowserBookmark[]>;
   openBookmarkFolder?: (key: string, name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
   openBookmarkFolderMenu?: (name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
@@ -102,9 +107,27 @@ function publishFavicon(detail: BrowserFaviconDetail) {
   window.dispatchEvent(new CustomEvent<BrowserFaviconDetail>(BROWSER_FAVICON_EVENT, { detail }));
 }
 
-/** Compatibility shim: global popups no longer hide the browser page. */
-export function markOverlay(_open: boolean) {
-  // Browser-specific overlays handle their own visibility inside BrowserDocument.
+/**
+ * Меню, диалоги и попапы шапки рисуются страницей MBOX, а сайт — главным процессом поверх всего окна,
+ * и он закрыл бы их собой. Пока открыт хоть один такой оверлей, страница сайта прячется, а на её месте
+ * стоит снимок (см. эффект видимости в BrowserDocument). Оверлеев может быть несколько сразу, поэтому
+ * счётчик, а не флаг: закрытие верхнего не должно вернуть страницу поверх нижнего.
+ */
+const OVERLAY_EVENT = "mbox:overlay";
+let overlayCount = 0;
+export function markOverlay(open: boolean) {
+  overlayCount = Math.max(0, overlayCount + (open ? 1 : -1));
+  window.dispatchEvent(new CustomEvent<boolean>(OVERLAY_EVENT, { detail: overlayCount > 0 }));
+}
+
+function useOverlayOpen() {
+  const [open, setOpen] = useState(overlayCount > 0);
+  useEffect(() => {
+    const listener = (event: Event) => setOpen(Boolean((event as CustomEvent<boolean>).detail));
+    window.addEventListener(OVERLAY_EVENT, listener);
+    return () => window.removeEventListener(OVERLAY_EVENT, listener);
+  }, []);
+  return open;
 }
 
 function floatingPoint(rect: DOMRect, menu: { width: number; height: number }, offset = 4) {
@@ -178,14 +201,15 @@ const visibleClaims = new Map<string, number>();
 function claimVisibleBrowser(bridge: BrowserBridge, key: string) {
   visibleClaims.set(key, (visibleClaims.get(key) || 0) + 1);
   void bridge.show(key);
-  return () => {
+  /** keepShown — страницу сейчас спрячет сам вызывающий, после снимка: прятать её раньше нельзя. */
+  return (keepShown = false) => {
     const next = (visibleClaims.get(key) || 0) - 1;
     if (next > 0) {
       visibleClaims.set(key, next);
       return;
     }
     visibleClaims.delete(key);
-    void bridge.hide(key);
+    if (!keepShown) void bridge.hide(key);
   };
 }
 
@@ -193,6 +217,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   const bridge = browserBridge();
   const url = browserTabUrl(tabKey);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<BrowserState | null>(null);
   const [address, setAddress] = useState(url);
   const [editing, setEditing] = useState(false);
@@ -217,6 +242,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     return () => window.clearTimeout(timer);
   }, [agentNote]);
   const [busy, setBusy] = useState(false);
+  const [settings, updateSettings] = useBrowserSettings();
+  useEffect(() => { void bridge?.setSearchEngine?.(settings.search); }, [bridge, settings.search]);
 
   useEffect(() => { if (bridge) void bridge.bookmarks().then(setBookmarks); }, [bridge]);
   useEffect(() => {
@@ -235,7 +262,9 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     if (!bridge) return;
     const timer = pendingClose.get(tabKey);
     if (timer) { window.clearTimeout(timer); pendingClose.delete(tabKey); }
-    void bridge.open(tabKey, url).then((next) => {
+    const settings = readBrowserSettings();
+    const startUrl = !url && settings.start === "url" ? settings.startUrl.trim() : "";
+    void bridge.open(tabKey, url || startUrl).then((next) => {
       if (!next) return;
       setState(next);
       if (next.favicon) publishFavicon({ key: tabKey, url: next.url || url, favicon: next.favicon });
@@ -299,23 +328,43 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   // зияет пустое место и кажется, что вкладка перезагрузилась.
   const [frozen, setFrozen] = useState("");
   const lastFrozen = useRef("");
-  const hidden = Boolean(folderOpen);
+  // Пустая вкладка — стартовая страница MBOX вместо белого about:blank; плавающие окна (папка, история,
+  // настройки) тоже прячут страницу: её рисует главный процесс поверх окна, и она закрыла бы их собой.
+  const isBlank = state ? !state.url || state.url === "about:blank" : !url;
+  // Страница ушла на другой адрес (например, «Открыть» в меню закладки из папки) — папка больше не нужна.
+  const lastUrl = useRef(state?.url);
+  useEffect(() => {
+    if (state?.url && lastUrl.current && state.url !== lastUrl.current) setFolderOpen(null);
+    lastUrl.current = state?.url;
+  }, [state?.url]);
+  const overlayOpen = useOverlayOpen();
+  const hidden = Boolean(folderOpen) || historyOpen || toolsOpen || isBlank || overlayOpen;
+  // Снимок нужно сделать, пока страница ещё видна: capture() у спрятанной вкладки пустой. Раньше
+  // уборка прошлого эффекта прятала страницу раньше снимка — и под «…» зияла пустота вместо сайта.
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
 
   useEffect(() => {
     if (!bridge || !visible) return;
     if (hidden) {
       let cancelled = false;
-      if (lastFrozen.current) setFrozen(lastFrozen.current);
+      if (lastFrozen.current && !isBlank) setFrozen(lastFrozen.current);
+      if (isBlank) {
+        void bridge.hide(tabKey);
+        return () => { cancelled = true; };
+      }
       const capture = bridge.capture?.(tabKey) ?? Promise.resolve("");
-      void capture.then((shot) => {
-        if (cancelled || !shot) return;
-        lastFrozen.current = shot;
-        setFrozen(shot);
-      }).catch(() => undefined);
-      const timer = window.setTimeout(() => {
-        if (!cancelled) void bridge.hide(tabKey);
-      }, 80);
-      return () => { cancelled = true; window.clearTimeout(timer); };
+      const limit = new Promise<string>((resolve) => window.setTimeout(() => resolve(""), 350));
+      void Promise.race([capture, limit]).then((shot) => {
+        if (cancelled) return;
+        if (shot) {
+          lastFrozen.current = shot;
+          setFrozen(shot);
+        }
+        // Кадр со снимком должен успеть нарисоваться до того, как уйдёт живая страница.
+        window.requestAnimationFrame(() => { if (!cancelled && hiddenRef.current) void bridge.hide(tabKey); });
+      }).catch(() => { if (!cancelled) void bridge.hide(tabKey); });
+      return () => { cancelled = true; };
     }
     setFrozen("");
     report();
@@ -333,9 +382,10 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       observer.disconnect();
       window.clearInterval(timer);
       window.removeEventListener("resize", report);
-      releaseVisible();
+      // Переход в «спрятано»: страницу уберёт ветка выше, когда снимет снимок.
+      releaseVisible(hiddenRef.current);
     };
-  }, [bridge, visible, hidden, tabKey, report]);
+  }, [bridge, visible, hidden, isBlank, tabKey, report]);
 
   if (!bridge) {
     return (
@@ -379,8 +429,9 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     finally { setDropUrl(""); }
   }
 
-  function openBookmarkMenu(item: BrowserBookmark, x: number, y: number) {
-    setFolderOpen(null);
+  /** keepFolder — меню вызвано из открытой папки: она остаётся открытой, пока с закладкой что-то делают. */
+  function openBookmarkMenu(item: BrowserBookmark, x: number, y: number, keepFolder = false) {
+    if (!keepFolder) setFolderOpen(null);
     if (bridge!.openBookmarkMenu) {
       void bridge!.openBookmarkMenu(tabKey, item, x, y).catch((error) => setMessage(String(error)));
       return;
@@ -390,13 +441,13 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
 
   function openBookmarkFolder(name: string, x: number, y: number) {
     setToolsOpen(false);
+    setHistoryOpen(false);
     setFolderOpen(null);
-    if (bridge!.openBookmarkFolder) {
-      void bridge!.openBookmarkFolder(tabKey, name, x, y).catch((error) => setMessage(String(error)));
-      return;
-    }
-    const point = pointerPoint(x, y, { width: 360, height: Math.min(window.innerHeight * 0.6, 420) });
-    setFolderOpen({ name, x: point.x, y: point.y });
+    // Меню стоит внутри области браузера (у рабочего места contain: layout — fixed там считается от области,
+    // а не от окна), поэтому координаты кнопки переводим в координаты области.
+    const point = pointerPoint(x, y, { width: 320, height: Math.min(window.innerHeight * 0.6, 440) });
+    const root = rootRef.current?.getBoundingClientRect();
+    setFolderOpen({ name, x: point.x - (root?.left ?? 0), y: point.y - (root?.top ?? 0) });
   }
 
   async function toggleBookmark() {
@@ -426,47 +477,95 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     finally { setBusy(false); }
   }
 
+  function closePanels() {
+    setFolderOpen(null);
+    setHistoryOpen(false);
+    setToolsOpen(false);
+  }
+
+  function navigate(target: string) {
+    closePanels();
+    void bridge!.act(tabKey, "navigate", target).then((next) => {
+      if (!next) return;
+      setState(next);
+      if (next.favicon) publishFavicon({ key: tabKey, url: next.url || target, favicon: next.favicon });
+    });
+  }
+
+  async function clearCache() {
+    if (!bridge!.clearCache) return;
+    setBusy(true);
+    try {
+      await bridge!.clearCache();
+      setMessage("Кэш очищен. Вход на сайты сохранён.");
+    } catch (error) { setMessage(String(error)); }
+    finally { setBusy(false); }
+  }
+
+  async function clearAllHistory() {
+    if (!(await askConfirm({ title: "Очистить всю историю браузера?", message: "История общая для всех ваших устройств.", confirmLabel: "Очистить", danger: true }))) return;
+    await bridge!.clearHistory?.();
+    setHistoryRows([]);
+  }
+
+  async function removeFromFolder(item: BrowserBookmark) {
+    try { setBookmarks(await bridge!.removeBookmark(item.url)); }
+    catch (error) { setMessage(String(error)); }
+  }
+
+  const engineLabel = SEARCH_ENGINES.find((item) => item.id === settings.search)?.label || "";
+
   return (
-    <div className="wb-browser">
-      <div className="wb-doc-bar">
+    <div className="wb-browser" ref={rootRef}>
+      <div className="wb-doc-bar wb-browser-bar">
         <div className="wb-browser-nav">
-          <button type="button" disabled={!state?.canGoBack} onClick={() => void bridge.act(tabKey, "back")} title="Назад"><ArrowLeft size={15} /></button>
-          <button type="button" disabled={!state?.canGoForward} onClick={() => void bridge.act(tabKey, "forward")} title="Вперёд"><ArrowRight size={15} /></button>
-          <button type="button" onClick={() => void bridge.act(tabKey, state?.loading ? "stop" : "reload")} title={state?.loading ? "Остановить" : "Обновить"}>
-            {state?.loading ? <X size={15} /> : <RotateCw size={14} />}
+          <button type="button" disabled={!state?.canGoBack} onClick={() => void bridge.act(tabKey, "back")} title="Назад" aria-label="Назад"><ArrowLeft size={16} /></button>
+          <button type="button" disabled={!state?.canGoForward} onClick={() => void bridge.act(tabKey, "forward")} title="Вперёд" aria-label="Вперёд"><ArrowRight size={16} /></button>
+          <button type="button" onClick={() => void bridge.act(tabKey, state?.loading ? "stop" : "reload")} title={state?.loading ? "Остановить" : "Обновить"} aria-label={state?.loading ? "Остановить" : "Обновить"}>
+            {state?.loading ? <X size={16} /> : <RotateCw size={15} />}
           </button>
         </div>
-        {agentNote && <span className="wb-browser-agent" role="status"><Sparkles size={13} aria-hidden="true" />{agentNote.actor}: {agentNote.text}</span>}
         <form className="wb-browser-address" onSubmit={submit}>
-          <Favicon tabKey={tabKey} url={pageUrl} size={13} />
+          {isBlank && !editing ? <Search size={14} aria-hidden="true" /> : <Favicon tabKey={tabKey} url={pageUrl} size={14} />}
           <input
-            value={address}
+            value={isBlank && !editing ? "" : address}
             spellCheck={false}
             onChange={(event) => { setAddress(event.target.value); setEditing(true); }}
             onFocus={(event) => { setEditing(true); event.target.select(); }}
             onBlur={() => { setEditing(false); setAddress(state?.url || url); }}
-            autoFocus={!url}
-            placeholder="Адрес сайта или поиск"
+            placeholder={`Поиск в ${engineLabel} или адрес`}
             aria-label="Адрес сайта"
           />
-        </form>
-        <div className="wb-doc-actions">
-          <button type="button" disabled={!/^https?:\/\//i.test(pageUrl)} onClick={() => void toggleBookmark()} title={saved ? "Убрать из закладок" : "Добавить в закладки"} aria-label={saved ? "Убрать из закладок" : "Добавить в закладки"} aria-pressed={saved}><Star size={15} fill={saved ? "currentColor" : "none"} /></button>
-          {bridge.history && (
-            <button type="button" onClick={() => { setToolsOpen(false); setFolderOpen(null); setHistoryOpen((open) => !open); }} title="История браузера" aria-label="История браузера" aria-expanded={historyOpen}>
-              <History size={15} />
-            </button>
-          )}
-          <button type="button" onClick={() => { setFolderOpen(null); setHistoryOpen(false); setToolsOpen((open) => !open); }} title="Импорт и пароли" aria-label="Импорт и пароли" aria-expanded={toolsOpen}><Download size={15} /></button>
           {state?.zoom !== undefined && state.zoom !== 100 && (
             <button type="button" className="wb-browser-zoom" onClick={() => void bridge.act(tabKey, "zoom-reset").then((next) => next && setState(next))} title="Сбросить масштаб (Ctrl+колесо над страницей)">
               {state.zoom}%
             </button>
           )}
-          <button type="button" onClick={() => window.open(state?.url || url, "_blank", "noopener")} title="Открыть в системном браузере"><ExternalLink size={14} /></button>
+          <button type="button" className="wb-browser-star" disabled={!/^https?:\/\//i.test(pageUrl)} onClick={() => void toggleBookmark()} title={saved ? "Убрать из закладок" : "Добавить в закладки"} aria-label={saved ? "Убрать из закладок" : "Добавить в закладки"} aria-pressed={saved}>
+            <Star size={15} fill={saved ? "currentColor" : "none"} />
+          </button>
+        </form>
+        {agentNote && <span className="wb-browser-agent" role="status"><Sparkles size={13} aria-hidden="true" />{agentNote.actor}: {agentNote.text}</span>}
+        <div className="wb-browser-actions">
+          {bridge.history && (
+            <button type="button" className={historyOpen ? "is-on" : undefined} onClick={() => { const next = !historyOpen; closePanels(); setHistoryOpen(next); }} title="История" aria-label="История" aria-expanded={historyOpen}>
+              <History size={16} />
+            </button>
+          )}
+          <button type="button" className={toolsOpen ? "is-on" : undefined} onClick={() => { const next = !toolsOpen; closePanels(); setMessage(""); setToolsOpen(next); }} title="Настройки браузера" aria-label="Настройки браузера" aria-expanded={toolsOpen}>
+            <MoreHorizontal size={16} />
+          </button>
         </div>
       </div>
-      <div className="wb-browser-bookmarks" aria-label="Панель закладок">
+      <div
+        className="wb-browser-bookmarks"
+        aria-label="Панель закладок"
+        // Колесо мыши листает панель вбок, как в Chrome: вертикальной прокрутки у неё нет.
+        onWheel={(event) => {
+          if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+          event.currentTarget.scrollLeft += event.deltaY;
+        }}
+      >
         <Bookmark size={14} aria-hidden="true" />
         {barEntries.map((entry) => {
           if (entry.kind === "folder") {
@@ -488,7 +587,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
                   void bridge.openBookmarkFolderMenu?.(name, event.clientX, event.clientY).catch((error) => setMessage(String(error)));
                 }}
               >
-                <Folder size={13} />
+                <FolderIcon size={16} />
                 <span>{name}</span>
               </button>
             );
@@ -500,15 +599,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
             type="button"
             key={item.url}
             className={dropUrl === item.url ? "is-drop-target" : undefined}
-            title={label ? `${label}
-${item.url}` : item.url}
+            title={label ? `${label}\n${item.url}` : item.url}
             draggable
             onDragStart={(event) => { setDragUrl(item.url); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/uri-list", item.url); }}
             onDragOver={(event) => { if (dragUrl && dragUrl !== item.url) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropUrl(item.url); } }}
             onDragLeave={() => { if (dropUrl === item.url) setDropUrl(""); }}
             onDrop={(event) => { event.preventDefault(); void dropBookmark(dragUrl, item.url); setDragUrl(""); }}
             onDragEnd={() => { setDragUrl(""); setDropUrl(""); }}
-            onClick={() => void bridge.act(tabKey, "navigate", item.url)}
+            onClick={() => navigate(item.url)}
             onContextMenu={(event) => {
               event.preventDefault();
               openBookmarkMenu(item, event.clientX, event.clientY);
@@ -543,95 +641,214 @@ ${item.url}` : item.url}
               else openBookmarkFolder("Другие", rect.left, rect.bottom + 4);
             }}
           >
-            <Folder size={13} />
+            <FolderIcon size={16} />
             <span>Другие</span>
           </button>
         )}
       </div>
 
-      {/* Плавающие меню: подложка ловит клик мимо и закрывает их, как было в оригинале. */}
-      {folderOpen && (
-        <div className="wb-bookmark-scrim" onClick={() => { setFolderOpen(null); }} onContextMenu={(event) => { event.preventDefault(); setFolderOpen(null); }} />
+      {/* Плавающие окна: подложка ловит клик мимо и закрывает их. */}
+      {(folderOpen || historyOpen || toolsOpen) && (
+        <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
       {folderOpen && (
-        <div className="wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} aria-label={`Закладки: ${folderOpen.name}`}>
-          {folderItems.map((item) => {
-            const label = bookmarkLabel(item);
-            return (
-            <button
-              type="button"
-              key={`${item.source}:${item.url}`}
-              title={label ? `${label}
-${item.url}` : item.url}
-              onClick={() => { setFolderOpen(null); void bridge.act(tabKey, "navigate", item.url); }}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setFolderOpen(null);
-                openBookmarkMenu(item, event.clientX, event.clientY);
-              }}
-            >
-              <Favicon url={item.url} />
-              {label && <span>{label}</span>}
-            </button>
-            );
-          })}
-          {!folderItems.length && <button type="button" disabled><span>Папка пуста</span></button>}
+        <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
+          <div className="wb-browser-pop-head"><Folder size={14} /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
+          <div className="wb-browser-pop-list">
+            {folderItems.map((item) => {
+              const label = bookmarkLabel(item) || bookmarkHost(item.url);
+              return (
+                <div className="wb-browser-pop-row" key={`${item.source}:${item.url}`} role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    title={`${label}\n${item.url}`}
+                    onClick={() => navigate(item.url)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      openBookmarkMenu(item, event.clientX, event.clientY, true);
+                    }}
+                  >
+                    <Favicon url={item.url} size={16} />
+                    <span>{label}</span>
+                  </button>
+                  <button type="button" className="wb-browser-pop-remove" onClick={() => void removeFromFolder(item)} title="Удалить закладку" aria-label={`Удалить закладку ${label}`}>
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+            {!folderItems.length && <div className="wb-browser-pop-empty">Папка пуста</div>}
+          </div>
         </div>
       )}
 
       {historyOpen && (
-        <div className="wb-browser-history" aria-label="История браузера">
-          <div className="wb-browser-history-head">
-            <input
-              value={historyQuery}
-              onChange={(event) => setHistoryQuery(event.target.value)}
-              placeholder="Поиск по истории"
-              aria-label="Поиск по истории"
-              autoFocus
-            />
-            <button type="button" onClick={() => { void bridge.clearHistory?.().then(() => setHistoryRows([])); }} title="Очистить историю">
-              <Trash2 size={13} /> Очистить
-            </button>
+        <div className="wb-browser-pop wb-browser-history" role="dialog" aria-label="История браузера">
+          <div className="wb-browser-pop-head">
+            <History size={14} /><span>История</span>
+            <button type="button" className="wb-browser-pop-link" onClick={() => void clearAllHistory()}>Очистить всё</button>
           </div>
-          <ul>
+          <label className="wb-browser-pop-search">
+            <Search size={13} aria-hidden="true" />
+            <input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Поиск по истории" aria-label="Поиск по истории" autoFocus />
+          </label>
+          <div className="wb-browser-pop-list">
             {historyRows.map((row) => (
-              <li key={row.url}>
-                <button type="button" title={row.url} onClick={() => { setHistoryOpen(false); void bridge.act(tabKey, "navigate", row.url); }}>
-                  <span className="wb-browser-history-title">{row.title || row.url}</span>
-                  <span className="wb-browser-history-url">{row.url}</span>
+              <div className="wb-browser-pop-row" key={row.url}>
+                <button type="button" title={row.url} onClick={() => navigate(row.url)}>
+                  <Favicon url={row.url} size={16} />
+                  <span className="wb-browser-history-text">
+                    <span className="wb-browser-history-title">{row.title || bookmarkHost(row.url)}</span>
+                    <span className="wb-browser-history-url">{bookmarkHost(row.url)} · {visitedLabel(row.visited_at)}</span>
+                  </span>
                 </button>
-              </li>
+                <button type="button" className="wb-browser-pop-remove" onClick={() => { void bridge.clearHistory?.(row.url).then(() => setHistoryRows((rows) => rows.filter((item) => item.url !== row.url))); }} title="Убрать из истории" aria-label="Убрать из истории">
+                  <X size={13} />
+                </button>
+              </div>
             ))}
-            {!historyRows.length && <li className="wb-empty">{historyQuery ? "Ничего не нашлось" : "История пока пуста"}</li>}
-          </ul>
+            {!historyRows.length && <div className="wb-browser-pop-empty">{historyQuery ? "Ничего не нашлось" : "История пока пуста"}</div>}
+          </div>
         </div>
       )}
-      {toolsOpen && <div className="wb-browser-tools">
-        <div className="wb-browser-tools-row">
-          <label htmlFor={`browser-profile-${tabKey}`}>Профиль Chrome</label>
-          <select id={`browser-profile-${tabKey}`} value={profile} onChange={(event) => setProfile(event.target.value)} disabled={busy || !profiles.length}>
-            {profiles.length ? profiles.map((item) => <option key={item} value={item}>{item}</option>) : <option value="Default">Профили не найдены</option>}
-          </select>
-          <button type="button" disabled={busy || !profiles.length} onClick={() => void importBookmarks()}>Импортировать закладки</button>
+
+      {toolsOpen && (
+        <div className="wb-browser-pop wb-browser-settings" role="dialog" aria-label="Настройки браузера">
+          <section>
+            <h4>Поиск в строке адреса</h4>
+            <div className="wb-segmented" role="radiogroup" aria-label="Поисковик">
+              {SEARCH_ENGINES.map((engine) => (
+                <button key={engine.id} type="button" role="radio" aria-checked={settings.search === engine.id} className={settings.search === engine.id ? "is-on" : undefined} onClick={() => updateSettings({ search: engine.id })}>{engine.label}</button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h4>Новая вкладка</h4>
+            <label className="wb-browser-radio"><input type="radio" name={`start-${tabKey}`} checked={settings.start === "mbox"} onChange={() => updateSettings({ start: "mbox" })} /> Стартовая страница MBOX: поиск, закладки, недавнее</label>
+            <label className="wb-browser-radio"><input type="radio" name={`start-${tabKey}`} checked={settings.start === "url"} onChange={() => updateSettings({ start: "url" })} /> Открывать адрес</label>
+            <input
+              className="wb-browser-pop-input"
+              value={settings.startUrl}
+              disabled={settings.start !== "url"}
+              onChange={(event) => updateSettings({ startUrl: event.target.value })}
+              placeholder="https://ya.ru"
+              spellCheck={false}
+              aria-label="Адрес новой вкладки"
+            />
+            {!isBlank && <button type="button" className="wb-browser-pop-link" onClick={() => updateSettings({ start: "url", startUrl: pageUrl })}>Сделать текущую страницу стартовой</button>}
+          </section>
+          <section>
+            <h4>Данные</h4>
+            <div className="wb-browser-pop-buttons">
+              {bridge.clearCache && <button type="button" disabled={busy} onClick={() => void clearCache()}><Eraser size={14} /> Очистить кэш</button>}
+              {bridge.history && <button type="button" onClick={() => void clearAllHistory()}><Trash2 size={14} /> Очистить историю</button>}
+            </div>
+          </section>
+          <section>
+            <h4>Импорт из Chrome</h4>
+            <div className="wb-browser-pop-buttons">
+              <select value={profile} onChange={(event) => setProfile(event.target.value)} disabled={busy || !profiles.length} aria-label="Профиль Chrome">
+                {profiles.length ? profiles.map((item) => <option key={item} value={item}>{item}</option>) : <option value="Default">Профили не найдены</option>}
+              </select>
+              <button type="button" disabled={busy || !profiles.length} onClick={() => void importBookmarks()}><Download size={14} /> Закладки</button>
+              <button type="button" disabled={busy} onClick={() => void importPasswords()}><KeyRound size={14} /> Пароли из CSV</button>
+            </div>
+            <small>Пароли сначала экспортируйте в Chrome. Они сохранятся только на этом компьютере.</small>
+          </section>
+          {credentials.length > 0 && (
+            <section>
+              <h4>Вход на этот сайт</h4>
+              <div className="wb-browser-pop-buttons">
+                {credentials.map((item) => <button type="button" key={item.username} onClick={() => { void bridge.fillPassword(tabKey, item.username).then((result) => { setMessage(result.error || "Поля входа заполнены"); setToolsOpen(false); }); }}><KeyRound size={14} /> {item.username}</button>)}
+              </div>
+            </section>
+          )}
+          {!isBlank && (
+            <section>
+              <button type="button" className="wb-browser-pop-link" onClick={() => window.open(pageUrl, "_blank", "noopener")}><ExternalLink size={13} /> Открыть в системном браузере</button>
+            </section>
+          )}
+          {message && <div className="wb-browser-tools-message" role="status">{message}</div>}
         </div>
-        <div className="wb-browser-tools-row">
-          <span>Пароли Chrome</span>
-          <button type="button" disabled={busy} onClick={() => void importPasswords()}>Выбрать CSV для импорта</button>
-          <small>Сначала экспортируйте пароли в Chrome. Они сохранятся только на этом компьютере.</small>
-        </div>
-        {credentials.length > 0 && <div className="wb-browser-tools-row">
-          <span>Для этого сайта</span>
-          {credentials.map((item) => <button type="button" key={item.username} onClick={() => { void bridge.fillPassword(tabKey, item.username).then((result) => { setMessage(result.error || "Поля входа заполнены"); setToolsOpen(false); }); }}>{`Заполнить: ${item.username}`}</button>)}
-        </div>}
-        {message && <div className="wb-browser-tools-message" role="status">{message}</div>}
-      </div>}
+      )}
       {state?.error && <div className="wb-banner is-error">{state.error}</div>}
       {/* Пустое место под страницу: её рисует поверх главный процесс по этим координатам. */}
       <div ref={stageRef} className="wb-browser-stage" data-scroll-memory="off">
-        {frozen && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} />}
+        {isBlank && !state?.auth && <BrowserStartPage engine={engineLabel} bookmarks={bookmarks} history={bridge.history} onNavigate={navigate} />}
+        {frozen && !isBlank && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} />}
         {state?.auth && bridge?.auth && <BrowserAuthForm key={state.auth.id} auth={state.auth} answer={bridge.auth} />}
       </div>
+    </div>
+  );
+}
+
+function bookmarkHost(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
+}
+
+function visitedLabel(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date();
+  const time = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  if (date.toDateString() === today.toDateString()) return time;
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return `вчера, ${time}`;
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+/** Новая вкладка: большая строка поиска, закладки плитками, недавнее — вместо белого листа. */
+function BrowserStartPage({ engine, bookmarks, history, onNavigate }: {
+  engine: string;
+  bookmarks: BrowserBookmark[];
+  history?: BrowserBridge["history"];
+  onNavigate: (target: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [recent, setRecent] = useState<BrowserHistoryEntry[]>([]);
+  useEffect(() => {
+    if (!history) return;
+    let alive = true;
+    void history("", 12).then((rows) => { if (alive) setRecent(rows); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [history]);
+  const tiles = bookmarks.filter((item) => item.source === "bookmark_bar" && !item.folder).slice(0, 12);
+  return (
+    <div className="wb-browser-start">
+      <form className="wb-browser-start-search" onSubmit={(event) => { event.preventDefault(); if (query.trim()) onNavigate(query.trim()); }}>
+        <Search size={18} aria-hidden="true" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Поиск в ${engine} или адрес сайта`} aria-label="Поиск или адрес" spellCheck={false} autoFocus />
+      </form>
+      {tiles.length > 0 && (
+        <section>
+          <h3>Закладки</h3>
+          <div className="wb-browser-start-tiles">
+            {tiles.map((item) => (
+              <button type="button" key={item.url} onClick={() => onNavigate(item.url)} title={item.url}>
+                <span className="wb-browser-start-icon"><Favicon url={item.url} size={24} /></span>
+                <span className="wb-browser-start-label">{bookmarkLabel(item) || bookmarkHost(item.url)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {recent.length > 0 && (
+        <section>
+          <h3>Недавно открытые</h3>
+          <div className="wb-browser-start-recent">
+            {recent.map((row) => (
+              <button type="button" key={row.url} onClick={() => onNavigate(row.url)} title={row.url}>
+                <Favicon url={row.url} size={16} />
+                <span className="wb-browser-history-title">{row.title || bookmarkHost(row.url)}</span>
+                <span className="wb-browser-history-url">{bookmarkHost(row.url)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

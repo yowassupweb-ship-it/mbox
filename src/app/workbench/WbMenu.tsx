@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { markOverlay } from "./BrowserDocument";
 
 /**
  * Всплывающее меню рабочего места. Рисуется порталом в корень `.wb`, а не там, где его открыли:
@@ -14,6 +15,13 @@ export function WbMenu({ x, y, onClose, children }: { x: number; y: number; onCl
   const [pos, setPos] = useState({ left: x, top: y });
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+
+  // Пока меню открыто, страница встроенного браузера прячется под снимок: она рисуется поверх окна
+  // и иначе закрыла бы меню собой.
+  useEffect(() => {
+    markOverlay(true);
+    return () => markOverlay(false);
+  }, []);
 
   useLayoutEffect(() => {
     const el = ref.current;

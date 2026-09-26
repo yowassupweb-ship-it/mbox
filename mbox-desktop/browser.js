@@ -10,6 +10,7 @@
 // Вход в сайты сохраняется между запусками: общий раздел сессии persist:mbox-browser. Он намеренно
 // отдельный от сессии самого MBOX — у сайтов не должно быть ни куки MBOX, ни моста к диску и агентам.
 
+const path = require("node:path");
 const { WebContentsView, session } = require("electron");
 const chromeImport = require("./import-chrome");
 const serverState = require("./server-state");
@@ -34,7 +35,29 @@ function normalizeUrl(input) {
   if (/^about:blank$/i.test(value)) return HOME;
   // Похоже на адрес (есть точка и нет пробелов) — считаем сайтом, иначе ищем.
   if (/^[^\s/]+\.[^\s/]{2,}(\/|$)/.test(value)) return `https://${value}`;
-  return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
+  return (SEARCH_ENGINES[searchEngine] || SEARCH_ENGINES.duckduckgo)(encodeURIComponent(value));
+}
+
+// Поисковик для строки адреса выбирается в настройках браузера на странице (setSearchEngine).
+const SEARCH_ENGINES = {
+  yandex: (q) => `https://yandex.ru/search/?text=${q}`,
+  google: (q) => `https://www.google.com/search?q=${q}`,
+  duckduckgo: (q) => `https://duckduckgo.com/?q=${q}`,
+  bing: (q) => `https://www.bing.com/search?q=${q}`,
+};
+let searchEngine = "duckduckgo";
+function setSearchEngine(id) {
+  if (SEARCH_ENGINES[id]) searchEngine = id;
+  return searchEngine;
+}
+
+/** Очистка кэша встроенного браузера. Куки и вход на сайты не трогаем — они синхронизируются с MBOX. */
+async function clearCache() {
+  const browserSession = session.fromPartition(PARTITION);
+  await browserSession.clearCache();
+  await browserSession.clearStorageData({ storages: ["cachestorage", "serviceworkers", "shadercache"] });
+  await browserSession.clearHostResolverCache().catch(() => {});
+  return { ok: true };
 }
 
 function stateOf(key) {
@@ -64,6 +87,7 @@ function create(key) {
   const view = new WebContentsView({
     webPreferences: {
       partition: PARTITION,
+      preload: path.join(__dirname, "browser-tab-preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -79,6 +103,7 @@ function create(key) {
     contents.on(event, () => publish(key));
   }
   contents.on("did-start-loading", () => { tab.error = ""; });
+
   contents.on("page-favicon-updated", (_event, favicons) => {
     tab.favicon = Array.isArray(favicons) ? favicons.find(Boolean) || "" : "";
     publish(key);
@@ -605,6 +630,7 @@ function attach(mainWindow, sendToUi) {
 
   const browserSession = session.fromPartition(PARTITION);
   browserSession.setUserAgent(chromeUserAgent());
+
   // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
@@ -615,4 +641,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, state: stateOf, PARTITION };
+module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, setSearchEngine, clearCache, state: stateOf, PARTITION };

@@ -10,6 +10,7 @@ import { orderTodos, positionBetween, todoPosition } from "../../lib/tree";
 import type { Project, Todo } from "../../types";
 import { Button, EmptyState, ErrorText, ManualForm, SaveButton, Select, TextArea, TextInput, type SaveState } from "../../ui";
 import { MarkdownText } from "../../app/workbench/MarkdownText";
+import { askConfirm } from "../../ui/askText";
 
 const statusOptions = Object.entries(todoStatusLabels).map(([value, label]) => ({ value, label }));
 const priorityOptions = Object.entries(todoPriorityLabels).map(([value, label]) => ({ value, label }));
@@ -274,7 +275,7 @@ function TodoModal({ todo, projectName, onClose, onSaved }: { todo: Todo; projec
   }
 
   async function remove() {
-    if (!window.confirm(`Удалить todo «${todo.title}»?`)) return;
+    if (!(await askConfirm({ title: `Удалить todo «${todo.title}»?`, confirmLabel: "Удалить", danger: true }))) return;
     try {
       await fetchJson(`/api/mbox/todos/${todo.id}`, { method: "DELETE" });
       onSaved();

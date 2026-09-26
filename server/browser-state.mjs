@@ -163,9 +163,12 @@ export async function handleBrowserStateApi({ req, res, url, query, readBody, se
         return true;
       }
       if (req.method === "DELETE") {
-        const href = validUrl(url.searchParams.get("url"));
+        const raw = String(url.searchParams.get("url") || "");
+        const href = validUrl(raw);
         const folder = String(url.searchParams.get("folder") || "").trim();
-        if (href) await query("DELETE FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND url = $2", [owner, href]);
+        // Импортированные из Chrome закладки лежат с исходным адресом, а validUrl его нормализует
+        // (слеш в конце, кодировка) — сравниваем с обоими видами, иначе такая закладка не удалялась.
+        if (href) await query("DELETE FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND url IN ($2, $3)", [owner, href, raw]);
         else if (folder) {
           await query(
             "DELETE FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND (folder = $2 OR left(folder, length($2) + 3) = $2 || ' / ')",

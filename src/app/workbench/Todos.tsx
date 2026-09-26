@@ -12,6 +12,7 @@ import { DocShell, DrawerToggle, MetaStrip, useDrawer } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { useDraft, useRemembered } from "./uiMemory";
+import { askConfirm } from "../../ui/askText";
 
 // Порядок колонок как на прежней доске; «Готово» и «Архив» — одна колонка.
 const COLUMNS = ["open", "next", "doing", "review", "blocked", "done"];
@@ -193,7 +194,7 @@ export function TodoDocument({ project, todo, tabs, tabKey, visible, onDirty, on
   });
 
   async function remove() {
-    if (!window.confirm(`Удалить задачу «${todo.title}»?`)) return;
+    if (!(await askConfirm({ title: `Удалить задачу «${todo.title}»?`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/todos/${todo.id}`, { method: "DELETE" });
     discardDraft();
     onDirty(tabKey, false);

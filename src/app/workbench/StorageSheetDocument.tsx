@@ -7,6 +7,7 @@ import { DocShell } from "./docLayout";
 import { delimitedContent, parseDelimited } from "./officeFormat";
 import { SheetEditor } from "./SheetEditor";
 import type { TabsApi } from "./tabs";
+import { askConfirm } from "../../ui/askText";
 
 export const STORAGE_SHEET_TAB = "s3sheet:";
 export const isSheetFile = (name: string) => /\.(xlsx|xlsm|csv|tsv)$/i.test(name);
@@ -98,7 +99,7 @@ export function StorageSheetDocument({ storageKey, tabs, tabKey, visible, onDirt
         <>
           <span className="wb-doc-crumbs">Хранилище › {storageKey.split("/").join(" › ")}{dirty && <b className="wb-dirty-mark"> ●</b>}</span>
           <div className="wb-doc-actions">
-            <button type="button" onClick={() => { if (!dirty || window.confirm("Отбросить несохранённые правки и перечитать файл?")) void load(); }} title="Перечитать из хранилища"><RefreshCw size={14} /></button>
+            <button type="button" onClick={async () => { if (!dirty || (await askConfirm({ title: "Отбросить несохранённые правки и перечитать файл?", confirmLabel: "Перечитать", danger: true }))) void load(); }} title="Перечитать из хранилища"><RefreshCw size={14} /></button>
             <button type="button" className="is-primary" disabled={!dirty || saving} onClick={() => void save()}><Save size={14} /> {saving ? "Сохраняю…" : "Сохранить"}</button>
           </div>
         </>

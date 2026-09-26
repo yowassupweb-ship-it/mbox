@@ -105,17 +105,21 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
     });
   }
 
+  // Колесо масштабирует картинку от курсора, как в просмотрщиках изображений; двигать — перетаскиванием.
+  // Тачпад шлёт мелкие шаги — масштаб пропорционален deltaY, чтобы жест не прыгал рывками.
   function onWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    if (!event.ctrlKey && !event.metaKey) return;
+    if (event.shiftKey) return;
     event.preventDefault();
-    zoomTo(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15), { x: event.clientX, y: event.clientY });
+    const step = Math.min(Math.abs(event.deltaY), 120) / 120;
+    const factor = 1 + 0.18 * (step || 1);
+    zoomTo(zoom * (event.deltaY < 0 ? factor : 1 / factor), { x: event.clientX, y: event.clientY });
   }
 
-  // Колесо с Ctrl должно масштабировать картинку, а не всё окно — нужен непассивный слушатель.
+  // Колесо должно масштабировать картинку, а не прокручивать область или всё окно — нужен непассивный слушатель.
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
-    const block = (event: WheelEvent) => { if (event.ctrlKey || event.metaKey) event.preventDefault(); };
+    const block = (event: WheelEvent) => { if (!event.shiftKey) event.preventDefault(); };
     el.addEventListener("wheel", block, { passive: false });
     return () => el.removeEventListener("wheel", block);
   }, [image?.dataUrl]);
@@ -173,9 +177,9 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
             <button type="button" className={view.fit ? "is-on" : undefined} onClick={() => setView((current) => ({ ...current, fit: true }))} title="Вписать в окно"><Maximize size={13} /></button>
             <button type="button" className={!view.fit && Math.abs(view.zoom - 1) < 0.001 ? "is-on" : undefined} onClick={() => zoomTo(1)} title="Реальный размер (100%)"><Scan size={13} /> 100%</button>
           </div>
-          <button type="button" onClick={() => zoomTo(zoom / 1.25)} title="Мельче (Ctrl+колесо)"><Minus size={13} /></button>
+          <button type="button" onClick={() => zoomTo(zoom / 1.25)} title="Мельче (колесо мыши)"><Minus size={13} /></button>
           <span className="wb-image-zoom">{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={() => zoomTo(zoom * 1.25)} title="Крупнее (Ctrl+колесо)"><Plus size={13} /></button>
+          <button type="button" onClick={() => zoomTo(zoom * 1.25)} title="Крупнее (колесо мыши)"><Plus size={13} /></button>
           <div className="wb-segmented" title="Фон под прозрачными участками">
             {(["checker", "dark", "light"] as const).map((background) => (
               <button key={background} type="button" className={view.background === background ? "is-on" : undefined} onClick={() => setView((current) => ({ ...current, background }))}>

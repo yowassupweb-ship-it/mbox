@@ -67,7 +67,7 @@
     min-height: 42px;
     max-width: 124px;
     padding: 0 10px;
-    font-size: 12px;
+    font-size: var(--text-sm);
   }
 
   .desktop-pill span {
@@ -92,7 +92,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: var(--text-sm);
     padding: 0 10px;
   }
 
@@ -146,7 +146,7 @@
     right: 10px;
     bottom: max(8px, env(safe-area-inset-bottom));
     width: auto;
-    border: 1px solid rgba(255, 255, 255, .08);
+    border: 1px solid color-mix(in srgb, var(--text-main) 8%, transparent);
     border-radius: var(--radius-pill);
     padding: 6px;
     overflow: hidden;
@@ -180,7 +180,7 @@
     max-width: 132px;
     min-height: 44px;
     padding: 0 13px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     scroll-snap-align: start;
     background: color-mix(in srgb, var(--element-bg) 74%, transparent);
   }
@@ -199,7 +199,7 @@
   }
 
   .panel-title h2 {
-    font-size: 17px;
+    font-size: var(--text-lg);
   }
 
   .content-grid,
@@ -235,12 +235,12 @@
 
   .tree-row small {
     max-width: 38%;
-    font-size: 12px;
+    font-size: var(--text-sm);
   }
 
   .note-title-input {
     min-height: 46px;
-    font-size: 22px;
+    font-size: var(--text-xl);
   }
 
   .note-controls {
@@ -320,7 +320,7 @@
   }
 
   .graph-card strong {
-    font-size: 12px;
+    font-size: var(--text-sm);
   }
 
   .relation-form {
@@ -365,10 +365,10 @@
   input,
   select,
   textarea {
-    font-size: 16px;
+    font-size: var(--text-lg);
   }
 
-  .search-shell input { font-size: 16px; }
+  .search-shell input { font-size: var(--text-lg); }
 
   /* Палец: минимальная цель 44px. */
   .entity-tile,
@@ -464,12 +464,12 @@
   .map-link-label { opacity: 1; }
 
   /* Чат разворачивается почти на весь экран — иначе на 360px это щель. */
-  .chat-composer textarea { font-size: 16px; }
+  .chat-composer textarea { font-size: var(--text-lg); }
 
   /* iOS Safari зумит страницу при фокусе на любом поле ввода с font-size < 16px — консольный
      composer был 12.5px (моноширинный терминальный размер), из-за чего на iPhone любое нажатие
      в чат разъезжало весь экран приближением и делать было ничего невозможно. */
-  .console-input-row textarea { font-size: 16px; }
+  .console-input-row textarea { font-size: var(--text-lg); }
 }
 
 /*

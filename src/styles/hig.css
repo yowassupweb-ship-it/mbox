@@ -60,14 +60,14 @@
   text-transform: none;
   letter-spacing: 0;
 }
-.wb-view-head { font-size: 12px; font-weight: 650; color: var(--text-2); }
+.wb-view-head { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-2); }
 .wb-tree-group-label,
 .wb-side-section h3,
 .wb-memory-side h3,
 .wb-menu-group-head,
 .wb-commands h3,
-.wb-drawer h3 { font-size: 11px; font-weight: 650; }
-.wb-console-label { font-size: 11px; }
+.wb-drawer h3 { font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+.wb-console-label { font-size: var(--text-xs); }
 
 /* ─── Боковая панель: строки со скруглённым выделением внутри поля, а не на всю ширину ─── */
 .wb-tree-row {
@@ -77,7 +77,7 @@
 }
 .wb-tree-row.is-active { background: var(--wb-selected); }
 /* Имена проектов — обычным начертанием: в источниках macOS жирным бывает только заголовок раздела. */
-.wb-tree-project { font-weight: 500; }
+.wb-tree-project { font-weight: var(--weight-medium); }
 .wb-tree-group-label { margin: 12px 14px 4px; }
 
 /* ─── Вкладки нижней панели (Чат · Внимание · Журнал): сегменты, а не подчёркнутые ярлыки ─── */
@@ -87,7 +87,7 @@
   padding: 0 10px;
   border: 0;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--text-sm);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -96,7 +96,7 @@
   border-bottom-color: transparent;
   background: var(--bg-raised);
   color: var(--text-main);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
   box-shadow: 0 0 0 1px var(--border-color), 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
@@ -111,7 +111,7 @@
   box-shadow: var(--glass-shadow);
 }
 .wb-menu { padding: 5px; }
-.wb-menu button { border-radius: 5px; }
+.wb-menu button { border-radius: var(--radius-xs); }
 .wb-menu button:hover { background: var(--accent-fill); color: var(--on-accent); }
 
 /* ─── Чат ─── */
@@ -125,14 +125,14 @@
 /* Поле ввода — одна мягкая «капсула», как в «Сообщениях»: скругление крупнее, рамка тоньше. */
 .console-input-row {
   border-color: var(--border-color);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--element-bg) 60%, transparent);
 }
 .console-input-row:focus-within {
   border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
 }
-.console-input-hints kbd { border-radius: 4px; }
+.console-input-hints kbd { border-radius: var(--radius-xs); }
 
 /* Заставка пустого чата выше невысокой нижней панели, а лента прокручена к низу — иконку срезало
    сверху. Компактнее: влезает в панель по умолчанию. */
@@ -157,11 +157,234 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-fill) 18%, transparent);
   color: var(--accent-color);
-  font-size: 12px;
-  font-weight: 550;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 /* Адресная строка: одно мягкое кольцо на капсуле целиком, как у поля поиска в Safari. */
 .wb-browser-address:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent); }
+
+/* ═══ Мягкая геометрия: пилюли и скругления ═══════════════════════════════════════════════
+   Правило одно на весь интерфейс: всё, что нажимают или во что пишут одной строкой, — пилюля;
+   карточки и панели — --radius-lg; меню — --radius-md с пунктами --radius-sm. */
+
+/* Кнопки с текстом */
+:is(.primary-action, .ghost-action, .danger-action, .wb-inline-btn, .compact-submit, .wb-empty-action,
+  .wb-share-create, .wb-git-commit, .wb-ssh-go, .console-start-btn, .sticky-save, .post-builder-done,
+  .wb-menu-item-launch, .wb-doc-project, .seo-row-btn, .seo-link-btn, .chat-debug-btn, .console-thread-menu-new) {
+  border-radius: var(--radius-pill);
+}
+.primary-action,
+.ghost-action { font-weight: var(--weight-semibold); letter-spacing: 0; }
+.wb .primary-action { min-height: 30px; padding: 0 14px; font-size: var(--text-sm); }
+.wb .ghost-action { min-height: 30px; padding: 0 12px; font-size: var(--text-sm); box-shadow: none; }
+.wb .primary-action:not(.danger-action) { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16); }
+.wb .primary-action:not(.danger-action):hover:not(:disabled) { background: var(--accent-fill-hover); filter: none; }
+
+/* Кнопки-значки: круг вместо квадрата */
+:is(.wb-icon-btn, .icon-button, .topbar-icon-action, .topbar-logout, .seo-icon-btn, .tb-pop-icon,
+  .wb-tab-close, .wb-note-tab-close, .wb-note-tab-add, .wb-drawer-close, .wb-console-pane-more,
+  .wb-console-collapse, .wb-board-more, .console-thread-archive, .needs-item-dismiss, .todo-card-expand) {
+  border-radius: var(--radius-pill);
+}
+.wb-icon-btn { min-width: 26px; height: 26px; }
+
+/* Чипы, бейджи, счётчики, метки */
+:is(.console-count, .console-focus-chip, .console-tool-chip, .diff-badge, .memory-link-chip, .meta-chip,
+  .nav-badge, .note-project-pill, .relation-chip, .seo-chip, .stack-chip, .todo-chip, .tok-tag, .wb-badge,
+  .wb-console-count, .wb-history-count, .wb-meta-tag, .wb-tree-count, .project-pill-count, .post-part-count,
+  .tag-row span, .wb-tags > *, .wb-activity b, .wb-panel-tab b) {
+  border-radius: var(--radius-pill);
+}
+:is(.meta-chip, .relation-chip, .todo-chip, .wb-meta-tag, .memory-link-chip, .console-focus-chip, .seo-chip, .stack-chip) {
+  padding-inline: 9px;
+}
+
+/* Однострочные поля — пилюли, многострочные — мягкий прямоугольник */
+:is(.wb-filter input, .wb-search-input, .wb-history-search, .wb-browser-address, .wb-list-filter,
+  .wb-sheet-filter input, .wb-ssh-field input, .field > input, .field > select, .stack-add input, .search-shell) {
+  border-radius: var(--radius-pill);
+}
+.wb-filter input,
+.wb-list-filter { padding-inline: 12px; }
+:is(.field > textarea, .entity-panel > textarea, .responder-token textarea) { border-radius: var(--radius-md); }
+.console-input-row { border-radius: var(--radius-xl); }
+
+/* Карточки и панели */
+:is(.wb-card, .wb-ws-card, .post-part-card, .todo-note-card-body, .panel, .metric-card, .entity-tile,
+  .project-pill, .console-attachment, .wb-skill-hero, .wb-empty) {
+  border-radius: var(--radius-lg);
+}
+
+/* Меню: мягкие углы, пункты — скруглённые строки внутри поля */
+.wb-menu,
+.console-picker-menu,
+.agent-status-popover,
+.desktop-popover { border-radius: var(--radius-md); }
+.wb-menu { padding: 6px; }
+.wb-menu button { border-radius: var(--radius-sm); padding: 6px 10px; }
+.wb-activity-tip { border-radius: var(--radius-sm); }
+
+/* ─── Вкладки редактора: капсулы в полосе, как вкладки Safari, а не прямоугольники VS Code ─── */
+.wb-editor { grid-template-rows: 38px minmax(0, 1fr); }
+.wb-tabs { align-items: center; gap: 3px; padding: 0 6px; }
+.wb-tab {
+  height: 28px;
+  padding: 0 4px 0 12px;
+  border-right: 0;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+}
+.wb-tab:hover { background: var(--wb-hover); }
+.wb-tab.is-active {
+  background: var(--bg-raised);
+  color: var(--text-main);
+  box-shadow: 0 0 0 1px var(--border-color), 0 1px 2px rgba(0, 0, 0, 0.14);
+}
+.wb-tab.is-active::after { display: none; }
+.wb-tab.is-group-start { margin-left: 9px; }
+.wb-tab.is-group-start::before { left: -7px; top: 7px; bottom: 7px; }
+.wb-tab[data-tab-group="web"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 30%, transparent); }
+.wb-tab[data-tab-group="web"].is-active { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 55%, var(--border-color)), 0 1px 2px rgba(0, 0, 0, 0.14); }
+.wb-tab.is-drop-zone:hover { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.wb-tab-close { width: 22px; height: 22px; }
+.wb-tab-close:hover { background: var(--surface-hover); }
+
+/* Сегменты нижней панели и собеседники чата — пилюли */
+.wb-panel-tab,
+.wb-chat-kind { height: 26px; padding: 0 12px; border-radius: var(--radius-pill); font-size: var(--text-sm); }
+.wb-panel-tab.is-active,
+.wb-chat-kind.is-active { font-weight: var(--weight-medium); }
+
+/* ─── Полоса разделов: скруглённая плашка под значком, как в боковой панели macOS ───
+   Вместо полоски слева на всю высоту и подпрыгивания значка при наведении. */
+.wb { --wb-activity: 58px; }
+.wb-activitybar { padding: 6px 0; align-items: center; }
+.wb-activity-group { align-items: center; width: 100%; }
+.wb-activity-group + .wb-activity-group { margin-top: 6px; padding-top: 6px; border-top: 0; }
+.wb-activity-group + .wb-activity-group::before { content: ""; display: block; width: 24px; height: 1px; margin: 0 auto 6px; background: var(--wb-line); }
+.wb-activity {
+  width: 46px;
+  height: 46px;
+  margin: 2px auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+}
+.wb-activity-icon { width: 32px; height: 32px; }
+.wb-activity-icon img { width: 32px; height: 32px; }
+.wb-activity-icon svg { width: 24px; height: 24px; }
+.wb-activity:hover { background: var(--wb-hover); }
+.wb-activity:hover .wb-activity-icon { transform: none; }
+.wb-activity.is-active { background: var(--wb-selected); }
+.wb-activity.is-active .wb-activity-icon img { filter: none; }
+.wb-activity:focus-visible { outline: none; }
+.wb-activity b { right: -2px; bottom: auto; top: -2px; box-shadow: 0 0 0 2px var(--wb-surface); }
+
+/* Строки дерева и списков: скругление крупнее, отступ от краёв */
+.wb-tree-row { border-radius: var(--radius-sm); }
+
+/* Строка состояния: пункты — пилюли при наведении, а не прямоугольники во всю высоту */
+.wb-statusbar { align-items: center; padding: 0 4px; gap: 2px; }
+.wb-status-item { height: 18px; padding: 0 8px; border-radius: var(--radius-pill); }
+
+/* Типографика рабочего места: основной текст — 14px обычного начертания, обвязка — 13px. */
+.wb { font-size: var(--text-sm); font-weight: var(--weight-normal); line-height: var(--leading-normal); }
+.wb h1, .wb h2, .wb h3 { letter-spacing: -0.01em; }
+.wb .wb-doc-header h1,
+.wb .wb-doc-page > h1 { font-size: var(--text-xl); font-weight: var(--weight-bold); }
+.console-log { font-size: var(--text-md); line-height: var(--leading-normal); }
+:is(.wb-reading, .wb-note-body, .wb-memory-body) { font-size: var(--text-reading); line-height: var(--leading-reading); }
+
+/* Поле фильтра в боковой панели — пилюля на подложке, как поиск в Finder */
+.wb-filter input { height: 30px; padding: 0 30px 0 12px; border-color: transparent; background: var(--surface-hover); }
+.wb-filter input:focus { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); background: var(--bg-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 20%, transparent); }
+.wb-filter > button { border-radius: var(--radius-pill); top: 5px; right: 5px; }
+
+/* Список заметок: карточки со скруглением внутри поля; цвет заметки — точка-метка, а не полоса во всю высоту */
+.wb-note-item {
+  position: relative;
+  margin: 2px 8px;
+  padding: 9px 30px 9px 24px;
+  border-left: 0;
+  border-radius: var(--radius-md);
+}
+.wb-note-item:not([data-note-color="default"]) { background: none; }
+/* Метка цвета — точка в поле слева, по центру первой строки заголовка (13px × 1.5 = 19.5px). */
+.wb-note-item:not([data-note-color="default"])::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: calc(9px + 9.75px - 4px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--note-mark);
+}
+.wb-note-item:hover { background: var(--wb-hover); }
+.wb-note-item.is-active,
+.wb-note-item.is-active:not([data-note-color="default"]) { background: var(--wb-selected); box-shadow: none; }
+.wb-note-item:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.wb-note-item-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); line-height: 1.5; }
+.wb-note-item-snippet { margin-top: 2px; font-size: var(--text-xs); line-height: 1.45; }
+.wb-note-item-meta { margin-top: 3px; font-size: var(--text-xs); }
+
+/* ─── Диалоги (askText, askConfirm): лист в духе macOS — крупные углы, кнопки-пилюли ─── */
+.ask-scrim { background: rgba(0, 0, 0, 0.36); }
+.ask-dialog {
+  width: min(400px, calc(100vw - 32px));
+  gap: 10px;
+  padding: 20px 20px 16px;
+  border-color: var(--border-color);
+  border-radius: var(--radius-xl);
+  background: var(--surface-panel);
+  box-shadow: var(--float);
+}
+.ask-title { color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-semibold); line-height: var(--leading-tight); }
+.ask-hint { font-size: var(--text-sm); line-height: var(--leading-normal); }
+.ask-dialog input { height: 34px; padding: 0 14px; border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color)); border-radius: var(--radius-pill); background: var(--bg-color); font-size: var(--text-md); }
+.ask-actions { margin-top: 6px; }
+.ask-actions button { height: 30px; padding: 0 16px; border-radius: var(--radius-pill); font-weight: var(--weight-medium); }
+.ask-actions button:hover { background: var(--surface-hover); }
+.ask-actions button.is-primary { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); }
+.ask-actions button.is-primary:hover { background: var(--accent-fill-hover); }
+.ask-actions button.is-primary.is-danger { background: #d70015; color: #fff; }
+.ask-actions button.is-primary.is-danger:hover { background: #bf0013; }
+.ask-actions button:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent); }
+.wb-note-pin { top: 9px; right: 8px; border-radius: var(--radius-pill); }
+
+/* Значки файлов и папок — SVG из Material Icon Theme (FileTypeIcon.tsx): без полей, одного размера. */
+.wb-tree-row img.wb-folder-icon,
+.wb-tree-row img.wb-file-type-icon { width: 18px; height: 18px; margin: 0; flex: none; }
+.wb-storage-name img { flex: none; }
+
+/* Шапка чата в узкой колонке: собеседники — компактные пилюли, нагрузка контекста не наезжает на значки. */
+.wb-chat-kind { padding: 0 8px; }
+.console-threads .console-context { min-width: 0; }
+.console-context .console-context-text { white-space: nowrap; }
+.wb-chat-head-slot .console-context-bar { display: none; }
+/* Чип контекста не шире поля ввода: длинное имя вкладки обрезается многоточием. */
+.console-focus-chip { max-width: 100%; min-width: 0; }
+
+/* Вкладки сжимаются, когда их много, как в Chrome: сначала ужимаются до значка и начала названия,
+   и только потом полоса начинает прокручиваться. Активная не уже 120px — её название должно читаться. */
+.wb-tab { flex: 0 1 220px; min-width: 72px; max-width: 220px; }
+.wb-tab.is-active { min-width: 120px; }
+.wb-tab-title { min-width: 0; flex: 1 1 auto; }
+.wb-tab:not(:hover):not(.is-active):not(.is-dirty) .wb-tab-close { width: 0; margin: 0; overflow: hidden; }
+
+/* Меню «…» заметки: фиксированная ширина, цвета метки — ровная сетка с одинаковыми полями,
+   выбранный цвет — кольцо снаружи кружка, а не тень, которую обрезает соседний. */
+.wb-note-menu { width: 280px; min-width: 0; }
+.wb-note-menu > button { min-height: 32px; }
+.wb-note-menu-label { padding: 8px 10px 4px; font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.wb-note-swatches { display: grid; grid-template-columns: repeat(9, 20px); justify-content: space-between; gap: 0; padding: 6px 12px 10px; }
+.wb-menu .wb-note-swatch { width: 20px; height: 20px; padding: 0; border-radius: 50%; }
+.wb-menu .wb-note-swatch:hover { transform: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18), 0 0 0 2px color-mix(in srgb, var(--text-main) 25%, transparent); }
+.wb-menu .wb-note-swatch.is-on { box-shadow: none; outline: 2px solid var(--text-main); outline-offset: 2px; }
+.wb-menu .wb-note-swatch.is-default { box-shadow: inset 0 0 0 1.5px var(--wb-line); }
+.wb-note-theme-swatch { border-radius: 50%; }
+.console-focus { max-width: 100%; overflow: hidden; }
+.console-focus-chip > span { flex: 1 1 auto; }

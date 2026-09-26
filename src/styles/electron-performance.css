@@ -1,17 +1,11 @@
-html[data-mbox-desktop="true"] {
+/* Размытие в приложении выключено ради скорости. Полупрозрачный «материал» без размытия просвечивал
+   текстом из-под меню — поэтому в приложении стекло сплошное, цвета панели текущей темы.
+   Переходы здесь больше не гасятся: общий * { transition-duration } давал всем элементам переход
+   по умолчанию (transition-property: all) — от этого и был «липкий» авторазмер поля. У элементов
+   остаются только их собственные, явно перечисленные переходы. */
+:root[data-mbox-desktop="true"] {
   --blur-glass: 0px;
-  --duration-fast: 0.01ms;
-  --duration-base: 0.01ms;
-}
-
-html[data-mbox-desktop="true"] *,
-html[data-mbox-desktop="true"] *::before,
-html[data-mbox-desktop="true"] *::after {
-  /* 0s, а не 0.01ms: у всех элементов transition-property: all, и «почти ноль» превращал любую смену
-     стиля в переход — синхронный замер (авторазмер поля ввода) читал старую высоту и застревал на 220px. */
-  transition-duration: 0s !important;
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
+  --glass: var(--surface-panel);
 }
 
 html[data-mbox-desktop="true"] .topbar,

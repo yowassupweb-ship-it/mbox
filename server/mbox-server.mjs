@@ -125,10 +125,26 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// Участник (не владелец) получает только сам факт изменения: заголовки, тексты уведомлений и шаги агентов
+// относятся к проектам, которые ему могут быть недоступны. Этого хватает, чтобы интерфейс перечитал данные.
+const memberRedactedFields = ["detail", "notification", "step", "title", "text"];
+
 function broadcastRealtime(type, payload = {}) {
-  const message = JSON.stringify({ type, ...payload, at: new Date().toISOString() });
+  const full = { type, ...payload, at: new Date().toISOString() };
+  const message = JSON.stringify(full);
+  let redacted = null;
   for (const client of realtimeClients) {
-    if (client.readyState === 1) client.send(message);
+    if (client.readyState !== 1) continue;
+    if (client.mboxOwner) {
+      client.send(message);
+      continue;
+    }
+    if (!redacted) {
+      const copy = { ...full };
+      for (const field of memberRedactedFields) delete copy[field];
+      redacted = JSON.stringify(copy);
+    }
+    client.send(redacted);
   }
 }
 
@@ -161,14 +177,17 @@ function actorFromReq(req) {
  */
 async function resolveRequestActor(req) {
   const header = req.headers["x-mbox-agent"] || req.headers["x-agent-name"];
-  if (header) return decodeAgentHeader(header);
+  let user = null;
   try {
-    const user = await currentUser(req);
-    if (user?.username) return user.username;
+    user = await currentUser(req);
   } catch {
     // Сессии ещё нет (например, сам /auth/login) — останется дефолт ниже.
   }
-  return "Agent";
+  // Имя агента из заголовка принимаем только от владельца: его сессией и токеном ходят агенты.
+  // Участник подписывается своим именем — иначе мог бы записать в аудит чужое.
+  if (header && (!user || isOwner(user))) return { actor: decodeAgentHeader(header), user };
+  if (user?.username) return { actor: user.username, user };
+  return { actor: "Agent", user };
 }
 
 function readableDetail(value, fallback) {
@@ -770,10 +789,75 @@ function suggestMemoryHierarchy(input, memories, limit = 8) {
   };
 }
 
+class HttpError extends Error {
+  constructor(status, code) {
+    super(code);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+// Предел тела JSON: результаты операций с локальными файлами несут документы в base64, поэтому запас крупный,
+// но конечный — без него один запрос мог занять всю память сервера.
+const maxBodyBytes = Math.max(1, Number(process.env.MBOX_MAX_BODY_MB || 50)) * 1024 * 1024;
+
 async function readBody(req) {
+  const declared = Number(req.headers["content-length"] || 0);
+  if (declared > maxBodyBytes) throw new HttpError(413, "payload_too_large");
   const chunks = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBodyBytes) throw new HttpError(413, "payload_too_large");
+    chunks.push(buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  } catch {
+    throw new HttpError(400, "invalid_json");
+  }
+}
+
+// Ответ на исключение из обработчика. Раньше всё уходило 503 с сырым текстом ошибки: клиент принимал
+// ошибку ввода за «сервер недоступен», а наружу утекали тексты SQL.
+const pgInputErrors = new Set(["22P02", "22007", "22008", "22003", "22001", "23502", "23514"]);
+const pgConflictErrors = new Set(["23505", "23503"]);
+const pgUnavailableErrors = new Set(["57P01", "57P03", "53300", "08000", "08003", "08006"]);
+
+function sendError(res, error) {
+  if (res.headersSent) return res.end();
+  if (error instanceof HttpError) return sendJson(res, error.status, { error: error.code });
+  const code = String(error?.code || "");
+  const message = error instanceof Error ? error.message : "unknown_error";
+  if (pgInputErrors.has(code)) return sendJson(res, 400, { error: "invalid_input", detail: message });
+  if (pgConflictErrors.has(code)) return sendJson(res, 409, { error: "conflict", detail: message });
+  if (pgUnavailableErrors.has(code) || /ECONNREFUSED|ETIMEDOUT|Connection terminated|timeout exceeded when trying to connect/i.test(message)) {
+    return sendJson(res, 503, { error: "database_unavailable" });
+  }
+  console.error("[mbox] unhandled error:", error);
+  return sendJson(res, 500, { error: "internal_error" });
+}
+
+// Перебор пароля: после 5 неудач с одного адреса для одного логина — пауза, растущая вдвое до часа.
+const loginFailures = new Map();
+
+function clientAddress(req) {
+  return String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket?.remoteAddress || "";
+}
+
+function loginLockedFor(key) {
+  const entry = loginFailures.get(key);
+  if (!entry || !entry.lockedUntil) return 0;
+  return Math.max(0, entry.lockedUntil - Date.now());
+}
+
+function noteLoginFailure(key) {
+  const entry = loginFailures.get(key) || { count: 0, lockedUntil: 0 };
+  entry.count += 1;
+  if (entry.count >= 5) entry.lockedUntil = Date.now() + Math.min(60 * 60 * 1000, 60 * 1000 * 2 ** (entry.count - 5));
+  loginFailures.set(key, entry);
+  if (loginFailures.size > 5000) loginFailures.delete(loginFailures.keys().next().value);
 }
 
 function isSecureRequest(req) {
@@ -877,7 +961,8 @@ async function currentUser(req) {
 }
 
 async function requireUser(req, res) {
-  const user = await currentUser(req);
+  const context = requestContext.getStore();
+  const user = context && "user" in context ? context.user : await currentUser(req);
   if (!user) {
     sendJson(res, 401, { error: "unauthorized" });
     return null;
@@ -1007,6 +1092,9 @@ async function storageAccessFor(scope, user) {
   };
 }
 
+const todoStatuses = new Set(["open", "next", "doing", "blocked", "review", "done", "archived"]);
+const todoPriorities = new Set(["low", "normal", "high", "urgent"]);
+
 function sendForbidden(res) {
   return sendJson(res, 403, { error: "project_access_denied" });
 }
@@ -1075,8 +1163,8 @@ const SERVICE_MODES = {
 };
 
 async function handleApi(req, res, url) {
-  const actor = await resolveRequestActor(req);
-  return requestContext.run({ actor }, () => handleApiWithContext(req, res, url));
+  const { actor, user } = await resolveRequestActor(req);
+  return requestContext.run({ actor, user }, () => handleApiWithContext(req, res, url));
 }
 
 async function handleApiWithContext(req, res, url) {
@@ -1084,13 +1172,26 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/auth/login" && req.method === "POST") {
     const body = await readBody(req);
+    if (typeof body.username !== "string" || typeof body.password !== "string" || !body.username || !body.password) {
+      return sendJson(res, 400, { error: "invalid_credentials" });
+    }
+    const failureKey = `${clientAddress(req)}\n${body.username.toLowerCase()}`;
+    const lockedMs = loginLockedFor(failureKey);
+    if (lockedMs > 0) {
+      res.setHeader("retry-after", String(Math.ceil(lockedMs / 1000)));
+      return sendJson(res, 429, { error: "too_many_attempts", retry_after_seconds: Math.ceil(lockedMs / 1000) });
+    }
     const user = await query(
       `SELECT id::text, username, role
        FROM users
        WHERE username = $1 AND password_hash = crypt($2, password_hash)`,
       [body.username, body.password],
     );
-    if (!user.rows[0]) return sendJson(res, 401, { error: "invalid_credentials" });
+    if (!user.rows[0]) {
+      noteLoginFailure(failureKey);
+      return sendJson(res, 401, { error: "invalid_credentials" });
+    }
+    loginFailures.delete(failureKey);
 
     const token = randomBytes(32).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -2338,9 +2439,18 @@ async function handleApiWithContext(req, res, url) {
 
   if (todoMatch && req.method === "PATCH") {
     const body = await readBody(req);
-    if (!scope.all) {
-      const current = await query("SELECT project_id::text FROM todos WHERE id = $1", [todoMatch[1]]);
-      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+    if (body.status && !todoStatuses.has(String(body.status))) return sendJson(res, 400, { error: "invalid_status" });
+    if (body.priority && !todoPriorities.has(String(body.priority))) return sendJson(res, 400, { error: "invalid_priority" });
+    const current = await query(
+      "SELECT project_id::text, claimed_by, claimed_until > now() AS lease_active FROM todos WHERE id = $1",
+      [todoMatch[1]],
+    );
+    if (!current.rows[0]) return sendJson(res, 404, { error: "not_found" });
+    if (!scope.all && !hasProjectAccess(scope, current.rows[0].project_id)) return sendForbidden(res);
+    // Лиз меняет только /claim; здесь чужой активный лиз перехватить нельзя, как и там (409).
+    const holder = String(current.rows[0].claimed_by || "");
+    if (typeof body.claimed_by === "string" && body.claimed_by && holder && current.rows[0].lease_active && body.claimed_by !== holder) {
+      return sendJson(res, 409, { error: "todo_claimed", claimed_by: holder });
     }
     const result = await query(
       `UPDATE todos SET
@@ -2697,7 +2807,7 @@ async function handleApiWithContext(req, res, url) {
          AND ($6::boolean OR project_id = ANY($7::bigint[]))
          AND (props->>'mbox_user_id' = $8 OR ($9::boolean AND NOT (props ? 'mbox_user_id')))
          AND ($10 = '' OR props->>'thread' = $10)
-       ORDER BY ${filtered ? "id DESC" : "updated_at DESC"}
+       ORDER BY ${filtered ? "id::bigint DESC" : "updated_at DESC"}
        LIMIT $5`,
       [agent, itemType, search, beforeId, limit, scope.all, scope.projectIds, String(user.id), isOwner(user), thread, status],
     );
@@ -3032,15 +3142,74 @@ async function handleApiWithContext(req, res, url) {
   return sendJson(res, 404, { error: "not_found" });
 }
 
-function serveStatic(req, res, url) {
-  const relative = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
+const staticTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".webmanifest": "application/manifest+json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
+  ".yml": "text/yaml; charset=utf-8",
+  ".pdf": "application/pdf",
+};
+
+async function statFile(target) {
+  try {
+    const stat = await fs.promises.stat(target);
+    return stat.isFile() ? stat : null;
+  } catch {
+    return null;
+  }
+}
+
+// Бандлы в /assets/ несут хеш в имени — их можно кэшировать навсегда. Остальное — с ETag,
+// чтобы повторный заход получал 304, а не скачивал мегабайты заново.
+async function serveStatic(req, res, url) {
+  let relative = "index.html";
+  if (url.pathname !== "/") {
+    try {
+      relative = decodeURIComponent(url.pathname.slice(1));
+    } catch {
+      return sendJson(res, 400, { error: "bad_path" });
+    }
+  }
   const target = path.resolve(publicDir, relative);
-  const safeTarget = target.startsWith(publicDir) ? target : path.join(publicDir, "index.html");
-  const file = fs.existsSync(safeTarget) && fs.statSync(safeTarget).isFile() ? safeTarget : path.join(publicDir, "index.html");
-  const ext = path.extname(file);
-  const type = ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : ext === ".html" ? "text/html; charset=utf-8" : ext === ".webmanifest" ? "application/manifest+json" : ext === ".png" ? "image/png" : ext === ".ico" ? "image/x-icon" : "application/octet-stream";
-  res.writeHead(200, { "content-type": type, "cache-control": ext === ".html" ? "no-store" : "no-cache" });
-  fs.createReadStream(file).pipe(res);
+  const inside = target === publicDir || target.startsWith(publicDir + path.sep);
+  let file = inside ? target : path.join(publicDir, "index.html");
+  let stat = await statFile(file);
+  if (!stat) {
+    file = path.join(publicDir, "index.html");
+    stat = await statFile(file);
+    if (!stat) return sendJson(res, 404, { error: "not_found" });
+  }
+  const ext = path.extname(file).toLowerCase();
+  const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+  const hashed = path.dirname(file) === path.join(publicDir, "assets") && /-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(file);
+  const headers = {
+    "content-type": staticTypes[ext] || "application/octet-stream",
+    "cache-control": ext === ".html" ? "no-store" : hashed ? "public, max-age=31536000, immutable" : "no-cache",
+    etag,
+    "last-modified": stat.mtime.toUTCString(),
+  };
+  if (ext !== ".html" && req.headers["if-none-match"] === etag) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  res.writeHead(200, { ...headers, "content-length": String(stat.size) });
+  if (req.method === "HEAD") return res.end();
+  fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
 }
 
 // MBOX_LOG_REQUESTS=1 — построчный журнал обращений: метод, путь, код, время, была ли cookie.
@@ -3077,7 +3246,7 @@ const httpServer = http.createServer(async (req, res) => {
     }
     return serveStatic(req, res, url);
   } catch (error) {
-    return sendJson(res, 503, { error: error instanceof Error ? error.message : "unknown_error" });
+    return sendError(res, error);
   }
 });
 

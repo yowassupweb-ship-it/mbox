@@ -46,6 +46,7 @@ export function parseOpenRequest(body, actor) {
 /** Запомнить, чьё это окно: команды открыть вкладку уходят только владельцу. */
 export function tagSocketUser(socket, user) {
   socket.mboxUserId = user ? String(user.id) : "";
+  socket.mboxOwner = user?.role === "owner";
 }
 
 export function sendOpenTab(clients, userId, event) {

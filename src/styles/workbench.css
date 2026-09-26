@@ -10,28 +10,8 @@
 }
 
 .wb {
-  /* Иерархия по важности. Текст документа — обычное начертание и самый удобный для чтения размер;
-     обвязка (вкладки, дерево, подписи) — мельче и тише; жирное — только заголовки и имена.
-     Токены переопределены здесь, чтобы старые панели внутри вкладок сели в ту же шкалу. */
-  /* Inter — обычный интерфейс и документы. Моноширинный набор остаётся у кода, терминала и
-     технических идентификаторов через --font-mono и специализированные классы. */
-  --weight-text: 400;
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
-  /* Cascadia Mono раньше Consolas: в Consolas нет →, и стрелку подставлял пропорциональный шрифт —
-     ASCII-схемы в заметках разъезжались (todo #334). Cascadia есть в Windows 11, стрелки и кириллица в ней моноширинные. */
-  --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-family: var(--font-sans);
-  font-optical-sizing: auto;
-  --weight-normal: 400;
-  --weight-medium: 540;
-  --weight-bold: 640;
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-md: 13px;
-  --text-lg: 15px;
-  --text-xl: 17px;
-  --text-2xl: 20px;
-  --wb-fs-reading: 13.5px;
+  /* Шкала шрифтов и весов — общая, из tokens.css. Здесь только размеры каркаса. */
+  --wb-fs-reading: var(--text-reading);
   --wb-activity: 44px;
   --wb-titlebar: 38px;
   --wb-status: 22px;
@@ -114,14 +94,14 @@ body.wb-resizing * {
 }
 
 .topbar-context strong {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   line-height: 1.1;
 }
 
 .topbar-context span {
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   line-height: 1.1;
 }
 
@@ -157,7 +137,7 @@ body.wb-resizing * {
 
 .wb-titlebar .realtime-pill { min-width: 0; max-width: min(28vw, 310px); }
 .wb-titlebar .realtime-pill .topbar-logo { width: 22px; height: 22px; }
-.wb-titlebar .realtime-pill strong.is-brand { font-size: 12px; top: 1px; margin-left: 0; }
+.wb-titlebar .realtime-pill strong.is-brand { font-size: var(--text-sm); top: 1px; margin-left: 0; }
 .wb-titlebar .realtime-pill span:not(.pill-avatars) { display: none; }
 .wb-titlebar .pill-avatars .agent-avatar { width: 18px !important; height: 18px !important; }
 .wb-titlebar .topbar-logout { width: 28px; min-height: 28px; }
@@ -209,11 +189,11 @@ body.wb-resizing * {
   padding: 1px 5px;
   border: 1px solid var(--wb-line);
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--text-main) 3%, transparent);
   /* --text-muted на подложке поиска — 4.3:1, ниже AA. */
   color: var(--text-2);
   font: inherit;
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 /* ─── Полоса разделов ───────────────────────────────── */
@@ -265,7 +245,7 @@ body.wb-resizing * {
   border: 1px solid color-mix(in srgb, var(--accent-color) 26%, var(--wb-line));
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--wb-surface-2) 94%, #000 6%);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.46), inset 0 1px color-mix(in srgb, var(--text-main) 6%, transparent);
   color: var(--text-main);
   font-size: var(--text-xs);
   line-height: 1.35;
@@ -289,10 +269,10 @@ body.wb-resizing * {
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--state-warn);
-  color: #000;
-  font-size: 9px;
+  color: var(--bg-color);
+  font-size: var(--text-2xs);
   line-height: 15px;
 }
 
@@ -328,7 +308,7 @@ body.wb-resizing * {
   justify-content: space-between;
   padding: 0 8px 0 16px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -350,7 +330,7 @@ body.wb-resizing * {
   background: none;
   color: var(--text-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-transform: none;
   letter-spacing: 0;
   cursor: pointer;
@@ -360,7 +340,7 @@ body.wb-resizing * {
 .wb-icon-btn:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-view-actions button.is-on { color: var(--accent-color); background: var(--wb-selected); }
 .wb-view-actions button img { opacity: 0.8; }
-.wb-view-actions button b { font-size: 10px; }
+.wb-view-actions button b { font-size: var(--text-2xs); }
 
 .wb-filter {
   position: relative;
@@ -468,7 +448,7 @@ body.wb-resizing * {
 .wb-tree-group-label {
   margin: 10px 16px 2px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -514,20 +494,20 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   flex: none;
   border-radius: 2px;
   background: var(--project-color, var(--state-off));
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-main) 12%, transparent);
 }
 
 .wb-tree-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.wb-tree-label.is-muted { color: var(--text-muted); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.2); }
+.wb-tree-label.is-muted { color: var(--text-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-main) 20%, transparent); }
 .wb-tree-count,
-.wb-tree-hint { flex: none; color: var(--text-muted); font-size: 11px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.wb-tree-hint { flex: none; color: var(--text-muted); font-size: var(--text-xs); max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 
 .wb-badge {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
-  font-size: 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
   line-height: 16px;
   text-align: center;
 }
@@ -585,7 +565,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   gap: 8px;
   padding: 0 16px 6px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .wb-search-summary button { border: 0; background: none; color: var(--text-muted); font: inherit; cursor: pointer; text-decoration: underline dotted; }
@@ -636,7 +616,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   gap: 4px 8px;
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .wb-hit-meta .is-fact { color: var(--accent-color); }
@@ -646,7 +626,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   height: 3px;
   margin-left: auto;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-main) 8%, transparent);
   overflow: hidden;
 }
 
@@ -660,7 +640,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-memory-side h3 {
   margin: 8px 8px 6px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -680,8 +660,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-agent-list li.is-stale { opacity: .72; }
 .wb-agent-main { min-width: 0; display: grid; flex: 1; }
 .wb-agent-list strong { color: var(--text-main); font-size: var(--text-sm); }
-.wb-agent-list span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.wb-agent-main small { overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-agent-list span { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.wb-agent-main small { overflow: hidden; color: color-mix(in srgb, var(--text-muted) 78%, transparent); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
 .wb-agent-actions { flex: none; display: flex; align-items: center; gap: 3px; }
 .wb-agent-actions button {
   width: 24px;
@@ -794,7 +774,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-tab:hover .wb-tab-close,
 .wb-tab.is-active .wb-tab-close { visibility: visible; }
-.wb-tab-close:hover { background: rgba(255, 255, 255, 0.08); }
+.wb-tab-close:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); }
 
 .wb-tab.is-dirty .wb-tab-close { visibility: visible; }
 .wb-tab.is-dirty .wb-tab-close svg { display: none; }
@@ -928,12 +908,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-doc-actions button:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
 .wb-doc-actions button.is-primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-medium); }
-.wb-doc-actions button.is-primary kbd { border-color: rgba(255, 255, 255, 0.3); color: rgba(255, 255, 255, 0.78); }
+.wb-doc-actions button.is-primary kbd { border-color: color-mix(in srgb, var(--text-main) 30%, transparent); color: color-mix(in srgb, var(--text-main) 78%, transparent); }
 .wb-doc-actions button.is-danger:hover { color: var(--state-danger); border-color: var(--state-danger); }
 
 .wb-memory-title {
   margin: 18px 0 16px;
-  font-size: 22px;
+  font-size: var(--text-xl);
   line-height: 1.3;
   font-weight: var(--weight-bold);
 }
@@ -984,7 +964,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   outline: none;
 }
 
-.wb-memory-title-input { height: 40px; padding: 0 10px; font-size: 18px; font-weight: var(--weight-medium); }
+.wb-memory-title-input { height: 40px; padding: 0 10px; font-size: var(--text-lg); font-weight: var(--weight-medium); }
 .wb-memory-editor textarea { min-height: calc(100dvh - 330px); padding: 12px; resize: vertical; font-size: var(--text-md); line-height: 1.6; }
 .wb-memory-title-input:focus,
 .wb-memory-editor textarea:focus,
@@ -1065,7 +1045,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: none;
   color: var(--text-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
@@ -1073,8 +1053,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-panel-tab:hover { color: var(--text-2); }
 .wb-panel-tab.is-active { color: var(--text-main); border-bottom-color: var(--accent-color); }
-.wb-panel-tab b { min-width: 16px; padding: 0 4px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); color: var(--text-2); font-size: 10px; letter-spacing: 0; line-height: 16px; }
-.wb-panel-tab b.is-warn { background: var(--state-warn); color: #000; }
+.wb-panel-tab b { min-width: 16px; padding: 0 4px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-2); font-size: var(--text-2xs); letter-spacing: 0; line-height: 16px; }
+.wb-panel-tab b.is-warn { background: var(--state-warn); color: var(--bg-color); }
 .wb-panel-fill { flex: 1; }
 
 .wb-panel-body { position: relative; min-height: 0; overflow: hidden; }
@@ -1176,7 +1156,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   justify-content: space-between;
   padding: 0 8px 0 14px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1209,7 +1189,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: none;
   color: var(--text-muted);
   font: inherit;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1218,9 +1198,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-menu-group-head.is-static { cursor: default; padding-top: 12px; }
-.wb-menu-group-head b { margin-left: auto; font-weight: 500; letter-spacing: 0; }
+.wb-menu-group-head b { margin-left: auto; font-weight: var(--weight-medium); letter-spacing: 0; }
 
-.wb-caret { display: inline-block; width: 10px; color: var(--text-muted); font-size: 13px; line-height: 1; transition: transform var(--duration-fast) ease; }
+.wb-caret { display: inline-block; width: 10px; color: var(--text-muted); font-size: var(--text-sm); line-height: 1; transition: transform var(--duration-fast) ease; }
 .wb-caret.is-open { transform: rotate(90deg); }
 
 .wb-menu-item {
@@ -1240,43 +1220,43 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-menu-item.has-icon { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding-left: 14px; align-items: center; }
 .wb-menu-item.has-icon > img,
-.wb-menu-item.has-icon > .wb-menu-item-icon { grid-row: span 2; width: 22px; height: 22px; border-radius: 4px; object-fit: contain; }
+.wb-menu-item.has-icon > .wb-menu-item-icon { grid-row: span 2; width: 22px; height: 22px; border-radius: var(--radius-xs); object-fit: contain; }
 .wb-menu-item:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-menu-item.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); color: var(--text-main); }
 .wb-menu-item.is-static { cursor: default; }
 .wb-menu-item.is-static:hover { background: none; color: var(--text-2); }
 .wb-menu-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
-.wb-menu-item-meta { overflow: hidden; color: var(--text-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-menu-item-meta { overflow: hidden; color: var(--text-muted); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
 
 .wb-skills-intro { display: grid; gap: 3px; padding: 11px 12px 10px; border-bottom: 1px solid var(--wb-line); }
 .wb-skills-intro span { color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: 1.35; }
-.wb-skills-intro small { color: var(--text-muted); font-size: 10.5px; line-height: 1.45; }
+.wb-skills-intro small { color: var(--text-muted); font-size: var(--text-2xs); line-height: 1.45; }
 
 /* ─── Страницы навыка и инструмента ─────────────────── */
 
 .wb-catalog-doc { gap: 18px; padding-top: 24px; }
-.wb-catalog-head h1 { margin: 6px 0 8px; font-size: 22px; }
+.wb-catalog-head h1 { margin: 6px 0 8px; font-size: var(--text-xl); }
 .wb-catalog-head p { margin: 0; max-width: 760px; color: var(--text-2); font-size: var(--text-md); line-height: 1.6; }
 .wb-catalog-head.has-icon { display: flex; gap: 16px; align-items: flex-start; }
 .wb-catalog-head.has-icon > img,
-.wb-catalog-head.has-icon > .wb-menu-item-icon { flex: none; margin-top: 18px; border-radius: 8px; }
-.wb-menu-item-icon { display: grid; place-items: center; border: 1px solid var(--wb-line); border-radius: 4px; background: var(--wb-surface); color: var(--accent-color); font-weight: var(--weight-bold); text-transform: uppercase; }
-.wb-catalog-head .wb-menu-item-icon { font-size: 20px; }
+.wb-catalog-head.has-icon > .wb-menu-item-icon { flex: none; margin-top: 18px; border-radius: var(--radius-sm); }
+.wb-menu-item-icon { display: grid; place-items: center; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: var(--wb-surface); color: var(--accent-color); font-weight: var(--weight-bold); text-transform: uppercase; }
+.wb-catalog-head .wb-menu-item-icon { font-size: var(--text-xl); }
 
 .wb-skill-doc { gap: 18px; max-width: 980px; padding-top: 24px; }
 .wb-skill-hero { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(250px, .75fr); gap: 28px; padding: 24px; border: 1px solid var(--wb-line); border-radius: var(--radius-lg); background: var(--wb-surface-2); box-shadow: var(--chin-shadow); }
 .wb-skill-hero-main { min-width: 0; }
-.wb-skill-kicker { display: block; margin-top: 22px; color: var(--accent-color); font-size: 11px; font-weight: var(--weight-medium); letter-spacing: .08em; text-transform: uppercase; }
+.wb-skill-kicker { display: block; margin-top: 22px; color: var(--accent-color); font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: .08em; text-transform: uppercase; }
 .wb-skill-hero h1 { max-width: 680px; margin: 8px 0 12px; color: var(--text-main); font-size: clamp(27px, 3vw, 38px); line-height: 1.08; letter-spacing: -.03em; }
-.wb-skill-hero-main > p { max-width: 670px; margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
+.wb-skill-hero-main > p { max-width: 670px; margin: 0; color: var(--text-2); font-size: var(--text-md); line-height: 1.6; }
 .wb-skill-outcome { align-self: end; display: grid; gap: 9px; padding: 16px; border: 1px solid var(--wb-line); border-left: 2px solid var(--accent-color); border-radius: var(--radius-md); background: var(--wb-surface); }
-.wb-skill-outcome > span { display: inline-flex; align-items: center; gap: 7px; color: var(--accent-color); font-size: 11px; font-weight: var(--weight-medium); letter-spacing: .06em; text-transform: uppercase; }
+.wb-skill-outcome > span { display: inline-flex; align-items: center; gap: 7px; color: var(--accent-color); font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: .06em; text-transform: uppercase; }
 .wb-skill-outcome strong { color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-medium); line-height: 1.5; }
 .wb-skill-outcome small { color: var(--text-muted); line-height: 1.45; }
 .wb-skill-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--wb-line); }
 .wb-skill-flow > div { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 74px; padding: 14px 18px; }
 .wb-skill-flow > div + div { border-left: 1px solid var(--wb-line); }
-.wb-skill-flow b { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent); border-radius: var(--radius-sm); color: var(--accent-color); font-size: 11px; }
+.wb-skill-flow b { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent); border-radius: var(--radius-sm); color: var(--accent-color); font-size: var(--text-xs); }
 .wb-skill-flow span { color: var(--text-main); font-size: var(--text-sm); line-height: 1.4; }
 .wb-skill-flow svg { position: absolute; right: -8px; z-index: 1; padding: 2px; background: var(--wb-surface); color: var(--text-muted); }
 .wb-skill-flow > div:last-child svg { display: none; }
@@ -1287,7 +1267,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-stat-row > div { display: grid; gap: 2px; padding: 10px 14px; border-right: 1px solid var(--wb-line); }
 .wb-stat-row > div:last-child { border-right: 0; }
 .wb-stat-row b { color: var(--text-main); font-size: var(--text-lg); }
-.wb-stat-row span { color: var(--text-muted); font-size: 11px; }
+.wb-stat-row span { color: var(--text-muted); font-size: var(--text-xs); }
 
 .wb-spec { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: var(--text-sm); }
 .wb-spec dt { color: var(--text-muted); }
@@ -1308,14 +1288,14 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: none;
   color: var(--text-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   vertical-align: middle;
   cursor: pointer;
 }
 
 .wb-inline-btn:hover { color: var(--text-main); border-color: color-mix(in srgb, var(--accent-color) 45%, transparent); }
 
-.wb-commands h3 { margin: 0 0 8px; color: var(--text-muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.wb-commands h3 { margin: 0 0 8px; color: var(--text-muted); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; }
 .wb-commands h3 span { letter-spacing: 0; text-transform: none; }
 
 .wb-command {
@@ -1342,7 +1322,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--wb-surface-2);
   color: var(--text-2);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -1386,7 +1366,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   border: 1px solid var(--wb-line);
   border-radius: var(--radius-sm);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .wb-files-notice button { margin-left: auto; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
@@ -1403,7 +1383,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-doc-actions .wb-segmented button + button { border-left: 1px solid var(--wb-line); }
 .wb-doc-actions .wb-segmented button.is-on { background: var(--wb-selected); color: var(--accent-color); }
 
-.wb-code-view { display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 100%; font-size: 12.5px; line-height: 1.6; }
+.wb-code-view { display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 100%; font-size: var(--text-sm); line-height: 1.6; }
 
 .wb-code-gutter {
   display: grid;
@@ -1429,7 +1409,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--bg-color);
   color: var(--code-block-text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   white-space: pre;
   tab-size: 2;
@@ -1438,7 +1418,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Редактор с подсветкой (CodeEditor): слой <pre> с токенами под прозрачным textarea — метрики должны совпадать. */
 .wb-code-wrap { position: relative; flex: 1; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--bg-color); }
 .wb-code-layer,
-.wb-code-editor.is-layered { position: absolute; inset: 0; margin: 0; padding: 12px 16px; border: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre; tab-size: 2; letter-spacing: normal; word-spacing: normal; }
+.wb-code-editor.is-layered { position: absolute; inset: 0; margin: 0; padding: 12px 16px; border: 0; font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6; white-space: pre; tab-size: 2; letter-spacing: normal; word-spacing: normal; }
 .wb-code-layer { overflow: hidden; color: var(--code-block-text); pointer-events: none; }
 .wb-code-editor.is-layered { height: 100%; min-height: 0; background: transparent; color: transparent; caret-color: #eef4f1; overflow: auto; }
 .wb-code-editor.is-layered::selection { background: rgba(41, 224, 214, .28); color: transparent; }
@@ -1489,7 +1469,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-code-wrap.is-document.is-autogrow .wb-code-editor.is-layered { height: 100%; min-height: 60vh; padding: 0; overflow: hidden; }
 
 .wb-html-preview { height: 100%; display: flex; justify-content: center; padding: 12px; background: repeating-conic-gradient(#121316 0% 25%, #0d0e10 0% 50%) 50% / 20px 20px; }
-.wb-html-preview iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: 4px; background: #fff; }
+.wb-html-preview iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: #fff; }
 .wb-html-preview.is-mobile iframe { width: 390px; max-width: 100%; }
 
 /* Встроенный браузер. Сайт рисует главный процесс Electron поверх окна, поэтому здесь только панель
@@ -1505,13 +1485,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-address { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--element-bg); color: var(--text-muted); }
 .wb-browser-address:focus-within { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
 .wb-browser-address svg, .wb-browser-address .wb-browser-favicon { flex: none; }
-.wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: 12.5px; }
+.wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
 .wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; }
 
 .wb-browser-bookmarks { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
 .wb-browser-bookmarks > svg { flex: none; margin-right: 2px; opacity: .72; }
-.wb-browser-bookmarks > span { font-size: 11px; }
-.wb-browser-bookmarks button { position: relative; flex: none; max-width: 180px; min-height: 25px; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); padding: 4px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+.wb-browser-bookmarks > span { font-size: var(--text-xs); }
+.wb-browser-bookmarks button { position: relative; flex: none; max-width: 180px; min-height: 25px; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); padding: 4px 8px; font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .wb-browser-bookmarks button:not(:has(span)) { justify-content: center; padding-inline: 6px; }
 .wb-browser-bookmarks button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-browser-bookmarks button:hover, .wb-browser-bookmarks button:focus-visible { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
@@ -1519,32 +1499,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-bookmarks button.is-drop-target::before { content: ""; position: absolute; left: 2px; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent-color); }
 .wb-browser-bookmarks button:focus-visible, .wb-browser-tools button:focus-visible, .wb-browser-tools select:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 /* Меню папки — плавающий список по координатам кнопки, а не полоса, раздвигающая страницу. */
-.wb-browser-folder-menu { position: fixed; z-index: 41; display: grid; gap: 2px; min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: min(420px, calc(100vh - 16px)); overflow-y: auto; padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
-.wb-browser-folder-menu button { width: 100%; max-width: none; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); padding: 6px 9px; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
-.wb-browser-folder-menu button:not(:has(span)) { justify-content: center; padding-inline: 7px; }
-.wb-browser-folder-menu button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-browser-folder-menu button:hover, .wb-browser-folder-menu button:focus-visible { background: var(--wb-hover); color: var(--text-main); }
-.wb-browser-folder-menu button:focus-visible { outline: 2px solid var(--accent-color); }
-.wb-browser-tools { display: grid; gap: 10px; padding: 12px; border-bottom: 1px solid var(--wb-line); background: var(--wb-surface); }
-.wb-browser-tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
-.wb-browser-tools-row > span, .wb-browser-tools-row > label { min-width: 110px; }
-.wb-browser-tools-row select, .wb-browser-tools-row button { border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); padding: 6px 9px; font: inherit; cursor: pointer; }
-.wb-browser-tools-row select:hover:not(:disabled), .wb-browser-tools-row button:hover:not(:disabled) { background: var(--wb-hover); }
-.wb-browser-tools-row select:disabled, .wb-browser-tools-row button:disabled { opacity: .5; cursor: default; }
-.wb-browser-tools-row small { color: var(--text-muted); }
-.wb-browser-tools-message { color: var(--text-2); font-size: 12px; }
+.wb-browser-tools-message { color: var(--text-2); font-size: var(--text-sm); }
 
 /* История браузера: список общий с другими машинами, лежит на сервере (server/browser-state.mjs). */
-.wb-browser-history { display: flex; flex-direction: column; max-height: 46vh; border-bottom: 1px solid var(--wb-line); background: var(--wb-surface); }
-.wb-browser-history-head { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--wb-line); }
-.wb-browser-history-head input { flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: 12px; }
-.wb-browser-history-head button { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
-.wb-browser-history-head button:hover { background: var(--wb-hover); color: var(--text-main); }
-.wb-browser-history ul { flex: 1; min-height: 0; margin: 0; padding: 6px; overflow: auto; list-style: none; }
-.wb-browser-history li > button { width: 100%; display: grid; gap: 1px; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
-.wb-browser-history li > button:hover { background: var(--wb-hover); }
-.wb-browser-history-title { overflow: hidden; color: var(--text-main); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
-.wb-browser-history-url { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-browser-history-title { overflow: hidden; color: var(--text-main); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.wb-browser-history-url { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
 
 /* Закладка без названия — одна фавиконка, поэтому отступы у такой кнопки поджаты. */
 .wb-browser-bookmarks button:not(:has(span)) { padding: 5px 6px; }
@@ -1554,9 +1513,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Контекстное меню закладки: переименовать, открыть, удалить. */
 .wb-bookmark-scrim { position: fixed; inset: 0; z-index: 40; }
 .wb-bookmark-menu { position: fixed; z-index: 41; display: grid; gap: 2px; width: min(240px, calc(100vw - 16px)); padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
-.wb-bookmark-menu input { margin-bottom: 4px; padding: 6px 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: 12px; }
+.wb-bookmark-menu input { margin-bottom: 4px; padding: 6px 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
 .wb-bookmark-menu input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
-.wb-bookmark-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.wb-bookmark-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
 .wb-bookmark-menu button:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-bookmark-menu button.is-danger:hover { color: var(--state-danger); }
 .wb-bookmark-menu button:disabled { opacity: .55; cursor: default; }
@@ -1564,13 +1523,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Перетаскивание закладки: видно, что кнопка «взята». */
 .wb-browser-bookmarks button[draggable="true"]:active { opacity: .6; }
 
-.wb-browser-zoom { min-width: 42px; padding: 0 6px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.wb-browser-zoom { min-width: 42px; padding: 0 6px; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .wb-browser-stage { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--surface-deep); }
 /* Замороженный снимок страницы, пока она спрятана под меню — см. BrowserDocument. */
 .wb-browser-frozen { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; pointer-events: none; }
 /* Форма HTTP-входа сайта — на месте спрятанной страницы (см. BrowserAuthForm). */
 .wb-browser-auth { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100% - 32px)); padding: 18px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); box-shadow: var(--float); color: var(--text-main); font-size: var(--text-sm); }
-.wb-browser-auth strong { font-size: 15px; font-weight: var(--weight-medium); }
+.wb-browser-auth strong { font-size: var(--text-md); font-weight: var(--weight-medium); }
 .wb-browser-auth-host { color: var(--text-2); overflow-wrap: anywhere; }
 .wb-browser-auth-error { color: var(--state-danger); }
 .wb-browser-auth label { display: flex; flex-direction: column; gap: 4px; }
@@ -1587,30 +1546,30 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-pdf-view iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: #fff; }
 
 .wb-office-scroll { height: 100%; overflow: auto; padding: 32px 24px 64px; background: var(--surface-deep); }
-.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: #202124; background: #fff; box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: 15px; line-height: 1.55; }
+.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: #202124; background: #fff; box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: var(--text-md); line-height: 1.55; }
 .wb-docx-page h1, .wb-docx-page h2, .wb-docx-page h3 { color: #17191d; line-height: 1.2; }
 .wb-docx-page img { max-width: 100%; height: auto; }
 .wb-docx-page table { width: 100%; border-collapse: collapse; }
 .wb-docx-page td, .wb-docx-page th { padding: 5px 7px; border: 1px solid #cfd3d8; vertical-align: top; }
-.wb-office-warnings { width: min(816px, 100%); margin: 14px auto 0; color: var(--text-muted); font-size: 12px; }
+.wb-office-warnings { width: min(816px, 100%); margin: 14px auto 0; color: var(--text-muted); font-size: var(--text-sm); }
 
 .wb-sheet-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: 35px minmax(0, 1fr) 30px; background: var(--surface-1); }
 .wb-sheet-formula { display: grid; grid-template-columns: 68px minmax(160px, 1fr) auto; align-items: center; border-bottom: 1px solid var(--wb-line); background: var(--surface-2); }
 .wb-sheet-formula b { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--wb-line); color: var(--text-muted); font: 600 11px var(--font-mono); }
 .wb-sheet-formula input { min-width: 0; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--text-main); background: transparent; font: 12px var(--font-mono); }
 .wb-sheet-formula input:focus { box-shadow: inset 0 0 0 1px var(--accent); }
-.wb-sheet-formula span { padding: 0 9px; color: var(--text-muted); font-size: 10.5px; }
+.wb-sheet-formula span { padding: 0 9px; color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-sheet-grid-wrap { overflow: auto; overscroll-behavior: contain; }
-.wb-sheet-grid { table-layout: fixed; min-width: max-content; border-collapse: separate; border-spacing: 0; color: var(--text-main); background: var(--surface-1); font-size: 12px; }
+.wb-sheet-grid { table-layout: fixed; min-width: max-content; border-collapse: separate; border-spacing: 0; color: var(--text-main); background: var(--surface-1); font-size: var(--text-sm); }
 .wb-sheet-grid th, .wb-sheet-grid td { box-sizing: border-box; width: 112px; min-width: 112px; height: 27px; padding: 4px 7px; overflow: hidden; border-right: 1px solid var(--wb-line); border-bottom: 1px solid var(--wb-line); text-overflow: ellipsis; white-space: nowrap; }
-.wb-sheet-grid thead th { position: sticky; z-index: 2; top: 0; height: 25px; color: var(--text-muted); background: var(--surface-2); font-weight: 500; text-align: center; }
-.wb-sheet-grid tbody th { position: sticky; z-index: 1; left: 0; width: 48px; min-width: 48px; color: var(--text-muted); background: var(--surface-2); font-weight: 500; text-align: center; }
+.wb-sheet-grid thead th { position: sticky; z-index: 2; top: 0; height: 25px; color: var(--text-muted); background: var(--surface-2); font-weight: var(--weight-medium); text-align: center; }
+.wb-sheet-grid tbody th { position: sticky; z-index: 1; left: 0; width: 48px; min-width: 48px; color: var(--text-muted); background: var(--surface-2); font-weight: var(--weight-medium); text-align: center; }
 .wb-sheet-grid .is-corner { left: 0; z-index: 3; width: 48px; min-width: 48px; }
 .wb-sheet-grid td { cursor: cell; }
 .wb-sheet-grid td:hover { background: var(--surface-hover); }
 .wb-sheet-grid td.is-selected { position: relative; overflow: visible; box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
 .wb-sheet-tabs { display: flex; align-items: stretch; gap: 1px; overflow-x: auto; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
-.wb-sheet-tabs button { min-width: 86px; padding: 0 14px; border: 0; border-right: 1px solid var(--wb-line); color: var(--text-muted); background: transparent; font-size: 11.5px; }
+.wb-sheet-tabs button { min-width: 86px; padding: 0 14px; border: 0; border-right: 1px solid var(--wb-line); color: var(--text-muted); background: transparent; font-size: var(--text-xs); }
 .wb-sheet-tabs button:hover { color: var(--text-main); background: var(--surface-hover); }
 .wb-sheet-tabs button.is-active { color: var(--text-main); background: var(--surface-1); box-shadow: inset 0 2px 0 var(--accent); }
 
@@ -1637,7 +1596,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   min-width: 0;
   padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--wb-line);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .wb-console-toolbar button {
@@ -1659,8 +1618,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-console-toolbar button:disabled { opacity: 0.4; cursor: default; }
 .wb-console-toolbar button.is-live { color: var(--state-live); }
 .wb-console-toolbar button.is-outside { color: var(--state-warn); }
-.wb-console-label { margin-right: 4px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
-.wb-console-label.is-hint { letter-spacing: 0; text-transform: none; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-console-label { margin-right: 4px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; font-size: var(--text-2xs); }
+.wb-console-label.is-hint { letter-spacing: 0; text-transform: none; font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-console-count { margin-left: 6px; color: var(--text-muted); white-space: nowrap; }
 .wb-console-fill { flex: 1; }
 
@@ -1770,7 +1729,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: transparent;
   color: var(--text-main);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -1796,17 +1755,17 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 .wb-agent-pane-title strong {
   color: var(--text-main);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
 .wb-agent-pane-title span {
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 .wb-console-pane-head > .wb-icon-btn { margin-left: 2px; }
 .wb-console-pane-head > .wb-console-pane-icon + .wb-icon-btn,
 .wb-console-pane-head > select + .wb-icon-btn { margin-left: auto; }
-.wb-session-state { margin-right: 4px; color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
+.wb-session-state { margin-right: 4px; color: var(--text-muted); font-size: var(--text-2xs); white-space: nowrap; }
 .wb-session-state.is-running { color: var(--state-live); }
 .wb-session-state.is-failed { color: var(--state-danger); }
 
@@ -1826,7 +1785,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   overflow: auto;
   padding: 8px 12px 16px;
   color: var(--code-block-text);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1842,7 +1801,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-session-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 16px; color: var(--text-muted); text-align: center; }
 .wb-session-empty p { margin: 0; max-width: 360px; }
-.wb-session-empty p.wb-muted { font-size: 12px; opacity: 0.75; }
+.wb-session-empty p.wb-muted { font-size: var(--text-sm); opacity: 0.75; }
 .wb-session-empty button { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent-color) 55%, transparent); border-radius: var(--radius-sm); background: none; color: var(--accent-color); font: inherit; cursor: pointer; }
 
 /* ─── Локальные папки и git ─────────────────────────── */
@@ -1857,7 +1816,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-agent-toggle:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-agent-toggle.is-on { color: var(--accent-color); }
 
-.wb-git-letter { flex: none; width: 14px; text-align: center; font-size: 10.5px; font-weight: var(--weight-bold); }
+.wb-git-letter { flex: none; width: 14px; text-align: center; font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .wb-git-letter.is-M { color: #e2c08d; }
 .wb-git-letter.is-A,
 .wb-git-letter.is-U { color: #73c991; }
@@ -1873,7 +1832,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-git-panel.is-open { min-height: 140px; }
 .wb-git-body { min-height: 0; overflow: auto; padding-bottom: 8px; }
 .wb-git-root + .wb-git-root { border-top: 1px dashed var(--wb-line); margin-top: 6px; padding-top: 6px; }
-.wb-git-branch { display: flex; align-items: center; gap: 6px; padding: 2px 8px 4px 14px; color: var(--text-2); font-size: 11.5px; }
+.wb-git-branch { display: flex; align-items: center; gap: 6px; padding: 2px 8px 4px 14px; color: var(--text-2); font-size: var(--text-xs); }
 .wb-git-branch b { color: var(--text-main); font-weight: var(--weight-medium); }
 .wb-git-branch span { color: var(--state-warn); }
 .wb-git-branch .wb-git-count { margin-left: auto; color: var(--text-muted); }
@@ -1892,7 +1851,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: none;
   color: var(--text-2);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   text-align: left;
   cursor: pointer;
 }
@@ -1919,7 +1878,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-git-change:hover,
 .wb-git-commit:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-git-commits { margin-top: 6px; }
-.wb-git-hash { color: var(--eyebrow); font-size: 10.5px; white-space: nowrap; }
+.wb-git-hash { color: var(--eyebrow); font-size: var(--text-2xs); white-space: nowrap; }
 
 .wb-ws-card { margin: 6px 10px; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); font-size: var(--text-xs); }
 .wb-ws-card-head { display: flex; align-items: center; gap: 6px; }
@@ -1939,15 +1898,15 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-banner.is-warn { background: color-mix(in srgb, var(--state-warn) 12%, var(--wb-surface)); color: #ffd98a; }
-.wb-banner.is-error { background: color-mix(in srgb, var(--state-danger) 12%, var(--wb-surface)); color: #ffb3bb; }
+.wb-banner.is-error { background: color-mix(in srgb, var(--state-danger) 12%, var(--wb-surface)); color: var(--state-danger); }
 .wb-banner.is-live { background: color-mix(in srgb, var(--state-live) 10%, var(--wb-surface)); color: #bfe9ff; }
 .wb-banner button { height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-main); font: inherit; cursor: pointer; }
 .wb-banner button.is-on { border-color: var(--accent-color); color: var(--accent-color); }
 
 .wb-version-view { min-height: 100%; }
-.wb-version-text { margin: 0; padding: 12px 16px 24px; color: var(--code-block-text); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-version-text { margin: 0; padding: 12px 16px 24px; color: var(--code-block-text); font-size: var(--text-sm); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.wb-diff { padding: 8px 0 24px; font-size: 12px; line-height: 1.55; }
+.wb-diff { padding: 8px 0 24px; font-size: var(--text-sm); line-height: 1.55; }
 .wb-diff-line { padding: 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--code-block-text); }
 /* Только значок «+»/«−» в начале строки. Раньше правило било по любому прямому span внутри строки,
    и подсветка слов разложила текст в столбик по 16 пикселей. */
@@ -1962,11 +1921,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-diff-word.is-del { background: rgba(244, 135, 113, 0.28); color: #ffd0c6; text-decoration: line-through; }
 .wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: #8ab4ff; }
 .wb-diff-line.is-meta { color: var(--text-muted); }
-.wb-diff-gap { padding: 2px 16px; color: var(--text-muted); font-size: 11px; background: rgba(255, 255, 255, 0.02); }
-.wb-commit-meta { margin: 0; padding: 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); color: var(--text-main); font-size: 12.5px; white-space: pre-wrap; }
+.wb-diff-gap { padding: 2px 16px; color: var(--text-muted); font-size: var(--text-xs); background: color-mix(in srgb, var(--text-main) 2%, transparent); }
+.wb-commit-meta { margin: 0; padding: 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); color: var(--text-main); font-size: var(--text-sm); white-space: pre-wrap; }
 
 .wb-side-tabs { display: flex; gap: 4px; margin: 4px 4px 8px; }
-.wb-side-tabs button { flex: 1; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.wb-side-tabs button { flex: 1; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .wb-side-tabs button.is-on { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); color: var(--accent-color); background: var(--wb-selected); }
 
 .wb-version-list { margin: 0; padding: 0; list-style: none; }
@@ -1975,14 +1934,14 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-version-list button.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); }
 .wb-version-list b { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
 .wb-version-list em { color: var(--text-muted); font-style: normal; }
-.wb-version-source { justify-self: start; padding: 0 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.06); color: var(--text-muted); font-size: 10px; }
+.wb-version-source { justify-self: start; padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--text-main) 6%, transparent); color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-version-source.is-agent { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--accent-color); }
 .wb-version-source.is-disk { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
 .wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: #8ab4ff; }
 /* Правка заметки человеком снаружи MBOX — отдельный цвет: по списку версий должно быть сразу видно,
    что текст поменял не владелец, а тот, кому дали ссылку. */
 .wb-version-source.is-share { background: color-mix(in srgb, var(--note-purple, #b18cff) 20%, transparent); color: var(--note-purple, #b18cff); }
-.wb-version-source.is-baseline { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+.wb-version-source.is-baseline { background: color-mix(in srgb, var(--text-main) 5%, transparent); color: var(--text-muted); }
 .wb-file-meta { margin-top: 14px; }
 
 /* ─── Каркас документа: текст главный, сведения — выдвижная панель ─── */
@@ -2008,12 +1967,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--bg-color);
 }
 
-.wb-doc-bar .wb-doc-crumbs { min-width: 0; font-size: 11px; }
+.wb-doc-bar .wb-doc-crumbs { min-width: 0; font-size: var(--text-xs); }
 .wb-doc-bar .wb-doc-actions { flex: none; gap: 4px; }
-.wb-doc-bar .wb-doc-actions button { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.wb-doc-bar .wb-doc-actions button { height: 24px; padding: 0 8px; font-size: var(--text-xs); }
 .wb-doc-bar .wb-doc-actions .wb-segmented button { height: 22px; }
 
-.wb-drawer-toggle b { min-width: 16px; padding: 0 4px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); color: var(--text-2); font-size: 10px; font-weight: 500; line-height: 16px; text-align: center; }
+.wb-drawer-toggle b { min-width: 16px; padding: 0 4px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-2); font-size: var(--text-2xs); font-weight: var(--weight-medium); line-height: 16px; text-align: center; }
 .wb-drawer-toggle.is-on { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent) !important; color: var(--accent-color) !important; }
 
 .wb-doc-layout { position: relative; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -2041,7 +2000,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-doc-find > svg { flex: none; }
 .wb-doc-find input { flex: 1; min-width: 80px; height: 28px; padding: 0 4px; border: 0; outline: 0; background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-md); }
 .wb-doc-find input::placeholder { color: var(--text-muted); }
-.wb-doc-find > span { flex: none; min-width: 42px; color: var(--text-muted); font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; }
+.wb-doc-find > span { flex: none; min-width: 42px; color: var(--text-muted); font-size: var(--text-xs); text-align: center; font-variant-numeric: tabular-nums; }
 .wb-doc-find > span.is-empty { color: var(--state-danger); }
 .wb-doc-find button { flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .wb-doc-find button:hover { background: var(--wb-hover); color: var(--text-main); }
@@ -2057,8 +2016,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--wb-surface-2);
 }
 
-.wb-drawer h3 { margin: 10px 4px 6px; color: var(--text-muted); font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
-.wb-drawer-close { display: none; position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); font-size: 16px; cursor: pointer; }
+.wb-drawer h3 { margin: 10px 4px 6px; color: var(--text-muted); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.08em; text-transform: uppercase; }
+.wb-drawer-close { display: none; position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); font-size: var(--text-lg); cursor: pointer; }
 
 /* Узкая вкладка (консоль справа, открыт сайдбар): панель накрывает текст, а не сжимает его. */
 @container (max-width: 820px) {
@@ -2081,8 +2040,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-doc-title {
   margin: 0 0 6px;
   color: var(--text-main);
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   line-height: 1.35;
   letter-spacing: 0;
   overflow-wrap: anywhere;
@@ -2095,7 +2054,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   gap: 2px 0;
   margin: 0 0 16px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
 }
 
@@ -2107,13 +2066,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-meta-tag { padding: 0 5px; border: 1px solid var(--wb-line); border-radius: 3px; }
 
 .wb-memory-body { max-width: none; font-size: var(--wb-fs-reading); font-weight: var(--weight-text); line-height: 1.7; }
-.wb-memory-body h4 { font-weight: 600; }
-.wb-memory-body h4.level-1 { font-size: 16px; }
-.wb-memory-body h4:not(.level-1):not(.level-3):not(.level-4) { font-size: 14.5px; }
-.wb-memory-body b { font-weight: 600; }
+.wb-memory-body h4 { font-weight: var(--weight-semibold); }
+.wb-memory-body h4.level-1 { font-size: var(--text-lg); }
+.wb-memory-body h4:not(.level-1):not(.level-3):not(.level-4) { font-size: var(--text-md); }
+.wb-memory-body b { font-weight: var(--weight-semibold); }
 
 .wb-memory-editor.wb-reading { display: grid; gap: 8px; max-width: 900px; }
-.wb-memory-editor .wb-memory-title-input { height: 34px; font-size: 16px; font-weight: 600; }
+.wb-memory-editor .wb-memory-title-input { height: 34px; font-size: var(--text-lg); font-weight: var(--weight-semibold); }
 .wb-memory-editor textarea { min-height: calc(100dvh - 260px); font-size: var(--wb-fs-reading); font-weight: var(--weight-text); }
 
 .wb-inline-props { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2128,7 +2087,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--wb-surface);
   color: var(--text-main);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   outline: none;
 }
 
@@ -2144,16 +2103,16 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-session-log,
 .wb-diff,
 .wb-version-text { font-weight: var(--weight-text); }
-.wb-doc-foot { flex: none; padding: 4px 20px; border-top: 1px solid var(--wb-line); color: var(--text-muted); font-size: 10.5px; }
+.wb-doc-foot { flex: none; padding: 4px 20px; border-top: 1px solid var(--wb-line); color: var(--text-muted); font-size: var(--text-2xs); }
 
 /* Консоль и старые панели внутри рабочего места — в ту же шкалу, без жирного основного текста. */
 .wb pre,
 .wb code,
 .wb kbd { font-family: var(--font-mono); }
 .wb-memory-body pre { color: var(--code-block-text); }
-.wb .console-log { font-size: 12px; line-height: 1.6; }
+.wb .console-log { font-size: var(--text-sm); line-height: 1.6; }
 .wb .console-log-text { font-weight: var(--weight-text); }
-.wb .console-log-actor { font-weight: 600; }
+.wb .console-log-actor { font-weight: var(--weight-semibold); }
 .wb .panel-title h2 { font-size: var(--text-lg); }
 .wb .rows-head h1 { font-size: var(--text-xl); }
 
@@ -2182,9 +2141,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-note-item:not([data-note-color="default"]) { border-left-color: var(--note-mark); background: color-mix(in srgb, var(--note-mark) 4%, transparent); }
 .wb-note-item.is-active { background: var(--wb-selected); border-left-color: var(--note-mark, var(--accent-color)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 14%, transparent); }
 .wb-note-item.is-active[data-note-color="default"] { border-left-color: var(--accent-color); }
-.wb-note-item-title { overflow: hidden; color: var(--text-main); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
-.wb-note-item-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-2); font-size: 11px; line-height: 1.4; }
-.wb-note-item-meta { color: var(--text-muted); font-size: 10px; }
+.wb-note-item-title { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.wb-note-item-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-2); font-size: var(--text-xs); line-height: 1.4; }
+.wb-note-item-meta { color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-note-pin { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; opacity: 0; }
 .wb-note-item:hover .wb-note-pin,
 .wb-note-pin.is-on { opacity: 1; }
@@ -2272,7 +2231,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-note-tab:hover { background: var(--wb-hover); color: var(--text-2); }
 .wb-note-tab.is-active { border-color: var(--wb-line); background: var(--doc-bg); color: var(--text-main); }
-.wb-note-tab > [role="tab"] { min-width: 0; flex: 1; height: 100%; padding: 0 20px 0 var(--space-2); overflow: hidden; border: 0; background: none; color: inherit; font: inherit; font-size: 10px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.wb-note-tab > [role="tab"] { min-width: 0; flex: 1; height: 100%; padding: 0 20px 0 var(--space-2); overflow: hidden; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-2xs); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .wb-note-tab > [role="tab"]:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .wb-note-tab-close { position: absolute; top: 2px; right: 2px; width: 14px; min-width: 14px; height: 14px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: var(--doc-bg); color: var(--text-muted); cursor: pointer; opacity: 0; }
 .wb-note-tab:hover .wb-note-tab-close,
@@ -2327,19 +2286,19 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-save-state.is-error { color: var(--state-danger); }
 .wb-save-state.is-saving,
 .wb-save-state.is-pending { color: var(--state-warn); }
-.wb-bar-select { height: 24px; max-width: 150px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; font-size: 11.5px; }
+.wb-bar-select { height: 24px; max-width: 150px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; font-size: var(--text-xs); }
 .wb-doc-actions button.is-on { color: var(--accent-color); border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
 
 /* ─── Хранилище S3 ──────────────────────────────────── */
 
 .wb-storage { position: relative; height: 100%; display: flex; flex-direction: column; }
-.wb-storage-crumbs { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; color: var(--text-muted); font-size: 12px; }
+.wb-storage-crumbs { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; color: var(--text-muted); font-size: var(--text-sm); }
 .wb-storage-crumbs span { display: inline-flex; align-items: center; gap: 2px; }
 .wb-storage-crumbs button { padding: 0 4px; border: 0; background: none; color: var(--text-2); font: inherit; cursor: pointer; }
 .wb-storage-crumbs button:hover { color: var(--accent-color); }
 .wb-storage-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 24px; }
-.wb-storage-list table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.wb-storage-list th { position: sticky; top: 0; padding: 6px 8px; background: var(--bg-color); color: var(--text-muted); font-size: 10.5px; font-weight: 500; text-align: left; border-bottom: 1px solid var(--wb-line); }
+.wb-storage-list table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.wb-storage-list th { position: sticky; top: 0; padding: 6px 8px; background: var(--bg-color); color: var(--text-muted); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: left; border-bottom: 1px solid var(--wb-line); }
 .wb-storage-list td { padding: 3px 8px; border-bottom: 1px solid rgba(133, 245, 219, 0.05); color: var(--text-2); white-space: nowrap; }
 .wb-storage-list tr:hover td { background: var(--wb-hover); }
 .wb-storage-list .is-num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -2351,7 +2310,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-storage-actions button:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-storage-actions button.is-danger:hover { color: var(--state-danger); }
 .wb-uploads { display: grid; gap: 4px; padding: 6px 20px; border-bottom: 1px solid var(--wb-line); }
-.wb-upload { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 3px 8px; overflow: hidden; border-radius: var(--radius-sm); background: var(--wb-surface); font-size: 11px; }
+.wb-upload { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 3px 8px; overflow: hidden; border-radius: var(--radius-sm); background: var(--wb-surface); font-size: var(--text-xs); }
 .wb-upload i { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent-color) 18%, transparent); transition: width 0.2s ease; }
 .wb-upload span,
 .wb-upload em { position: relative; font-style: normal; }
@@ -2364,17 +2323,17 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-storage-settings { max-width: 760px; }
 .wb-storage-form { display: grid; gap: 10px; }
-.wb-storage-form label { display: grid; gap: 4px; color: var(--text-muted); font-size: 11px; }
-.wb-storage-form input { height: 30px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 13px; outline: none; }
+.wb-storage-form label { display: grid; gap: 4px; color: var(--text-muted); font-size: var(--text-xs); }
+.wb-storage-form input { height: 30px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-sm); outline: none; }
 .wb-storage-form input:focus { border-color: var(--accent-color); }
-.wb-storage-form details { display: grid; gap: 8px; color: var(--text-muted); font-size: 11px; }
+.wb-storage-form details { display: grid; gap: 8px; color: var(--text-muted); font-size: var(--text-xs); }
 .wb-storage-form details label { margin-top: 8px; }
 .wb-storage-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .wb-storage-form-actions button { height: 30px; padding: 0 14px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
-.wb-storage-form-actions button.is-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+.wb-storage-form-actions button.is-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-semibold); }
 .wb-howto { margin-top: 8px; padding: 14px 18px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
-.wb-howto h3 { margin: 0 0 8px; font-size: 13px; }
-.wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
+.wb-howto h3 { margin: 0 0 8px; font-size: var(--text-sm); }
+.wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: var(--text-sm); line-height: 1.6; }
 .wb-howto code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
 .wb-howto i { color: var(--text-main); font-style: normal; }
 
@@ -2383,7 +2342,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-board { height: 100%; display: flex; flex-direction: column; }
 .wb-doc-crumbs .wb-project-dot { display: inline-block; vertical-align: middle; }
 .wb-board-add { display: flex; gap: 6px; padding: 8px 20px; border-bottom: 1px solid var(--wb-line); }
-.wb-board-add input { flex: 1; height: 28px; padding: 0 10px; border: 1px solid var(--accent-color); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 13px; outline: none; }
+.wb-board-add input { flex: 1; height: 28px; padding: 0 10px; border: 1px solid var(--accent-color); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-sm); outline: none; }
 .wb-board-add button { height: 28px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
 .wb-board-add button:disabled { opacity: 0.4; }
 
@@ -2405,9 +2364,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Пустая или свёрнутая колонка не держит ширину — места под текст карточек больше. */
 .wb-board-column.is-slim { flex: 0 0 150px; min-width: 150px; }
 .wb-board-column.is-over { background: color-mix(in srgb, var(--accent-color) 6%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent); }
-.wb-board-column > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; padding: 6px 4px; background: var(--bg-color); color: var(--text-2); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-.wb-board-column > header b { margin-left: auto; color: var(--text-muted); font-weight: 500; }
-.wb-board-more { align-self: flex-start; padding: 2px 6px; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.wb-board-column > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; padding: 6px 4px; background: var(--bg-color); color: var(--text-2); font-size: var(--text-xs); letter-spacing: 0.04em; text-transform: uppercase; }
+.wb-board-column > header b { margin-left: auto; color: var(--text-muted); font-weight: var(--weight-medium); }
+.wb-board-more { align-self: flex-start; padding: 2px 6px; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .wb-board-more:hover { color: var(--accent-color); }
 
 .wb-card {
@@ -2425,10 +2384,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-card.is-dragging { opacity: 0.4; }
 .wb-card.is-unseen { box-shadow: inset 2px 0 0 var(--state-warn); }
 .wb-board-column.status-done .wb-card { opacity: 0.65; }
-.wb-card-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-main); font-size: 12.5px; font-weight: 540; line-height: 1.4; }
+.wb-card-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: 1.4; }
 .wb-card-title .wb-priority { margin-right: 5px; }
-.wb-card-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-muted); font-size: 11px; font-weight: var(--weight-text); line-height: 1.45; }
-.wb-card-foot { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 10.5px; }
+.wb-card-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); font-weight: var(--weight-text); line-height: 1.45; }
+.wb-card-foot { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-card-new { color: var(--state-warn); }
 .wb-card-agent,
 .wb-meta-agent { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-2); }
@@ -2445,8 +2404,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: transparent;
   color: var(--text-main);
   font: inherit;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   line-height: 1.35;
 }
 
@@ -2457,9 +2416,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-kv { display: grid; gap: 4px; }
 .wb-kv-row { display: grid; grid-template-columns: minmax(70px, 38%) minmax(0, 1fr) 20px; align-items: center; gap: 6px; }
-.wb-kv-row > span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-kv-row > span { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .wb-kv-row input,
-.wb-kv-add input { min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 11.5px; outline: none; }
+.wb-kv-add input { min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-xs); outline: none; }
 .wb-kv-row input:focus,
 .wb-kv-add input:focus { border-color: var(--accent-color); }
 .wb-kv-row button,
@@ -2475,9 +2434,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-rows button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 7px 10px; border: 0; border-bottom: 1px solid rgba(133, 245, 219, 0.05); background: none; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
 .wb-rows button:hover { background: var(--wb-hover); }
 .wb-rows button.is-active { background: var(--wb-selected); }
-.wb-rows-title { overflow: hidden; color: var(--text-main); font-size: 12.5px; font-weight: 540; text-overflow: ellipsis; white-space: nowrap; }
-.wb-rows-meta { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
-.wb-rows-snippet { grid-column: 1 / -1; overflow: hidden; color: var(--text-muted); font-size: 11px; font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
+.wb-rows-title { overflow: hidden; color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.wb-rows-meta { color: var(--text-muted); font-size: var(--text-2xs); white-space: nowrap; }
+.wb-rows-snippet { grid-column: 1 / -1; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
 
 .wb-titlebar .desktop-pill.download strong { display: none; }
 .wb-titlebar .desktop-pill.download { width: 28px; padding: 0; justify-content: center; }
@@ -2486,19 +2445,18 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-docs,
 .wb-panel,
 .wb-sidebar,
-.wb-right { --font-pixel: var(--font-mono); }
-.wb-docs .panel-title h2 { font-size: 13px; letter-spacing: 0.02em; }
+.wb-docs .panel-title h2 { font-size: var(--text-sm); letter-spacing: 0.02em; }
 .wb-docs .panel { padding: 12px 14px; }
 .wb-docs .entity-list { gap: 0; }
-.wb-docs .entity-line { min-height: 28px; padding: 4px 2px; border-radius: 0; background: none; box-shadow: none; border-bottom: 1px solid rgba(133, 245, 219, 0.06); font-size: 12px; }
-.wb-docs .entity-line strong { font-weight: 500; color: var(--text-2); }
+.wb-docs .entity-line { min-height: 28px; padding: 4px 2px; border-radius: 0; background: none; box-shadow: none; border-bottom: 1px solid rgba(133, 245, 219, 0.06); font-size: var(--text-sm); }
+.wb-docs .entity-line strong { font-weight: var(--weight-medium); color: var(--text-2); }
 .wb-docs .content-grid { gap: 10px; }
 
 /* Свойства проекта: плотная таблица ключ–значение вместо крупных полей. */
 .wb-docs .env-rows { gap: 3px; }
 .wb-docs .env-row { grid-template-columns: minmax(120px, 220px) minmax(0, 1fr) 28px; gap: 6px; }
 .wb-docs .env-key,
-.wb-docs .env-value { min-height: 28px; padding: 5px 8px; font-size: 12px; }
+.wb-docs .env-value { min-height: 28px; padding: 5px 8px; font-size: var(--text-sm); }
 .wb-docs .env-remove { width: 28px; height: 28px; }
 
 /* ─── SSH ───────────────────────────────────────────── */
@@ -2592,7 +2550,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--wb-hover);
   color: var(--text-muted);
 }
@@ -2717,7 +2675,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   border-top: 1px solid var(--wb-line);
   background: var(--wb-surface);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .wb-status-item {
@@ -2779,10 +2737,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-menu button:hover { background: var(--wb-selected); color: var(--text-main); }
 .wb-menu button { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .wb-menu button > span { display: inline-flex; align-items: center; min-width: 0; }
-.wb-menu button kbd { border: 0; background: none; color: var(--text-muted); font-size: 10px; }
-.wb-menu button.is-danger:hover { background: color-mix(in srgb, var(--state-danger) 18%, transparent); color: #ffb3bb; }
+.wb-menu button kbd { border: 0; background: none; color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-menu button.is-danger:hover { background: color-mix(in srgb, var(--state-danger) 18%, transparent); color: var(--state-danger); }
 .wb-menu-sep { height: 1px; margin: 4px 6px; background: var(--wb-line); }
-.wb-tree-row.is-selected:not(.is-active) { background: rgba(255, 255, 255, 0.05); }
+.wb-tree-row.is-selected:not(.is-active) { background: color-mix(in srgb, var(--text-main) 5%, transparent); }
 .wb-view-body:focus-within .wb-tree-row.is-selected:not(.is-active) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent); }
 .wb-view-body:focus { outline: none; }
 .wb-tree-row.is-cut { opacity: 0.5; }
@@ -2901,8 +2859,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-console-pane.is-drop-bottom::after { inset: 50% 0 0 0; }
 .wb-console-pane-head[draggable="true"] { cursor: grab; }
 .wb-console-pane-head[draggable="true"]:active { cursor: grabbing; }
-.wb-console-pane-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.wb-console-pane-more { font-size: 14px; line-height: 1; }
+.wb-console-pane-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-medium); }
+.wb-console-pane-more { font-size: var(--text-md); line-height: 1; }
 .wb-console-pane-head > .wb-console-pane-actions ~ .wb-icon-btn { margin-left: 0; }
 .wb-console-pane-head:not(:has(.wb-console-pane-actions)) > .wb-console-pane-more { margin-left: auto; }
 /* Кнопки разделения видны у панели под мышью и у активной. Прячем прозрачностью, а не display:
@@ -3000,7 +2958,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   white-space: nowrap;
   writing-mode: vertical-rl;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.02em;
 }
 .wb-console-pane-strip:hover .wb-console-strip-title { color: var(--text-main); }
@@ -3019,7 +2977,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-image-doc > * { flex: none; }
 .wb-image-doc > .wb-image-stage { flex: 1 1 0; }
 .wb-image-doc > .wb-meta-strip { padding-inline: 16px; }
-.wb-image-zoom { min-width: 42px; color: var(--text-muted); font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums; }
+.wb-image-zoom { min-width: 42px; color: var(--text-muted); font-size: var(--text-xs); text-align: center; font-variant-numeric: tabular-nums; }
 .wb-image-stage { min-height: 0; overflow: auto; cursor: grab; user-select: none; }
 .wb-image-stage.is-panning { cursor: grabbing; }
 .wb-image-canvas { display: grid; place-items: center; }
@@ -3076,7 +3034,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--element-bg);
   color: var(--text-main);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .wb-agent-toast-action:hover { border-color: var(--accent-color); color: var(--accent-color); }
@@ -3088,7 +3046,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-md-table th,
 .wb-md-table td { padding: 5px 10px; border: 1px solid var(--wb-line); text-align: left; vertical-align: top; }
 .wb-md-table th { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-bold); white-space: nowrap; }
-.wb-md-table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .02); }
+.wb-md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--text-main) 2%, transparent); }
 
 
 
@@ -3109,7 +3067,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 @media (max-width: 760px) {
   .wb-skill-doc { padding-top: 16px; }
   .wb-skill-hero { grid-template-columns: 1fr; gap: 20px; padding: 20px; }
-  .wb-skill-hero h1 { font-size: 30px; }
+  .wb-skill-hero h1 { font-size: var(--text-2xl); }
   .wb-skill-flow { grid-template-columns: 1fr; }
   .wb-skill-flow > div + div { border-top: 1px solid var(--wb-line); border-left: 0; }
   .wb-skill-flow svg { right: auto; bottom: -8px; left: 23px; transform: rotate(90deg); }
@@ -3121,13 +3079,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* ─── Диалог ввода (askText) — замена window.prompt, которого нет в Electron ─── */
 .ask-scrim { position: fixed; inset: 0; z-index: 400; display: grid; place-items: start center; padding-top: 18vh; background: rgba(0, 0, 0, .45); }
 .ask-dialog { width: min(420px, calc(100vw - 32px)); display: grid; gap: 8px; padding: 14px; border: 1px solid var(--glass-brd, rgba(133, 245, 219, .22)); border-radius: var(--radius-md, 8px); background: var(--wb-surface-2, #101114); box-shadow: 0 18px 48px rgba(0, 0, 0, .6); color: var(--text-main, #eef4f1); }
-.ask-title { color: var(--text-2, rgba(238, 244, 241, .7)); font-size: 12px; }
+.ask-title { color: var(--text-2, rgba(238, 244, 241, .7)); font-size: var(--text-sm); }
 .ask-dialog input { height: 32px; padding: 0 10px; border: 1px solid var(--accent-color, #29e0d6); border-radius: var(--radius-sm, 4px); background: var(--wb-surface, #0c0d0f); color: inherit; font: inherit; outline: none; }
-.ask-hint { color: var(--text-muted, rgba(238, 244, 241, .44)); font-size: 11.5px; }
+.ask-hint { color: var(--text-muted, rgba(238, 244, 241, .44)); font-size: var(--text-xs); }
 .ask-hint.is-error { color: var(--state-danger, #ff4d5e); }
 .ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.ask-actions button { height: 28px; padding: 0 12px; border: 1px solid var(--wb-line, rgba(133, 245, 219, .12)); border-radius: var(--radius-sm, 4px); background: none; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
-.ask-actions button.is-primary { border-color: var(--accent-color, #29e0d6); background: var(--accent-color, #29e0d6); color: #031312; font-weight: 600; }
+.ask-actions button { height: 28px; padding: 0 12px; border: 1px solid var(--wb-line, rgba(133, 245, 219, .12)); border-radius: var(--radius-sm, 4px); background: none; color: inherit; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.ask-actions button.is-primary { border-color: var(--accent-color, #29e0d6); background: var(--accent-color, #29e0d6); color: #031312; font-weight: var(--weight-semibold); }
 
 /* ─── Панель markdown (MarkdownToolbar) и новые элементы просмотра ─── */
 /* Панель не переносится на вторую строку: иначе шапка меняла высоту при каждом «сохраняю… / сохранено» и текст прыгал. */
@@ -3140,7 +3098,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-doc-bar .wb-bar-select { max-width: 150px; text-overflow: ellipsis; }
 .wb-md-toolbar button { position: relative; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--text-2); cursor: pointer; }
 .wb-md-toolbar button:hover { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
-.wb-md-toolbar button b { position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent-color); color: #031312; font-size: 9px; line-height: 14px; }
+.wb-md-toolbar button b { position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-sm); background: var(--accent-color); color: #031312; font-size: var(--text-2xs); line-height: 14px; }
 .wb-md-toolbar i { width: 1px; height: 16px; margin: 0 4px; background: var(--wb-line); }
 .wb-memory-edit .wb-md-toolbar { margin-bottom: 6px; }
 .wb-memory-body s { color: var(--text-muted); }
@@ -3157,12 +3115,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Прокручивается только текст: раньше поле имело min-height: 100% под заголовком, и при наборе двигались два
    скролла сразу (контейнер и поле) — заметка дёргалась вместе с курсором. */
 .wb-note-edit { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 860px; margin-inline: auto; min-height: 0; }
-.wb-note-title { width: 100%; padding: 22px 28px 4px; border: 0; outline: none; background: transparent; color: var(--text-main); font: inherit; font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
+.wb-note-title { width: 100%; padding: 22px 28px 4px; border: 0; outline: none; background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: 1.3; letter-spacing: -0.01em; }
 .wb-note-title::placeholder { color: var(--text-muted); }
 .wb-note-edit .wb-note-editor { flex: 1; min-height: 0; max-width: none; padding-top: 6px; overflow: auto; }
 .wb-note-edit .wb-note-markdown { flex: 1; width: 100%; min-height: 0; max-width: none; }
 .wb-note-title { flex: none; }
-.wb-memory-body h1.wb-note-title-view { margin: 0 0 10px; color: var(--text-main); font-size: 26px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
+.wb-memory-body h1.wb-note-title-view { margin: 0 0 10px; color: var(--text-main); font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: 1.3; letter-spacing: -0.01em; }
 
 /* Markdown в карточках (MarkdownText): размер и цвет — от карточки, длинный текст — плавный обрез. */
 .md-text { max-width: none; color: inherit; font-size: inherit; line-height: 1.5; }
@@ -3213,13 +3171,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: color-mix(in srgb, var(--doc-bg) 92%, transparent);
   backdrop-filter: blur(10px);
 }
-.share-brand { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--text-main); font-size: 13px; font-weight: 650; }
+.share-brand { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 .share-brand img { display: block; image-rendering: pixelated; }
-.share-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.share-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: var(--text-sm); }
 .share-status.is-pending, .share-status.is-saving { color: var(--state-warn); }
 .share-status.is-error { color: var(--state-danger); }
 /* Доступ — меткой справа: кто открыл ссылку, сразу видит, можно ли тут писать. */
-.share-access { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 3px 9px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.share-access { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 3px 9px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: var(--text-sm); white-space: nowrap; }
 .share-theme-button {
   display: inline-flex;
   flex: none;
@@ -3231,7 +3189,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--wb-surface-2);
   color: var(--text-2);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .share-theme-button:hover { border-color: color-mix(in srgb, var(--accent-color) 42%, var(--wb-line)); color: var(--text-main); }
@@ -3239,9 +3197,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-bar .wb-md-toolbar { flex: 1 1 auto; }
 .share-page > .wb-doc-find { position: fixed; top: calc(52px + env(safe-area-inset-top, 0px)); }
 .share-toggle { display: inline-flex; flex: none; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); overflow: hidden; }
-.share-toggle button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.share-toggle button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .share-toggle button.is-on { background: var(--wb-hover); color: var(--accent-color); }
-.share-notice { max-width: 820px; margin: 12px auto 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--state-warn) 45%, transparent); border-radius: var(--radius-sm); color: var(--state-warn); font-size: 12.5px; }
+.share-notice { max-width: 820px; margin: 12px auto 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--state-warn) 45%, transparent); border-radius: var(--radius-sm); color: var(--state-warn); font-size: var(--text-sm); }
 .share-workspace { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 820px) minmax(0, 1fr); gap: var(--space-7); margin: 0 auto; padding: 0 var(--space-6); box-sizing: border-box; }
 .share-doc { grid-column: 2; min-width: 0; padding: 40px 0 30vh; box-sizing: border-box; }
 .share-note-tabs { grid-column: 1; grid-row: 1; position: sticky; top: calc(44px + 40px); align-self: start; justify-self: end; width: min(220px, 100%); max-height: calc(100dvh - 44px - var(--space-8)); display: grid; gap: var(--space-1); margin-top: 40px; overflow-x: hidden; overflow-y: auto; }
@@ -3249,7 +3207,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
    вылезал за левый край окна, и «Вкладки» читались как «…ладки». */
 .share-workspace:has(> .share-note-tabs:not(.is-collapsed)) { grid-template-columns: minmax(180px, 1fr) minmax(0, 820px) minmax(0, 1fr); }
 .share-note-tabs.is-collapsed { width: var(--space-8); overflow: hidden; }
-.share-note-tabs-head { height: var(--space-8); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-1) 0 var(--space-2); color: var(--text-muted); font-size: 12px; font-weight: 650; }
+.share-note-tabs-head { height: var(--space-8); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-1) 0 var(--space-2); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 .share-note-tabs-head > div { display: flex; align-items: center; }
 .share-note-tabs.is-collapsed .share-note-tabs-head { padding: 0; justify-content: center; }
 .share-note-tabs-list { display: grid; gap: var(--space-1); }
@@ -3259,7 +3217,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-note-tabs-head button:hover { background: var(--wb-hover); color: var(--text-main); }
 .share-note-tab { min-height: var(--space-8); display: flex; align-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); }
 .share-note-tab:hover { background: var(--wb-hover); }
-.share-note-tab.is-active { background: color-mix(in srgb, var(--accent-color) 14%, transparent); color: var(--text-main); font-weight: 550; }
+.share-note-tab.is-active { background: color-mix(in srgb, var(--accent-color) 14%, transparent); color: var(--text-main); font-weight: var(--weight-medium); }
 .share-note-tab > [role="tab"] { min-width: 0; flex: 1; min-height: var(--space-8); padding: 0 var(--space-3); overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .share-note-tab > button:last-child:not(:first-child) { width: var(--space-7); height: var(--space-7); display: grid; flex: none; place-items: center; margin-right: var(--space-1); border-radius: var(--radius-sm); color: var(--text-muted); opacity: 0; }
 .share-note-tab:hover > button:last-child:not(:first-child),
@@ -3267,7 +3225,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-note-tab > button:last-child:not(:first-child):hover { background: color-mix(in srgb, var(--state-danger) 14%, transparent); color: var(--state-danger); }
 .share-note-tab button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .share-title,
-.share-title-input { width: 100%; margin: 0 0 18px; padding: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: 28px; font-weight: 650; line-height: 1.25; }
+.share-title-input { width: 100%; margin: 0 0 18px; padding: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: var(--text-2xl); font-weight: var(--weight-semibold); line-height: 1.25; }
 .share-title-input::placeholder,
 .share-editor::placeholder { color: var(--text-muted); }
 .share-editor { display: block; width: 100%; min-height: 60vh; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; background: none; color: var(--text-main); font: inherit; font-size: var(--wb-fs-reading); font-weight: var(--weight-text); line-height: 1.75; }
@@ -3275,7 +3233,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .share-doc .wb-memory-body img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
 .share-muted { color: var(--text-muted); }
 .share-missing { max-width: 520px; margin: 18vh auto 0; padding: 0 24px; text-align: center; }
-.share-missing h1 { margin: 0 0 10px; font-size: 22px; }
+.share-missing h1 { margin: 0 0 10px; font-size: var(--text-xl); }
 .share-missing p { color: var(--text-muted); }
 @media (max-width: 640px) {
   .share-workspace { display: flex; flex-direction: column; gap: 0; padding: 0 var(--space-4); }
@@ -3285,7 +3243,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   .share-note-tabs-list { display: flex; }
   .share-note-tabs-head { position: sticky; left: 0; min-width: max-content; background: var(--doc-bg); }
   .share-note-tab { min-width: 136px; }
-  .share-title, .share-title-input { font-size: 22px; }
+  .share-title, .share-title-input { font-size: var(--text-xl); }
   .share-toggle button { padding: 0 8px; }
   .share-theme-button { justify-content: center; }
   .share-status { display: none; }
@@ -3311,13 +3269,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-share-row { display: grid; gap: 6px; }
 .wb-share-row + .wb-share-row { padding-top: 12px; border-top: 1px solid var(--wb-line); }
 .wb-share-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.wb-share-head b { font-weight: 600; }
-.wb-share-head span, .wb-share-actions span { color: var(--text-muted); font-size: 11px; }
+.wb-share-head b { font-weight: var(--weight-semibold); }
+.wb-share-head span, .wb-share-actions span { color: var(--text-muted); font-size: var(--text-xs); }
 .wb-share-link { display: flex; gap: 4px; }
-.wb-share-link input { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: 11.5px; }
+.wb-share-link input { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-xs); }
 .wb-share-actions { display: flex; align-items: center; gap: 6px; }
 .wb-share-actions span { flex: 1; }
-.wb-share-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: 11.5px; cursor: pointer; }
+.wb-share-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .wb-share-panel button:hover { color: var(--text-main); background: var(--wb-hover); }
 .wb-share-panel button.is-danger:hover { color: var(--state-danger); }
 .wb-share-panel button:disabled { opacity: 0.5; cursor: default; }
@@ -3345,16 +3303,16 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: nowrap;
   cursor: pointer;
 }
 .wb-chat-kind:hover { background: var(--wb-hover); color: var(--text-main); }
-.wb-chat-kind.is-active { background: var(--wb-selected); color: var(--text-main); font-weight: 500; }
+.wb-chat-kind.is-active { background: var(--wb-selected); color: var(--text-main); font-weight: var(--weight-medium); }
 .wb-chat-kind:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .wb-chat-kind-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); opacity: 0.45; }
 .wb-chat-kind-dot.is-online { background: var(--state-ok); opacity: 1; }
@@ -3378,16 +3336,16 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-sunken, var(--wb-surface-2));
 }
-.chat-debug { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 11.5px; }
+.chat-debug { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: var(--text-xs); }
 .chat-debug-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 6px 2px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent); color: var(--text-2); }
 .chat-debug-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-debug-btn { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 6px; background: transparent; color: var(--accent-color); font: inherit; cursor: pointer; white-space: nowrap; }
+.chat-debug-btn { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: transparent; color: var(--accent-color); font: inherit; cursor: pointer; white-space: nowrap; }
 .chat-debug-btn:hover { background: var(--wb-hover); }
 .chat-debug-log { flex: 1; min-height: 0; overflow: hidden; }
 .chat-debug-log > * { height: 100%; }
 .chat-debug-note { margin: 0; padding: 8px 10px; color: var(--text-muted); }
 .chat-debug-list { margin: 0; padding: 4px; list-style: none; overflow: auto; }
-.chat-debug-list li { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px; }
+.chat-debug-list li { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--radius-xs); }
 .chat-debug-list li:hover { background: var(--wb-hover); }
 .chat-debug-list span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-debug-list em { color: var(--text-muted); font-style: normal; }
@@ -3395,20 +3353,20 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* ─── Продвинутый редактор таблиц (SheetEditor.tsx): виртуальная сетка ─── */
 .wb-sheet-shell.is-advanced { grid-template-rows: 34px 32px minmax(0, 1fr) 30px; }
 .wb-sheet-toolbar { display: flex; align-items: center; gap: 2px; min-width: 0; padding: 0 6px; overflow-x: auto; border-bottom: 1px solid var(--wb-line); background: var(--surface-2); }
-.wb-sheet-toolbar > button { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 26px; min-width: 28px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.wb-sheet-toolbar > button { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 26px; min-width: 28px; padding: 0 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-2); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wb-sheet-toolbar > button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-main); }
 .wb-sheet-toolbar > button:disabled { opacity: 0.35; cursor: default; }
 .wb-sheet-toolbar > button.is-on { background: var(--wb-selected, var(--surface-selected)); color: var(--accent-color); }
 .wb-sheet-toolbar > button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .wb-sheet-sep { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--wb-line); }
 .wb-sheet-find { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
-.wb-sheet-find input { width: 170px; height: 24px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 5px; background: var(--surface-1); color: var(--text-main); font: inherit; font-size: 12px; }
-.wb-sheet-find em { color: var(--text-muted); font-style: normal; font-size: 11px; white-space: nowrap; }
-.wb-sheet-find button { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.wb-sheet-find input { width: 170px; height: 24px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: var(--surface-1); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.wb-sheet-find em { color: var(--text-muted); font-style: normal; font-size: var(--text-xs); white-space: nowrap; }
+.wb-sheet-find button { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-muted); cursor: pointer; }
 
 .wb-sheet-shell.is-advanced .wb-sheet-formula { grid-template-columns: 96px minmax(160px, 1fr); }
 
-.wb-grid { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; background: var(--surface-1); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wb-grid { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; outline: none; background: var(--surface-1); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .wb-grid-canvas { position: relative; }
 .wb-grid-cell {
   position: absolute;
@@ -3429,7 +3387,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-grid-cell.is-in-range { background: color-mix(in srgb, var(--accent-color) 12%, var(--cell-fill, var(--surface-1))); }
 .wb-grid-cell.is-focus { z-index: 1; box-shadow: inset 0 0 0 2px var(--accent-color); background: var(--cell-fill, var(--surface-1)); }
 .wb-grid-cell.is-formula-empty { color: var(--text-muted); font-style: italic; }
-.wb-grid-cell.is-frozen { z-index: 3; background: var(--cell-fill, var(--surface-2)); font-weight: 600; border-bottom-color: var(--text-muted); }
+.wb-grid-cell.is-frozen { z-index: 3; background: var(--cell-fill, var(--surface-2)); font-weight: var(--weight-semibold); border-bottom-color: var(--text-muted); }
 .wb-grid-cell.is-frozen.is-in-range { background: color-mix(in srgb, var(--accent-color) 14%, var(--cell-fill, var(--surface-2))); }
 .wb-grid-colhead, .wb-grid-rowhead, .wb-grid-corner {
   position: absolute;
@@ -3443,7 +3401,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   border-bottom: 1px solid var(--wb-line);
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   user-select: none;
   cursor: default;
 }
@@ -3466,7 +3424,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: var(--surface-1);
   color: var(--text-main);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 18px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
 }
@@ -3474,13 +3432,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-sheet-footer { display: flex; align-items: stretch; min-width: 0; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
 .wb-sheet-footer .wb-sheet-tabs { flex: 1 1 auto; min-width: 0; border-top: 0; }
 .wb-sheet-add { min-width: 32px !important; padding: 0 !important; display: inline-grid; place-items: center; }
-.wb-sheet-rename { width: 120px; margin: 3px; padding: 0 6px; border: 1px solid var(--accent-color); border-radius: 4px; background: var(--surface-1); color: var(--text-main); font: inherit; font-size: 11.5px; }
-.wb-sheet-stats { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--text-2); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wb-sheet-rename { width: 120px; margin: 3px; padding: 0 6px; border: 1px solid var(--accent-color); border-radius: var(--radius-xs); background: var(--surface-1); color: var(--text-main); font: inherit; font-size: var(--text-xs); }
+.wb-sheet-stats { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--text-2); font-size: var(--text-xs); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wb-sheet-filter { display: grid; gap: 6px; padding: 6px; min-width: 230px; }
-.wb-sheet-filter label { color: var(--text-2); font-size: 12px; }
-.wb-sheet-filter input { height: 28px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 5px; background: var(--surface-1); color: var(--text-main); font: inherit; }
+.wb-sheet-filter label { color: var(--text-2); font-size: var(--text-sm); }
+.wb-sheet-filter input { height: 28px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: var(--surface-1); color: var(--text-main); font: inherit; }
 .wb-sheet-filter > div { display: flex; gap: 6px; justify-content: flex-end; }
-.wb-sheet-filter > div button { height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: 5px; background: transparent; color: var(--text-main); font: inherit; font-size: 12px; cursor: pointer; }
+.wb-sheet-filter > div button { height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wb-sheet-filter > div button:first-child { border-color: var(--accent-color); color: var(--accent-color); }
 @media (max-width: 640px) { .wb-sheet-stats { display: none; } }
 
@@ -3495,7 +3453,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-note-save.is-error { color: var(--state-danger); }
 .wb-note-save.is-error > svg { color: currentColor; }
 .wb-note-spinner { width: 11px; height: 11px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: wb-ssh-spin 0.8s linear infinite; }
-.wb-note-flag { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: 10.5px; }
+.wb-note-flag { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: var(--text-2xs); }
 .wb-note-notice { overflow: hidden; color: var(--state-warn); text-overflow: ellipsis; }
 
 .wb-note-tools { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
@@ -3571,13 +3529,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-note-tools .wb-share > button.is-on { color: var(--accent-color); }
 .wb-note-icon:focus-visible,
 .wb-note-tools .wb-share > button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
-.wb-note-icon b { min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: 10px; font-weight: var(--weight-medium); line-height: 16px; text-align: center; }
+.wb-note-icon b { min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: var(--text-2xs); font-weight: var(--weight-medium); line-height: 16px; text-align: center; }
 
 .wb-note-menu { display: grid; min-width: 224px; }
 .wb-note-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .wb-note-menu > button > svg { color: var(--accent-color); }
-.wb-note-menu-label { padding: 4px 10px 2px; color: var(--text-muted); font-size: 10.5px; }
-.wb-note-theme-swatch { display: inline-block; width: 14px; height: 14px; margin-right: 8px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--wb-line); vertical-align: -3px; }
+.wb-note-menu-label { padding: 4px 10px 2px; color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-note-theme-swatch { display: inline-block; width: 14px; height: 14px; margin-right: 8px; border-radius: var(--radius-xs); box-shadow: inset 0 0 0 1px var(--wb-line); vertical-align: -3px; }
 .wb-note-theme-swatch.is-light { background: var(--doc-light-bg); }
 .wb-note-theme-swatch.is-graphite { background: var(--doc-graphite-bg); }
 .wb-note-theme-swatch.is-black { background: var(--doc-black-bg); }
@@ -3638,7 +3596,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-titlebar .command-center { flex: 0 1 320px; height: 26px; border-color: transparent; background: var(--wb-hover); }
 .wb-titlebar .command-center:hover { border-color: var(--wb-line); background: var(--wb-surface-2); }
-.wb-titlebar .command-center kbd { padding: 0 5px; border: 0; border-radius: 4px; background: var(--wb-hover); color: var(--text-muted); font-size: 10px; }
+.wb-titlebar .command-center kbd { padding: 0 5px; border: 0; border-radius: var(--radius-xs); background: var(--wb-hover); color: var(--text-muted); font-size: var(--text-2xs); }
 
 .wb-titlebar .topbar-actions { gap: 2px; }
 .wb-titlebar .topbar-icon-action,
@@ -3682,7 +3640,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   border-radius: var(--radius-pill);
   background: var(--state-ok);
   color: #0b1a10;
-  font-size: 9px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   line-height: 11px;
   text-align: center;
@@ -3730,7 +3688,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .topbar {
   border: 1px solid var(--glass-brd);
   border-radius: var(--radius-md);
   background: var(--wb-surface-2);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 1px 0 color-mix(in srgb, var(--text-main) 4%, transparent) inset;
   color: var(--text-main);
   font-size: var(--text-sm);
   text-align: left;
@@ -3744,7 +3702,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .tb-pop section + section { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--wb-line); }
 .tb-pop-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 6px 8px; }
 .tb-pop-head strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.tb-pop-label { display: flex; align-items: center; gap: 5px; margin: 0; padding: 6px 8px 4px; color: var(--text-muted); font-size: 10.5px; font-weight: var(--weight-medium); }
+.tb-pop-label { display: flex; align-items: center; gap: 5px; margin: 0; padding: 6px 8px 4px; color: var(--text-muted); font-size: var(--text-2xs); font-weight: var(--weight-medium); }
 .tb-pop-label.is-warn { color: var(--state-warn); }
 
 .tb-pop-list { display: grid; margin: 0; padding: 0; list-style: none; }
@@ -3781,7 +3739,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .tb-pop-menu button:hover:not(:disabled) { background: var(--wb-selected); color: var(--text-main); }
 .tb-pop-menu button:hover:not(:disabled) svg { color: var(--accent-color); }
 .tb-pop-menu button:disabled { opacity: 0.45; cursor: default; }
-.tb-pop-foot { margin: 4px 2px 0; padding: 6px 8px 2px; border-top: 1px solid var(--wb-line); color: var(--text-muted); font-size: 10.5px; line-height: 1.4; }
+.tb-pop-foot { margin: 4px 2px 0; padding: 6px 8px 2px; border-top: 1px solid var(--wb-line); color: var(--text-muted); font-size: var(--text-2xs); line-height: 1.4; }
 .tb-pop-foot.is-error { color: var(--state-danger); }
 
 .tb-pop-note { margin: 0; padding: 4px 8px 6px; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; }
@@ -3789,7 +3747,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .tb-pop-feed li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 26px; padding: 4px 8px; border-radius: var(--radius-sm); }
 .tb-pop-feed li span { min-width: 0; color: var(--text-2); font-size: var(--text-xs); line-height: 1.35; }
 .tb-pop-feed li b { color: var(--text-muted); font-weight: var(--weight-medium); }
-.tb-pop-feed li time { flex: none; color: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.tb-pop-feed li time { flex: none; color: var(--text-muted); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
 
 .tb-pop :is(button):focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .tb-pop { animation: none; } }
@@ -3825,7 +3783,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-agent-list li { position: relative; border-radius: var(--radius-sm); }
 .wb-agent-list li:hover { background: var(--wb-hover); }
 .wb-agent-main strong { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.wb-agent-main strong small { overflow: hidden; color: var(--text-muted); font-size: 10.5px; font-weight: var(--weight-normal); text-overflow: ellipsis; white-space: nowrap; }
+.wb-agent-main strong small { overflow: hidden; color: var(--text-muted); font-size: var(--text-2xs); font-weight: var(--weight-normal); text-overflow: ellipsis; white-space: nowrap; }
 .wb-agent-main span.is-ok { color: var(--state-ok); }
 .wb-agent-main span.is-live { color: var(--accent-color); }
 .wb-agent-actions { opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
@@ -3834,21 +3792,21 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 
 /* ─── Инструменты: группы и точка состояния на значке ─── */
 .wb-tool-glyph { position: relative; grid-row: span 2; width: 22px; height: 22px; display: grid; place-items: center; }
-.wb-tool-glyph img, .wb-tool-glyph .wb-menu-item-icon { width: 22px !important; height: 22px !important; border-radius: 5px; }
+.wb-tool-glyph img, .wb-tool-glyph .wb-menu-item-icon { width: 22px !important; height: 22px !important; border-radius: var(--radius-xs); }
 .wb-tool-glyph > i { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border: 2px solid var(--wb-surface); border-radius: 50%; background: var(--state-off); }
 .wb-tool-glyph.is-ok > i { background: var(--state-ok); }
 .wb-tool-glyph.is-warn > i { background: var(--state-warn); }
 .wb-tool-glyph.is-planned > i { display: none; }
 .wb-tool-item.is-planned .wb-menu-item-title { color: var(--text-2); }
 .wb-tool-item.is-planned .wb-tool-glyph .wb-menu-item-icon { border-style: dashed; color: var(--text-muted); background: none; }
-.wb-tool-soon { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-muted); font-size: 9.5px; font-style: normal; letter-spacing: 0; text-transform: none; }
+.wb-tool-soon { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-muted); font-size: var(--text-2xs); font-style: normal; letter-spacing: 0; text-transform: none; }
 .wb-tool-planned { margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--wb-line); border-radius: var(--radius-md); color: var(--text-2); font-size: var(--text-sm); line-height: 1.5; }
 .wb-tool-planned b { color: var(--text-main); font-weight: var(--weight-medium); }
 
 /* ─── История: лента по дням вместо журнала аудита ─── */
 .wb-history { max-width: 920px; }
 .wb-history-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-.wb-history-head h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.02em; }
+.wb-history-head h1 { margin: 0 0 4px; font-size: var(--text-2xl); letter-spacing: -0.02em; }
 .wb-history-head p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 .wb-history-mode { display: inline-flex; flex: none; padding: 2px; border-radius: var(--radius-sm); background: var(--wb-hover); }
 .wb-history-mode button { height: 24px; padding: 0 12px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; }
@@ -3870,7 +3828,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-history-day time { color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .wb-history-who { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .wb-history-who b { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
-.wb-history-human { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--wb-selected); color: var(--text-main); font-size: 10px; font-weight: var(--weight-bold); }
+.wb-history-human { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--wb-selected); color: var(--text-main); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .wb-history-what { display: flex; align-items: baseline; gap: 7px; min-width: 0; color: var(--text-2); }
 .wb-history-what em { flex: none; font-size: var(--text-xs); font-style: normal; font-weight: var(--weight-medium); }
 .wb-history-what em.is-new { color: var(--state-ok); }

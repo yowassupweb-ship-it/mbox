@@ -9,6 +9,7 @@ import type { TabsApi } from "./tabs";
 import { hasDraft, useDraft } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
+import { askConfirm, showNotice } from "../../ui/askText";
 
 type MemoryRecord = Memory & { project_name?: string | null; todo_id?: string | null };
 type MemoryLink = { id: string; from_memory_id: string; from_title: string; to_memory_id: string; to_title: string; link_type: string };
@@ -188,8 +189,8 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
     tabs.pin(tabKey);
   }
 
-  function cancelEdit() {
-    if (dirty && !window.confirm("Отменить несохранённые правки?")) return;
+  async function cancelEdit() {
+    if (dirty && !(await askConfirm({ title: "Отменить несохранённые правки?", confirmLabel: "Отменить правки", danger: true }))) return;
     discardDraft();
     if (isNew) return tabs.close(tabKey);
     setEditing(false);
@@ -197,7 +198,7 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
 
   async function save() {
     if (saveState === "saving") return;
-    if (!draft.title.trim()) { window.alert("Нужно название"); return; }
+    if (!draft.title.trim()) { showNotice("Нужно название"); return; }
     setSaveState("saving");
     const body = {
       title: draft.title.trim(),
@@ -228,7 +229,7 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
   }
 
   async function remove() {
-    if (!memory || !window.confirm(`Удалить запись «${memory.title}»?`)) return;
+    if (!memory || !(await askConfirm({ title: `Удалить запись «${memory.title}»?`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/memories/${memory.id}`, { method: "DELETE" });
     data.reload();
     tabs.close(tabKey);

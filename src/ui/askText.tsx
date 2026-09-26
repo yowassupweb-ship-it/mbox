@@ -72,3 +72,58 @@ function AskDialog({ title, value = "", placeholder = "", confirmLabel = "Гот
     </div>
   );
 }
+
+type ConfirmOptions = { title: string; message?: string; confirmLabel?: string; cancelLabel?: string | null; danger?: boolean };
+
+/**
+ * Замена window.confirm/alert: системное окно Windows посреди интерфейса выглядело чужим и уводило фокус
+ * из приложения. true — подтвердили, false — отмена (Esc, клик мимо).
+ */
+export function askConfirm(options: ConfirmOptions): Promise<boolean> {
+  return new Promise((resolve) => {
+    const host = document.createElement("div");
+    (document.querySelector(".wb") ?? document.body).append(host);
+    const root = createRoot(host);
+    const done = (value: boolean) => {
+      root.unmount();
+      host.remove();
+      resolve(value);
+    };
+    root.render(<ConfirmDialog {...options} onDone={done} />);
+  });
+}
+
+/** Сообщение с одной кнопкой «Понятно» — вместо window.alert. */
+export function showNotice(title: string, message?: string): Promise<void> {
+  return askConfirm({ title, message, confirmLabel: "Понятно", cancelLabel: null }).then(() => undefined);
+}
+
+function ConfirmDialog({ title, message, confirmLabel = "Да", cancelLabel = "Отмена", danger, onDone }: ConfirmOptions & { onDone: (value: boolean) => void }) {
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    markOverlay(true);
+    return () => markOverlay(false);
+  }, []);
+
+  useEffect(() => { confirmRef.current?.focus(); }, []);
+
+  return (
+    <div className="ask-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onDone(false); }}>
+      <form
+        className="ask-dialog"
+        role="alertdialog"
+        aria-label={title}
+        onSubmit={(event) => { event.preventDefault(); onDone(true); }}
+        onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onDone(false); } }}
+      >
+        <div className="ask-title">{title}</div>
+        {message && <div className="ask-hint">{message}</div>}
+        <div className="ask-actions">
+          {cancelLabel !== null && <button type="button" onClick={() => onDone(false)}>{cancelLabel}</button>}
+          <button ref={confirmRef} type="submit" className={danger ? "is-primary is-danger" : "is-primary"}>{confirmLabel}</button>
+        </div>
+      </form>
+    </div>
+  );
+}

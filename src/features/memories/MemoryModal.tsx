@@ -5,6 +5,7 @@ import { formatBytes, formatDateTime } from "../../lib/format";
 import type { Memory } from "../../types";
 import { Button, SaveButton, TextArea, TextInput, type SaveState } from "../../ui";
 import { MarkdownText } from "../../app/workbench/MarkdownText";
+import { askConfirm } from "../../ui/askText";
 
 /**
  * Полноэкранная запись памяти — читать и править. Раньше записи можно было увидеть только куском
@@ -38,7 +39,7 @@ export function MemoryModal({ memory, onClose, onSaved }: { memory: Memory; onCl
   }
 
   async function remove() {
-    if (!window.confirm(`Удалить запись «${memory.title}»?`)) return;
+    if (!(await askConfirm({ title: `Удалить запись «${memory.title}»?`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/memories/${memory.id}`, { method: "DELETE" });
     onSaved();
     onClose();

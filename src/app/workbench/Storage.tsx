@@ -3,10 +3,11 @@ import { ChevronRight, Download, ExternalLink, FolderPlus, Link2, RefreshCw, Set
 import { fetchJson } from "../../lib/api";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { usePersistentState } from "./tabs";
-import { askText } from "../../ui/askText";
+import { askText, askConfirm } from "../../ui/askText";
 import { uploadToStorage, type UploadMode } from "../../lib/storageUpload";
 import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 
 /** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
 function openSheetTab(key: string) {
@@ -104,7 +105,7 @@ export function StorageDocument() {
 
   async function remove(key: string) {
     const isFolder = key.endsWith("/");
-    if (!window.confirm(isFolder ? `Удалить папку «${key}» со всем содержимым?` : `Удалить «${key.split("/").pop()}»?`)) return;
+    if (!(await askConfirm({ title: isFolder ? `Удалить папку «${key}» со всем содержимым?` : `Удалить «${key.split("/").pop()}»?`, confirmLabel: "Удалить", danger: true }))) return;
     const response = await fetch(`/api/mbox/storage/object?key=${encodeURIComponent(key)}`, { method: "DELETE" });
     if (!response.ok) setError(await apiError(response));
     await load(prefix);
@@ -184,7 +185,7 @@ export function StorageDocument() {
               )}
               {listing.folders.map((folder) => (
                 <tr key={folder} className="is-folder">
-                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><img src={`${PROJECT_ICONS}/folder.png`} width={16} height={16} alt="" />{folderName(folder)}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><FolderIcon size={16} />{folderName(folder)}</button></td>
                   <td className="is-num">—</td>
                   <td />
                   <td className="wb-storage-actions"><button type="button" onClick={() => void remove(folder)} title="Удалить папку"><Trash2 size={13} /></button></td>
@@ -192,7 +193,7 @@ export function StorageDocument() {
               ))}
               {listing.objects.map((object) => (
                 <tr key={object.key}>
-                  <td><button type="button" className="wb-storage-name" onClick={async () => { if (isSheetFile(object.key)) { openSheetTab(object.key); return; } const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title={isSheetFile(object.key) ? "Открыть таблицу в редакторе" : "Открыть в новом окне"}><img src={`${PROJECT_ICONS}/documents.png`} width={16} height={16} alt="" />{object.key.slice(prefix.length)}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={async () => { if (isSheetFile(object.key)) { openSheetTab(object.key); return; } const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title={isSheetFile(object.key) ? "Открыть таблицу в редакторе" : "Открыть в новом окне"}><FileTypeIcon name={object.key} size={16} />{object.key.slice(prefix.length)}</button></td>
                   <td className="is-num">{formatBytes(object.size)}</td>
                   <td>{object.last_modified ? formatDateTime(object.last_modified) : ""}</td>
                   <td className="wb-storage-actions">

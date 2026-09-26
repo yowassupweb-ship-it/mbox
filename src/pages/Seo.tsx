@@ -25,6 +25,8 @@ type SeoSettings = {
     site_origin: string;
     sitemap_url: string;
     topvisor_project_id: string;
+    topvisor_user_id?: string;
+    topvisor_region_index?: string;
     topvisor_modules: { audit: boolean; ranks: boolean; serp: boolean; monitoring: boolean };
     webmaster_host_id: string;
     metrica_counter_id: string;
@@ -751,6 +753,16 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => { void fetchOr<SeoSettings>("/api/mbox/seo/settings", EMPTY_SETTINGS).then(setSettings); }, []);
+  // Проверка Topvisor: ключ, User-Id и проект — и список регионов проекта для выбора.
+  type TopvisorCheck = { ok: boolean; error?: string; project?: string; site?: string; regions?: Array<{ index: number; label: string }>; last_check?: string | null };
+  const [check, setCheck] = useState<TopvisorCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const checkTopvisor = async () => {
+    setChecking(true);
+    try { setCheck(await fetchJson<TopvisorCheck>("/api/mbox/seo/topvisor/check")); }
+    catch (cause) { setCheck({ ok: false, error: cause instanceof Error ? cause.message : String(cause) }); }
+    finally { setChecking(false); }
+  };
   const patch = (change: Partial<SeoSettings["config"]>) => setSettings((value) => ({ ...value, config: { ...value.config, ...change } }));
   const save = async () => {
     setSaving(true);
@@ -786,7 +798,17 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
           </>}
           {tool === "topvisor-api" && <>
             <SecretField label="API-ключ Topvisor" name="topvisor_api_key" secrets={secrets} has={settings.has_secrets.topvisor_api_key} onChange={setSecrets} />
+            <Field label="User-Id (Настройки → API в Topvisor)" value={c.topvisor_user_id || ""} onChange={(topvisor_user_id) => patch({ topvisor_user_id })} />
             <Field label="ID проекта Topvisor" value={c.topvisor_project_id} onChange={(topvisor_project_id) => patch({ topvisor_project_id })} />
+            {check?.ok && check.regions && check.regions.length > 0 && (
+              <label className="seo-field">
+                <span>Регион позиций</span>
+                <select value={c.topvisor_region_index || ""} onChange={(event) => patch({ topvisor_region_index: event.currentTarget.value })}>
+                  <option value="">первый в проекте ({check.regions[0].label})</option>
+                  {check.regions.map((region) => <option key={region.index} value={String(region.index)}>{region.label}</option>)}
+                </select>
+              </label>
+            )}
           </>}
           {tool === "metrica-api" && <>
             <SecretField label="Токен Метрики" name="metrica_token" secrets={secrets} has={settings.has_secrets.metrica_token} onChange={setSecrets} />
@@ -811,7 +833,13 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
         )}
         <div className="seo-form-actions">
           <button type="submit" className="is-primary" disabled={saving}>{saving ? "Сохранение…" : "Сохранить"}</button>
+          {tool === "topvisor-api" && <button type="button" disabled={checking || saving} onClick={() => void save().then(checkTopvisor)}>{checking ? "Проверяю…" : "Проверить подключение"}</button>}
           {saved && <span className="seo-saved" role="status">Сохранено</span>}
+          {tool === "topvisor-api" && check && (
+            <span className={check.ok ? "seo-saved" : "seo-error"} role="status">
+              {check.ok ? `Подключено: ${check.project}${check.site ? ` (${check.site})` : ""}, регионов — ${check.regions?.length ?? 0}. ${check.last_check ? `Последняя проверка позиций в Topvisor — ${new Date(check.last_check).toLocaleDateString("ru-RU")}` : "Проверок позиций в Topvisor ещё не было"}` : check.error}
+            </span>
+          )}
         </div>
       </form>
     </div>

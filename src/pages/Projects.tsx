@@ -11,7 +11,7 @@ import { useWheelToHorizontal } from "../lib/useWheelToHorizontal";
 import { positionBetween, projectPosition } from "../lib/tree";
 import type { Company, DecisionEntry, FolderRow, Memory, Project } from "../types";
 import { EmptyState } from "../ui";
-import { askText } from "../ui/askText";
+import { askText, askConfirm } from "../ui/askText";
 
 const ICONS = "/assets/icons/icons";
 const SYSTEM_ICONS = "/assets/icons/system";
@@ -208,7 +208,7 @@ export function ProjectsBoard({ projects, companies, query, selectedNodeKey, onS
 
   /** Папку, созданную здесь же, здесь же надо и удалять: контекстное меню дерева до неё не достаёт. */
   async function deleteFolder(folder: FolderRow) {
-    if (!window.confirm(`Удалить папку «${folder.name}»? Сама папка исчезнет, содержимое проекта останется.`)) return;
+    if (!(await askConfirm({ title: `Удалить папку «${folder.name}»? Сама папка исчезнет, содержимое проекта останется.`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/folders/${folder.id}`, { method: "DELETE" });
     go(project.id, "todo");
     onSaved();

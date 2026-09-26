@@ -183,7 +183,7 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
   return (
     <div className="wb-doc-page is-narrow wb-catalog-doc">
       <header className="wb-catalog-head has-icon">
-        <ToolIcon src={tool.icon} name={tool.name} size={44} />
+        <ToolIcon id={tool.id} src={tool.icon} name={tool.name} size={48} />
         <div>
           <span className="wb-doc-crumbs">Инструменты › {tool.kind}</span>
           <h1>{tool.name}</h1>

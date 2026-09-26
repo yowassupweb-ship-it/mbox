@@ -5,8 +5,8 @@ import { gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspaceBridge, typ
 import { usePersistentState, type TabsApi } from "./tabs";
 import { WbMenu } from "./WbMenu";
 import { onLocalReveal } from "./agentTabs";
-import { askText } from "../../ui/askText";
-import { FileTypeIcon } from "./FileTypeIcon";
+import { askText, askConfirm } from "../../ui/askText";
+import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 
 const PROJECT_ICONS = "/assets/icons/project";
 
@@ -169,10 +169,10 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     }
   }
 
-  function trash(selection: Selection) {
+  async function trash(selection: Selection) {
     const entry = selection.entry;
     if (!entry || !bridge) return;
-    if (!window.confirm(`Переместить «${entry.name}» в корзину?`)) return setMenu(null);
+    if (!(await askConfirm({ title: `Переместить «${entry.name}» в корзину?`, confirmLabel: "В корзину", danger: true }))) return setMenu(null);
     void act(async () => {
       await bridge.trash(selection.rootKey, entry.path);
       tabs.close(localFileKey(selection.rootKey, entry.path));
@@ -247,7 +247,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
           >
             {entry.type === "dir" ? <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} /> : <span className="wb-chevron-space" />}
             {entry.type === "dir"
-              ? <img className="wb-folder-icon" src={`${PROJECT_ICONS}/folder.png`} width={20} height={20} alt="" />
+              ? <FolderIcon open={open} />
               : <FileTypeIcon name={entry.name} />}
             <span className="wb-tree-label">{entry.name}</span>
             {letter && <span className={`wb-git-letter is-${letter}`}>{letter}</span>}
@@ -383,7 +383,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
             </>
           )}
           <button type="button" onClick={() => void act(() => bridge.reveal(menu.rootKey, menu.entry?.path ?? ""))}>Показать в проводнике Windows</button>
-          {!menu.entry && <button type="button" onClick={() => { if (window.confirm("Отключить папку от MBOX? Файлы на диске останутся.")) void act(() => ws.remove(menu.rootKey)); else setMenu(null); }}>Отключить папку</button>}
+          {!menu.entry && <button type="button" onClick={async () => { if ((await askConfirm({ title: "Отключить папку от MBOX? Файлы на диске останутся.", confirmLabel: "Отключить", danger: true }))) void act(() => ws.remove(menu.rootKey)); else setMenu(null); }}>Отключить папку</button>}
         </WbMenu>
       )}
     </div>

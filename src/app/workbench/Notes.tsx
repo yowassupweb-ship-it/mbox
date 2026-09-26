@@ -5,7 +5,7 @@ import { fetchJson } from "../../lib/api";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { formatDateTime, formatSince } from "../../lib/format";
-import { askText } from "../../ui/askText";
+import { askText, askConfirm } from "../../ui/askText";
 import { DocShell, useDrawer } from "./docLayout";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { WbMenu } from "./WbMenu";
@@ -385,7 +385,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   }
 
   async function remove() {
-    if (noteTabs.some((tab) => tab.content.trim()) && !window.confirm("Удалить заметку?")) return;
+    if (noteTabs.some((tab) => tab.content.trim()) && !(await askConfirm({ title: "Удалить заметку?", confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/notes/${noteId}`, { method: "DELETE" });
     notesStore.list = notesStore.list.filter((item) => item.id !== noteId);
     notesStore.listeners.forEach((listener) => listener());
@@ -457,9 +457,9 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     setNoteTabs((current) => current.map((item) => item.id === tab.id ? { ...item, title: title.slice(0, 120) } : item));
   }
 
-  function removeTab(tab: NoteTab) {
+  async function removeTab(tab: NoteTab) {
     if (noteTabs.length <= 1) return;
-    if (tab.content.trim() && !window.confirm(`Удалить вкладку «${tab.title}» вместе с её содержимым?`)) return;
+    if (tab.content.trim() && !(await askConfirm({ title: `Удалить вкладку «${tab.title}» вместе с её содержимым?`, confirmLabel: "Удалить", danger: true }))) return;
     const index = noteTabs.findIndex((item) => item.id === tab.id);
     const remaining = noteTabs.filter((item) => item.id !== tab.id);
     setNoteTabs(remaining);
@@ -763,7 +763,7 @@ function ShareButton({ noteId, onSharedChange }: { noteId: string; onSharedChang
   }
 
   async function revoke(mode: "view" | "edit") {
-    if (!window.confirm(mode === "edit" ? "Отозвать ссылку на правку? Она перестанет открываться." : "Отозвать ссылку на просмотр? Она перестанет открываться.")) return;
+    if (!(await askConfirm({ title: mode === "edit" ? "Отозвать ссылку на правку? Она перестанет открываться." : "Отозвать ссылку на просмотр? Она перестанет открываться.", confirmLabel: "Отозвать", danger: true }))) return;
     setBusy(mode);
     try {
       await fetchJson(`/api/mbox/notes/${noteId}/shares/${mode}`, { method: "DELETE" });

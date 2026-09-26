@@ -4,6 +4,7 @@ import { fetchJson } from "../../lib/api";
 import { edgeTypeLabel, edgeTypeLabels } from "../../lib/labels";
 import type { Project } from "../../types";
 import { Button, EmptyState, Select, TextArea, TextInput } from "../../ui";
+import { askConfirm } from "../../ui/askText";
 
 const edgeTypes = Object.entries(edgeTypeLabels).map(([value, label]) => ({ value, label }));
 
@@ -37,7 +38,7 @@ export function RelationsPanel({ project, projects, onSaved }: { project: Projec
   }
 
   async function removeRelation(id: string, label: string) {
-    if (!window.confirm(`Убрать связь с «${label}»?`)) return;
+    if (!(await askConfirm({ title: `Убрать связь с «${label}»?`, confirmLabel: "Убрать", danger: true }))) return;
     await fetchJson(`/api/mbox/graph/edges/${id}`, { method: "DELETE" });
     onSaved();
   }

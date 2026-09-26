@@ -571,6 +571,8 @@ const DEFAULT_SEO_CONFIG = {
   site_origin: DEFAULT_SITE,
   sitemap_url: "/sitemap.xml",
   topvisor_project_id: "",
+  topvisor_user_id: "",
+  topvisor_region_index: "",
   topvisor_modules: { audit: false, ranks: false, serp: false, monitoring: false },
   webmaster_host_id: "",
   metrica_counter_id: "",
@@ -627,6 +629,172 @@ export async function saveSeoSettings(query, { config = {}, secrets = {} }) {
   return getSeoSettings(query);
 }
 
+// ─── Topvisor API v2 ────────────────────────────────────────────────────────────────────────
+// Доступ — два заголовка: User-Id (ID аккаунта, «Настройки → API» в Topvisor) и Authorization: bearer <ключ>.
+// Позиции берём из positions_2/history по одному региону проекта (config.topvisor_region_index или первый
+// регион первого поисковика) и пишем в seo_rank_snapshots — их читает представление «Позиции».
+// Не календарное окно, а последние TOPVISOR_CHECKS дат, когда проверка реально была: проверки в Topvisor
+// идут по расписанию или вручную и могут надолго прерываться (у vs-travel.ru последняя — 2026-08-03).
+const TOPVISOR_API = "https://api.topvisor.com/v2/json";
+const TOPVISOR_CHECKS = 8;
+const TOPVISOR_LOOKBACK_DAYS = 400;
+
+async function topvisorCall(auth, method, body, timeoutMs = 60000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${TOPVISOR_API}/${method}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-id": String(auth.userId),
+        authorization: `bearer ${auth.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* ниже — ошибка с текстом ответа */ }
+    const apiError = data?.errors?.[0];
+    if (!response.ok || apiError) {
+      const message = apiError?.string || apiError?.message || text.slice(0, 200) || `HTTP ${response.status}`;
+      throw new Error(`Topvisor ${method}: ${message}`);
+    }
+    return data?.result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isoDay(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
+  const projects = await topvisorCall(auth, "get/projects_2/projects", {
+    show_searchers_and_regions: 1,
+    filters: [{ name: "id", operator: "EQUALS", values: [Number(projectId)] }],
+  });
+  const project = Array.isArray(projects) ? projects[0] : null;
+  if (!project) throw new Error(`Topvisor: проект ${projectId} не найден в аккаунте`);
+  const regions = (project.searchers || []).flatMap((searcher) => (searcher.regions || []).map((region) => ({
+    index: Number(region.index),
+    label: [searcher.name, region.name].filter(Boolean).join(" · "),
+    device: region.device === 1 || region.device === "1" ? "mobile" : region.device === 2 || region.device === "2" ? "tablet" : "desktop",
+  })));
+  if (!regions.length) throw new Error("Topvisor: у проекта нет регионов проверки позиций");
+  const region = regions.find((item) => String(item.index) === String(regionIndex)) || regions[0];
+
+  const to = new Date();
+  const from = new Date(to.getTime() - TOPVISOR_LOOKBACK_DAYS * 86400000);
+  const probe = await topvisorCall(auth, "get/positions_2/history", {
+    project_id: Number(projectId),
+    regions_indexes: [region.index],
+    date1: isoDay(from),
+    date2: isoDay(to),
+    type_range: 2,
+    show_exists_dates: 1,
+    fields: ["id"],
+    positions_fields: ["position"],
+    limit: 1,
+  });
+  const dates = [...new Set((probe?.existsDates || []).filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day)))].sort().slice(-TOPVISOR_CHECKS);
+  if (!dates.length) {
+    return { project: project.name || String(projectId), region: region.label, regions: regions.map((item) => ({ index: item.index, label: item.label })), keywords: 0, rows: 0, last_check: null };
+  }
+  const history = await topvisorCall(auth, "get/positions_2/history", {
+    project_id: Number(projectId),
+    regions_indexes: [region.index],
+    dates,
+    fields: ["id", "name"],
+    positions_fields: ["position", "relevant_url"],
+  }, 120000);
+
+  const rowsOut = [];
+  for (const keyword of history?.keywords || []) {
+    const name = String(keyword.name || "").trim();
+    if (!name) continue;
+    for (const [key, cell] of Object.entries(keyword.positionsData || {})) {
+      const day = key.split(":")[0];
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const raw = cell?.position;
+      const position = raw === undefined || raw === null || raw === "--" || raw === "" ? null : Number(raw);
+      rowsOut.push({
+        captured_at: `${day}T12:00:00Z`,
+        query: name,
+        url: String(cell?.relevant_url || ""),
+        position: Number.isFinite(position) ? position : null,
+        raw: { keyword_id: keyword.id, cell },
+      });
+    }
+  }
+
+  // Прогон за те же даты заменяет прошлый: Topvisor мог досчитать проверку, дубли по дням не нужны.
+  await query(
+    "DELETE FROM seo_rank_snapshots WHERE source = 'topvisor' AND region = $1 AND captured_at::date = ANY($2::date[])",
+    [region.label, dates],
+  );
+  for (let i = 0; i < rowsOut.length; i += 500) {
+    const chunk = rowsOut.slice(i, i + 500);
+    await query(
+      `INSERT INTO seo_rank_snapshots(captured_at, source, query, url, position, region, device, raw)
+       SELECT r.captured_at, 'topvisor', r.query, r.url, r.position, $2, $3, r.raw
+       FROM jsonb_to_recordset($1::jsonb) AS r(captured_at TIMESTAMPTZ, query TEXT, url TEXT, position DOUBLE PRECISION, raw JSONB)`,
+      [JSON.stringify(chunk), region.label, region.device],
+    );
+  }
+  return {
+    project: project.name || String(projectId),
+    region: region.label,
+    regions: regions.map((item) => ({ index: item.index, label: item.label })),
+    keywords: (history?.keywords || []).length,
+    rows: rowsOut.length,
+    dates,
+    last_check: dates[dates.length - 1],
+  };
+}
+
+/** Проверка подключения для страницы инструмента: ключ, User-Id и проект — без записи позиций. */
+export async function checkTopvisor(query) {
+  const settings = await getSeoSettings(query, true);
+  const auth = {
+    userId: process.env.TOPVISOR_USER_ID || settings.config?.topvisor_user_id,
+    apiKey: process.env.TOPVISOR_API_KEY || settings.secrets?.topvisor_api_key,
+  };
+  const projectId = process.env.TOPVISOR_PROJECT_ID || settings.config?.topvisor_project_id;
+  if (!auth.apiKey) return { ok: false, error: "Не указан API-ключ Topvisor" };
+  if (!auth.userId) return { ok: false, error: "Не указан User-Id Topvisor (Настройки → API в Topvisor)" };
+  if (!projectId) return { ok: false, error: "Не указан ID проекта Topvisor" };
+  try {
+    const projects = await topvisorCall(auth, "get/projects_2/projects", {
+      show_searchers_and_regions: 1,
+      filters: [{ name: "id", operator: "EQUALS", values: [Number(projectId)] }],
+    });
+    const project = Array.isArray(projects) ? projects[0] : null;
+    if (!project) return { ok: false, error: `Проект ${projectId} не найден в аккаунте Topvisor` };
+    const regions = (project.searchers || []).flatMap((searcher) => (searcher.regions || []).map((region) => ({
+      index: Number(region.index),
+      label: [searcher.name, region.name].filter(Boolean).join(" · "),
+    })));
+    const probe = await topvisorCall(auth, "get/positions_2/history", {
+      project_id: Number(projectId),
+      regions_indexes: [regions[0]?.index ?? 1],
+      date1: isoDay(new Date(Date.now() - TOPVISOR_LOOKBACK_DAYS * 86400000)),
+      date2: isoDay(new Date()),
+      type_range: 2,
+      show_exists_dates: 1,
+      fields: ["id"],
+      positions_fields: ["position"],
+      limit: 1,
+    }).catch(() => null);
+    const checks = (probe?.existsDates || []).slice().sort();
+    return { ok: true, project: project.name || String(projectId), site: project.site || "", regions, last_check: checks[checks.length - 1] || null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function runExternalAdapters(query) {
   const settings = await getSeoSettings(query, true).catch(() => ({ config: DEFAULT_SEO_CONFIG, secrets: {} }));
   const cfg = settings.config || {};
@@ -638,11 +806,25 @@ async function runExternalAdapters(query) {
   const topvisorProjectId = process.env.TOPVISOR_PROJECT_ID || cfg.topvisor_project_id;
   const webmasterHostId = process.env.YANDEX_WEBMASTER_HOST_ID || cfg.webmaster_host_id;
   const metricaCounterId = process.env.YANDEX_METRICA_COUNTER_ID || cfg.metrica_counter_id;
+  const topvisorUserId = process.env.TOPVISOR_USER_ID || cfg.topvisor_user_id;
+  const modules = cfg.topvisor_modules || {};
+  // Позиции собираем, если включён модуль «позиции» или не включено ни одного — иначе ключ лежит впустую.
+  const wantRanks = modules.ranks || !Object.values(modules).some(Boolean);
+  let topvisor;
+  if (!topvisorKey) topvisor = await configuredSource("topvisor_audit", false, { reason: "topvisor_api_key missing", modules });
+  else if (!topvisorUserId) topvisor = await configuredSource("topvisor_audit", false, { reason: "topvisor_user_id missing", modules });
+  else if (!topvisorProjectId) topvisor = await configuredSource("topvisor_audit", false, { reason: "topvisor_project_id missing", modules });
+  else if (!wantRanks) topvisor = await configuredSource("topvisor_audit", true, { reason: "ranks module off", modules });
+  else {
+    try {
+      const ranks = await collectTopvisorRanks(query, { userId: topvisorUserId, apiKey: topvisorKey }, topvisorProjectId, cfg.topvisor_region_index);
+      topvisor = await configuredSource("topvisor_audit", true, { modules, ranks });
+    } catch (error) {
+      topvisor = { status: "error", error: error instanceof Error ? error.message : String(error), modules, updated_at: new Date().toISOString(), source: "topvisor_audit" };
+    }
+  }
   return {
-    topvisor_audit: await configuredSource("topvisor_audit", Boolean(topvisorKey && topvisorProjectId), {
-      reason: topvisorKey ? "project_id_missing_or_adapter_pending" : "topvisor_api_key missing",
-      modules: cfg.topvisor_modules || {},
-    }),
+    topvisor_audit: topvisor,
     webmaster: await configuredSource("webmaster", Boolean(webmasterToken && webmasterHostId), {
       reason: webmasterToken ? "host_id_missing_or_step_2" : "webmaster_token missing",
     }),
@@ -1227,6 +1409,9 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     }
     if (url.pathname === "/api/mbox/seo/changes" && req.method === "POST") {
       return reply(201, { change: await recordChange(query, await readBody(req)) });
+    }
+    if (url.pathname === "/api/mbox/seo/topvisor/check" && req.method === "GET") {
+      return reply(200, await checkTopvisor(query));
     }
     if (url.pathname === "/api/mbox/seo/settings" && req.method === "GET") {
       return reply(200, await getSeoSettings(query));

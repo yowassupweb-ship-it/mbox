@@ -48,6 +48,7 @@ import { installBrowserAgent } from "./browserAgent";
 import { SkillPageDocument } from "./SkillPageDocument";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
+import { askConfirm } from "../../ui/askText";
 
 type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
@@ -105,7 +106,7 @@ function useDrag(onMove: (event: PointerEvent) => void) {
 
 export function Workbench({ data, titleBar, renderers, status, user, onProjectContext }: Props) {
   setWorkbenchStorageUser(user.username);
-  const tabs = useTabs();
+  const tabsState = useTabs();
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const defaultNoteProjectId = user.role === "owner" ? null : data.projects[0]?.id;
 
@@ -141,6 +142,20 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   // Сплит центральной части: вторая группа редактора справа от основной. Держит ровно одну
   // вкладку (браузер слева — заметка справа, и наоборот), поэтому хватает одного ключа и доли ширины.
   const [splitKey, setSplitKey] = usePersistentState<string | null>("mbox.wb.splitKey", null);
+  // Экран разделён, и браузер только во второй области — новая вкладка браузера (из меню, от агента, по ссылке)
+  // встаёт туда же, а не в основную область с заметкой. Прежняя страница уходит в основной список вкладок.
+  const routedOpen = useCallback((key: string, pin = false) => {
+    const isNewWeb = key.startsWith("web:") && !tabsState.tabs.some((tab) => tab.key === key);
+    if (isNewWeb && splitKey?.startsWith("web:") && !tabsState.active.startsWith("web:")) {
+      const mainActive = tabsState.active;
+      tabsState.open(key, true);
+      setSplitKey(key);
+      if (mainActive) tabsState.open(mainActive);
+      return;
+    }
+    tabsState.open(key, pin);
+  }, [tabsState, splitKey, setSplitKey]);
+  const tabs = useMemo(() => ({ ...tabsState, open: routedOpen }), [tabsState, routedOpen]);
   const [splitRatio, setSplitRatio] = usePersistentState("mbox.wb.splitRatio", 0.5);
   const [rightOpen, setRightOpen] = usePersistentState("mbox.wb.rightOpen", true);
   const [rightWidth, setRightWidth] = usePersistentState("mbox.wb.rightWidth", 460);
@@ -283,8 +298,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     }
   }, []);
 
-  function closeTab(key: string) {
-    if (dirty[key] && !window.confirm("Во вкладке несохранённые правки. Закрыть?")) return;
+  async function closeTab(key: string) {
+    if (dirty[key] && !(await askConfirm({ title: "Во вкладке несохранённые правки. Закрыть?", confirmLabel: "Закрыть без сохранения", danger: true }))) return;
     if (key === splitKey) setSplitKey(null);
     tabs.close(key);
   }

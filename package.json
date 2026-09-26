@@ -35,6 +35,7 @@
     "exceljs": "^4.4.0",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.12.3",
+    "material-icon-theme": "^5.38.1",
     "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

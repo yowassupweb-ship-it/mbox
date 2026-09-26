@@ -41,7 +41,7 @@
 .project-company-label {
   padding: 0 4px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   text-transform: uppercase;
   letter-spacing: .04em;
@@ -82,8 +82,9 @@
 }
 
 .project-pill-name {
-  font-family: var(--font-pixel);
-  font-size: 15px;
+  font-family: var(--font-sans);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
   line-height: 1.4;
   color: var(--text-main);
   overflow-wrap: anywhere;
@@ -111,7 +112,7 @@
   border-radius: var(--radius-pill);
   background: var(--state-live);
   color: #06120e;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 2px var(--container-bg);
@@ -121,7 +122,7 @@
   min-width: 22px;
   padding: 1px 7px;
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, .07);
+  background: color-mix(in srgb, var(--text-main) 7%, transparent);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -136,7 +137,7 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-color) 12%, transparent);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 .project-pill-props svg { flex: none; }
@@ -273,7 +274,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.project-fact-card time { color: var(--text-muted); font-size: 11px; }
+.project-fact-card time { color: var(--text-muted); font-size: var(--text-xs); }
 
 /* Перетаскивание карточек */
 
@@ -319,7 +320,7 @@
 .todo-done-head b {
   padding: 1px 8px;
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, .07);
+  background: color-mix(in srgb, var(--text-main) 7%, transparent);
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
 }
@@ -384,7 +385,7 @@
   border-radius: var(--radius-pill);
   background: var(--state-ok);
   color: #04210e;
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   line-height: 17px;
   text-align: center;
@@ -440,8 +441,8 @@
 .env-hint code {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .07);
-  font-family: "SF Mono", ui-monospace, monospace;
+  background: color-mix(in srgb, var(--text-main) 7%, transparent);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
 
@@ -466,7 +467,7 @@
 }
 
 .env-key {
-  font-family: "SF Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   text-transform: none;
 }
 
@@ -529,7 +530,7 @@
   height: 30px;
   border: 0;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .05);
+  background: color-mix(in srgb, var(--text-main) 5%, transparent);
   color: var(--text-muted);
 }
 
@@ -638,7 +639,7 @@
   color: var(--text-muted);
 }
 
-.folder-note header button:hover { background: rgba(255, 255, 255, .06); color: var(--text-main); }
+.folder-note header button:hover { background: color-mix(in srgb, var(--text-main) 6%, transparent); color: var(--text-main); }
 .folder-note header button:last-child:hover { color: var(--state-danger); }
 
 .folder-note p {
@@ -766,7 +767,7 @@
   color: var(--text-muted);
 }
 
-.stack-chip button:hover { background: rgba(255, 255, 255, .09); color: var(--state-danger); }
+.stack-chip button:hover { background: color-mix(in srgb, var(--text-main) 9%, transparent); color: var(--state-danger); }
 
 .stack-add { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; width: min(100%, 520px); }
 .stack-add input { flex: 1 1 220px; min-width: 0; }
@@ -788,7 +789,7 @@
 
 .git-link:hover { border-color: color-mix(in srgb, #7ee2a8 55%, var(--border-color)); }
 .git-link svg { color: #7ee2a8; flex: none; }
-.git-repo { font-family: "SF Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
+.git-repo { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .git-host { color: var(--text-muted); font-size: var(--text-sm); }
 
 /* Структура репозитория — публикует scripts/publish-repo-structure.mjs (или set_repo_structure
@@ -800,8 +801,8 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-lg);
   background: #0c0c0e;
-  font-family: "SF Mono", ui-monospace, monospace;
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .repo-tree-head {
@@ -812,7 +813,7 @@
   flex-wrap: wrap;
   margin-bottom: var(--space-2);
   padding-bottom: var(--space-2);
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-main) 6%, transparent);
   font-weight: var(--weight-bold);
   color: var(--text-main);
 }
@@ -955,7 +956,7 @@
 .responder-access > p { margin: 0; max-width: 72ch; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
 .responder-token { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--accent-color) 44%, var(--border-color)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent-color) 8%, var(--element-bg)); }
 .responder-token strong { font-size: var(--text-sm); }
-.responder-token textarea { width: 100%; padding: 10px 12px; resize: vertical; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); color: var(--text-main); font: 12px/1.55 "SF Mono", ui-monospace, monospace; }
+.responder-token textarea { width: 100%; padding: 10px 12px; resize: vertical; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); color: var(--text-main); font: 12px/1.55 var(--font-mono); }
 .responder-token button,
 .responder-key-row > button { justify-self: start; min-height: 32px; padding: 5px 11px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); color: var(--text-main); }
 .responder-key-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
@@ -981,7 +982,7 @@
   text-align: left;
 }
 
-.access-level b { font-family: "SF Mono", ui-monospace, monospace; font-size: var(--text-md); }
+.access-level b { font-family: var(--font-mono); font-size: var(--text-md); }
 .access-level small { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; }
 
 .access-level.is-active {
@@ -1162,7 +1163,7 @@
 .chat-tabs b {
   padding: 0 6px;
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, .07);
+  background: color-mix(in srgb, var(--text-main) 7%, transparent);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -1204,7 +1205,7 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--container-bg) 96%, transparent);
-  box-shadow: 0 20px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  box-shadow: 0 20px 44px rgba(0,0,0,.45), inset 0 1px 0 color-mix(in srgb, var(--text-main) 6%, transparent);
   backdrop-filter: blur(18px) saturate(150%);
 }
 
@@ -1216,7 +1217,7 @@
   margin-bottom: 2px;
   padding: 0 var(--space-2);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: .04em;
 }
@@ -1276,7 +1277,7 @@
   gap: 5px;
   padding-left: 4px;
   color: var(--text-main);
-  background: rgba(255, 255, 255, .09);
+  background: color-mix(in srgb, var(--text-main) 9%, transparent);
 }
 .project-workspace-main {
   min-width: 0;
@@ -1333,5 +1334,5 @@
   font-size: var(--text-xs);
 }
 
-.account-jarvis { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+.account-jarvis { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--text-sm); white-space: nowrap; cursor: pointer; }
 .account-jarvis input { accent-color: var(--accent-color); }

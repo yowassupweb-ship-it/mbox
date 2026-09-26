@@ -7,7 +7,7 @@ import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from ".
 import { CodeEditor } from "../app/workbench/CodeEditor";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "../app/workbench/DocumentTools";
 import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } from "../app/workbench/noteTabs";
-import { askText } from "../ui/askText";
+import { askText, askConfirm } from "../ui/askText";
 
 type SharedNote = { title: string; content: string; tabs?: NoteTab[]; theme: "light" | "graphite" | "black"; updated_at: string };
 type Status = "loading" | "saved" | "pending" | "saving" | "error" | "missing";
@@ -218,9 +218,9 @@ export function SharedNotePage({ token }: { token: string }) {
     setTabs((current) => current.map((item) => item.id === tab.id ? { ...item, title: title.slice(0, 120) } : item));
   }
 
-  function removeTab(tab: NoteTab) {
+  async function removeTab(tab: NoteTab) {
     if (mode !== "edit" || tabs.length <= 1) return;
-    if (tab.content.trim() && !window.confirm(`Удалить вкладку «${tab.title}» вместе с её содержимым?`)) return;
+    if (tab.content.trim() && !(await askConfirm({ title: `Удалить вкладку «${tab.title}» вместе с её содержимым?`, confirmLabel: "Удалить", danger: true }))) return;
     const index = tabs.findIndex((item) => item.id === tab.id);
     const remaining = tabs.filter((item) => item.id !== tab.id);
     setTabs(remaining);

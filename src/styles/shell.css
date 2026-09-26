@@ -24,10 +24,10 @@
 .metric-card,
 .sync-panel {
   border: 1px solid rgba(20, 26, 36, .78);
-  background: rgba(255, 255, 255, .54);
+  background: color-mix(in srgb, var(--text-main) 54%, transparent);
   box-shadow:
     10px 12px 24px rgba(113, 126, 150, .14),
-    inset 1px 1px 0 rgba(255, 255, 255, .92);
+    inset 1px 1px 0 color-mix(in srgb, var(--text-main) 92%, transparent);
   backdrop-filter: blur(22px) saturate(160%);
 }
 
@@ -97,8 +97,8 @@
 }
 
 .brand-name {
-  font-size: 24px;
-  font-weight: 800;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
 }
 
@@ -129,9 +129,9 @@
 .editor-preview input,
 .editor-preview textarea,
 .compact-control select {
-  border: 1px solid rgba(255,255,255,.14);
+  border: 1px solid color-mix(in srgb, var(--text-main) 14%, transparent);
   border-radius: var(--radius-pill);
-  background: rgba(255,255,255,.46);
+  background: color-mix(in srgb, var(--text-main) 46%, transparent);
   color: inherit;
   box-shadow: inset 2px 2px 5px rgba(137, 151, 175, .10);
 }
@@ -157,8 +157,8 @@
   gap: 8px;
   padding: 0 16px;
   text-align: center;
-  font-size: 14px;
-  font-weight: 760;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
   white-space: nowrap;
   text-decoration: none;
 }
@@ -168,7 +168,7 @@
   background: color-mix(in srgb, var(--accent-color) 24%, transparent);
   border-color: rgba(134, 194, 255, .32);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 1px 0 color-mix(in srgb, var(--text-main) 18%, transparent),
     inset 0 -10px 18px color-mix(in srgb, var(--accent-color) 10%, transparent),
     0 10px 28px color-mix(in srgb, var(--accent-color) 14%, transparent);
   backdrop-filter: blur(18px) saturate(150%);
@@ -196,7 +196,7 @@
     calc(18px + env(safe-area-inset-left));
   border-top: var(--border-width) solid var(--border-color);
   background: color-mix(in srgb, var(--container-bg) 86%, transparent);
-  box-shadow: 0 -12px 34px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.08);
+  box-shadow: 0 -12px 34px rgba(0,0,0,.26), inset 0 1px 0 color-mix(in srgb, var(--text-main) 8%, transparent);
   backdrop-filter: blur(18px);
 }
 
@@ -255,7 +255,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .sync-panel select {
@@ -293,7 +293,7 @@
 
 /* В прилипшем положении шапка стоит выше и ближе к верху окна, но не касается края. */
 .topbar-logo { flex: none; }
-.realtime-pill strong.is-brand { font-family: var(--font-pixel); font-size: 18px; letter-spacing: .02em; margin-left: -5px; position: relative; top: 3px; }
+.realtime-pill strong.is-brand { font-family: var(--font-sans); font-weight: var(--weight-bold); font-size: var(--text-md); letter-spacing: -0.01em; }
 
 .topbar {
   position: sticky;
@@ -352,14 +352,14 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: var(--border-width) solid rgba(255,255,255,.08);
+  border: var(--border-width) solid color-mix(in srgb, var(--text-main) 8%, transparent);
   border-radius: var(--radius-pill);
   padding: 0 13px;
   color: #cfe3ff;
   background: color-mix(in srgb, var(--element-bg) 78%, transparent);
   box-shadow: var(--chin-shadow);
-  font-size: 13px;
-  font-weight: 760;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
   text-decoration: none;
   white-space: nowrap;
   backdrop-filter: blur(18px) saturate(150%);
@@ -400,7 +400,7 @@
 .desktop-pill:hover,
 .desktop-pill[aria-expanded="true"] {
   background: rgba(58, 58, 62, .86);
-  box-shadow: 0 16px 34px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.08);
+  box-shadow: 0 16px 34px rgba(0,0,0,.34), inset 0 1px 0 color-mix(in srgb, var(--text-main) 8%, transparent);
 }
 
 .desktop-popover {
@@ -411,7 +411,7 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--container-bg) 92%, transparent);
-  box-shadow: 0 24px 54px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  box-shadow: 0 24px 54px rgba(0,0,0,.45), inset 0 1px 0 color-mix(in srgb, var(--text-main) 6%, transparent);
   backdrop-filter: blur(22px) saturate(150%);
   padding: 12px;
   color: var(--text-main);
@@ -433,13 +433,13 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: var(--border-width) solid rgba(255,255,255,.08);
+  border: var(--border-width) solid color-mix(in srgb, var(--text-main) 8%, transparent);
   border-radius: var(--radius-lg);
-  background: rgba(255,255,255,.05);
+  background: color-mix(in srgb, var(--text-main) 5%, transparent);
   color: inherit;
   font: inherit;
-  font-size: 12px;
-  font-weight: 730;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
   cursor: pointer;
 }
 
@@ -459,7 +459,7 @@
   gap: 9px;
   border-radius: var(--radius-lg);
   padding: 8px;
-  background: rgba(255,255,255,.045);
+  background: color-mix(in srgb, var(--text-main) 4.5%, transparent);
 }
 
 .desktop-agent-row div {
@@ -470,7 +470,7 @@
 
 .desktop-agent-row span:not(.desktop-dot) {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .desktop-dot {
@@ -478,7 +478,7 @@
   height: 9px;
   border-radius: 50%;
   background: #6b7280;
-  box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-main) 4%, transparent);
 }
 
 .desktop-dot.live {
@@ -500,7 +500,7 @@
 .desktop-update-state {
   margin-top: 9px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.35;
 }
 
@@ -527,14 +527,14 @@
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  border: var(--border-width) solid rgba(255,255,255,.08);
+  border: var(--border-width) solid color-mix(in srgb, var(--text-main) 8%, transparent);
   border-radius: var(--radius-pill);
   padding: 0 14px;
   background: color-mix(in srgb, var(--element-bg) 70%, transparent);
   box-shadow: var(--chin-shadow);
   color: #aeb8c8;
-  font-size: 13px;
-  font-weight: 760;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
   backdrop-filter: blur(18px) saturate(150%);
   max-width: min(52vw, 560px);
   min-width: 156px;
@@ -611,7 +611,7 @@
 .realtime-pill:hover,
 .realtime-pill[aria-expanded="true"] {
   background: rgba(58, 58, 62, .86);
-  box-shadow: 0 16px 34px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.08);
+  box-shadow: 0 16px 34px rgba(0,0,0,.34), inset 0 1px 0 color-mix(in srgb, var(--text-main) 8%, transparent);
 }
 
 .agent-status-popover {
@@ -625,7 +625,7 @@
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--container-bg) 92%, transparent);
-  box-shadow: 0 24px 54px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  box-shadow: 0 24px 54px rgba(0,0,0,.45), inset 0 1px 0 color-mix(in srgb, var(--text-main) 6%, transparent);
   backdrop-filter: blur(22px) saturate(150%);
   padding: 14px;
   color: var(--text-main);
@@ -651,7 +651,7 @@
   gap: 4px;
   border-radius: var(--radius-lg);
   padding: 10px;
-  background: rgba(255,255,255,.05);
+  background: color-mix(in srgb, var(--text-main) 5%, transparent);
 }
 
 .agent-status-item span {
@@ -661,7 +661,7 @@
 .agent-status-item time,
 .agent-status-popover p {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 @keyframes status-pop {
@@ -700,5 +700,5 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-weight: 750;
+  font-weight: var(--weight-bold);
 }

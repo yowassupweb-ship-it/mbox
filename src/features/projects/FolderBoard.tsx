@@ -8,6 +8,7 @@ import { Button, EmptyState, SaveButton, TextArea, TextInput, type SaveState } f
 import { usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
 import { MarkdownText } from "../../app/workbench/MarkdownText";
+import { askConfirm } from "../../ui/askText";
 
 /**
  * Содержимое папки проекта.
@@ -102,7 +103,7 @@ function NewNote({ folder, project, onDone, onSaved }: { folder: FolderRow; proj
 function FolderNote({ memory, onOpen, onSaved }: { memory: Memory; onOpen: () => void; onSaved: () => void }) {
   async function remove(event: MouseEvent) {
     event.stopPropagation();
-    if (!window.confirm(`Удалить запись «${memory.title}»?`)) return;
+    if (!(await askConfirm({ title: `Удалить запись «${memory.title}»?`, confirmLabel: "Удалить", danger: true }))) return;
     await fetchJson(`/api/mbox/memories/${memory.id}`, { method: "DELETE" });
     onSaved();
   }
