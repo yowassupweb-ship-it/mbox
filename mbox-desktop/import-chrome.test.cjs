@@ -52,6 +52,31 @@ test("imports Chrome bookmark bar and folders, preserving local bookmarks", () =
   assert.throws(() => imported.importBookmarks("../../outside"));
 });
 
+test("re-import merges Chrome bookmarks without overwriting manual bookmarks", () => {
+  const profile = path.join(root, "Google", "Chrome", "User Data", "Profile 1");
+  fs.mkdirSync(profile, { recursive: true });
+  fs.writeFileSync(path.join(profile, "Bookmarks"), JSON.stringify({ roots: {
+    bookmark_bar: { type: "folder", name: "Bookmarks bar", children: [
+      { type: "folder", name: "Work", children: [{ type: "url", name: "Old docs", url: "https://merge.example/docs" }] },
+    ] },
+  } }));
+  imported.setBookmark({ title: "Manual docs", url: "https://merge.example/docs", folder: "Pinned" });
+  let result = imported.importFromChrome({ profile: "Profile 1", bookmarks: true });
+  assert.equal(result.bookmarks.count, 0);
+  assert.equal(imported.getBookmarks().find((item) => item.url === "https://merge.example/docs").title, "Manual docs");
+
+  fs.writeFileSync(path.join(profile, "Bookmarks"), JSON.stringify({ roots: {
+    bookmark_bar: { type: "folder", name: "Bookmarks bar", children: [
+      { type: "folder", name: "Work", children: [{ type: "folder", name: "Deep", children: [
+        { type: "url", name: "New docs", url: "https://merge.example/new" },
+      ] }] },
+    ] },
+  } }));
+  result = imported.importFromChrome({ profile: "Profile 1", bookmarks: true });
+  assert.equal(result.bookmarks.count, 1);
+  assert.equal(imported.getBookmarks().find((item) => item.url === "https://merge.example/new").folder, "Work / Deep");
+});
+
 test("imports quoted Chrome CSV locally and matches credentials by HTTPS origin", () => {
   const csv = path.join(root, "passwords.csv");
   fs.writeFileSync(csv, 'name,url,username,password,note\r\nSite,https://example.com/login,user,"sec,ret","line 1\nline 2"\r\n');

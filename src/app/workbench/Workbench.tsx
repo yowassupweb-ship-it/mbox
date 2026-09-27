@@ -740,7 +740,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "explorer" && <ExplorerView data={data} tabs={tabs} onProjectContext={onProjectContext} />}
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
-        {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} />}
+        {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
         {activity === "skills" && <SkillsView tabs={tabs} />}

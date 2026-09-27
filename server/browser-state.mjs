@@ -113,6 +113,13 @@ export async function handleBrowserStateApi({ req, res, url, query, readBody, se
         // и ставим позиции по порядку массива — так панель повторяет порядок Chrome.
         const batch = Array.isArray(body.bookmarks);
         const items = batch ? body.bookmarks : [body];
+        const importUrls = items.map((item) => validUrl(item.url)).filter(Boolean);
+        const basePosition = batch
+          ? Number((await query(
+            "SELECT COALESCE(MAX(position), 0) AS position FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1 AND NOT (url = ANY($2::text[]))",
+            [owner, importUrls],
+          )).rows[0]?.position || 0)
+          : 0;
         let index = 0;
         for (const item of items.slice(0, 5000)) {
           const href = validUrl(item.url);
@@ -125,8 +132,14 @@ export async function handleBrowserStateApi({ req, res, url, query, readBody, se
                      CASE WHEN $7::boolean THEN $8::double precision
                           ELSE (SELECT COALESCE(MIN(position), 0) - 1 FROM browser_bookmarks WHERE mbox_user_id IS NOT DISTINCT FROM $1) END)
              ON CONFLICT (mbox_user_id, url) DO UPDATE SET title = EXCLUDED.title, folder = EXCLUDED.folder,
-               position = CASE WHEN $7::boolean THEN EXCLUDED.position ELSE browser_bookmarks.position END`,
-            [owner, href, String(item.title || "").slice(0, 200), String(item.folder || "").slice(0, 200), String(item.source || "bookmark_bar").slice(0, 40), Boolean(item.imported), batch, index],
+               source = CASE WHEN browser_bookmarks.imported THEN EXCLUDED.source ELSE browser_bookmarks.source END,
+               imported = browser_bookmarks.imported OR EXCLUDED.imported,
+               position = CASE
+                 WHEN $7::boolean AND browser_bookmarks.imported THEN EXCLUDED.position
+                 WHEN $7::boolean THEN browser_bookmarks.position
+                 ELSE browser_bookmarks.position
+               END`,
+            [owner, href, String(item.title || "").slice(0, 200), String(item.folder || "").slice(0, 200), String(item.source || "bookmark_bar").slice(0, 40), Boolean(item.imported), batch, basePosition + index],
           );
         }
         sendJson(res, 200, { bookmarks: await listBookmarks(query, owner) });

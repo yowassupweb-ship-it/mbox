@@ -111,7 +111,7 @@ function snippetOf(note: Note) {
   return lines.slice(1).join(" · ").slice(0, 140);
 }
 
-export function NotesView({ tabs, defaultProjectId = null }: { tabs: TabsApi; defaultProjectId?: string | null }) {
+export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(notesStore.query);
   const canCreate = defaultProjectId !== undefined;
@@ -139,7 +139,7 @@ export function NotesView({ tabs, defaultProjectId = null }: { tabs: TabsApi; de
   function renderItem(note: Note) {
     const key = `note:${note.id}`;
     return (
-      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => tabs.open(key)} onDoubleClick={() => tabs.open(key, true)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") tabs.open(key, true); }}>
+      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => { tabs.open(key); onOpen?.(); }} onDoubleClick={() => { tabs.open(key, true); onOpen?.(); }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") { tabs.open(key, true); onOpen?.(); } }}>
         <div className="wb-note-item-title">{note.title || "Пустая заметка"}</div>
         {snippetOf(note) && <div className="wb-note-item-snippet">{snippetOf(note)}</div>}
         <div className="wb-note-item-meta">{formatSince(note.updated_at)}</div>
@@ -155,7 +155,7 @@ export function NotesView({ tabs, defaultProjectId = null }: { tabs: TabsApi; de
       <header className="wb-view-head">
         <span>Заметки</span>
         <div className="wb-view-actions">
-          <button type="button" disabled={!canCreate} onClick={() => void createNoteAndOpen(tabs, defaultProjectId ?? null)} title={canCreate ? "Новая заметка (Ctrl+Alt+N)" : "Нет доступных проектов для заметок"}><Plus size={14} /></button>
+          <button type="button" disabled={!canCreate} onClick={() => { void createNoteAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая заметка (Ctrl+Alt+N)" : "Нет доступных проектов для заметок"}><Plus size={14} /></button>
         </div>
       </header>
       <div className="wb-filter">
@@ -177,7 +177,7 @@ export function NotesView({ tabs, defaultProjectId = null }: { tabs: TabsApi; de
         {!notesStore.loading && !notesStore.failed && !notesStore.list.length && (
           <div className="wb-session-empty">
             <p>{query ? "Ничего не нашлось." : "Заметок пока нет."}</p>
-            {!query && <button type="button" disabled={!canCreate} onClick={() => void createNoteAndOpen(tabs, defaultProjectId ?? null)}><Plus size={13} /> Новая заметка</button>}
+            {!query && <button type="button" disabled={!canCreate} onClick={() => { void createNoteAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }}><Plus size={13} /> Новая заметка</button>}
           </div>
         )}
       </div>

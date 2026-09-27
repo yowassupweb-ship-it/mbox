@@ -253,11 +253,26 @@ function importFromChrome({ profile = "Default", bookmarks = true, passwordsCsv 
   if (bookmarks) {
     const res = importBookmarks(profile);
     if (res.ok) {
-      const local = getBookmarks().filter((item) => item.source === "bookmark_bar" && !item.imported);
-      const seen = new Set(local.map((item) => item.url));
-      const imported = res.items.filter((item) => !seen.has(item.url)).map((item) => ({ ...item, imported: true }));
-      writeJson("bookmarks.json", { savedAt: Date.now(), items: [...local, ...imported] });
-      result.bookmarks = { count: imported.length };
+      const current = getBookmarks();
+      const byUrl = new Map(current.map((item) => [item.url, item]));
+      let added = 0;
+      let updated = 0;
+      for (const item of res.items) {
+        const existing = byUrl.get(item.url);
+        if (existing && !existing.imported) continue;
+        if (existing) updated += 1;
+        else added += 1;
+        byUrl.set(item.url, { ...existing, ...item, imported: true });
+      }
+      const chromeOrder = new Map(res.items.map((item, index) => [item.url, index]));
+      const next = [
+        ...current
+          .filter((item) => !chromeOrder.has(item.url))
+          .map((item) => byUrl.get(item.url) || item),
+        ...res.items.map((item) => byUrl.get(item.url)).filter(Boolean),
+      ];
+      writeJson("bookmarks.json", { savedAt: Date.now(), items: next });
+      result.bookmarks = { count: added, updated };
     }
     else result.bookmarks = { error: res.error };
   }

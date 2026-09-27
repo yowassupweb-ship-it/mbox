@@ -268,6 +268,29 @@ function chromeUserAgent() {
   return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
 }
 
+function chromeClientHints() {
+  const major = String(process.versions.chrome || "130").split(".")[0];
+  const platform = process.platform === "darwin" ? "macOS" : process.platform === "win32" ? "Windows" : "Linux";
+  return {
+    "sec-ch-ua": `"Chromium";v="${major}", "Google Chrome";v="${major}", "Not?A_Brand";v="99"`,
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": `"${platform}"`,
+  };
+}
+
+function installChromeIdentity(browserSession) {
+  const hints = chromeClientHints();
+  browserSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const requestHeaders = { ...details.requestHeaders };
+    for (const [key, value] of Object.entries(hints)) {
+      const current = Object.keys(requestHeaders).find((name) => name.toLowerCase() === key);
+      if (current) requestHeaders[current] = value;
+      else requestHeaders[key] = value;
+    }
+    callback({ requestHeaders });
+  });
+}
+
 function close(key) {
   const tab = tabs.get(key);
   if (!tab) return;
@@ -630,6 +653,7 @@ function attach(mainWindow, sendToUi) {
 
   const browserSession = session.fromPartition(PARTITION);
   browserSession.setUserAgent(chromeUserAgent());
+  installChromeIdentity(browserSession);
 
   // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

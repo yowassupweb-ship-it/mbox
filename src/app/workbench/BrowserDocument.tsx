@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Bookmark, Download, Eraser, ExternalLink, Folder, Globe, History, KeyRound, MoreHorizontal, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
 import { FolderIcon } from "./FileTypeIcon";
@@ -231,6 +231,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   const [folderOpen, setFolderOpen] = useState<{ name: string; x: number; y: number } | null>(null);
   const [dragUrl, setDragUrl] = useState("");
   const [dropUrl, setDropUrl] = useState("");
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [bookmarksQuery, setBookmarksQuery] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<BrowserHistoryEntry[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -342,7 +344,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     lastUrl.current = state?.url;
   }, [state?.url]);
   const overlayOpen = useOverlayOpen();
-  const hidden = Boolean(folderOpen) || historyOpen || toolsOpen || isBlank || overlayOpen;
+  const hidden = Boolean(folderOpen) || bookmarksOpen || historyOpen || toolsOpen || isBlank || overlayOpen;
   // Снимок нужно сделать, пока страница ещё видна: capture() у спрятанной вкладки пустой. Раньше
   // уборка прошлого эффекта прятала страницу раньше снимка — и под «…» зияла пустота вместо сайта.
   const hiddenRef = useRef(hidden);
@@ -426,6 +428,20 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   const hasOther = bookmarks.some((item) => item.source !== "bookmark_bar");
   const folderItems = bookmarks.filter((item) => folderOpen?.name === "Другие" ? item.source !== "bookmark_bar" : item.source === "bookmark_bar" && item.folder?.split(" / ")[0] === folderOpen?.name);
 
+  const folderRows: Array<{ kind: "group"; key: string; label: string; depth: number } | { kind: "bookmark"; item: BrowserBookmark; depth: number }> = [];
+  const seenFolderRows = new Set<string>();
+  for (const item of folderItems) {
+    const parts = String(item.folder || "").split(" / ").filter(Boolean);
+    const nested = folderOpen?.name === "Другие" ? parts : parts.slice(1);
+    nested.forEach((part, index) => {
+      const key = nested.slice(0, index + 1).join(" / ");
+      if (!key || seenFolderRows.has(key)) return;
+      seenFolderRows.add(key);
+      folderRows.push({ kind: "group", key, label: part, depth: index });
+    });
+    folderRows.push({ kind: "bookmark", item, depth: nested.length });
+  }
+
   async function dropBookmark(url: string, beforeUrl: string) {
     if (!url || url === beforeUrl || !bridge!.moveBookmark) return;
     try { setBookmarks(await bridge!.moveBookmark(url, beforeUrl)); }
@@ -483,6 +499,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
 
   function closePanels() {
     setFolderOpen(null);
+    setBookmarksOpen(false);
     setHistoryOpen(false);
     setToolsOpen(false);
   }
@@ -518,6 +535,10 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   }
 
   const engineLabel = SEARCH_ENGINES.find((item) => item.id === settings.search)?.label || "";
+  const bookmarkSearch = bookmarksQuery.trim().toLowerCase();
+  const managedBookmarks = bookmarkSearch
+    ? bookmarks.filter((item) => [item.title, item.url, item.folder, item.source].some((part) => String(part || "").toLowerCase().includes(bookmarkSearch)))
+    : bookmarks;
 
   return (
     <div className="wb-browser" ref={rootRef}>
@@ -551,6 +572,9 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
         </form>
         {agentNote && <span className="wb-browser-agent" role="status"><Sparkles size={13} aria-hidden="true" />{agentNote.actor}: {agentNote.text}</span>}
         <div className="wb-browser-actions">
+          <button type="button" className={bookmarksOpen ? "is-on" : undefined} onClick={() => { const next = !bookmarksOpen; closePanels(); setBookmarksOpen(next); }} title="Закладки" aria-label="Закладки" aria-expanded={bookmarksOpen}>
+            <Bookmark size={16} />
+          </button>
           {bridge.history && (
             <button type="button" className={historyOpen ? "is-on" : undefined} onClick={() => { const next = !historyOpen; closePanels(); setHistoryOpen(next); }} title="История" aria-label="История" aria-expanded={historyOpen}>
               <History size={16} />
@@ -652,7 +676,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       </div>
 
       {/* Плавающие окна: подложка ловит клик мимо и закрывает их. */}
-      {(folderOpen || historyOpen || toolsOpen) && (
+      {(folderOpen || bookmarksOpen || historyOpen || toolsOpen) && (
         <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
@@ -660,15 +684,24 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
         <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
           <div className="wb-browser-pop-head"><FolderIcon size={16} open /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
           <div className="wb-browser-pop-list">
-            {folderItems.map((item) => {
+            {folderRows.map((row) => {
+              if (row.kind === "group") {
+                return (
+                  <div className="wb-browser-pop-folder-row" key={`folder:${row.key}`} style={{ "--depth": row.depth } as CSSProperties}>
+                    <FolderIcon size={14} open />
+                    <span>{row.label}</span>
+                  </div>
+                );
+              }
+              const item = row.item;
               const label = bookmarkLabel(item) || bookmarkHost(item.url);
               return (
-                <div className="wb-browser-pop-row" key={`${item.source}:${item.url}`} role="none">
+                <div className="wb-browser-pop-row" key={`${item.source}:${item.url}`} role="none" style={{ "--depth": row.depth } as CSSProperties}>
                   <button
                     type="button"
                     role="menuitem"
                     title={`${label}\n${item.url}`}
-                    onClick={() => navigate(item.url)}
+                    onClick={() => { closePanels(); navigate(item.url); }}
                     onContextMenu={(event) => {
                       event.preventDefault();
                       openBookmarkMenu(item, event.clientX, event.clientY, true);
@@ -684,6 +717,46 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
               );
             })}
             {!folderItems.length && <div className="wb-browser-pop-empty">Папка пуста</div>}
+          </div>
+        </div>
+      )}
+
+      {bookmarksOpen && (
+        <div className="wb-browser-pop wb-browser-manager" role="dialog" aria-label="Закладки">
+          <div className="wb-browser-pop-head">
+            <Bookmark size={14} /><span>Закладки</span><small>{bookmarks.length}</small>
+          </div>
+          <label className="wb-browser-pop-search">
+            <Search size={13} aria-hidden="true" />
+            <input value={bookmarksQuery} onChange={(event) => setBookmarksQuery(event.target.value)} placeholder="Найти закладку" aria-label="Найти закладку" autoFocus />
+          </label>
+          <div className="wb-browser-pop-list">
+            {managedBookmarks.map((item, index) => {
+              const label = bookmarkLabel(item) || bookmarkHost(item.url);
+              return (
+                <div className="wb-browser-pop-row" key={`manager:${item.source || "bookmark"}:${item.folder || ""}:${item.url}:${index}`}>
+                  <button
+                    type="button"
+                    title={`${label}\n${item.url}`}
+                    onClick={() => { closePanels(); navigate(item.url); }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      openBookmarkMenu(item, event.clientX, event.clientY);
+                    }}
+                  >
+                    <Favicon url={item.url} size={16} />
+                    <span className="wb-browser-history-text">
+                      <span className="wb-browser-history-title">{label}</span>
+                      <span className="wb-browser-history-url">{[item.folder, bookmarkHost(item.url)].filter(Boolean).join(" · ")}</span>
+                    </span>
+                  </button>
+                  <button type="button" className="wb-browser-pop-remove" onClick={() => void removeFromFolder(item)} title="Удалить закладку" aria-label={`Удалить закладку ${label}`}>
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+            {!managedBookmarks.length && <div className="wb-browser-pop-empty">{bookmarksQuery ? "Ничего не найдено" : "Закладок пока нет"}</div>}
           </div>
         </div>
       )}

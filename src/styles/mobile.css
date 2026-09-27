@@ -152,8 +152,112 @@
   .console-input-hints { display: none; }
 
   /* Панель заметки: статус сохранения — одной галочкой, текст не помещается. */
+  .wb-doc-bar:has(.wb-note-tools) {
+    min-height: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .wb-doc-bar:has(.wb-note-tools) .wb-note-status {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 34px;
+  }
+  .wb-doc-bar:has(.wb-note-tools) .wb-note-tools {
+    order: 2;
+    max-width: calc(100vw - 92px);
+    margin-left: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .wb-doc-bar:has(.wb-note-tools) .wb-note-tools::-webkit-scrollbar { display: none; }
+  .wb-doc-bar:has(.wb-note-tools) .wb-md-toolbar {
+    order: 3;
+    flex: 1 0 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .wb-doc-bar:has(.wb-note-tools) .wb-md-toolbar::-webkit-scrollbar { display: none; }
   .wb-note-save { font-size: 0; gap: 0; }
   .wb-note-save > svg { width: 16px; height: 16px; }
+  .wb-note-divider,
+  .wb-note-popup > span,
+  .wb-note-mode button > span,
+  .wb-note-flag { display: none; }
+  .wb-note-mode button,
+  .wb-note-icon,
+  .wb-note-tools .wb-share > button,
+  .wb-md-toolbar button {
+    min-width: 36px;
+    height: 36px;
+  }
+  .wb-note-popup {
+    width: 36px;
+    height: 36px;
+    justify-content: center;
+    padding: 0;
+  }
+  .wb-note-popup > svg + svg { display: none; }
+  .wb-note-surface { grid-template-rows: minmax(0, 1fr) 34px; }
+  .wb-note-title { padding: 18px 16px 4px; }
+  .wb-note-edit .wb-note-editor { padding-inline: 16px; }
+  .wb-note-tabs {
+    height: 34px;
+    padding: 4px 8px 0;
+    scrollbar-width: none;
+  }
+  .wb-note-tabs::-webkit-scrollbar { display: none; }
+  .wb-note-tab {
+    min-width: 112px;
+    height: 30px;
+  }
+  .wb-note-tab > [role="tab"] { font-size: var(--text-xs); }
+  .wb-note-tab-close {
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    min-width: 20px;
+    height: 20px;
+    opacity: 1;
+  }
+  .wb-note-tab-add {
+    width: 30px;
+    height: 30px;
+  }
+  .wb-note-surface > .wb-reading,
+  .wb-note-edit .wb-note-editor { scroll-padding-bottom: var(--wb-nav-space); }
+
+  .wb-browser-bar {
+    min-height: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 6px 8px;
+  }
+  .wb-browser-nav { order: 1; flex: none; }
+  .wb-browser-actions { order: 2; margin-left: auto; }
+  .wb-browser-address {
+    order: 3;
+    flex: 1 0 100%;
+    height: 40px;
+  }
+  .wb-browser-agent { display: none; }
+  .wb-browser-manager,
+  .wb-browser-history,
+  .wb-browser-settings {
+    top: 92px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-height: calc(100% - 100px - var(--wb-nav-space));
+  }
+  .wb-browser-folder-menu {
+    left: 8px !important;
+    right: 8px;
+    width: auto;
+    max-height: calc(100% - 116px - var(--wb-nav-space));
+  }
 }
 
 /* На сенсорном экране наведения нет — кнопки, которые показывались по hover, видны всегда. */
