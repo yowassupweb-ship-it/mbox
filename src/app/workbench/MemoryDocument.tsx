@@ -10,6 +10,7 @@ import { hasDraft, useDraft } from "./uiMemory";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { askConfirm, showNotice } from "../../ui/askText";
+import { Crumbs, reveal } from "./Crumbs";
 
 type MemoryRecord = Memory & { project_name?: string | null; todo_id?: string | null };
 type MemoryLink = { id: string; from_memory_id: string; from_title: string; to_memory_id: string; to_title: string; link_type: string };
@@ -259,7 +260,11 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
       onCloseDrawer={() => setDrawerOpen(false)}
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">Память{project ? ` › ${project.name}` : ""}{memory ? ` › #${memory.id}` : " › новая"}</span>
+          <Crumbs items={[
+            { label: "Память", onClick: () => reveal("search"), title: "Поиск по памяти" },
+            ...(project ? [{ label: project.name, onClick: () => tabs.open(`entity:${project.id}:memories`, true), title: `Память проекта ${project.name}` }] : []),
+            memory ? { label: `#${memory.id}`, copy: `#${memory.id}` } : { label: "новая" },
+          ]} />
           <div className="wb-doc-actions">
             {editing ? (
               <>

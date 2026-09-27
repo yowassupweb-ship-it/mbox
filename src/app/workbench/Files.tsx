@@ -13,6 +13,7 @@ import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { askConfirm, showNotice } from "../../ui/askText";
+import { Crumbs, reveal } from "./Crumbs";
 
 const PROJECT_ICONS = "/assets/icons/project";
 const FILE_ICONS = "/assets/icons/files";
@@ -402,9 +403,12 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
   return (
     <div className="wb-file">
       <div className="wb-doc-bar">
-        <span className="wb-doc-crumbs">
-          Файлы › {project?.name ?? "Без проекта"} › {editing ? draft.category || "…" : file?.category} › <b>{editing ? draft.name || "новый файл" : file?.name || `#${fileId}`}</b>
-        </span>
+        <Crumbs items={[
+          { label: "Артефакты", onClick: () => reveal("files") },
+          project ? { label: project.name, onClick: () => reveal("explorer", project.id), title: "Показать проект в дереве" } : { label: "Без проекта", onClick: () => reveal("files") },
+          { label: (editing ? draft.category : file?.category) || "…", onClick: () => reveal("files") },
+          { label: <b>{editing ? draft.name || "новый файл" : file?.name || `#${fileId}`}</b> },
+        ]} />
         <div className="wb-doc-actions">
           {/* Переключатель есть и при правке: черновик HTML/markdown можно посмотреть, не сохраняя.
               Раньше он прятался на время правки — а незаконченная правка теперь открывается сразу. */}

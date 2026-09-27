@@ -4,6 +4,7 @@ import { formatDate } from "../../lib/format";
 import { projectMemoryMatches } from "../../lib/memory";
 import type { Memory, Project } from "../../types";
 import { usePersistentState, type TabsApi } from "./tabs";
+import { Crumbs, reveal } from "./Crumbs";
 
 /** Автологи агентов («Итог запуска: …», тег auto) дублируют настоящие записи — по умолчанию прячем. */
 function isAutoLog(memory: Memory) {
@@ -32,7 +33,10 @@ export function ProjectMemories({ project, memories, tabs }: { project: Project;
   return (
     <div className="wb-board">
       <div className="wb-doc-bar">
-        <span className="wb-doc-crumbs"><span className="wb-project-dot" style={{ ["--project-color" as string]: project.color || "#5b6b66" }} /> {project.name} › Память · {visible.length}{visible.length !== all.length ? ` из ${all.length}` : ""}</span>
+        <Crumbs items={[
+          { label: <><span className="wb-project-dot" style={{ ["--project-color" as string]: project.color || "#5b6b66" }} /> {project.name}</>, onClick: () => reveal("explorer", project.id), title: "Показать проект в дереве" },
+          { label: `Память · ${visible.length}` },
+        ]} />
         <div className="wb-doc-actions">
           {autoCount > 0 && <button type="button" className={showAuto ? "is-on" : undefined} onClick={() => setShowAuto(!showAuto)}>{showAuto ? "Скрыть автологи" : `Автологи · ${autoCount}`}</button>}
           <button type="button" onClick={() => tabs.open("memory:new", true)}>Новая запись</button>

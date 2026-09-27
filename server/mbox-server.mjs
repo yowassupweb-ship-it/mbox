@@ -923,6 +923,33 @@ async function recordMemoryAction({ memoryId, actor = "agent", action, note = ""
   return result.rows[0] || null;
 }
 
+async function recordActivityMemory({ actor = "MBOX", action, entityType, entityId = null, projectId = null, title, content, tags = [], metadata = {} }) {
+  const safeAction = String(action || "").trim();
+  const safeEntity = String(entityType || "").trim();
+  const safeTitle = textPreview(title || `${safeEntity} ${safeAction}`, 180);
+  const safeContent = textPreview(content || safeTitle, 1800);
+  if (!safeAction || !safeEntity || !safeContent) return null;
+  const meta = {
+    ...(metadata && typeof metadata === "object" ? metadata : {}),
+    source_agent: String(actor || "MBOX"),
+    recorded_via: "activity_journal",
+    action: safeAction,
+    entity_type: safeEntity,
+    entity_id: entityId ? String(entityId) : null,
+    project_id: projectId ? String(projectId) : null,
+  };
+  const result = await query(
+    `INSERT INTO memories(project_id, title, content, entity_type, access_level, tags, metadata)
+     VALUES ($1, $2, $3, 'activity', 'agents', $4, $5)
+     RETURNING id::text`,
+    [projectId || null, safeTitle, safeContent, [...new Set(["journal", "activity", safeEntity, safeAction, ...tags.map(String)])], JSON.stringify(meta)],
+  );
+  await refreshMemoryEmbeddings();
+  const memoryId = result.rows[0]?.id || null;
+  await recordMemoryAction({ memoryId, actor, action: "activity_record", note: `${safeEntity}:${safeAction}`, metadata: meta });
+  return memoryId;
+}
+
 async function currentUser(req) {
   const authorization = String(req.headers.authorization || "");
   const apiToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : String(req.headers["x-mbox-token"] || "").trim();
@@ -1136,7 +1163,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/data-sources"
     || /^\/api\/mbox\/browser\/(bookmarks|history|cookies)(?:\/.*)?$/.test(pathname)
     // Хранилище: участнику — только папки его проектов (проверка внутри handleStorageApi).
-    || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|folder|file|link|object)$/.test(pathname)
+    || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object)$/.test(pathname)
     || pathname === "/api/mbox/agent/inbox"
     || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
     || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?))?$/.test(pathname)
@@ -1251,7 +1278,16 @@ async function handleApiWithContext(req, res, url) {
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
-    if (await handleStorageApi({ req, res, url, query, readBody, sendJson, allowed: scope.all, access, labels, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
+    if (await handleStorageApi({
+      req, res, url, query, readBody, sendJson, allowed: scope.all, access, labels,
+      secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key",
+      onActivity: (activity) => recordActivityMemory({
+        actor: actorFromReq(req),
+        entityType: "storage",
+        projectId: activity.project_id || null,
+        ...activity,
+      }).catch((error) => console.error(`activity journal storage: ${error.message}`)),
+    })) return;
   }
   // Закладки, история и куки встроенного браузера — на сервере, чтобы сессия была сквозной
   // между машинами (см. server/browser-state.mjs).
@@ -1313,7 +1349,19 @@ async function handleApiWithContext(req, res, url) {
   // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill/edit_skill_file.
   if (await handleSkillPackagesApi({
     req, res, url, query, skillsRoot: path.join(root, "skills"), actor: actorFromReq(req), sendJson, readBody,
-    onChange: (change) => broadcastRealtime("skill_file_changed", change),
+    onChange: (change) => {
+      broadcastRealtime("skill_file_changed", change);
+      recordActivityMemory({
+        actor: change.actor || actorFromReq(req),
+        action: "version",
+        entityType: "skills",
+        entityId: change.skill,
+        title: `Обновлен навык ${change.skill}`,
+        content: `Создана новая версия файла навыка ${change.skill}/${change.path}.`,
+        tags: ["skill", "version"],
+        metadata: { skill_id: change.skill, path: change.path },
+      }).catch((error) => console.error(`activity journal skill: ${error.message}`));
+    },
   })) return;
 
   if (url.pathname === "/api/mbox/agent/skills" && req.method === "GET") {
@@ -1949,9 +1997,22 @@ async function handleApiWithContext(req, res, url) {
       const result = await query(
         `INSERT INTO artifacts(folder_id, project_id, name, category, version, status, content, access_level)
          VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(NULLIF($8, ''), 'agents'))
-         RETURNING id::text`,
+         RETURNING id::text, project_id::text, name, category, version, status`,
         [body.folder_id || null, body.project_id || null, String(body.name || "").trim(), String(body.category || "Code"), String(body.version || "v1"), String(body.status || "created"), String(body.content || ""), String(body.access_level || "")],
       );
+      if (result.rows[0]) {
+        await recordActivityMemory({
+          actor: actorFromReq(req),
+          action: "create",
+          entityType: "artifacts",
+          entityId: result.rows[0].id,
+          projectId: result.rows[0].project_id,
+          title: `Создан документ ${result.rows[0].name}`,
+          content: `Создан документ/артефакт "${result.rows[0].name}" (${result.rows[0].category}, ${result.rows[0].version}, статус ${result.rows[0].status}).`,
+          tags: ["artifact", "document"],
+          metadata: { artifact: result.rows[0] },
+        });
+      }
       broadcastChange(req, "create", "artifacts", String(body.name || "").trim());
       return sendJson(res, 201, { artifact: result.rows[0] });
     }
@@ -1987,9 +2048,14 @@ async function handleApiWithContext(req, res, url) {
   const artifactMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)$/);
   if (artifactMatch && req.method === "PATCH") {
     const body = await readBody(req);
+    let before = null;
     if (!scope.all) {
-      const current = await query("SELECT project_id::text FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      const current = await query("SELECT project_id::text, name, category, version, status FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      before = current.rows[0] || null;
       if (!hasProjectAccess(scope, current.rows[0]?.project_id) || (body.project_id && !hasProjectAccess(scope, body.project_id))) return sendForbidden(res);
+    } else {
+      const current = await query("SELECT project_id::text, name, category, version, status FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      before = current.rows[0] || null;
     }
     const result = await query(
       `UPDATE artifacts SET
@@ -2002,19 +2068,51 @@ async function handleApiWithContext(req, res, url) {
          content = COALESCE($7, content),
          updated_at = now()
        WHERE id = $8
-       RETURNING id::text`,
+       RETURNING id::text, project_id::text, name, category, version, status`,
       [body.folder_id || null, body.project_id || null, String(body.name || "").trim(), String(body.category || ""), String(body.version || ""), String(body.status || ""), body.content ?? null, artifactMatch[1]],
     );
+    if (result.rows[0]) {
+      const changedFields = Object.keys(body || {}).filter((key) => !["folder_id", "project_id"].includes(key));
+      await recordActivityMemory({
+        actor: actorFromReq(req),
+        action: "update",
+        entityType: "artifacts",
+        entityId: result.rows[0].id,
+        projectId: result.rows[0].project_id,
+        title: `Обновлен документ ${result.rows[0].name}`,
+        content: `Обновлен документ/артефакт "${result.rows[0].name}" (${result.rows[0].category}, версия ${before?.version || "?"} -> ${result.rows[0].version}, статус ${before?.status || "?"} -> ${result.rows[0].status}). Изменены поля: ${changedFields.join(", ") || "данные"}.`,
+        tags: ["artifact", "document", "version"],
+        metadata: { before, after: result.rows[0], changed_fields: changedFields },
+      });
+    }
     if (result.rows[0]) broadcastChange(req, "update", "artifacts", String(body.name || "").trim() || `#${artifactMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { artifact: result.rows[0] } : { error: "not_found" });
   }
 
   if (artifactMatch && req.method === "DELETE") {
+    let current = null;
     if (!scope.all) {
-      const current = await query("SELECT project_id::text FROM artifacts WHERE id = $1", [artifactMatch[1]]);
-      if (!hasProjectAccess(scope, current.rows[0]?.project_id)) return sendForbidden(res);
+      const row = await query("SELECT project_id::text, name, category, version, status FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      current = row.rows[0] || null;
+      if (!hasProjectAccess(scope, current?.project_id)) return sendForbidden(res);
+    } else {
+      const row = await query("SELECT project_id::text, name, category, version, status FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+      current = row.rows[0] || null;
     }
     await query("DELETE FROM artifacts WHERE id = $1", [artifactMatch[1]]);
+    if (current) {
+      await recordActivityMemory({
+        actor: actorFromReq(req),
+        action: "delete",
+        entityType: "artifacts",
+        entityId: artifactMatch[1],
+        projectId: current.project_id,
+        title: `Удален документ ${current.name}`,
+        content: `Удален документ/артефакт "${current.name}" (${current.category}, ${current.version}, статус ${current.status}).`,
+        tags: ["artifact", "document"],
+        metadata: { artifact: current },
+      });
+    }
     broadcastChange(req, "delete", "artifacts", `#${artifactMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }

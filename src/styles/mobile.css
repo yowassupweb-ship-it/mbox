@@ -1,0 +1,166 @@
+/* Телефон (≤720px). Подключён последним — поверх раскладки «одна область за раз» из workbench.css.
+   Нижнее меню — парящая капсула над контентом; внутри неё пилюли «значок + подпись», лента листается
+   пальцем (14 разделов в ширину телефона не помещаются). Всё, что открывается поверх (боковая панель,
+   чат, нижняя панель), заканчивается над капсулой, а прокручиваемые области оставляют под неё место. */
+
+/* Подпись пилюли — только в нижнем меню телефона; на компьютере у полосы разделов подсказка. */
+.wb-activity-label { display: none; }
+
+@media (max-width: 720px) {
+  .wb {
+    --wb-nav-h: 56px;
+    --wb-nav-gap: 10px;
+    --wb-nav-space: calc(var(--wb-nav-h) + var(--wb-nav-gap) * 2 + env(safe-area-inset-bottom));
+    grid-template-rows: var(--wb-titlebar) minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "center";
+  }
+
+  /* ─── Капсула нижнего меню ─── */
+  .wb-activitybar {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--wb-nav-gap) + env(safe-area-inset-bottom));
+    z-index: 60;
+    height: var(--wb-nav-h);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--glass-brd);
+    border-radius: var(--radius-pill);
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    backdrop-filter: blur(24px) saturate(1.8);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32), 0 0 0 1px color-mix(in srgb, var(--text-main) 4%, transparent);
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 6px;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    /* Края ленты растворяются — видно, что пилюль больше, чем помещается. */
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+  .wb-activitybar::-webkit-scrollbar { display: none; }
+  /* В Desktop размытие выключено — капсула сплошная, иначе сквозь неё читался бы текст. */
+  :root[data-mbox-desktop="true"] .wb-activitybar { background: var(--surface-panel); }
+
+  /* Группы на телефоне не нужны — пилюли идут одной лентой, «Чат» первым. */
+  .wb-activity-group,
+  .wb-activity-group + .wb-activity-group { display: contents; }
+  .wb-activity-group + .wb-activity-group::before { display: none; }
+  .wb-activity.is-mobile-only { order: -1; }
+  .wb-activity-fill { display: none; }
+
+  .wb-activity,
+  .wb-activity.is-mobile-only {
+    flex: none;
+    width: auto;
+    height: 44px;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 14px 0 10px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    scroll-snap-align: center;
+    color: var(--text-2);
+  }
+  .wb-activity-icon,
+  .wb-activity-icon img { width: 30px; height: 30px; }
+  .wb-activity-icon svg { width: 20px; height: 20px; }
+  .wb-activity-label {
+    display: inline;
+    color: inherit;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    white-space: nowrap;
+  }
+  .wb-activity:hover { background: var(--wb-hover); }
+  .wb-activity.is-active { background: var(--wb-selected); color: var(--accent-color); border-top-color: transparent; }
+  .wb-activity.is-active .wb-activity-label { font-weight: var(--weight-semibold); }
+  .wb-activity-tip { display: none; }
+  .wb-activity b { top: 2px; right: 4px; bottom: auto; }
+
+  /* ─── Области поверх контента — над капсулой ─── */
+  .wb-sidebar,
+  .wb.has-right .wb-right,
+  .wb.has-panel .wb-panel {
+    bottom: 0;
+    padding-bottom: var(--wb-nav-space);
+    background: var(--wb-surface-2);
+  }
+  .wb.has-right .wb-right,
+  .wb.has-panel .wb-panel { background: var(--bg-color); }
+
+  /* Прокручиваемое содержимое уходит под капсулу, но последняя строка остаётся доступной. */
+  .wb-doc,
+  .wb-view-body,
+  .console-log { scroll-padding-bottom: var(--wb-nav-space); }
+  .wb-doc > :last-child { margin-bottom: var(--wb-nav-space); }
+  .wb-center { padding-bottom: 0; }
+  .wb-docs { padding-bottom: var(--wb-nav-space); }
+
+  /* ─── Шапка и вкладки ─── */
+  .wb-titlebar .topbar { padding-inline: 12px; }
+  .wb-editor { grid-template-rows: 44px minmax(0, 1fr); }
+  .wb-tabs { padding: 0 8px; gap: 4px; scroll-snap-type: x proximity; }
+  .wb-tab { height: 32px; min-width: 96px; max-width: 180px; scroll-snap-align: start; }
+  .wb-tab.is-active { min-width: 130px; }
+
+  /* ─── Касания: цели крупнее, поля без автоувеличения iOS ─── */
+  .wb input,
+  .wb textarea,
+  .wb select,
+  .login-panel input { font-size: 16px; }
+  .wb-tree-row { min-height: 40px; }
+  .wb-menu-item { padding-block: 10px; }
+  .wb-note-item { padding-block: 12px; }
+  .wb-icon-btn { min-width: 36px; height: 36px; }
+  .wb-filter input { height: 38px; }
+  .wb-menu button { min-height: 40px; }
+  .wb-doc-page,
+  .wb-memory-main,
+  .wb-reading { padding-left: 16px; padding-right: 16px; }
+
+  /* Диалоги — листом снизу, как на iPhone. */
+  .ask-scrim { place-items: end center; padding: 0 0 env(safe-area-inset-bottom); }
+  .ask-dialog { width: 100%; border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .ask-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .ask-actions button { height: 44px; }
+
+  /* Меню и плавающие окна не шире экрана. */
+  .wb-menu { max-width: calc(100vw - 24px); }
+
+  /* Шапка: поиск — круглая кнопка-лупа, место — названию документа. */
+  .wb-titlebar .command-center { flex: 0 0 36px; width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
+  .wb-titlebar .command-center span,
+  .wb-titlebar .command-center kbd { display: none; }
+  .topbar-context strong { font-size: var(--text-md); }
+  .topbar-actions button { min-width: 36px; min-height: 36px; }
+
+  /* Шапка чата: без полосы и числа нагрузки контекста — иначе они наезжают на кнопки. */
+  .console-threads .console-context { display: none; }
+  .console-input-hints { display: none; }
+
+  /* Панель заметки: статус сохранения — одной галочкой, текст не помещается. */
+  .wb-note-save { font-size: 0; gap: 0; }
+  .wb-note-save > svg { width: 16px; height: 16px; }
+}
+
+/* На сенсорном экране наведения нет — кнопки, которые показывались по hover, видны всегда. */
+@media (hover: none) {
+  .wb-browser-pop-remove,
+  .wb-note-pin,
+  .wb-agent-actions { opacity: 1; }
+  .wb-menu-item-launch { opacity: 1; transform: translateY(-50%) scale(1); }
+  .wb-tab.is-active .wb-tab-close { visibility: visible; width: 22px; }
+}

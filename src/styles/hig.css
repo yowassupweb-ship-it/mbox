@@ -260,22 +260,32 @@
 
 /* ─── Полоса разделов: скруглённая плашка под значком, как в боковой панели macOS ───
    Вместо полоски слева на всю высоту и подпрыгивания значка при наведении. */
-.wb { --wb-activity: 58px; }
+.wb { --wb-activity: 64px; }
+/* Разделов больше, чем влезает по высоте окна, — полоса прокручивается (колесом и пальцем), ползунок скрыт.
+   Подсказки стоят от окна (position: fixed, координаты ставит placeActivityTip в Workbench.tsx):
+   внутри прокручиваемой полосы они обрезались бы её краем. */
+/* min-height: 0 — иначе элемент сетки растёт по содержимому, прокрутка не включается и значки
+   вылезают поверх строки состояния. */
+.wb-activitybar { min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; }
+.wb-activity:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.wb-activitybar::-webkit-scrollbar { display: none; }
+.wb-activity { flex: none; }
+.wb-activity-tip { position: fixed; left: var(--tip-left, 72px); top: var(--tip-top, 0); }
 .wb-activitybar { padding: 6px 0; align-items: center; }
 .wb-activity-group { align-items: center; width: 100%; }
 .wb-activity-group + .wb-activity-group { margin-top: 6px; padding-top: 6px; border-top: 0; }
 .wb-activity-group + .wb-activity-group::before { content: ""; display: block; width: 24px; height: 1px; margin: 0 auto 6px; background: var(--wb-line); }
 .wb-activity {
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   margin: 2px auto;
   padding: 0;
   border: 0;
   border-radius: var(--radius-md);
 }
-.wb-activity-icon { width: 32px; height: 32px; }
-.wb-activity-icon img { width: 32px; height: 32px; }
-.wb-activity-icon svg { width: 24px; height: 24px; }
+.wb-activity-icon { width: 38px; height: 38px; }
+.wb-activity-icon img { width: 38px; height: 38px; }
+.wb-activity-icon svg { width: 26px; height: 26px; }
 .wb-activity:hover { background: var(--wb-hover); }
 .wb-activity:hover .wb-activity-icon { transform: none; }
 .wb-activity.is-active { background: var(--wb-selected); }

@@ -239,6 +239,38 @@ server.registerTool(
 );
 
 server.registerTool(
+  "seo_check_topvisor",
+  {
+    title: "Check Topvisor API connection",
+    description: "Check that Topvisor API credentials, User-Id and project settings are available to SEO Wizard. Returns project metadata and regions, never returns secrets.",
+    inputSchema: {},
+  },
+  async () => {
+    const data = await mboxFetch("/api/mbox/seo/topvisor/check");
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "seo_run_collection",
+  {
+    title: "Run SEO Wizard collection",
+    description: "Start a server-side SEO Wizard collection. When Topvisor is configured and ranks are enabled, this fetches Topvisor positions into seo_rank_snapshots and can build the scenario package.",
+    inputSchema: {
+      scenario: z.string().default("step1"),
+      build_package: z.boolean().default(true),
+    },
+  },
+  async ({ scenario, build_package }) => {
+    const data = await mboxFetch("/api/mbox/seo/run", {
+      method: "POST",
+      body: JSON.stringify({ scenario, buildPackage: build_package }),
+    });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "seo_update_issue",
   {
     title: "Update SEO issue status",

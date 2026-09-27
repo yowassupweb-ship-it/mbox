@@ -7,6 +7,7 @@ import { WbMenu } from "./WbMenu";
 import { onLocalReveal } from "./agentTabs";
 import { askText, askConfirm } from "../../ui/askText";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
+import { isThumbable, LocalThumb } from "./LocalThumb";
 
 const PROJECT_ICONS = "/assets/icons/project";
 
@@ -248,7 +249,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
             {entry.type === "dir" ? <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} /> : <span className="wb-chevron-space" />}
             {entry.type === "dir"
               ? <FolderIcon open={open} />
-              : <FileTypeIcon name={entry.name} />}
+              : isThumbable(entry) ? <LocalThumb rootKey={root.key} entry={entry} /> : <FileTypeIcon name={entry.name} />}
             <span className="wb-tree-label">{entry.name}</span>
             {letter && <span className={`wb-git-letter is-${letter}`}>{letter}</span>}
           </div>

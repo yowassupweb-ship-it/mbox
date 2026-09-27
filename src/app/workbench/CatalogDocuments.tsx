@@ -7,6 +7,7 @@ import { formatLastUsed, formatTokens, isSeoWizardTool, useSkillsCatalog, useToo
 import { ToolIcon } from "./CatalogViews";
 import { fetchJson } from "../../lib/api";
 import { SeoBoard } from "../../pages/Seo";
+import { Crumbs, reveal } from "./Crumbs";
 
 function useCopy() {
   const [copied, setCopied] = useState("");
@@ -29,7 +30,7 @@ export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsAp
     <div className={`wb-doc-page is-narrow wb-catalog-doc wb-skill-doc${skill.id === "email-campaign" ? " is-mail" : ""}`}>
       <header className="wb-skill-hero">
         <div className="wb-skill-hero-main">
-          <span className="wb-doc-crumbs">Навыки › {skill.category || "Рабочий сценарий"}</span>
+          <Crumbs items={[{ label: "Навыки", onClick: () => reveal("skills") }, { label: skill.category || "Рабочий сценарий", onClick: () => reveal("skills") }]} />
           <h1>{skill.name}</h1>
           <p>{skill.goal || skill.summary}</p>
           <p className="wb-skill-outcome-line"><Check size={14} aria-hidden="true" /><span><b>Результат:</b> {skill.output || "готовый результат в MBOX"}</span></p>
@@ -183,9 +184,9 @@ function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
   return (
     <div className="wb-doc-page is-narrow wb-catalog-doc">
       <header className="wb-catalog-head has-icon">
-        <ToolIcon id={tool.id} src={tool.icon} name={tool.name} size={48} />
+        <ToolIcon id={tool.id} src={tool.icon} name={tool.name} size={64} />
         <div>
-          <span className="wb-doc-crumbs">Инструменты › {tool.kind}</span>
+          <Crumbs items={[{ label: "Инструменты", onClick: () => reveal("tools") }, { label: tool.kind, onClick: () => reveal("tools") }]} />
           <h1>{tool.name}</h1>
           <p>{tool.summary}</p>
         </div>

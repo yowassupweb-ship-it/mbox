@@ -1,5 +1,5 @@
-import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
-import { ChevronRight, ChevronsDownUp, RefreshCw, X } from "lucide-react";
+import { useMemo, useState, type DragEvent, type MouseEvent, useEffect } from "react";
+import { ChevronRight, ChevronsDownUp, RefreshCw, X, Brain, Database, FileText, Files, Figma, Folder, GitBranch, Layers, Lightbulb, Link2, ListChecks, ListTodo, Newspaper, Rocket, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { projectEntityKinds } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { isLeaseLive } from "../../lib/agents";
@@ -13,8 +13,10 @@ import { FileTypeIcon } from "./FileTypeIcon";
 import { folderIcon } from "./tabMeta";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { folderGlyph, TreeGlyph } from "./TreeGlyph";
+import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 
-const SYSTEM_ICONS = "/assets/icons/system";
+
 const PROJECT_ICONS = "/assets/icons/project";
 const CLOSED_STATUSES = ["done", "archived"];
 
@@ -66,6 +68,18 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
     }
     return [{ label: "", projects: personal }, ...[...byCompany.entries()].map(([label, projects]) => ({ label, projects }))].filter((group) => group.projects.length);
   }, [matches, ordered, companyByProject]);
+
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const projectId = (event as CustomEvent<RevealDetail>).detail.projectId;
+      if (!projectId) return;
+      const key = `project:${projectId}`;
+      setExpanded((current) => (current.includes(key) ? current : [...current, key]));
+      window.setTimeout(() => document.querySelector(`[data-project-row="${projectId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+    };
+    window.addEventListener(REVEAL_EVENT, listener);
+    return () => window.removeEventListener(REVEAL_EVENT, listener);
+  }, [setExpanded]);
 
   function isOpen(key: string) {
     return Boolean(matches) || expandedSet.has(key);
@@ -122,7 +136,8 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
       <li key={project.id} className={dropTarget === project.id && dragged !== project.id ? "is-drop-target" : undefined}>
         <div
           className="wb-tree-row wb-tree-project"
-          style={{ ["--project-color" as string]: project.color || "#5b6b66", ["--depth" as string]: 0 }}
+          data-project-row={project.id}
+          style={{ ["--project-color" as string]: project.color && project.color !== "transparent" ? project.color : "var(--state-off)", ["--depth" as string]: 0 }}
           onClick={() => toggle(projectKey)}
           onContextMenu={(event: MouseEvent) => { event.preventDefault(); onProjectContext(project, { x: event.clientX, y: event.clientY }); }}
           draggable
@@ -148,7 +163,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
                   size={14}
                   onClick={(event) => { event.stopPropagation(); toggle(`${todosKey}:list`); }}
                 />
-                <img src={`${SYSTEM_ICONS}/todo.png`} width={16} height={16} alt="" />
+                <TreeGlyph kind="todos" />
                 <span className="wb-tree-label">Todo</span>
                 <span className="wb-tree-count">{active.length}</span>
               </div>
@@ -174,7 +189,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
                 <li key={kind}>
                   <div {...row(key)} style={{ ["--depth" as string]: 1 }}>
                     <span className="wb-chevron-space" />
-                    <img src={meta.image} width={16} height={16} alt="" />
+                    <TreeGlyph kind={kind} />
                     <span className="wb-tree-label">{meta.label}</span>
                     {/* Только числа: «указан», «задана», «agents» ничего не сообщали, а шумели в каждой строке. */}
                     {(() => { const hint = kind === "memories" ? String(memoryCount) : String(entitySummary(project, kind, data.memories)); return /^\d+$/.test(hint) && hint !== "0" ? <span className="wb-tree-count">{hint}</span> : null; })()}
@@ -186,7 +201,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
               <li>
                 <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(`files:${project.id}`)}>
                   <ChevronRight className={isOpen(`files:${project.id}`) ? "wb-chevron is-open" : "wb-chevron"} size={14} />
-                  <img src={`${PROJECT_ICONS}/documents.png`} width={16} height={16} alt="" />
+                  <TreeGlyph kind="files" />
                   <span className="wb-tree-label">Файлы</span>
                   <span className="wb-tree-count">{files.length}</span>
                 </div>
@@ -208,7 +223,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
               <li key={folder.id}>
                 <div {...row(`folder:${project.id}:${folder.id}`)} style={{ ["--depth" as string]: 1 }}>
                   <span className="wb-chevron-space" />
-                  <img src={folderIcon(folder.name)} width={16} height={16} alt="" />
+                  <TreeGlyph kind={folderGlyph(folder.name)} />
                   <span className="wb-tree-label">{folder.name}</span>
                 </div>
               </li>
@@ -225,7 +240,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
         <span>Проекты</span>
         <div className="wb-view-actions">
           <button type="button" className={showDone ? "is-on" : undefined} onClick={() => setShowDone((value) => !value)} title={showDone ? "Скрыть готовые todo" : "Показать готовые todo"}>
-            <img src={`${PROJECT_ICONS}/check.png`} width={13} height={13} alt="" />
+            <ListChecks size={14} />
           </button>
           <button type="button" onClick={() => setExpanded([])} title="Свернуть всё"><ChevronsDownUp size={14} /></button>
           <button type="button" onClick={data.reload} title="Обновить"><RefreshCw size={13} /></button>

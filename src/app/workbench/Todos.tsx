@@ -13,6 +13,7 @@ import { renderDocument } from "./MemoryDocument";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { useDraft, useRemembered } from "./uiMemory";
 import { askConfirm } from "../../ui/askText";
+import { Crumbs, reveal } from "./Crumbs";
 
 // Порядок колонок как на прежней доске; «Готово» и «Архив» — одна колонка.
 const COLUMNS = ["open", "next", "doing", "review", "blocked", "done"];
@@ -79,7 +80,10 @@ export function TodoBoard({ project, tabs, onSaved }: { project: Project; tabs: 
   return (
     <div className="wb-board">
       <div className="wb-doc-bar">
-        <span className="wb-doc-crumbs"><span className="wb-project-dot" style={{ ["--project-color" as string]: project.color || "#5b6b66" }} /> {project.name} › Задачи · {active} активных</span>
+        <Crumbs items={[
+          { label: <><span className="wb-project-dot" style={{ ["--project-color" as string]: project.color || "#5b6b66" }} /> {project.name}</>, onClick: () => reveal("explorer", project.id), title: "Показать проект в дереве" },
+          { label: `Задачи · ${active} активных` },
+        ]} />
         <div className="wb-doc-actions">
           <button type="button" className={showDone ? "is-on" : undefined} onClick={() => setShowDone(!showDone)}>{showDone ? "Скрыть готовые" : "Показать готовые"}</button>
           <button type="button" className="is-primary" onClick={() => setAdding(true)}><Plus size={14} /> Задача</button>
@@ -211,9 +215,14 @@ export function TodoDocument({ project, todo, tabs, tabKey, visible, onDirty, on
       onCloseDrawer={() => setDrawerOpen(false)}
       toolbar={(
         <>
-          <span className="wb-doc-crumbs">
-            <button type="button" className="wb-meta-link" onClick={() => tabs.open(`todos:${project.id}`, true)}>{project.name}</button> › задача #{todo.id}{dirty && <b className="wb-dirty-mark"> ●</b>}
-          </span>
+          <Crumbs
+            items={[
+              { label: project.name, onClick: () => reveal("explorer", project.id), title: "Показать проект в дереве" },
+              { label: "Задачи", onClick: () => tabs.open(`todos:${project.id}`, true), title: "Все задачи проекта" },
+              { label: `#${todo.id}`, copy: `#${todo.id}` },
+            ]}
+            suffix={dirty ? <b className="wb-dirty-mark"> ●</b> : null}
+          />
           <div className="wb-doc-actions">
             {/* Статус и приоритет сохраняются сразу — это действие, а не правка текста. */}
             <select className="wb-bar-select" value={draft.status} onChange={(event) => { setDraft({ ...draft, status: event.target.value }); void save({ status: event.target.value }); }} title={todoStatusHint[draft.status]}>

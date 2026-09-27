@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { Copy, FolderOpen, Maximize, Minus, Plus, RefreshCw, Scan } from "lucide-react";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { gitStatusOf, onWorkspaceChange, rootName, workspaceBridge, type ImageRead } from "./localWorkspace";
@@ -88,6 +88,13 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
   const fitZoom = natural && stage.width && stage.height ? Math.min(1, (stage.width - 32) / natural.width, (stage.height - 32) / natural.height) : 1;
   const zoom = view.fit ? fitZoom : view.zoom;
 
+  // Масштаб на момент последней отрисовки — колесо шлёт события чаще кадров, считать надо от актуального.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  // Прокрутка после смены масштаба: ставится до отрисовки (useLayoutEffect ниже). Раньше она догоняла
+  // в следующем кадре — картинка на кадр прыгала со старой прокруткой, и при масштабе колесом всё мигало.
+  const pendingScroll = useRef<{ left: number; top: number } | null>(null);
+
   /** Новый масштаб с сохранением точки под курсором (или центра области). */
   function zoomTo(next: number, anchor?: { x: number; y: number }) {
     const el = stageRef.current;
@@ -96,14 +103,24 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
     const rect = el.getBoundingClientRect();
     const ax = anchor ? anchor.x - rect.left : el.clientWidth / 2;
     const ay = anchor ? anchor.y - rect.top : el.clientHeight / 2;
-    const contentX = (el.scrollLeft + ax) / zoom;
-    const contentY = (el.scrollTop + ay) / zoom;
-    setView((current) => ({ ...current, fit: false, zoom: clamped }));
-    window.requestAnimationFrame(() => {
-      el.scrollLeft = contentX * clamped - ax;
-      el.scrollTop = contentY * clamped - ay;
-    });
+    const current = zoomRef.current;
+    const contentX = (el.scrollLeft + ax) / current;
+    const contentY = (el.scrollTop + ay) / current;
+    pendingScroll.current = { left: contentX * clamped - ax, top: contentY * clamped - ay };
+    setView((view) => ({ ...view, fit: false, zoom: clamped }));
   }
+
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    const target = pendingScroll.current;
+    if (!el || !target) return;
+    pendingScroll.current = null;
+    el.scrollLeft = target.left;
+    el.scrollTop = target.top;
+  }, [view.zoom, view.fit]);
+
+  // События колеса и тачпада склеиваются: одно изменение масштаба за кадр, а не десяток перерисовок.
+  const wheelBatch = useRef<{ factor: number; anchor: { x: number; y: number }; frame: number } | null>(null);
 
   // Колесо масштабирует картинку от курсора, как в просмотрщиках изображений; двигать — перетаскиванием.
   // Тачпад шлёт мелкие шаги — масштаб пропорционален deltaY, чтобы жест не прыгал рывками.
@@ -112,7 +129,19 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
     event.preventDefault();
     const step = Math.min(Math.abs(event.deltaY), 120) / 120;
     const factor = 1 + 0.18 * (step || 1);
-    zoomTo(zoom * (event.deltaY < 0 ? factor : 1 / factor), { x: event.clientX, y: event.clientY });
+    const anchor = { x: event.clientX, y: event.clientY };
+    const batch = wheelBatch.current;
+    if (batch) {
+      batch.factor *= event.deltaY < 0 ? factor : 1 / factor;
+      batch.anchor = anchor;
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const done = wheelBatch.current;
+      wheelBatch.current = null;
+      if (done) zoomTo(zoomRef.current * done.factor, done.anchor);
+    });
+    wheelBatch.current = { factor: event.deltaY < 0 ? factor : 1 / factor, anchor, frame };
   }
 
   // Колесо должно масштабировать картинку, а не прокручивать область или всё окно — нужен непассивный слушатель.
@@ -215,6 +244,7 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
               src={image.dataUrl}
               alt={path}
               draggable={false}
+              decoding="sync"
               width={shownWidth || undefined}
               height={shownHeight || undefined}
               style={{ imageRendering: zoom >= 3 ? "pixelated" : "auto" }}

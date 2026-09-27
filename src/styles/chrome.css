@@ -1,0 +1,90 @@
+/* Шапка и строка состояния в духе macOS. Подключён после catalog.css.
+   Шапка — единая панель окна (unified toolbar): лёгкий вертикальный градиент, волосяная линия снизу,
+   название документа слева жирным, поиск — капсула по центру (как адресная строка Safari),
+   кнопки — скруглённые квадраты без рамок. Высота остаётся 38px: на Windows кнопки окна рисуются
+   поверх шапки (titleBarOverlay, height 38 в mbox-desktop/main.js) — другая высота разъехалась бы с ними.
+   Строка состояния — тонкая нижняя полоса, как у Finder: мелкий приглушённый текст, без заливок. */
+
+.wb-titlebar {
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--text-main) 3.5%, var(--wb-surface)), var(--wb-surface));
+  border-bottom: 1px solid color-mix(in srgb, #000 35%, var(--wb-line));
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--text-main) 4%, transparent), 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+:root[data-theme="light"] .wb-titlebar { border-bottom-color: var(--wb-line); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+
+.wb-titlebar .topbar { gap: 12px; }
+
+/* Название документа: значок-«прокси» как в заголовке окна macOS, название жирным, подпись тише. */
+.topbar-context { gap: 8px; }
+.topbar-context img { width: 16px; height: 16px; opacity: 1; }
+.topbar-context strong { font-size: var(--text-sm); font-weight: var(--weight-bold); letter-spacing: -0.005em; color: var(--text-main); }
+.topbar-context span { font-size: var(--text-xs); color: var(--text-muted); }
+.topbar-context span::before { content: "—"; margin: 0 6px 0 2px; color: var(--text-muted); }
+
+/* Поиск — капсула по центру шапки. */
+.wb-titlebar .command-center {
+  flex: 0 1 420px;
+  height: 28px;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-main) 7%, transparent);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.12);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.wb-titlebar .command-center:hover { border-color: transparent; background: color-mix(in srgb, var(--text-main) 10%, transparent); color: var(--text-2); }
+.wb-titlebar .command-center span { text-align: center; }
+.wb-titlebar .command-center kbd { border-radius: var(--radius-xs); background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-muted); font-family: var(--font-sans); font-size: var(--text-2xs); }
+
+/* Кнопки панели: скруглённые квадраты, как на панели инструментов macOS, без рамок. */
+.wb-titlebar .topbar-actions { gap: 4px; }
+.wb-titlebar .topbar-icon-action,
+.wb-titlebar .topbar-logout,
+.wb-titlebar .desktop-pill,
+.wb-titlebar .realtime-pill {
+  height: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  box-shadow: none;
+  color: var(--text-2);
+}
+.wb-titlebar .topbar-icon-action,
+.wb-titlebar .topbar-logout { width: 30px; min-width: 30px; padding: 0; display: grid; place-items: center; }
+.wb-titlebar .topbar-icon-action svg,
+.wb-titlebar .topbar-logout svg { width: 16px; height: 16px; }
+.wb-titlebar .topbar-icon-action:hover,
+.wb-titlebar .topbar-logout:hover,
+.wb-titlebar .desktop-pill:hover,
+.wb-titlebar .realtime-pill:hover,
+.wb-titlebar .desktop-pill[aria-expanded="true"],
+.wb-titlebar .realtime-pill[aria-expanded="true"] { background: color-mix(in srgb, var(--text-main) 9%, transparent); color: var(--text-main); }
+.wb-titlebar .topbar-icon-action:active,
+.wb-titlebar .topbar-logout:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+
+/* ─── Строка состояния ─── */
+.wb-statusbar {
+  padding: 0 8px;
+  gap: 2px;
+  border-top: 1px solid color-mix(in srgb, #000 30%, var(--wb-line));
+  background: var(--wb-surface);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+:root[data-theme="light"] .wb-statusbar { border-top-color: var(--wb-line); }
+.wb-status-item {
+  height: 18px;
+  gap: 5px;
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+}
+.wb-status-item svg { width: 12px; height: 12px; opacity: 0.85; }
+.wb-status-item:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-2); }
+.wb-status-item.is-on { color: var(--accent-color); }
+.wb-status-item.is-warn { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); }
+.wb-state-dot { width: 6px; height: 6px; }

@@ -69,6 +69,7 @@ export function browserBridge(): BrowserBridge | undefined {
 
 /** Адрес вкладки: ключ вида «web:https://example.com». */
 export const browserTabKey = (url: string) => `web:${url}`;
+export const browserBlankTabKey = () => `web:blank-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 const AGENT_ACTION_LABEL: Record<string, string> = {
   snapshot: "читает страницу",
@@ -79,7 +80,10 @@ const AGENT_ACTION_LABEL: Record<string, string> = {
   scroll: "прокручивает",
   screenshot: "смотрит на экран",
 };
-export const browserTabUrl = (key: string) => key.slice(4);
+export const browserTabUrl = (key: string) => {
+  const url = key.slice(4);
+  return url.startsWith("blank-") ? "" : url;
+};
 
 export const BROWSER_FAVICON_EVENT = "mbox:browser-favicon";
 export type BrowserFaviconDetail = { key?: string; url?: string; favicon: string };
@@ -587,7 +591,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
                   void bridge.openBookmarkFolderMenu?.(name, event.clientX, event.clientY).catch((error) => setMessage(String(error)));
                 }}
               >
-                <FolderIcon size={16} />
+                <FolderIcon size={16} open={folderOpen?.name === name} />
                 <span>{name}</span>
               </button>
             );
@@ -641,7 +645,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
               else openBookmarkFolder("Другие", rect.left, rect.bottom + 4);
             }}
           >
-            <FolderIcon size={16} />
+            <FolderIcon size={16} open={folderOpen?.name === "Другие"} />
             <span>Другие</span>
           </button>
         )}
@@ -654,7 +658,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
 
       {folderOpen && (
         <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
-          <div className="wb-browser-pop-head"><Folder size={14} /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
+          <div className="wb-browser-pop-head"><FolderIcon size={16} open /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
           <div className="wb-browser-pop-list">
             {folderItems.map((item) => {
               const label = bookmarkLabel(item) || bookmarkHost(item.url);
@@ -887,4 +891,3 @@ function BrowserAuthForm({ auth, answer }: { auth: NonNullable<BrowserState["aut
     </form>
   );
 }
-

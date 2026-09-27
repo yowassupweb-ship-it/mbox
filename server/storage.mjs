@@ -231,7 +231,12 @@ function cleanKey(value) {
  * access (для участника): { roots: [{ prefix, label }], canUse(key) → Promise<boolean> }.
  * labels: { "projects/4/": "Вокруг света" } — подписи папок проектов для интерфейса.
  */
-export async function handleStorageApi({ req, res, url, query, readBody, sendJson, allowed, access = null, labels = {}, secretKey }) {
+function projectIdFromKey(key) {
+  const match = String(key || "").match(/^projects\/(\d+)\//);
+  return match ? match[1] : null;
+}
+
+export async function handleStorageApi({ req, res, url, query, readBody, sendJson, allowed, access = null, labels = {}, secretKey, onActivity }) {
   if (!url.pathname.startsWith("/api/mbox/storage")) return false;
   if (!allowed && !access) {
     sendJson(res, 403, { error: "forbidden" });
@@ -293,7 +298,7 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       return true;
     }
     // Всё ниже работает с конкретным ключом: участнику — только внутри своих папок.
-    const keyParam = pathname === "/api/mbox/storage/upload-url" || pathname === "/api/mbox/storage/folder" ? null : url.searchParams.get("key");
+    const keyParam = pathname === "/api/mbox/storage/upload-url" || pathname === "/api/mbox/storage/folder" || pathname === "/api/mbox/storage/commit" ? null : url.searchParams.get("key");
     if (member && keyParam !== null && keyParam !== undefined && !(await usable(cleanKey(keyParam)))) return denied();
     if (pathname === "/api/mbox/storage/upload-url" && req.method === "POST") {
       const body = await readBody(req);
@@ -310,6 +315,22 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       sendJson(res, 200, { url: upload, key });
       return true;
     }
+    if (pathname === "/api/mbox/storage/commit" && req.method === "POST") {
+      const body = await readBody(req);
+      const key = cleanKey(body.key);
+      if (!(await usable(key))) return denied();
+      onActivity?.({
+        action: "upload",
+        entityId: key,
+        project_id: projectIdFromKey(key),
+        title: `Загружен файл ${key.split("/").pop() || key}`,
+        content: `В хранилище загружен файл "${key}"${body.size ? ` (${body.size} байт)` : ""}.`,
+        tags: ["storage", "file"],
+        metadata: { key, size: body.size || null, mode: body.mode || "direct" },
+      });
+      sendJson(res, 200, { ok: true, key });
+      return true;
+    }
     if (pathname === "/api/mbox/storage/upload" && req.method === "POST") {
       const key = cleanKey(url.searchParams.get("key"));
       const length = Number(req.headers["content-length"] || 0);
@@ -321,6 +342,15 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
         headers: { "content-length": String(length), "content-type": String(req.headers["content-type"] || "application/octet-stream") },
         body: Readable.toWeb(req),
       });
+      if (response.ok) onActivity?.({
+        action: "upload",
+        entityId: key,
+        project_id: projectIdFromKey(key),
+        title: `Загружен файл ${key.split("/").pop() || key}`,
+        content: `В хранилище загружен файл "${key}" (${length} байт).`,
+        tags: ["storage", "file"],
+        metadata: { key, size: length, mode: "proxy" },
+      });
       sendJson(res, response.ok ? 200 : 502, response.ok ? { key, size: length } : { error: await s3Error(response) });
       return true;
     }
@@ -329,6 +359,15 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       const key = `${cleanKey(body.prefix).replace(/\/+$/, "")}/`;
       if (!(await usable(key))) return denied();
       const response = await s3(config, { method: "PUT", key, headers: { "content-length": "0" }, body: "", payloadHash: EMPTY_SHA256 });
+      if (response.ok) onActivity?.({
+        action: "create_folder",
+        entityId: key,
+        project_id: projectIdFromKey(key),
+        title: `Создана папка ${key}`,
+        content: `В хранилище создана папка "${key}".`,
+        tags: ["storage", "folder"],
+        metadata: { key },
+      });
       sendJson(res, response.ok ? 200 : 502, response.ok ? { key } : { error: await s3Error(response) });
       return true;
     }
@@ -375,6 +414,15 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
         const response = await s3(config, { method: "DELETE", key: item });
         if (!response.ok && response.status !== 404) throw new Error(await s3Error(response));
       }
+      onActivity?.({
+        action: "delete",
+        entityId: key,
+        project_id: projectIdFromKey(key),
+        title: `Удалено из хранилища ${key}`,
+        content: `Из хранилища удалено "${key}". Удалено объектов: ${keys.length}.`,
+        tags: ["storage", key.endsWith("/") ? "folder" : "file"],
+        metadata: { key, deleted: keys.length, deleted_keys: keys.slice(0, 100) },
+      });
       sendJson(res, 200, { deleted: keys.length });
       return true;
     }

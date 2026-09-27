@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Columns2, Database, GitBranch, MessageSquare, PanelBottom, PanelLeft, PanelRight, Power, RotateCcw, TerminalSquare, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Columns2, Database, MessageSquare, PanelBottom, PanelLeft, PanelRight, Power, RotateCcw, TerminalSquare, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -22,7 +22,7 @@ import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
-import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail } from "./BrowserDocument";
+import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
@@ -49,6 +49,8 @@ import { SkillPageDocument } from "./SkillPageDocument";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
 import { askConfirm } from "../../ui/askText";
+import { TreeGlyph } from "./TreeGlyph";
+import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 
 type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
@@ -78,7 +80,7 @@ type Props = {
     openTodo: (todoId: string) => void;
     toggleSidebar: () => void;
     toggleConsole: () => void;
-    activeTab: { title: string; hint: string; icon: string; dirty: boolean; tabs: number };
+    activeTab: { title: string; hint: string; icon: string; glyph?: string; dirty: boolean; tabs: number };
   }) => ReactNode;
   renderers: WorkbenchRenderers;
   realtime: { state: string; label: string };
@@ -142,18 +144,36 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   // Сплит центральной части: вторая группа редактора справа от основной. Держит ровно одну
   // вкладку (браузер слева — заметка справа, и наоборот), поэтому хватает одного ключа и доли ширины.
   const [splitKey, setSplitKey] = usePersistentState<string | null>("mbox.wb.splitKey", null);
+  // Телефон: нижнее меню — лента пилюль в капсуле, её листают. Активный раздел держим на виду — по центру.
+  const activityRef = useRef<HTMLElement | null>(null);
+  const [isPhone, setIsPhone] = useState(() => window.matchMedia("(max-width: 720px)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 720px)");
+    const listener = () => setIsPhone(media.matches);
+    media.addEventListener("change", listener);
+    return () => media.removeEventListener("change", listener);
+  }, []);
+  const consoleVisibleRef = useRef(false);
+
+  // История переходов между документами, как «Назад / Вперёд» в VS Code (Alt+← / Alt+→, боковые кнопки мыши).
+  // Открыли память проекта, из неё запись — «Назад» возвращает к списку, даже если его вкладку уже заменили.
+  const navHistory = useRef<{ stack: string[]; index: number; jumping: boolean }>({ stack: [], index: -1, jumping: false });
+  const [navState, setNavState] = useState({ back: false, forward: false });
   // Экран разделён, и браузер только во второй области — новая вкладка браузера (из меню, от агента, по ссылке)
   // встаёт туда же, а не в основную область с заметкой. Прежняя страница уходит в основной список вкладок.
   const routedOpen = useCallback((key: string, pin = false) => {
-    const isNewWeb = key.startsWith("web:") && !tabsState.tabs.some((tab) => tab.key === key);
+    const nextKey = key === "web:" && splitKey?.startsWith("web:") && !tabsState.active.startsWith("web:")
+      ? browserBlankTabKey()
+      : key;
+    const isNewWeb = nextKey.startsWith("web:") && !tabsState.tabs.some((tab) => tab.key === nextKey);
     if (isNewWeb && splitKey?.startsWith("web:") && !tabsState.active.startsWith("web:")) {
       const mainActive = tabsState.active;
-      tabsState.open(key, true);
-      setSplitKey(key);
+      tabsState.open(nextKey, true);
+      setSplitKey(nextKey);
       if (mainActive) tabsState.open(mainActive);
       return;
     }
-    tabsState.open(key, pin);
+    tabsState.open(nextKey, pin);
   }, [tabsState, splitKey, setSplitKey]);
   const tabs = useMemo(() => ({ ...tabsState, open: routedOpen }), [tabsState, routedOpen]);
   const [splitRatio, setSplitRatio] = usePersistentState("mbox.wb.splitRatio", 0.5);
@@ -175,6 +195,52 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const centerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const nav = navHistory.current;
+    if (tabs.active) {
+      if (nav.jumping) nav.jumping = false;
+      else if (nav.stack[nav.index] !== tabs.active) {
+        nav.stack = [...nav.stack.slice(0, nav.index + 1), tabs.active].slice(-100);
+        nav.index = nav.stack.length - 1;
+      }
+      setNavState({ back: nav.index > 0, forward: nav.index < nav.stack.length - 1 });
+    }
+  }, [tabs.active]);
+
+  const navigateRef = useRef<(step: -1 | 1) => void>(() => {});
+  navigateRef.current = (step) => navigate(step);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+      navigateRef.current(event.key === "ArrowLeft" ? -1 : 1);
+    };
+    // Боковые кнопки мыши «назад / вперёд» (button 3 / 4).
+    const onMouse = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      navigateRef.current(event.button === 3 ? -1 : 1);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mouseup", onMouse);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mouseup", onMouse);
+    };
+  }, []);
+
+  function navigate(step: -1 | 1) {
+    const nav = navHistory.current;
+    const next = nav.index + step;
+    if (next < 0 || next >= nav.stack.length) return;
+    nav.index = next;
+    nav.jumping = true;
+    tabs.open(nav.stack[next], true);
+  }
 
   useEffect(() => {
     if (tabs.active) setVisited((current) => (current.has(tabs.active) ? current : new Set(current).add(tabs.active)));
@@ -201,6 +267,16 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const onTitle = useCallback((key: string, title: string) => setTitles((current) => (current[key] === title ? current : { ...current, [key]: title })), []);
   const onDirty = useCallback((key: string, value: boolean) => setDirty((current) => (Boolean(current[key]) === value ? current : { ...current, [key]: value })), []);
 
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<RevealDetail>).detail;
+      setActivity(detail.activity as Activity);
+      setSidebarOpen(true);
+    };
+    window.addEventListener(REVEAL_EVENT, listener);
+    return () => window.removeEventListener(REVEAL_EVENT, listener);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   function showActivity(next: Activity) {
     if (activity === next && sidebarOpen) setSidebarOpen(false);
     else { setActivity(next); setSidebarOpen(true); }
@@ -214,6 +290,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const railHidden = useRailHidden();
 
   function railActive(id: RailItemId) {
+    // Телефон: чат открыт поверх всего — активна только его пилюля.
+    if (isPhone && consoleVisibleRef.current) return false;
     const tabKey = RAIL_TABS[id];
     if (tabKey) return id === "browser" ? tabs.active.startsWith("web:") : tabs.active === tabKey;
     return sidebarOpen && activity === (id as Activity);
@@ -238,6 +316,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, [setActivity, setSidebarOpen]);
 
   /** Консоль живёт либо во вкладке нижней панели, либо отдельной колонкой справа — как чат в VS Code. */
+  /** Телефон: чат лежит поверх всего, поэтому выбор раздела в нижнем меню сначала его закрывает. */
+  function closePhoneChat() {
+    if (!isPhone || !consoleVisibleRef.current) return;
+    if (consoleDock === "right") setRightOpen(false);
+    else setPanelOpen(false);
+  }
+
   function toggleConsole(forceOpen = false) {
     if (consoleDock === "right") setRightOpen((value) => forceOpen || !value);
     else if (forceOpen) { setPanelTab("console"); setPanelOpen(true); }
@@ -538,6 +623,16 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   };
 
   const consoleVisible = consoleDock === "right" ? rightOpen : panelOpen && panelTab === "console";
+  consoleVisibleRef.current = consoleVisible;
+  // Активная вкладка всегда на виду в ленте вкладок: открыли из меню или от агента — лента прокручивается к ней.
+  useEffect(() => {
+    document.querySelector<HTMLElement>(".wb-editor:not(.is-split) .wb-tab.is-active")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [tabs.active]);
+  useEffect(() => {
+    const nav = activityRef.current;
+    if (!nav || !window.matchMedia("(max-width: 720px)").matches) return;
+    nav.querySelector<HTMLElement>(".wb-activity.is-active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [activity, tabs.active, consoleVisible]);
   // Что открыто сейчас: активная вкладка и вторая область. Агент получает это с сообщением и не ищет файл сам.
   const chatFocus = useMemo<FocusItem[]>(() => {
     const keys = [tabs.active, splitKey].filter((key): key is string => Boolean(key));
@@ -610,7 +705,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         },
       })}</div>
 
-      <nav className="wb-activitybar" aria-label="Разделы">
+      <nav className="wb-activitybar" aria-label="Разделы" ref={activityRef}>
         {/* Состав и порядок — в rail.ts: группы разделены чертой, лишнее выключается в настройках.
             Браузер живёт только в приложении: сайт показывает главный процесс Electron. */}
         {RAIL_GROUPS.map((group) => {
@@ -622,9 +717,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                 <ActivityButton
                   key={item.id}
                   label={item.label}
+                  short={item.short}
                   icon={<img src={item.icon} alt="" draggable={false} />}
                   active={railActive(item.id)}
-                  onClick={() => openRail(item.id)}
+                  onClick={() => { closePhoneChat(); openRail(item.id); }}
                   badge={item.id === "agents" ? needsHuman.length : undefined}
                 />
               ))}
@@ -634,9 +730,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Чат с агентами">
           <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
+          <span className="wb-activity-label" aria-hidden="true">Чат</span>
           <span className="wb-activity-tip" role="tooltip">Чат с агентами</span>
         </button>
-        <ActivityButton label="Настройки" icon={systemIcon("settings.png")} active={tabs.active === "settings"} onClick={() => tabs.open("settings", true)} />
+        <ActivityButton label="Настройки" short="Настройки" icon={systemIcon("settings.png")} active={tabs.active === "settings"} onClick={() => { closePhoneChat(); tabs.open("settings", true); }} />
       </nav>
 
       <aside className="wb-sidebar" aria-label="Боковая панель" data-scroll-scope={`sidebar:${activity}`}>
@@ -669,6 +766,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               tabs.open(`${TERMINAL_TAB}${pane}`, true);
             }}
           >
+            <div className="wb-tabs-nav">
+              <button type="button" disabled={!navState.back} onClick={() => navigate(-1)} title="Назад (Alt+←)" aria-label="Назад"><ArrowLeft size={15} /></button>
+              <button type="button" disabled={!navState.forward} onClick={() => navigate(1)} title="Вперёд (Alt+→)" aria-label="Вперёд"><ArrowRight size={15} /></button>
+            </div>
             {orderTabs(tabs.tabs.filter((tab) => tab.key !== splitKey), groupTabs).map((tab, index, list) => {
               const meta = tabMeta(tab.key, data, catalogTitles);
               const group = tabGroupOf(tab.key);
@@ -698,7 +799,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   onDrop={(event) => { event.preventDefault(); if (draggedTab) tabs.move(draggedTab, tab.key); setDraggedTab(null); }}
                   onDragEnd={() => setDraggedTab(null)}
                 >
-                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={tab.key} url={browserUrl} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
+                  {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={tab.key} url={browserUrl} size={18} /> : meta.glyph && !browserFavicon ? <TreeGlyph kind={meta.glyph} size={16} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                   <span className="wb-tab-title">{meta.title}</span>
                   <button type="button" className="wb-tab-close" onClick={(event) => { event.stopPropagation(); closeTab(tab.key); }} aria-label={`Закрыть ${meta.title}`}>
                     <X size={13} />
@@ -744,7 +845,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                     : "";
                   return (
                     <div className="wb-tab is-active" role="tab" aria-selected title={meta.hint}>
-                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={splitKey} url={browserUrl} size={18} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
+                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={splitKey} url={browserUrl} size={18} /> : meta.glyph && !browserFavicon ? <TreeGlyph kind={meta.glyph} size={16} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                       <span className="wb-tab-title">{meta.title}</span>
                       <button type="button" className="wb-tab-close" onClick={() => setSplitKey(null)} aria-label="Закрыть вторую область">
                         <X size={13} />
@@ -831,17 +932,6 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <TerminalSquare size={12} /> {working.length > 0 ? `${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : "Чат"}
         </button>
         <span className="wb-status-fill" />
-        {(() => {
-          const [kind, rootKey] = tabs.active.split(":");
-          const key = ["local", "gitdiff", "commit"].includes(kind) ? rootKey : localWorkspace.roots[0]?.key;
-          const git = key ? localWorkspace.git(key) : undefined;
-          if (!git?.isRepo) return null;
-          return (
-            <button type="button" className="wb-status-item" onClick={() => showActivity("local")} title={`Ветка git · ${git.changesTotal ?? 0} изменённых файлов`}>
-              <GitBranch size={12} /> {git.branch}{(git.changesTotal ?? 0) > 0 ? `*${git.changesTotal}` : ""}{(git.ahead ?? 0) > 0 ? ` ↑${git.ahead}` : ""}{(git.behind ?? 0) > 0 ? ` ↓${git.behind}` : ""}
-            </button>
-          );
-        })()}
         {attentionCount > 0 && (
           <button type="button" className={needsHuman.length ? "wb-status-item is-warn" : "wb-status-item"} onClick={() => showPanel("attention")} title="Требует внимания">
             <AlertTriangle size={12} /> {attentionCount}
@@ -894,10 +984,19 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   );
 }
 
-function ActivityButton({ label, icon, active, onClick, badge }: { label: string; icon: ReactNode; active: boolean; onClick: () => void; badge?: number }) {
+/** Полоса разделов прокручивается и обрезала бы подсказку — она стоит от окна, по месту кнопки (hig.css). */
+function placeActivityTip(event: { currentTarget: HTMLElement }) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  event.currentTarget.style.setProperty("--tip-left", `${Math.round(rect.right + 8)}px`);
+  event.currentTarget.style.setProperty("--tip-top", `${Math.round(rect.top + rect.height / 2)}px`);
+}
+
+function ActivityButton({ label, short, icon, active, onClick, badge }: { label: string; short?: string; icon: ReactNode; active: boolean; onClick: () => void; badge?: number }) {
   return (
-    <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} aria-label={label} aria-pressed={active}>
+    <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} aria-label={label} aria-pressed={active} onMouseEnter={placeActivityTip} onFocus={placeActivityTip}>
       <span className="wb-activity-icon" aria-hidden="true">{icon}</span>
+      {/* Подпись видна только в нижнем меню телефона (см. mobile.css); на компьютере — подсказка. */}
+      <span className="wb-activity-label" aria-hidden="true">{short || label}</span>
       <span className="wb-activity-tip" role="tooltip">{label}</span>
       {Boolean(badge) && <b>{badge}</b>}
     </button>

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS, AgentName } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
 import { markOverlay } from "../app/workbench/BrowserDocument";
+import { TreeGlyph } from "../app/workbench/TreeGlyph";
 
 // Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
 // полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
@@ -30,6 +31,8 @@ type TopBarProps = {
   activeTitle?: string;
   activeHint?: string;
   activeIcon?: string;
+  /** Символ сущности проекта вместо картинки — как на вкладке. */
+  activeGlyph?: string;
   activeDirty?: boolean;
   tabCount?: number;
   realtimeState?: "connecting" | "connected" | "thinking" | "working" | "attention" | "offline";
@@ -103,6 +106,7 @@ export function TopBar({
   activeTitle = "MBOX",
   activeHint = "Рабочее место",
   activeIcon = "/assets/icons/navigation/projects.png",
+  activeGlyph,
   activeDirty = false,
   tabCount = 0,
   realtimeState = "connecting",
@@ -257,7 +261,7 @@ export function TopBar({
   return (
     <header className="topbar" ref={barRef}>
       <div className="topbar-context" title={`${activeTitle} — ${activeHint}${tabCount > 1 ? ` · ${tabCount} вкладок` : ""}`}>
-        <img src={activeIcon} alt="" width={18} height={18} />
+        {activeGlyph ? <TreeGlyph kind={activeGlyph} size={16} /> : <img src={activeIcon} alt="" width={18} height={18} />}
         <strong>{activeTitle}</strong>
         {activeDirty && <i className="topbar-dirty" aria-label="есть несохранённые правки" />}
         <span>{activeHint}</span>

@@ -3,6 +3,7 @@ import type { MboxData } from "../../hooks/useMboxData";
 import { fileIcon, fileKind } from "./Files";
 import { chatPeer, consoleLabel, isChatPane } from "./consoleLayout";
 import { noteTitle } from "./Notes";
+import { folderGlyph } from "./TreeGlyph";
 
 const MENU = "/assets/icons/bottom-menu";
 const NAVIGATION = "/assets/icons/navigation";
@@ -10,7 +11,8 @@ const SYSTEM = "/assets/icons/system";
 const PROJECT = "/assets/icons/project";
 const FILES = "/assets/icons/files";
 
-export type TabMeta = { title: string; hint: string; icon: string };
+/** glyph — символ сущности проекта (TreeGlyph); если есть, рисуется вместо картинки icon. */
+export type TabMeta = { title: string; hint: string; icon: string; glyph?: string };
 
 export function folderIcon(name: string) {
   return `${PROJECT}/${name === "Посты" ? "posts" : name === "Документы" ? "documents" : "folder"}.png`;
@@ -31,19 +33,19 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "settings":
       return { title: "Настройки", hint: "Сервер и доступ", icon: `${SYSTEM}/settings.png` };
     case "todos":
-      return { title: `Todo · ${project?.name ?? `#${first}`}`, hint: "Задачи проекта", icon: `${SYSTEM}/todo.png` };
+      return { title: `Todo · ${project?.name ?? `#${first}`}`, hint: "Задачи проекта", icon: `${SYSTEM}/todo.png`, glyph: "todos" };
     case "entity": {
       const meta = projectEntityKinds[second as ProjectEntityKind];
-      return { title: `${meta?.label ?? second} · ${project?.name ?? `#${first}`}`, hint: project?.name ?? "", icon: meta?.image ?? `${SYSTEM}/properties.png` };
+      return { title: `${meta?.label ?? second} · ${project?.name ?? `#${first}`}`, hint: project?.name ?? "", icon: second === "memories" ? `${NAVIGATION}/memory.png` : meta?.image ?? `${SYSTEM}/properties.png`, glyph: second };
     }
     case "folder": {
       const folder = data.folders.find((item) => item.id === second);
-      return { title: `${folder?.name ?? "Папка"} · ${project?.name ?? `#${first}`}`, hint: "Папка проекта", icon: folderIcon(folder?.name ?? "") };
+      return { title: `${folder?.name ?? "Папка"} · ${project?.name ?? `#${first}`}`, hint: "Папка проекта", icon: folderIcon(folder?.name ?? ""), glyph: folderGlyph(folder?.name ?? "") };
     }
     case "todo": {
       const owner = data.projects.find((item) => item.todos.some((todo) => todo.id === first));
       const todo = owner?.todos.find((item) => item.id === first);
-      return { title: todo?.title ?? `Todo #${first}`, hint: owner ? `${owner.name} · todo #${first}` : `todo #${first}`, icon: `${SYSTEM}/todo.png` };
+      return { title: todo?.title ?? `Todo #${first}`, hint: owner ? `${owner.name} · todo #${first}` : `todo #${first}`, icon: `${SYSTEM}/todo.png`, glyph: "todos" };
     }
     case "note":
       return { title: noteTitle(key) || "Заметка", hint: "Заметка", icon: `${NAVIGATION}/notes.png` };
@@ -79,7 +81,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       // Пока сайт не загрузился, заголовка нет — показываем домен, он уже в ключе вкладки.
       const address = key.slice(4);
       const host = address.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
-      return { title: titles[key] || host || "Браузер", hint: address || "Встроенный браузер", icon: `${FILES}/browser-file.png` };
+      return { title: titles[key] || host || "Браузер", hint: address || "Встроенный браузер", icon: "/assets/icons/navigation/browser.png" };
     }
     case "tool":
       return { title: titles[key] ?? first, hint: "Инструмент", icon: `${NAVIGATION}/tools.png` };
@@ -90,9 +92,9 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: file?.name || `Файл #${first}`, hint: [owner?.name ?? "Без проекта", file?.category].filter(Boolean).join(" › "), icon: file ? fileIcon(fileKind(file), file.name) : `${PROJECT}/documents.png` };
     }
     case "memory": {
-      if (first === "new") return { title: "Новая запись", hint: "Память", icon: `${NAVIGATION}/memory.png` };
+      if (first === "new") return { title: "Новая запись", hint: "Память", icon: `${NAVIGATION}/memory.png`, glyph: "memories" };
       const known = titles[key] ?? data.memories.find((item) => item.id === first)?.title;
-      return { title: known || `Память #${first}`, hint: `память #${first}`, icon: `${NAVIGATION}/memory.png` };
+      return { title: known || `Память #${first}`, hint: `память #${first}`, icon: `${NAVIGATION}/memory.png`, glyph: "memories" };
     }
     case "term": {
       const pane = key.slice(5);

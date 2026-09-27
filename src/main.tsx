@@ -180,6 +180,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
             activeTitle={activeTab.title}
             activeHint={activeTab.hint}
             activeIcon={activeTab.icon}
+            activeGlyph={activeTab.glyph}
             activeDirty={activeTab.dirty}
             tabCount={activeTab.tabs}
             realtimeState={headerState}

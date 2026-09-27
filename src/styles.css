@@ -16,4 +16,6 @@
 @import "./styles/hig.css";
 @import "./styles/browser.css";
 @import "./styles/catalog.css";
+@import "./styles/chrome.css";
 @import "./styles/editor.css";
+@import "./styles/mobile.css";

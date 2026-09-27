@@ -49,6 +49,7 @@ export async function uploadToStorage(key: string, file: Blob, onProgress: (load
     let sent = 0;
     try {
       await putWithProgress(url, file, (loaded) => { sent = loaded; onProgress(loaded, "direct"); });
+      await fetch("/api/mbox/storage/commit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key, size: file.size, mode: "direct" }) }).catch(() => undefined);
       return;
     } catch (error) {
       // CORS или сеть до первого байта — пробуем через сервер; оборвалось на середине — это настоящая ошибка.

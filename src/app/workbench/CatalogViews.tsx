@@ -115,12 +115,28 @@ function tileColor(name: string) {
   return `hsl(${hash} 55% 48%)`;
 }
 
-/** Своя картинка — если есть и загрузилась (кроме общей заглушки), иначе символ на цветной плитке или первая буква. */
+/** Значки инструментов из набора MBOX (public/assets/icons/tools) — важнее картинки из каталога сервера. */
+const TOOL_IMAGES: Record<string, string> = {
+  "tour-feed": "/assets/icons/tools/tour-feed.png",
+  "wordstat-api": "/assets/icons/tools/wordstat-api.png",
+  "topvisor-api": "/assets/icons/tools/topvisor-api.png",
+  "metrica-api": "/assets/icons/tools/metrica-api.png",
+  "webmaster-api": "/assets/icons/tools/webmaster-api.png",
+  "playwright-mcp": "/assets/icons/tools/playwright-mcp.png",
+  "chrome-devtools-mcp": "/assets/icons/tools/chrome-devtools-mcp.png",
+  "browserbase-stagehand": "/assets/icons/tools/browserbase-stagehand.png",
+  figma: "/assets/icons/tools/figma.png",
+  obscura: "/assets/icons/tools/obscura.png",
+};
+
+/** Своя картинка из набора, затем из каталога (кроме общей заглушки), иначе символ на цветной плитке или первая буква. */
 export function ToolIcon({ id = "", src, name, size }: { id?: string; src: string; name: string; size: number }) {
-  const generic = !src || /\/project\/sources\.png$/.test(src);
+  const own = TOOL_IMAGES[id];
+  const image = own || src;
+  const generic = !image || (!own && /\/project\/sources\.png$/.test(image));
   const [failed, setFailed] = useState(generic);
   const glyph = TOOL_GLYPHS[id];
-  if (!failed && !glyph) return <img className="wb-tool-tile is-image" src={src} width={size} height={size} alt="" onError={() => setFailed(true)} />;
+  if (!failed && (own || !glyph)) return <img className="wb-tool-tile is-image" src={image} width={size} height={size} alt="" onError={() => setFailed(true)} />;
   const Icon = glyph?.icon;
   return (
     <span className="wb-tool-tile" style={{ width: size, height: size, ["--tile" as string]: glyph?.color || tileColor(name) }} aria-hidden="true">
@@ -175,7 +191,7 @@ export function ToolsView({ tabs }: { tabs: TabsApi }) {
                     title={`${tool.summary}\n\n${tool.status}`}
                   >
                     <span className={`wb-tool-glyph ${toolTone(tool)}`}>
-                      <ToolIcon id={tool.id} src={tool.planned ? "" : tool.icon} name={tool.name} size={28} />
+                      <ToolIcon id={tool.id} src={tool.planned ? "" : tool.icon} name={tool.name} size={36} />
                       <i aria-hidden="true" />
                     </span>
                     <span className="wb-menu-item-title">{tool.name}</span>

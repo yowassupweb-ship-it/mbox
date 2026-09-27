@@ -30,6 +30,8 @@ export type RailItem = {
   id: RailItemId;
   /** Подпись в подсказке и в настройках. */
   label: string;
+  /** Подпись пилюли в нижнем меню телефона — одно-два слова. */
+  short: string;
   icon: string;
   /** Только в MBOX Desktop: в вебе рядом есть настоящий браузер. */
   desktopOnly?: boolean;
@@ -44,41 +46,41 @@ export const RAIL_GROUPS: Array<{ id: string; title: string; items: RailItem[] }
   {
     id: "projects",
     title: "Проекты",
-    items: [{ id: "explorer", label: "Проекты (Ctrl+Shift+E)", icon: `${NAVIGATION}/projects.png`, required: true }],
+    items: [{ id: "explorer", label: "Проекты (Ctrl+Shift+E)", short: "Проекты", icon: `${NAVIGATION}/projects.png`, required: true }],
   },
   {
     id: "documents",
     title: "Документы",
     items: [
-      { id: "notes", label: "Заметки (Ctrl+Alt+N — новая)", icon: `${NAVIGATION}/notes.png` },
-      { id: "local", label: "Папки (локальные файлы и git)", icon: `${NAVIGATION}/folders.png` },
-      { id: "files", label: "Артефакты", icon: `${NAVIGATION}/artifacts.png` },
-      { id: "browser", label: "Браузер", icon: "/assets/icons/files/browser-file.png", desktopOnly: true },
+      { id: "notes", label: "Заметки (Ctrl+Alt+N — новая)", short: "Заметки", icon: `${NAVIGATION}/notes.png` },
+      { id: "local", label: "Папки (локальные файлы и git)", short: "Папки", icon: `${NAVIGATION}/folders.png` },
+      { id: "files", label: "Артефакты", short: "Артефакты", icon: `${NAVIGATION}/artifacts.png` },
+      { id: "browser", label: "Браузер", short: "Браузер", icon: `${NAVIGATION}/browser.png`, desktopOnly: true },
     ],
   },
   {
     id: "memory",
     title: "Память и хранилище",
     items: [
-      { id: "search", label: "Поиск по памяти (Ctrl+K)", icon: `${NAVIGATION}/memory.png` },
-      { id: "storage", label: "Хранилище S3", icon: `${NAVIGATION}/storage.png` },
+      { id: "search", label: "Поиск по памяти (Ctrl+K)", short: "Поиск", icon: `${NAVIGATION}/memory.png` },
+      { id: "storage", label: "Хранилище S3", short: "Хранилище", icon: `${NAVIGATION}/storage.png` },
     ],
   },
   {
     id: "abilities",
     title: "Навыки и инструменты",
     items: [
-      { id: "skills", label: "Навыки", icon: `${NAVIGATION}/skills.png` },
-      { id: "tools", label: "Инструменты", icon: `${NAVIGATION}/tools.png` },
+      { id: "skills", label: "Навыки", short: "Навыки", icon: `${NAVIGATION}/skills.png` },
+      { id: "tools", label: "Инструменты", short: "Инструменты", icon: `${NAVIGATION}/tools.png` },
     ],
   },
   {
     id: "agents",
     title: "Агенты",
     items: [
-      { id: "agents", label: "Агенты", icon: `${NAVIGATION}/agents.png` },
-      { id: "ssh", label: "SSH", icon: "/assets/icons/project/ssh.png" },
-      { id: "history", label: "История", icon: `${SYSTEM}/history.png` },
+      { id: "agents", label: "Агенты", short: "Агенты", icon: `${NAVIGATION}/agents.png` },
+      { id: "ssh", label: "SSH", short: "SSH", icon: "/assets/icons/project/ssh.png" },
+      { id: "history", label: "История", short: "История", icon: `${SYSTEM}/history.png` },
     ],
   },
 ];
