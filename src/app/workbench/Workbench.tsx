@@ -729,7 +729,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         })}
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Чат с агентами">
-          <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
+          <span className="wb-activity-icon" aria-hidden="true">{systemIcon("chat.png")}</span>
           <span className="wb-activity-label" aria-hidden="true">Чат</span>
           <span className="wb-activity-tip" role="tooltip">Чат с агентами</span>
         </button>

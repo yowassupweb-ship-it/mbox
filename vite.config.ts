@@ -23,6 +23,7 @@ import { ensureSeoWizardSchema, handleSeoWizardApi } from "./server/seo-wizard.m
 import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import { handleBrowserAgentApi } from "./server/browser-agent.mjs";
+import { handleVkTourBot } from "./server/vk-tour-bot.mjs";
 import {
   configureJarvis, JARVIS_NAME, JARVIS_AUTOREPLY, jarvisPhase, setAgentPhase, getAgentPhase, activeJarvisRequests,
   bulkUpsertTourSheets, refreshDataSourceById, replyAsJarvis, searchTerms, jarvisModels, publishAgentModels, type TourSheetItem,
@@ -997,6 +998,8 @@ function mboxDevApi() {
       });
 
       server.middlewares.use(async (req, res, next) => {
+        const publicUrl = new URL(req.url || "/", "http://localhost");
+        if (await handleVkTourBot({ req, res, url: publicUrl, query: queryPostgres, readBody })) return;
         // Зеркало прод-сервера: заметка по ссылке отвечает без входа (см. server/notes.mjs).
         if (req.url?.startsWith("/api/share/")) {
           const shareUrl = new URL(req.url, "http://localhost");
