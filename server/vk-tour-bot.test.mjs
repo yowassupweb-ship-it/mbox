@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBotReply, buildTourDialogUrl, extractCoverUrl, extractTourKeys, handleVkTourBot, hasMenu, MENU_KEYBOARD, loadTours, makeTourCard, processVkEvent } from "./vk-tour-bot.mjs";
+import { buildBotReply, buildTourDialogUrl, extractCoverUrl, extractTourKeys, handleVkTourBot, loadTours, makeTourCard, processVkEvent } from "./vk-tour-bot.mjs";
 
 const realFeedTour = {
   tour_id: "512",
@@ -27,16 +27,8 @@ test("кнопка «Начать» после перехода по ссылк�
   assert.deepEqual(extractTourKeys(event), ["512", "603"]);
 });
 
-test("постоянная кнопка «Показать туры» ставится один раз", () => {
-  const menuMessage = { out: 1, text: "Увидели подборку в посте — откройте ссылку и нажмите «Показать туры» внизу." };
-  assert.equal(hasMenu({ items: [{ out: 0, text: "512" }, menuMessage] }), true);
-  assert.equal(hasMenu({ items: [{ out: 0, text: menuMessage.text }] }), false);
-  assert.equal(hasMenu({ items: [] }, { object: { message: { payload: JSON.stringify({ command: "show_tours" }) } } }), true);
-  assert.equal(MENU_KEYBOARD.one_time, false);
-});
-
 test("сообщение без ключа получает подсказку, а не «не нашёл»", () => {
-  assert.match(buildBotReply([], undefined, []).message, /Показать туры/);
+  assert.match(buildBotReply([], undefined, []).message, /^Пришлите номер тура/);
   assert.match(buildBotReply([], undefined, ["999"]).message, /^Не нашёл/);
 });
 
@@ -95,7 +87,6 @@ test("сквозной обработчик читает фид и отправ�
       subscriptionUrl: "https://vk.ru/app5898182_-53145183#s=3819494",
       tourBaseUrl: "https://vs-travel.ru/tour?id=",
       photos: false,
-      menu: false,
     },
   });
   assert.deepEqual(result.keys, ["512"]);
