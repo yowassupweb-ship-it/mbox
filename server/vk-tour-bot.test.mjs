@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBotReply, buildTourDialogUrl, extractTourKeys, handleVkTourBot, loadTours, makeTourCard, processVkEvent } from "./vk-tour-bot.mjs";
+import { buildBotReply, buildTourDialogUrl, extractCoverUrl, extractTourKeys, handleVkTourBot, loadTours, makeTourCard, processVkEvent } from "./vk-tour-bot.mjs";
 
 const realFeedTour = {
   tour_id: "512",
@@ -37,11 +37,17 @@ test("карточка реального тура 512 содержит согл
   assert.equal(card.days, 1);
   assert.equal(card.price, 5500);
   assert.equal(card.url, "https://vs-travel.ru/tour?id=512");
-  assert.match(card.text, /Название тура: Незнакомая Кострома/);
+  assert.match(card.text, /^Незнакомая Кострома\n/);
   assert.match(card.text, /Маршрут: Кострома/);
-  assert.match(card.text, /Количество дней: 1 день/);
+  assert.match(card.text, /Продолжительность: 1 день/);
   assert.match(card.text, /Стоимость: от 5\s500 ₽/);
-  assert.match(card.text, /Перейти: https:\/\/vs-travel\.ru\/tour\?id=512/);
+  assert.doesNotMatch(card.text, /https?:/);
+});
+
+test("обложка тура берётся из og:image страницы тура", () => {
+  const html = '<meta property="og:image" content="/tourimages/2026/08/cover-md.jpg" />';
+  assert.equal(extractCoverUrl(html, "https://vs-travel.ru/tour?id=512"), "https://vs-travel.ru/tourimages/2026/08/cover-md.jpg");
+  assert.equal(extractCoverUrl("<html></html>", "https://vs-travel.ru/tour?id=512"), "");
 });
 
 test("loadTours сохраняет порядок группы ключей", async () => {
@@ -59,8 +65,11 @@ test("loadTours сохраняет порядок группы ключей", as
 test("ответ для группы содержит карточки и CTA подписки", () => {
   const reply = buildBotReply([makeTourCard(realFeedTour), makeTourCard({ ...realFeedTour, tour_id: "603" })]);
   assert.match(reply.message, /———/);
-  assert.match(reply.message, /app5898182_-53145183#s=3819494/);
+  assert.doesNotMatch(reply.message, /https?:/);
+  for (const item of reply.format.items) assert.equal(reply.message.slice(item.offset, item.offset + item.length), "Незнакомая Кострома");
+  assert.equal(reply.format.items.length, 2);
   assert.equal(reply.keyboard.buttons.flat().length, 3);
+  assert.equal(reply.keyboard.buttons.flat().at(-1).action.link, "https://vk.ru/app5898182_-53145183#s=3819494");
 });
 
 test("сквозной обработчик читает фид и отправляет ответ VK без сохранения лида", async () => {
@@ -77,6 +86,7 @@ test("сквозной обработчик читает фид и отправ�
       apiVersion: "5.199",
       subscriptionUrl: "https://vk.ru/app5898182_-53145183#s=3819494",
       tourBaseUrl: "https://vs-travel.ru/tour?id=",
+      photos: false,
     },
   });
   assert.deepEqual(result.keys, ["512"]);

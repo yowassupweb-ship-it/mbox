@@ -91,11 +91,10 @@ export function makeTourCard(row, tourBaseUrl = DEFAULT_TOUR_URL) {
     price: Number(row.price_from) || 0,
     url: `${tourBaseUrl}${encodeURIComponent(String(row.tour_id))}`,
     text: [
-      `Название тура: ${row.tour_name || "Тур"}`,
+      String(row.tour_name || "Тур"),
       `Маршрут: ${row.route_name || "Маршрут уточняется"}`,
-      `Количество дней: ${days} ${dayLabel(days)}`,
+      `Продолжительность: ${days} ${dayLabel(days)}`,
       `Стоимость: от ${money(row.price_from)} ₽`,
-      `Перейти: ${tourBaseUrl}${encodeURIComponent(String(row.tour_id))}`,
     ].join("\n"),
   };
 }
@@ -122,7 +121,7 @@ export function buildBotReply(cards, subscriptionUrl = DEFAULT_SUBSCRIPTION_URL,
       ? "Пришлите номер тура, например: 512. Номер есть в ссылке на тур и в постах сообщества."
       : "Не нашёл доступный тур по этому ключу.";
     return {
-      message: `${lead} Подпишитесь на рассылку ВКонтакте — там появляются новые туры: ${subscriptionUrl}`,
+      message: `${lead} Подпишитесь на рассылку ВКонтакте — там появляются новые туры.`,
       keyboard: {
         inline: true,
         buttons: [[{ action: { type: "open_link", link: subscriptionUrl, label: "Подписаться" } }]],
@@ -135,9 +134,17 @@ export function buildBotReply(cards, subscriptionUrl = DEFAULT_SUBSCRIPTION_URL,
   buttons.push({ action: { type: "open_link", link: subscriptionUrl, label: "Подписаться на рассылку" } });
   const rows = [];
   for (let index = 0; index < buttons.length; index += 2) rows.push(buttons.slice(index, index + 2));
+  const separator = "\n\n———\n\n";
+  const bold = [];
+  let offset = 0;
+  for (const card of cards) {
+    bold.push({ type: "bold", offset, length: card.title.length });
+    offset += card.text.length + separator.length;
+  }
   return {
-    message: `${cards.map((card) => card.text).join("\n\n———\n\n")}\n\nПодпишитесь на рассылку ВКонтакте, чтобы не пропускать новые туры: ${subscriptionUrl}`,
+    message: `${cards.map((card) => card.text).join(separator)}\n\nПодпишитесь на рассылку ВКонтакте, чтобы не пропускать новые туры.`,
     keyboard: { inline: true, buttons: rows },
+    format: { version: 1, items: bold },
   };
 }
 
@@ -146,22 +153,70 @@ function randomId(event) {
   return createHash("sha256").update(source).digest().readUInt32BE(0) & 0x7fffffff;
 }
 
+async function vkApi(fetchImpl, method, params) {
+  const response = await fetchImpl(`https://api.vk.com/method/${method}`, { method: "POST", body: new URLSearchParams(params) });
+  const result = await response.json();
+  if (!response.ok || result.error) throw new Error(result.error?.error_msg || `VK API ${response.status}`);
+  return result.response;
+}
+
 export async function sendVkMessage({ fetchImpl = fetch, token, apiVersion, peerId, event, reply }) {
-  const body = new URLSearchParams({
+  const params = {
     access_token: token,
     v: apiVersion,
     peer_id: String(peerId),
     random_id: String(randomId(event)),
     message: reply.message,
     keyboard: JSON.stringify(reply.keyboard),
-  });
-  const response = await fetchImpl("https://api.vk.com/method/messages.send", { method: "POST", body });
-  const result = await response.json();
-  if (!response.ok || result.error) throw new Error(result.error?.error_msg || `VK API ${response.status}`);
-  return result.response;
+    dont_parse_links: "1",
+  };
+  if (reply.attachments?.length) params.attachment = reply.attachments.join(",");
+  if (reply.format?.items?.length) params.format_data = JSON.stringify(reply.format);
+  return vkApi(fetchImpl, "messages.send", params);
 }
 
-export async function processVkEvent({ event, query, fetchImpl = fetch, config }) {
+export function extractCoverUrl(html, pageUrl) {
+  const match = String(html || "").match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+    || String(html || "").match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (!match) return "";
+  try {
+    return new URL(match[1], pageUrl).href;
+  } catch {
+    return "";
+  }
+}
+
+const photoCache = new Map();
+
+async function uploadTourPhoto({ fetchImpl, config, peerId, card }) {
+  if (photoCache.has(card.key)) return photoCache.get(card.key);
+  const page = await fetchImpl(card.url);
+  if (!page.ok) return "";
+  const coverUrl = extractCoverUrl(await page.text(), card.url);
+  if (!coverUrl) return "";
+  const image = await fetchImpl(coverUrl);
+  if (!image.ok) return "";
+  const auth = { access_token: config.token, v: config.apiVersion };
+  const server = await vkApi(fetchImpl, "photos.getMessagesUploadServer", { ...auth, peer_id: String(peerId) });
+  const form = new FormData();
+  form.append("photo", new Blob([await image.arrayBuffer()], { type: image.headers.get("content-type") || "image/jpeg" }), `tour-${card.key}.jpg`);
+  const uploaded = await (await fetchImpl(server.upload_url, { method: "POST", body: form })).json();
+  if (!uploaded.photo || uploaded.photo === "[]") return "";
+  const [photo] = await vkApi(fetchImpl, "photos.saveMessagesPhoto", { ...auth, photo: uploaded.photo, server: String(uploaded.server), hash: uploaded.hash });
+  const attachment = `photo${photo.owner_id}_${photo.id}${photo.access_key ? `_${photo.access_key}` : ""}`;
+  photoCache.set(card.key, attachment);
+  return attachment;
+}
+
+export async function tourPhotos({ fetchImpl = fetch, config, peerId, cards, logger = console }) {
+  const results = await Promise.all(cards.map((card) => uploadTourPhoto({ fetchImpl, config, peerId, card }).catch((error) => {
+    logger.warn(`VK bot: no photo for tour ${card.key}: ${error.message}`);
+    return "";
+  })));
+  return results.filter(Boolean);
+}
+
+export async function processVkEvent({ event, query, fetchImpl = fetch, config, logger = console }) {
   if (event?.type !== "message_new") return { ignored: true };
   const message = event.object?.message || event.object || {};
   const peerId = message.peer_id || message.from_id;
@@ -169,6 +224,7 @@ export async function processVkEvent({ event, query, fetchImpl = fetch, config }
   const keys = extractTourKeys(event);
   const cards = await loadTours(query, keys, config.tourBaseUrl);
   const reply = buildBotReply(cards, config.subscriptionUrl, keys);
+  if (cards.length && config.photos !== false) reply.attachments = await tourPhotos({ fetchImpl, config, peerId, cards, logger });
   await sendVkMessage({ fetchImpl, token: config.token, apiVersion: config.apiVersion, peerId, event, reply });
   return { peerId: String(peerId), keys, cards };
 }
@@ -217,6 +273,6 @@ export async function handleVkTourBot({ req, res, url, query, readBody, env = pr
   }
   logger.info(`VK bot: accepted ${String(event.type || "unknown")} callback`);
   plain(res, 200, "ok");
-  void processVkEvent({ event, query, fetchImpl, config }).catch((error) => logger.error(`VK bot: ${error.message}`));
+  void processVkEvent({ event, query, fetchImpl, config, logger }).catch((error) => logger.error(`VK bot: ${error.message}`));
   return true;
 }
