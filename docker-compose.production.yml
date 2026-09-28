@@ -30,8 +30,6 @@ services:
       VK_BOT_SECRET: ${VK_BOT_SECRET:-}
       VK_BOT_CONFIRMATION_CODE: ${VK_BOT_CONFIRMATION_CODE:-}
       VK_BOT_API_VERSION: ${VK_BOT_API_VERSION:-5.199}
-      VK_APP_ID: ${VK_APP_ID:-}
-      VK_APP_SECRET: ${VK_APP_SECRET:-}
     networks:
       - mbox-net
 

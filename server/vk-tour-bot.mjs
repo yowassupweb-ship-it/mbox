@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 
 const DEFAULT_GROUP_ID = "223347696";
@@ -89,7 +89,9 @@ export function makeTourCard(row, tourBaseUrl = DEFAULT_TOUR_URL) {
     title: String(row.tour_name || "Тур"),
     route: String(row.route_name || "Маршрут уточняется"),
     days,
+    duration: `${days} ${dayLabel(days)}`,
     price: Number(row.price_from) || 0,
+    priceText: `от ${money(row.price_from)} ₽`,
     url: `${tourBaseUrl}${encodeURIComponent(String(row.tour_id))}`,
     text: [
       String(row.tour_name || "Тур"),
@@ -188,12 +190,19 @@ export function extractCoverUrl(html, pageUrl) {
 }
 
 const photoCache = new Map();
+const coverCache = new Map();
+
+export async function tourCover(fetchImpl, card) {
+  if (coverCache.has(card.key)) return coverCache.get(card.key);
+  const page = await fetchImpl(card.url);
+  const coverUrl = page.ok ? extractCoverUrl(await page.text(), card.url) : "";
+  if (coverUrl) coverCache.set(card.key, coverUrl);
+  return coverUrl;
+}
 
 async function uploadTourPhoto({ fetchImpl, config, peerId, card }) {
   if (photoCache.has(card.key)) return photoCache.get(card.key);
-  const page = await fetchImpl(card.url);
-  if (!page.ok) return "";
-  const coverUrl = extractCoverUrl(await page.text(), card.url);
+  const coverUrl = await tourCover(fetchImpl, card);
   if (!coverUrl) return "";
   const image = await fetchImpl(coverUrl);
   if (!image.ok) return "";
@@ -235,55 +244,35 @@ async function sendTours({ fetchImpl, query, config, peerId, keys, event, logger
   return cards;
 }
 
-const LAUNCH_MAX_AGE_SECONDS = 86400;
-
-// Подпись параметров запуска мини-приложения: vk_* по алфавиту, HMAC-SHA256 защищённым ключом, base64url.
-export function verifyLaunchParams(search, secret, now = Date.now()) {
-  if (!secret) return null;
-  const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
-  const sign = params.get("sign") || "";
-  const signed = [...params.entries()].filter(([key]) => key.startsWith("vk_")).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const base = signed.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
-  const expected = createHmac("sha256", secret).update(base).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const given = Buffer.from(sign);
-  if (!sign || given.length !== expected.length || !timingSafeEqual(given, Buffer.from(expected))) return null;
-  const launch = Object.fromEntries(signed);
-  const ts = Number(launch.vk_ts);
-  if (Number.isFinite(ts) && now / 1000 - ts > LAUNCH_MAX_AGE_SECONDS) return null;
-  return launch;
-}
-
 function json(res, status, body) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
 }
 
-export async function handleAppShow({ body, query, config, fetchImpl = fetch, logger = console }) {
-  const launch = verifyLaunchParams(body?.launch, config.appSecret);
-  if (!launch || (config.appId && String(launch.vk_app_id) !== config.appId) || !launch.vk_user_id) return { status: 403, body: { error: "bad_sign" } };
-  const keys = [...new Set(splitKeys(String(body?.tours || "").replace(/^(?:tours?[:=])/i, "")))].slice(0, MAX_TOURS);
-  const groupName = `club${config.groupId}`;
-  const dialogUrl = `https://vk.me/${groupName}`;
-  if (!keys.length) return { status: 200, body: { result: "start", url: dialogUrl } };
-  const startUrl = buildTourDialogUrl(keys, "app", groupName);
-  const auth = { access_token: config.token, v: config.apiVersion };
-  try {
-    const allowed = await vkApi(fetchImpl, "messages.isMessagesFromGroupAllowed", { ...auth, group_id: config.groupId, user_id: String(launch.vk_user_id) });
-    if (!allowed?.is_allowed) return { status: 200, body: { result: "start", url: startUrl } };
-    const event = { event_id: `app:${launch.vk_user_id}:${keys.join(",")}:${launch.vk_ts || ""}` };
-    const cards = await sendTours({ fetchImpl, query, config, peerId: launch.vk_user_id, keys, event, logger });
-    logger.info(`VK bot: app sent ${cards.length} tour(s)`);
-    return { status: 200, body: { result: "sent", url: dialogUrl, count: cards.length } };
-  } catch (error) {
-    logger.error(`VK bot: app send failed: ${error.message}`);
-    return { status: 200, body: { result: "start", url: startUrl } };
-  }
+export function appKeys(value) {
+  return [...new Set(splitKeys(String(value || "").replace(/^(?:tours?[:=])/i, "")))].slice(0, MAX_TOURS);
+}
+
+export async function handleAppTours({ keysParam, query, config, fetchImpl = fetch, logger = console }) {
+  const keys = appKeys(keysParam);
+  const cards = await loadTours(query, keys, config.tourBaseUrl);
+  const tours = await Promise.all(cards.map(async (card) => ({
+    key: card.key,
+    title: card.title,
+    route: card.route,
+    duration: card.duration,
+    price: card.priceText,
+    url: card.url,
+    cover: await tourCover(fetchImpl, card).catch((error) => {
+      logger.warn(`VK bot: no cover for tour ${card.key}: ${error.message}`);
+      return "";
+    }),
+  })));
+  return { groupId: Number(config.groupId), subscriptionUrl: config.subscriptionUrl, tours };
 }
 
 export function vkTourBotConfig(env = process.env) {
   return {
-    appId: String(env.VK_APP_ID || ""),
-    appSecret: String(env.VK_APP_SECRET || ""),
     groupId: String(env.VK_BOT_GROUP_ID || DEFAULT_GROUP_ID),
     subscriptionUrl: String(env.VK_BOT_SUBSCRIPTION_URL || env.VK_BOT_COMMUNITY_URL || DEFAULT_SUBSCRIPTION_URL),
     tourBaseUrl: String(env.VK_BOT_TOUR_URL || DEFAULT_TOUR_URL),
@@ -302,13 +291,8 @@ export async function handleVkTourBot({ req, res, url, query, readBody, env = pr
     res.end(req.method === "HEAD" ? undefined : fs.readFileSync(APP_PAGE));
     return true;
   }
-  if (url.pathname === "/vk/app/show") {
-    if (req.method !== "POST") {
-      plain(res, 405, "method not allowed");
-      return true;
-    }
-    const result = await handleAppShow({ body: await readBody(req), query, config: vkTourBotConfig(env), fetchImpl, logger });
-    json(res, result.status, result.body);
+  if (url.pathname === "/vk/app/tours" && req.method === "GET") {
+    json(res, 200, await handleAppTours({ keysParam: url.searchParams.get("tours"), query, config: vkTourBotConfig(env), fetchImpl, logger }));
     return true;
   }
   if (!["/vk/callback", "/api/vk/callback"].includes(url.pathname)) return false;
