@@ -5,6 +5,12 @@ const DEFAULT_GROUP_NAME = "club223347696";
 const DEFAULT_SUBSCRIPTION_URL = "https://vk.ru/app5898182_-53145183#s=3819494";
 const DEFAULT_TOUR_URL = "https://vs-travel.ru/tour?id=";
 const MAX_TOURS = 9;
+const MENU_LABEL = "Показать туры";
+
+export const MENU_KEYBOARD = {
+  one_time: false,
+  buttons: [[{ action: { type: "text", label: MENU_LABEL, payload: JSON.stringify({ command: "show_tours" }) }, color: "primary" }]],
+};
 
 function plain(res, status, body) {
   res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
@@ -118,7 +124,7 @@ export async function loadTours(query, keys, tourBaseUrl = DEFAULT_TOUR_URL) {
 export function buildBotReply(cards, subscriptionUrl = DEFAULT_SUBSCRIPTION_URL, keys = null) {
   if (!cards.length) {
     const lead = keys && !keys.length
-      ? "Пришлите номер тура, например: 512. Номер есть в ссылке на тур и в постах сообщества."
+      ? `Откройте ссылку на тур из поста и нажмите «${MENU_LABEL}» внизу — или пришлите номер тура, например: 512.`
       : "Не нашёл доступный тур по этому ключу.";
     return {
       message: `${lead} Подпишитесь на рассылку ВКонтакте — там появляются новые туры.`,
@@ -226,7 +232,30 @@ export async function processVkEvent({ event, query, fetchImpl = fetch, config, 
   const reply = buildBotReply(cards, config.subscriptionUrl, keys);
   if (cards.length && config.photos !== false) reply.attachments = await tourPhotos({ fetchImpl, config, peerId, cards, logger });
   await sendVkMessage({ fetchImpl, token: config.token, apiVersion: config.apiVersion, peerId, event, reply });
+  if (config.menu !== false) await ensureMenu({ fetchImpl, config, peerId, event }).catch((error) => logger.warn(`VK bot: menu not set: ${error.message}`));
   return { peerId: String(peerId), keys, cards };
+}
+
+const MENU_TEXT = `Увидели подборку в посте — откройте ссылку и нажмите «${MENU_LABEL}» внизу.`;
+
+// VK не отдаёт постоянную клавиатуру ни в current_keyboard, ни в истории — узнаём её по служебному сообщению.
+export function hasMenu(history, event) {
+  if (parsePayload(event?.object?.message?.payload)?.command === "show_tours") return true;
+  return (history?.items || []).some((item) => item.out && item.text === MENU_TEXT);
+}
+
+async function ensureMenu({ fetchImpl, config, peerId, event }) {
+  const auth = { access_token: config.token, v: config.apiVersion };
+  const history = await vkApi(fetchImpl, "messages.getHistory", { ...auth, peer_id: String(peerId), count: "200" });
+  if (hasMenu(history, event)) return;
+  await sendVkMessage({
+    fetchImpl,
+    token: config.token,
+    apiVersion: config.apiVersion,
+    peerId,
+    event: { event_id: `${event?.event_id || Date.now()}:menu` },
+    reply: { message: MENU_TEXT, keyboard: MENU_KEYBOARD },
+  });
 }
 
 export function vkTourBotConfig(env = process.env) {
