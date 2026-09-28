@@ -203,13 +203,16 @@ export async function handleVkTourBot({ req, res, url, query, readBody, env = pr
     return true;
   }
   if (!config.secret || !config.token) {
+    logger.error("VK bot: callback received, but bot credentials are not configured");
     plain(res, 503, "vk bot is not configured");
     return true;
   }
   if (String(event.secret || "") !== config.secret) {
+    logger.warn(`VK bot: rejected ${String(event.type || "unknown")} callback (secret mismatch)`);
     plain(res, 403, "forbidden");
     return true;
   }
+  logger.info(`VK bot: accepted ${String(event.type || "unknown")} callback`);
   plain(res, 200, "ok");
   void processVkEvent({ event, query, fetchImpl, config }).catch((error) => logger.error(`VK bot: ${error.message}`));
   return true;
