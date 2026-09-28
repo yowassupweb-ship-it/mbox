@@ -116,10 +116,13 @@ export async function loadTours(query, keys, tourBaseUrl = DEFAULT_TOUR_URL) {
   return result.rows.map((row) => makeTourCard(row, tourBaseUrl)).sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999));
 }
 
-export function buildBotReply(cards, subscriptionUrl = DEFAULT_SUBSCRIPTION_URL) {
+export function buildBotReply(cards, subscriptionUrl = DEFAULT_SUBSCRIPTION_URL, keys = null) {
   if (!cards.length) {
+    const lead = keys && !keys.length
+      ? "Пришлите номер тура, например: 512. Номер есть в ссылке на тур и в постах сообщества."
+      : "Не нашёл доступный тур по этому ключу.";
     return {
-      message: `Не нашёл доступный тур по этому ключу. Подпишитесь на рассылку ВКонтакте — там появляются новые туры: ${subscriptionUrl}`,
+      message: `${lead} Подпишитесь на рассылку ВКонтакте — там появляются новые туры: ${subscriptionUrl}`,
       keyboard: {
         inline: true,
         buttons: [[{ action: { type: "open_link", link: subscriptionUrl, label: "Подписаться" } }]],
@@ -165,7 +168,7 @@ export async function processVkEvent({ event, query, fetchImpl = fetch, config }
   if (!peerId) return { ignored: true };
   const keys = extractTourKeys(event);
   const cards = await loadTours(query, keys, config.tourBaseUrl);
-  const reply = buildBotReply(cards, config.subscriptionUrl);
+  const reply = buildBotReply(cards, config.subscriptionUrl, keys);
   await sendVkMessage({ fetchImpl, token: config.token, apiVersion: config.apiVersion, peerId, event, reply });
   return { peerId: String(peerId), keys, cards };
 }

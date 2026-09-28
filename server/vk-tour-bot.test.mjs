@@ -22,6 +22,16 @@ test("ссылка из поста открывает диалог и перед
   assert.equal(buildTourDialogUrl(["512", "603"]), "https://vk.me/club223347696?ref=tours%3A512%2C603&ref_source=post");
 });
 
+test("кнопка «Начать» после перехода по ссылке несёт ключи в ref", () => {
+  const event = { object: { message: { text: "Начать", payload: JSON.stringify({ command: "start" }), ref: "tours:512,603", ref_source: "post" } } };
+  assert.deepEqual(extractTourKeys(event), ["512", "603"]);
+});
+
+test("сообщение без ключа получает подсказку, а не «не нашёл»", () => {
+  assert.match(buildBotReply([], undefined, []).message, /^Пришлите номер тура/);
+  assert.match(buildBotReply([], undefined, ["999"]).message, /^Не нашёл/);
+});
+
 test("карточка реального тура 512 содержит согласованный набор полей", () => {
   const card = makeTourCard(realFeedTour);
   assert.equal(card.days, 1);
