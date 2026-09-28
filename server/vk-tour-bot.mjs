@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import fs from "node:fs";
 
 const DEFAULT_GROUP_ID = "223347696";
 const DEFAULT_GROUP_NAME = "club223347696";
@@ -222,15 +223,67 @@ export async function processVkEvent({ event, query, fetchImpl = fetch, config, 
   const peerId = message.peer_id || message.from_id;
   if (!peerId) return { ignored: true };
   const keys = extractTourKeys(event);
+  const cards = await sendTours({ fetchImpl, query, config, peerId, keys, event, logger });
+  return { peerId: String(peerId), keys, cards };
+}
+
+async function sendTours({ fetchImpl, query, config, peerId, keys, event, logger }) {
   const cards = await loadTours(query, keys, config.tourBaseUrl);
   const reply = buildBotReply(cards, config.subscriptionUrl, keys);
   if (cards.length && config.photos !== false) reply.attachments = await tourPhotos({ fetchImpl, config, peerId, cards, logger });
   await sendVkMessage({ fetchImpl, token: config.token, apiVersion: config.apiVersion, peerId, event, reply });
-  return { peerId: String(peerId), keys, cards };
+  return cards;
+}
+
+const LAUNCH_MAX_AGE_SECONDS = 86400;
+
+// Подпись параметров запуска мини-приложения: vk_* по алфавиту, HMAC-SHA256 защищённым ключом, base64url.
+export function verifyLaunchParams(search, secret, now = Date.now()) {
+  if (!secret) return null;
+  const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  const sign = params.get("sign") || "";
+  const signed = [...params.entries()].filter(([key]) => key.startsWith("vk_")).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const base = signed.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
+  const expected = createHmac("sha256", secret).update(base).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const given = Buffer.from(sign);
+  if (!sign || given.length !== expected.length || !timingSafeEqual(given, Buffer.from(expected))) return null;
+  const launch = Object.fromEntries(signed);
+  const ts = Number(launch.vk_ts);
+  if (Number.isFinite(ts) && now / 1000 - ts > LAUNCH_MAX_AGE_SECONDS) return null;
+  return launch;
+}
+
+function json(res, status, body) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify(body));
+}
+
+export async function handleAppShow({ body, query, config, fetchImpl = fetch, logger = console }) {
+  const launch = verifyLaunchParams(body?.launch, config.appSecret);
+  if (!launch || (config.appId && String(launch.vk_app_id) !== config.appId) || !launch.vk_user_id) return { status: 403, body: { error: "bad_sign" } };
+  const keys = [...new Set(splitKeys(String(body?.tours || "").replace(/^(?:tours?[:=])/i, "")))].slice(0, MAX_TOURS);
+  const groupName = `club${config.groupId}`;
+  const dialogUrl = `https://vk.me/${groupName}`;
+  if (!keys.length) return { status: 200, body: { result: "start", url: dialogUrl } };
+  const startUrl = buildTourDialogUrl(keys, "app", groupName);
+  const auth = { access_token: config.token, v: config.apiVersion };
+  try {
+    const allowed = await vkApi(fetchImpl, "messages.isMessagesFromGroupAllowed", { ...auth, group_id: config.groupId, user_id: String(launch.vk_user_id) });
+    if (!allowed?.is_allowed) return { status: 200, body: { result: "start", url: startUrl } };
+    const event = { event_id: `app:${launch.vk_user_id}:${keys.join(",")}:${launch.vk_ts || ""}` };
+    const cards = await sendTours({ fetchImpl, query, config, peerId: launch.vk_user_id, keys, event, logger });
+    logger.info(`VK bot: app sent ${cards.length} tour(s)`);
+    return { status: 200, body: { result: "sent", url: dialogUrl, count: cards.length } };
+  } catch (error) {
+    logger.error(`VK bot: app send failed: ${error.message}`);
+    return { status: 200, body: { result: "start", url: startUrl } };
+  }
 }
 
 export function vkTourBotConfig(env = process.env) {
   return {
+    appId: String(env.VK_APP_ID || ""),
+    appSecret: String(env.VK_APP_SECRET || ""),
     groupId: String(env.VK_BOT_GROUP_ID || DEFAULT_GROUP_ID),
     subscriptionUrl: String(env.VK_BOT_SUBSCRIPTION_URL || env.VK_BOT_COMMUNITY_URL || DEFAULT_SUBSCRIPTION_URL),
     tourBaseUrl: String(env.VK_BOT_TOUR_URL || DEFAULT_TOUR_URL),
@@ -241,7 +294,23 @@ export function vkTourBotConfig(env = process.env) {
   };
 }
 
+const APP_PAGE = new URL("./vk-app.html", import.meta.url);
+
 export async function handleVkTourBot({ req, res, url, query, readBody, env = process.env, fetchImpl = fetch, logger = console }) {
+  if (["/vk/app", "/vk/app/"].includes(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : fs.readFileSync(APP_PAGE));
+    return true;
+  }
+  if (url.pathname === "/vk/app/show") {
+    if (req.method !== "POST") {
+      plain(res, 405, "method not allowed");
+      return true;
+    }
+    const result = await handleAppShow({ body: await readBody(req), query, config: vkTourBotConfig(env), fetchImpl, logger });
+    json(res, result.status, result.body);
+    return true;
+  }
   if (!["/vk/callback", "/api/vk/callback"].includes(url.pathname)) return false;
   if (req.method !== "POST") {
     plain(res, 405, "method not allowed");

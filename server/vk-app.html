@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Туры</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --text: #000; --muted: #818c99; --accent: #2688eb; --accent-text: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #19191a; --text: #e1e3e6; --muted: #76787a; --accent: #529ef4; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { min-height: 100%; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 32px 20px; text-align: center; }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  p { margin: 0; color: var(--muted); max-width: 320px; }
+  a.button { display: inline-block; min-width: 220px; padding: 12px 20px; border-radius: 10px; background: var(--accent); color: var(--accent-text); font-weight: 600; text-decoration: none; }
+  a.button[hidden] { display: none; }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .spinner[hidden] { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <div class="spinner" id="spinner"></div>
+  <h1 id="title">Подбираем туры…</h1>
+  <p id="text"></p>
+  <a class="button" id="action" target="_blank" rel="noopener" hidden></a>
+</main>
+<script src="https://unpkg.com/@vkontakte/vk-bridge@3.0.2/dist/browser.min.js"></script>
+<script>
+  (function () {
+    var bridge = window.vkBridge;
+    if (bridge) bridge.send("VKWebAppInit").catch(function () {});
+    var hash = decodeURIComponent(location.hash.replace(/^#/, ""));
+    var tours = hash.replace(/^tours?[=:]/i, "");
+    var fallback = "https://vk.me/club223347696" + (tours ? "?ref=" + encodeURIComponent("tours:" + tours) + "&ref_source=app" : "");
+
+    function show(title, text, label, url) {
+      document.getElementById("spinner").hidden = true;
+      document.getElementById("title").textContent = title;
+      document.getElementById("text").textContent = text;
+      var action = document.getElementById("action");
+      action.textContent = label;
+      action.href = url;
+      action.hidden = false;
+    }
+
+    fetch("/vk/app/show", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ launch: location.search, tours: tours })
+    })
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        if (data.result === "sent") {
+          show("Туры уже в сообщениях", "Отправили подборку в диалог с сообществом.", "Открыть сообщения", data.url);
+        } else if (data.url) {
+          show("Туры придут в сообщения", "Откройте диалог и нажмите «Начать» — подборка придёт сразу.", "Получить туры", data.url);
+        } else {
+          show("Туры придут в сообщения", "Откройте диалог и нажмите «Начать» или отправьте любое сообщение.", "Получить туры", fallback);
+        }
+      })
+      .catch(function () {
+        show("Туры придут в сообщения", "Откройте диалог и нажмите «Начать» или отправьте любое сообщение.", "Получить туры", fallback);
+      });
+  })();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBotReply, buildTourDialogUrl, extractCoverUrl, extractTourKeys, handleVkTourBot, loadTours, makeTourCard, processVkEvent } from "./vk-tour-bot.mjs";
+import { buildBotReply, buildTourDialogUrl, extractCoverUrl, extractTourKeys, handleAppShow, handleVkTourBot, verifyLaunchParams, loadTours, makeTourCard, processVkEvent } from "./vk-tour-bot.mjs";
 
 const realFeedTour = {
   tour_id: "512",
@@ -114,4 +114,45 @@ test("Callback API подтверждает сервер по group_id без se
   assert.equal(handled, true);
   assert.equal(response.status, 200);
   assert.equal(response.body, "confirm-me");
+});
+
+const vkExampleLaunch = "?vk_user_id=494075&vk_app_id=6736218&vk_is_app_user=1&vk_are_notifications_enabled=1&vk_language=ru&vk_access_token_settings=&vk_platform=android&sign=htQFduJpLxz7ribXRZpDFUH-XEUhC9rBPTJkjUFEkRA";
+const appConfig = { appId: "6736218", appSecret: "wvl68m4dR1UpLrVRli", groupId: "223347696", token: "test-token", apiVersion: "5.199", tourBaseUrl: "https://vs-travel.ru/tour?id=", photos: false };
+
+test("подпись запуска мини-приложения сверена с официальным примером VK", () => {
+  assert.equal(verifyLaunchParams(vkExampleLaunch, appConfig.appSecret).vk_user_id, "494075");
+  assert.equal(verifyLaunchParams(vkExampleLaunch.replace("494075", "1"), appConfig.appSecret), null);
+  assert.equal(verifyLaunchParams(vkExampleLaunch, ""), null);
+});
+
+function vkStub(allowed, calls) {
+  return async (url, options) => {
+    const method = String(url).split("/method/")[1];
+    calls.push({ method, body: options?.body });
+    const response = method === "messages.isMessagesFromGroupAllowed" ? { is_allowed: allowed ? 1 : 0 } : 101;
+    return { ok: true, json: async () => ({ response }) };
+  };
+}
+
+test("мини-приложение сразу шлёт туры, если человек уже разрешил сообщения", async () => {
+  const calls = [];
+  const result = await handleAppShow({ body: { launch: vkExampleLaunch, tours: "512,603" }, query: async () => ({ rows: [realFeedTour] }), config: appConfig, fetchImpl: vkStub(true, calls), logger: { info() {}, error() {}, warn() {} } });
+  assert.deepEqual(result.body, { result: "sent", url: "https://vk.me/club223347696", count: 1 });
+  const send = calls.find((call) => call.method === "messages.send");
+  assert.equal(send.body.get("peer_id"), "494075");
+});
+
+test("мини-приложение ведёт в диалог с ref, если сообщения не разрешены", async () => {
+  const calls = [];
+  const result = await handleAppShow({ body: { launch: vkExampleLaunch, tours: "tours=512,603" }, query: async () => ({ rows: [] }), config: appConfig, fetchImpl: vkStub(false, calls) });
+  assert.equal(result.body.result, "start");
+  assert.equal(result.body.url, "https://vk.me/club223347696?ref=tours%3A512%2C603&ref_source=app");
+  assert.equal(calls.some((call) => call.method === "messages.send"), false);
+});
+
+test("мини-приложение без верной подписи ничего не отправляет", async () => {
+  const calls = [];
+  const result = await handleAppShow({ body: { launch: vkExampleLaunch.replace("494075", "1"), tours: "512" }, query: async () => ({ rows: [] }), config: appConfig, fetchImpl: vkStub(true, calls) });
+  assert.equal(result.status, 403);
+  assert.equal(calls.length, 0);
 });
