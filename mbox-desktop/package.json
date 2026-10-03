@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.52",
+  "version": "0.1.53",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
