@@ -2175,6 +2175,14 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
       `INSERT INTO projects(name, status, stack, git_url, access_level, props) VALUES ($1, 'active', $2, $3, 'private', '{}') RETURNING id::text`,
       [projectName, JSON.stringify(stack), gitUrl],
     );
+    // Проект создаёт тот, кто попросил: участнику он достаётся сразу (иначе проект видел бы только владелец).
+    if (viewer?.userId && !viewer.all) {
+      await client.query(
+        "INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor') ON CONFLICT (project_id, user_id) DO NOTHING",
+        [inserted.rows[0].id, viewer.userId],
+      );
+      if (Array.isArray(viewer.projectIds)) viewer.projectIds.push(inserted.rows[0].id);
+    }
     projectList.push({ id: inserted.rows[0].id, name: projectName });
     const extra = [stack.length ? `стек: ${stack.join(", ")}` : "", gitUrl ? `git: ${gitUrl}` : ""].filter(Boolean).join(", ");
     return `создан проект «${projectName}»${extra ? ` (${extra})` : ""} (#${inserted.rows[0].id})`;

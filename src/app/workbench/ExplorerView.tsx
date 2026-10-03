@@ -1,9 +1,10 @@
 import { useMemo, useState, type DragEvent, type MouseEvent, useEffect } from "react";
-import { ChevronRight, ChevronsDownUp, RefreshCw, X, Brain, Database, FileText, Files, Figma, Folder, GitBranch, Layers, Lightbulb, Link2, ListChecks, ListTodo, Newspaper, Rocket, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, Plus, RefreshCw, X, Brain, Database, FileText, Files, Figma, Folder, GitBranch, Layers, Lightbulb, Link2, ListChecks, ListTodo, Newspaper, Rocket, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { projectEntityKinds } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { isLeaseLive } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
+import { askText, showNotice } from "../../ui/askText";
 import { todoPriorityLabel, todoStatusLabel } from "../../lib/labels";
 import { projectMemoryMatches } from "../../lib/memory";
 import { positionBetween, projectPosition, sortTodos } from "../../lib/tree";
@@ -107,6 +108,26 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
       body: JSON.stringify({ props: { ...project.props, position } }),
     });
     data.reload();
+  }
+
+  /** Свой проект может завести любой аккаунт: он сразу получает доступ, а «Свойства» открываются для заполнения. */
+  async function createProject() {
+    const name = await askText({ title: "Новый проект", placeholder: "Название проекта", confirmLabel: "Создать" });
+    const clean = name?.trim().slice(0, 120);
+    if (!clean) return;
+    try {
+      const { project } = await fetchJson<{ project: { id: string } }>("/api/mbox/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: clean, status: "active", access_level: "private" }),
+      });
+      await Promise.resolve(data.reload());
+      setExpanded((current) => [...current, `project:${project.id}`]);
+      tabs.open(`entity:${project.id}:properties`, true);
+    } catch (error) {
+      const conflict = error instanceof Error && /:(409|500)$/.test(error.message);
+      showNotice("Проект не создан", conflict ? "Проект с таким названием уже есть. Выберите другое название." : "Не удалось создать проект. Попробуйте ещё раз.");
+    }
   }
 
   function row(key: string, pinOnOpen = false) {
@@ -239,6 +260,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
       <header className="wb-view-head">
         <span>Проекты</span>
         <div className="wb-view-actions">
+          <button type="button" onClick={() => void createProject()} title="Новый проект" aria-label="Новый проект"><Plus size={14} /></button>
           <button type="button" className={showDone ? "is-on" : undefined} onClick={() => setShowDone((value) => !value)} title={showDone ? "Скрыть готовые todo" : "Показать готовые todo"}>
             <ListChecks size={14} />
           </button>
@@ -256,7 +278,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
             {group.label && <h3 className="wb-tree-group-label">{group.label}</h3>}
             <ul className="wb-tree">{group.projects.map(renderProject)}</ul>
           </section>
-        )) : data.loading ? <OctopusSpinner label="Загружаю проекты…" /> : <p className="wb-empty">{needle ? "Ничего не найдено" : "Проектов пока нет"}</p>}
+        )) : data.loading ? <OctopusSpinner label="Загружаю проекты…" /> : <p className="wb-empty">{needle ? "Ничего не найдено" : <>Проектов пока нет. <button type="button" className="wb-empty-action" onClick={() => void createProject()}>Создать проект</button></>}</p>}
       </div>
     </div>
   );

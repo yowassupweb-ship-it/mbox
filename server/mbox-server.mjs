@@ -2347,12 +2347,20 @@ async function handleApiWithContext(req, res, url) {
     const offset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
     if (req.method === "POST") {
       const body = await readBody(req);
+      if (!String(body.name || "").trim()) return sendJson(res, 400, { error: "name_required" });
       const result = await query(
         `INSERT INTO projects(name, status, stack, git_url, deploy_provider, deploy_target, color, access_level, props)
          VALUES ($1, COALESCE(NULLIF($2, ''), 'active'), $3, $4, $5, $6, $7, COALESCE(NULLIF($8, ''), 'private'), $9)
          RETURNING id::text`,
         [String(body.name || "").trim(), String(body.status || ""), JSON.stringify(Array.isArray(body.stack) ? body.stack : []), String(body.git_url || ""), String(body.deploy_provider || ""), String(body.deploy_target || ""), String(body.color || "#2c2c2e"), String(body.access_level || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
       );
+      // Проект участника принадлежит ему: без членства он не увидел бы собственный проект (а владелец видит всё).
+      if (!isOwner(user) && result.rows[0]) {
+        await query(
+          "INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor') ON CONFLICT (project_id, user_id) DO NOTHING",
+          [result.rows[0].id, user.id],
+        );
+      }
       broadcastChange(req, "create", "projects", String(body.name || "").trim());
       return sendJson(res, 201, { project: result.rows[0] });
     }
