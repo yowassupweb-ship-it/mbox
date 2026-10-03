@@ -37,7 +37,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const publicDir = path.join(root, "public");
 
-configureJarvis({ query, broadcastRealtime, rankMemories, recordMemoryAction });
+configureJarvis({
+  query,
+  broadcastRealtime,
+  rankMemories,
+  recordMemoryAction,
+  // Без userId (ответ без привязки к аккаунту) вкладка уходит окнам владельца.
+  openTab: (userId, event) => {
+    if (userId) return sendOpenTab(realtimeClients, userId, event);
+    let delivered = 0;
+    for (const client of realtimeClients) if (client.mboxOwner) delivered += sendOpenTab(new Set([client]), client.mboxUserId, event);
+    return delivered;
+  },
+});
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
 
 const port = Number(process.env.MBOX_PORT || process.env.PORT || 3000);

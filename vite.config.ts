@@ -939,6 +939,7 @@ function mboxDevApi() {
         broadcastRealtime: (type, payload) => broadcastRealtime(realtimeClients, type, payload),
         rankMemories,
         recordMemoryAction,
+        openTab: (userId: string | null, event: Record<string, unknown>) => (userId ? sendOpenTab(realtimeClients, userId, event as never) : 0),
       });
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));

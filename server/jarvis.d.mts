@@ -8,6 +8,8 @@ export type JarvisDeps = {
   broadcastRealtime: (type: string, payload?: Record<string, unknown>) => void;
   rankMemories: (search: string, options?: { minScore?: number; limit?: number; projectId?: string; project?: string; tags?: string[]; recencyDays?: number }) => Promise<Row[]>;
   recordMemoryAction: (input: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) => Promise<unknown>;
+  /** Открыть вкладку в окнах пользователя (без userId — владельца): созданное агентом появляется на глазах. */
+  openTab?: (userId: string | null, event: Record<string, unknown>) => number;
 };
 
 export type JarvisTool = { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } };
