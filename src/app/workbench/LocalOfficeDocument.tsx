@@ -144,9 +144,9 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
         <>
           <span className="wb-doc-crumbs">{rootName(rootKey)} › {path.split("/").join(" › ")}{dirty && <b className="wb-dirty-mark"> ●</b>}</span>
           <div className="wb-doc-actions">
-            {kind === "docx" && <button type="button" onClick={find.openFind} title="Найти в документе"><Search size={14} /></button>}
-            <button type="button" onClick={() => void load()} title="Перечитать с диска"><RefreshCw size={14} /></button>
-            <button type="button" onClick={() => void bridge.reveal(rootKey, path)} title="Показать в проводнике"><FolderOpen size={14} /></button>
+            {kind === "docx" && <button type="button" onClick={find.openFind} title="Найти в документе" aria-label="Найти в документе"><Search size={14} /></button>}
+            <button type="button" onClick={() => void load()} title="Перечитать с диска" aria-label="Перечитать с диска"><RefreshCw size={14} /></button>
+            <button type="button" onClick={() => void bridge.reveal(rootKey, path)} title="Показать в проводнике" aria-label="Показать в проводнике"><FolderOpen size={14} /></button>
             <button type="button" onClick={() => void bridge.openDefault(rootKey, path)} title="Открыть в программе по умолчанию"><ExternalLink size={14} /> Открыть</button>
             {kind === "sheet" && <button type="button" className="is-primary" disabled={!dirty || saving} onClick={() => void save()}><Save size={14} /> {saving ? "Сохраняю…" : "Сохранить"}</button>}
           </div>
@@ -154,8 +154,8 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
       )}
     >
       {find.bar}
-      {error && <div className="wb-banner is-error">{error}</div>}
-      {loading ? <div className="wb-doc-missing">Открываю {path}…</div>
+      {error && <div className="wb-banner is-error" role="alert">{error}</div>}
+      {loading ? <div className="wb-doc-missing" role="status" aria-live="polite">Открываю {path}…</div>
         : file?.tooLarge ? <div className="wb-doc-missing">Файл {formatBytes(file.size)} — слишком большой для встроенного просмотра.</div>
           : kind === "pdf" && file ? (
             <div className="wb-pdf-view"><iframe title={path} src={`data:${file.mime};base64,${file.base64}`} /></div>

@@ -886,7 +886,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-doc-crumbs { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.wb-shared-note-label { margin-left: 7px; color: var(--accent); font-weight: var(--weight-medium); }
+.wb-shared-note-label { margin-left: 7px; color: var(--accent-color); font-weight: var(--weight-medium); }
 
 .wb-doc-actions { display: flex; align-items: center; gap: 6px; }
 
@@ -1546,18 +1546,25 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-pdf-view iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: #fff; }
 
 .wb-office-scroll { height: 100%; overflow: auto; padding: 32px 24px 64px; background: var(--surface-deep); }
-.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: #202124; background: #fff; box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: var(--text-md); line-height: 1.55; }
-.wb-docx-page h1, .wb-docx-page h2, .wb-docx-page h3 { color: #17191d; line-height: 1.2; }
+.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: var(--paper-ink); background: var(--paper-bg); box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: var(--text-md); line-height: var(--leading-reading); overflow-wrap: anywhere; }
+.wb-docx-page h1, .wb-docx-page h2, .wb-docx-page h3 { color: var(--paper-heading); line-height: var(--leading-tight); font-weight: var(--weight-semibold); }
+.wb-docx-page h1 { font-size: var(--text-2xl); }
+.wb-docx-page h2 { font-size: var(--text-xl); }
+.wb-docx-page h3 { font-size: var(--text-lg); }
+.wb-docx-page a { color: var(--paper-link); text-underline-offset: 2px; }
+.wb-docx-page a:focus-visible { outline: 2px solid var(--paper-link); outline-offset: 2px; border-radius: var(--radius-xs); }
 .wb-docx-page img { max-width: 100%; height: auto; }
-.wb-docx-page table { width: 100%; border-collapse: collapse; }
-.wb-docx-page td, .wb-docx-page th { padding: 5px 7px; border: 1px solid #cfd3d8; vertical-align: top; }
+.wb-docx-page table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.wb-docx-page td, .wb-docx-page th { padding: 5px 7px; border: 1px solid var(--paper-rule); vertical-align: top; }
+.wb-docx-page th { background: var(--paper-head-bg); font-weight: var(--weight-semibold); text-align: left; }
 .wb-office-warnings { width: min(816px, 100%); margin: 14px auto 0; color: var(--text-muted); font-size: var(--text-sm); }
 
 .wb-sheet-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: 35px minmax(0, 1fr) 30px; background: var(--surface-1); }
 .wb-sheet-formula { display: grid; grid-template-columns: 68px minmax(160px, 1fr) auto; align-items: center; border-bottom: 1px solid var(--wb-line); background: var(--surface-2); }
-.wb-sheet-formula b { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--wb-line); color: var(--text-muted); font: 600 11px var(--font-mono); }
-.wb-sheet-formula input { min-width: 0; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--text-main); background: transparent; font: 12px var(--font-mono); }
-.wb-sheet-formula input:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+.wb-sheet-formula b { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--wb-line); color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.wb-sheet-formula input { min-width: 0; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--text-main); background: transparent; font-family: var(--font-mono); font-size: var(--text-xs); }
+.wb-sheet-formula input:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.wb-sheet-formula input:disabled { color: var(--text-muted); cursor: default; }
 .wb-sheet-formula span { padding: 0 9px; color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-sheet-grid-wrap { overflow: auto; overscroll-behavior: contain; }
 .wb-sheet-grid { table-layout: fixed; min-width: max-content; border-collapse: separate; border-spacing: 0; color: var(--text-main); background: var(--surface-1); font-size: var(--text-sm); }
@@ -1567,11 +1574,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-sheet-grid .is-corner { left: 0; z-index: 3; width: 48px; min-width: 48px; }
 .wb-sheet-grid td { cursor: cell; }
 .wb-sheet-grid td:hover { background: var(--surface-hover); }
-.wb-sheet-grid td.is-selected { position: relative; overflow: visible; box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
+.wb-sheet-grid td.is-selected { position: relative; overflow: visible; box-shadow: inset 0 0 0 2px var(--accent-color); background: color-mix(in srgb, var(--accent-color) 8%, var(--surface-1)); }
 .wb-sheet-tabs { display: flex; align-items: stretch; gap: 1px; overflow-x: auto; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
 .wb-sheet-tabs button { min-width: 86px; padding: 0 14px; border: 0; border-right: 1px solid var(--wb-line); color: var(--text-muted); background: transparent; font-size: var(--text-xs); }
 .wb-sheet-tabs button:hover { color: var(--text-main); background: var(--surface-hover); }
-.wb-sheet-tabs button.is-active { color: var(--text-main); background: var(--surface-1); box-shadow: inset 0 2px 0 var(--accent); }
+.wb-sheet-tabs button.is-active { color: var(--text-main); background: var(--surface-1); box-shadow: inset 0 2px 0 var(--accent-color); }
 
 @media (max-width: 720px) {
   .wb-docx-page { min-height: 0; padding: 36px 28px; }
@@ -3426,7 +3433,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   font: inherit;
   font-size: var(--text-sm);
   line-height: 18px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-pop);
 }
 
 .wb-sheet-footer { display: flex; align-items: stretch; min-width: 0; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
@@ -3441,6 +3448,32 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-sheet-filter > div button { height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wb-sheet-filter > div button:first-child { border-color: var(--accent-color); color: var(--accent-color); }
 @media (max-width: 640px) { .wb-sheet-stats { display: none; } }
+
+/* Состояния редактора таблиц: hover, focus-visible, active, disabled у каждого интерактивного элемента */
+.wb-sheet-toolbar > button:active:not(:disabled) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-toolbar > button.is-on:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-color) 22%, transparent); }
+.wb-sheet-tabs button { cursor: pointer; transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.wb-sheet-tabs button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-sheet-tabs button:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-tabs button:disabled { opacity: 0.4; cursor: default; }
+.wb-sheet-find input:hover { border-color: var(--text-muted); }
+.wb-sheet-find input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; border-color: var(--accent-color); }
+.wb-sheet-find button:hover { background: var(--surface-hover); color: var(--text-main); }
+.wb-sheet-find button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-sheet-find button:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-rename:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-sheet-filter input:hover { border-color: var(--text-muted); }
+.wb-sheet-filter input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; border-color: var(--accent-color); }
+.wb-sheet-filter > div button { transition: background var(--duration-fast) var(--ease-out); }
+.wb-sheet-filter > div button:hover:not(:disabled) { background: var(--surface-hover); }
+.wb-sheet-filter > div button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-sheet-filter > div button:active:not(:disabled) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-filter > div button:disabled { opacity: 0.4; cursor: default; }
+.wb-grid:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-color); }
+.wb-grid-resize:active { background: var(--accent-color); }
+@media (prefers-reduced-motion: reduce) {
+  .wb-sheet-tabs button, .wb-sheet-filter > div button { transition: none; }
+}
 
 /* ─── Тулбар заметки ───────────────────────────────────
    Слева — состояние (когда изменена, сохранилась ли), справа — три группы по частоте: режим,

@@ -99,14 +99,14 @@ export function StorageSheetDocument({ storageKey, tabs, tabKey, visible, onDirt
         <>
           <span className="wb-doc-crumbs">Хранилище › {storageKey.split("/").join(" › ")}{dirty && <b className="wb-dirty-mark"> ●</b>}</span>
           <div className="wb-doc-actions">
-            <button type="button" onClick={async () => { if (!dirty || (await askConfirm({ title: "Отбросить несохранённые правки и перечитать файл?", confirmLabel: "Перечитать", danger: true }))) void load(); }} title="Перечитать из хранилища"><RefreshCw size={14} /></button>
+            <button type="button" onClick={async () => { if (!dirty || (await askConfirm({ title: "Отбросить несохранённые правки и перечитать файл?", confirmLabel: "Перечитать", danger: true }))) void load(); }} title="Перечитать из хранилища" aria-label="Перечитать из хранилища"><RefreshCw size={14} /></button>
             <button type="button" className="is-primary" disabled={!dirty || saving} onClick={() => void save()}><Save size={14} /> {saving ? "Сохраняю…" : "Сохранить"}</button>
           </div>
         </>
       )}
     >
-      {error && <div className="wb-banner is-error">{error}</div>}
-      {loading ? <div className="wb-doc-missing">Открываю {storageKey.split("/").pop()}…</div>
+      {error && <div className="wb-banner is-error" role="alert">{error}</div>}
+      {loading ? <div className="wb-doc-missing" role="status" aria-live="polite">Открываю {storageKey.split("/").pop()}…</div>
         : book && sheetName ? <SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setDirty(true)} visible={visible} />
           : !error && <div className="wb-doc-missing">Не удалось прочитать таблицу.</div>}
     </DocShell>
