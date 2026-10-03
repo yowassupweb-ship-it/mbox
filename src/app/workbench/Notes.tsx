@@ -123,6 +123,16 @@ function snippetOf(note: Note) {
   return lines.slice(1).join(" · ").slice(0, 140);
 }
 
+// Заметку создал или изменил агент (Джарвис, MCP): список слева обновляется сразу, даже если раздел не открыт.
+let notesRefreshTimer = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener(ENTITY_CHANGED_EVENT, (event) => {
+    if ((event as CustomEvent<string>).detail !== "notes") return;
+    window.clearTimeout(notesRefreshTimer);
+    notesRefreshTimer = window.setTimeout(() => void refreshNotes(), 150);
+  });
+}
+
 export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(notesStore.query);

@@ -37,7 +37,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const publicDir = path.join(root, "public");
 
-configureJarvis({ query, broadcastRealtime, rankMemories, recordMemoryAction });
+configureJarvis({
+  query,
+  broadcastRealtime,
+  rankMemories,
+  recordMemoryAction,
+  // Без userId (ответ без привязки к аккаунту) вкладка уходит окнам владельца.
+  openTab: (userId, event) => {
+    if (userId) return sendOpenTab(realtimeClients, userId, event);
+    let delivered = 0;
+    for (const client of realtimeClients) if (client.mboxOwner) delivered += sendOpenTab(new Set([client]), client.mboxUserId, event);
+    return delivered;
+  },
+});
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
 
 const port = Number(process.env.MBOX_PORT || process.env.PORT || 3000);
@@ -131,7 +143,7 @@ function sendJson(res, status, body) {
 
 // Участник (не владелец) получает только сам факт изменения: заголовки, тексты уведомлений и шаги агентов
 // относятся к проектам, которые ему могут быть недоступны. Этого хватает, чтобы интерфейс перечитал данные.
-const memberRedactedFields = ["detail", "notification", "step", "title", "text"];
+const memberRedactedFields = ["detail", "notification", "step", "title", "text", "agent"];
 
 function broadcastRealtime(type, payload = {}) {
   // Правка агента в документе уходит только тем, кто его сейчас смотрит, а не всем окнам.
@@ -1146,6 +1158,9 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/agent/threads"
     || /^\/api\/mbox\/agent\/threads\/[A-Za-z0-9_-]{1,80}$/.test(pathname)
     || pathname === "/api/mbox/agents"
+    // Свой наблюдатель участника (claude-inbox-watcher под его аккаунтом) отмечается в ростере: запись привязана к нему.
+    || pathname === "/api/mbox/agent/ping"
+    || /^\/api\/mbox\/agents\/[^/]+$/.test(pathname)
     || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history))?)?$/.test(pathname)
     || pathname === "/api/mbox/email/check"
     || pathname.startsWith("/api/mbox/seo")
@@ -1322,20 +1337,20 @@ async function handleApiWithContext(req, res, url) {
     const name = String(body.agent || actorFromReq(req)).trim() || "Agent";
     const started = body.event === "session_start";
     const result = await query(
-      `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions)
-       VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1)
-       ON CONFLICT (agent_name) DO UPDATE
+      `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions, owner_user_id)
+       VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1, $6)
+       ON CONFLICT (owner_user_id, agent_name) DO UPDATE
          SET last_seen = now(),
              kind = COALESCE(NULLIF(EXCLUDED.kind, ''), agent_presence.kind),
              client = COALESCE(NULLIF(EXCLUDED.client, ''), agent_presence.client),
              scope = COALESCE(NULLIF(EXCLUDED.scope, ''), agent_presence.scope),
              sessions = agent_presence.sessions + $5
        RETURNING agent_name, kind, client, scope, sessions, last_seen::text`,
-      [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
+      [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0, user.id],
     );
     if (started) broadcastRealtime("agent_presence", { agent: name, event: "session_start" });
     if (typeof body.phase === "string") {
-      setAgentPhase(name, body.phase.trim());
+      setAgentPhase(`${user.id}:${name}`, body.phase.trim());
       broadcastRealtime("agent_presence", { agent: name, event: "phase" });
     }
     // Шаг работы агента — в эфир как есть, без записи в базу: это поток, а не состояние.
@@ -1507,14 +1522,15 @@ async function handleApiWithContext(req, res, url) {
        WHERE agent_name = $1
          AND finished_at IS NULL
          AND status IN ('running', 'doing')
+         AND (props->>'mbox_user_id' = $3 OR ($4::boolean AND NOT (props ? 'mbox_user_id')))
        RETURNING id::text`,
-      [agentName, String(body.reason || "")],
+      [agentName, String(body.reason || ""), String(user.id), isOwner(user)],
     );
     let forgotten = 0;
     if (req.method === "DELETE" || body.action === "forget") {
-      const deleteResult = await query("DELETE FROM agent_presence WHERE agent_name = $1", [agentName]);
+      const deleteResult = await query("DELETE FROM agent_presence WHERE agent_name = $1 AND owner_user_id = $2", [agentName, user.id]);
       forgotten = deleteResult.rowCount || 0;
-      setAgentPhase(agentName, "");
+      setAgentPhase(`${user.id}:${agentName}`, "");
     }
     broadcastRealtime("agent_presence", { agent: agentName, event: req.method === "DELETE" ? "removed" : "updated" });
     broadcastChange(req, req.method === "DELETE" ? "delete" : "update", "agent_presence", agentName);
@@ -1527,6 +1543,7 @@ async function handleApiWithContext(req, res, url) {
       `WITH presence AS (
          SELECT agent_name AS name, kind, client, scope, sessions, first_seen, last_seen
          FROM agent_presence
+         WHERE owner_user_id = $2::bigint OR ($1::boolean AND owner_user_id IS NULL)
        ),
        audited AS (
          SELECT actor AS name, count(*)::int AS events, max(created_at) AS last_seen
@@ -1540,6 +1557,7 @@ async function handleApiWithContext(req, res, url) {
                 count(*) FILTER (WHERE finished_at IS NULL AND heartbeat_at > now() - interval '5 minutes')::int AS live_runs,
                 max(GREATEST(heartbeat_at, started_at)) AS last_seen
          FROM agent_runs
+         WHERE props->>'mbox_user_id' = $3 OR ($1::boolean AND NOT (props ? 'mbox_user_id'))
          GROUP BY agent_name
        ),
        names AS (
@@ -1561,6 +1579,7 @@ async function handleApiWithContext(req, res, url) {
        LEFT JOIN audited a ON a.name = n.name
        LEFT JOIN ran r ON r.name = n.name
        ORDER BY GREATEST(p.last_seen, a.last_seen, r.last_seen) DESC NULLS LAST`,
+      [scope.all, user.id, String(user.id)],
     );
 
     const now = Date.now();
@@ -1582,7 +1601,7 @@ async function handleApiWithContext(req, res, url) {
         events: row.events,
         runs: row.runs,
         live_runs: row.live_runs,
-        phase: getAgentPhase(row.name),
+        phase: getAgentPhase(`${user.id}:${row.name}`),
         first_seen: row.first_seen,
         last_seen: row.last_seen,
       };
@@ -3013,7 +3032,7 @@ async function handleApiWithContext(req, res, url) {
         `INSERT INTO agent_runs(project_id, todo_id, agent_name, status, goal, read_context, commands, touched_files, result, props)
          VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'running'), $5, $6, $7, $8, $9, $10)
          RETURNING id::text, project_id::text, todo_id::text, agent_name, status, goal, touched_files, result`,
-        [body.project_id || null, body.todo_id || null, String(body.agent_name || actorFromReq(req)), String(body.status || ""), String(body.goal || ""), JSON.stringify(Array.isArray(body.read_context) ? body.read_context : []), JSON.stringify(Array.isArray(body.commands) ? body.commands : []), JSON.stringify(Array.isArray(body.touched_files) ? body.touched_files : []), String(body.result || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
+        [body.project_id || null, body.todo_id || null, String(body.agent_name || actorFromReq(req)), String(body.status || ""), String(body.goal || ""), JSON.stringify(Array.isArray(body.read_context) ? body.read_context : []), JSON.stringify(Array.isArray(body.commands) ? body.commands : []), JSON.stringify(Array.isArray(body.touched_files) ? body.touched_files : []), String(body.result || ""), JSON.stringify({ ...(body.props && typeof body.props === "object" ? body.props : {}), mbox_user_id: String(user.id) })],
       );
       let auto_memory = null;
       if (result.rows[0] && ["done", "failed", "blocked"].includes(result.rows[0].status)) {
@@ -3032,7 +3051,7 @@ async function handleApiWithContext(req, res, url) {
       return sendJson(res, 201, { run: result.rows[0], auto_memory });
     }
     await closeStaleAgentRuns();
-    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE $1::boolean OR project_id = ANY($2::bigint[]) ORDER BY started_at DESC LIMIT 100", [scope.all, scope.projectIds]);
+    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE $1::boolean OR props->>'mbox_user_id' = $3 OR (agent_name = $4 AND project_id = ANY($2::bigint[])) ORDER BY started_at DESC LIMIT 100", [scope.all, scope.projectIds, String(user.id), JARVIS_NAME]);
     return sendJson(res, 200, { runs: result.rows });
   }
 
@@ -3040,10 +3059,10 @@ async function handleApiWithContext(req, res, url) {
   if (runMatch && req.method === "PATCH") {
     const body = await readBody(req);
     const result = await query(
-      `UPDATE agent_runs SET status = COALESCE(NULLIF($1, ''), status), result = COALESCE($2, result), commands = COALESCE($3, commands), touched_files = COALESCE($4, touched_files), props = COALESCE($5, props), heartbeat_at = now(), finished_at = CASE WHEN $6 THEN now() ELSE finished_at END
-       WHERE id = $7
+      `UPDATE agent_runs SET status = COALESCE(NULLIF($1, ''), status), result = COALESCE($2, result), commands = COALESCE($3, commands), touched_files = COALESCE($4, touched_files), props = (COALESCE($5::jsonb, props) || CASE WHEN props ? 'mbox_user_id' THEN jsonb_build_object('mbox_user_id', props->'mbox_user_id') ELSE '{}'::jsonb END), heartbeat_at = now(), finished_at = CASE WHEN $6 THEN now() ELSE finished_at END
+       WHERE id = $7 AND (props->>'mbox_user_id' = $8 OR ($9::boolean AND NOT (props ? 'mbox_user_id')))
        RETURNING id::text, project_id::text, todo_id::text, agent_name, status, goal, touched_files, result`,
-      [String(body.status || ""), body.result ?? null, Array.isArray(body.commands) ? JSON.stringify(body.commands) : null, Array.isArray(body.touched_files) ? JSON.stringify(body.touched_files) : null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, ["done", "failed", "blocked"].includes(String(body.status || "")), runMatch[1]],
+      [String(body.status || ""), body.result ?? null, Array.isArray(body.commands) ? JSON.stringify(body.commands) : null, Array.isArray(body.touched_files) ? JSON.stringify(body.touched_files) : null, body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null, ["done", "failed", "blocked"].includes(String(body.status || "")), runMatch[1], String(user.id), isOwner(user)],
     );
     let auto_memory = null;
     if (result.rows[0] && ["done", "failed", "blocked"].includes(String(body.status || ""))) {

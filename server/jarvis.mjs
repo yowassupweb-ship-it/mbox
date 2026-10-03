@@ -11,9 +11,10 @@ let query;
 let broadcastRealtime;
 let rankMemories;
 let recordMemoryAction;
+let openTab;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -2815,6 +2816,8 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     if (!content.trim()) return "нужен текст заметки";
     const note = await createNote(client.query.bind(client), { title: String(args.title || "").trim(), content, author: JARVIS_NAME, owner_user_id: viewer?.userId || null });
     broadcastRealtime("entity_changed", { entity: "notes", action: "create", actor: JARVIS_NAME, detail: note.title, notification: `Агент ${JARVIS_NAME} создал заметку «${note.title}»` });
+    // Созданное должно появиться на глазах: вкладка заметки открывается в окнах того, кто попросил.
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `note:${note.id}`, title: note.title, note: "Заметка создана", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
     return `создана заметка «${note.title}» (#${note.id})`;
   }
 

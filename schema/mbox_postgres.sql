@@ -406,9 +406,15 @@ CREATE TABLE IF NOT EXISTS agent_presence (
   sessions INTEGER NOT NULL DEFAULT 0,
   props JSONB NOT NULL DEFAULT '{}',
   first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  owner_user_id BIGINT
 );
 
+ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS owner_user_id BIGINT;
+-- У каждого аккаунта свои агенты: «Claude» владельца и «Claude» участника — разные записи.
+UPDATE agent_presence SET owner_user_id = (SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1) WHERE owner_user_id IS NULL;
+ALTER TABLE agent_presence DROP CONSTRAINT IF EXISTS agent_presence_pkey;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_presence_owner_name ON agent_presence(owner_user_id, agent_name);
 ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'ai_agent';
 ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS client TEXT NOT NULL DEFAULT '';
 ALTER TABLE agent_presence ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT '';
