@@ -213,3 +213,4 @@
   margin: 14px 0 0;
   color: var(--text-muted);
 }
+.tree-menu { max-height: calc(100vh - 24px); overflow-y: auto; }
