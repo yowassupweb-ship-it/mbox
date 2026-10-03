@@ -39,12 +39,15 @@ function safeFileName(input) {
 /** Свободное имя в папке: «файл.pdf» → «файл (1).pdf» → «файл (2).pdf». */
 function uniquePath(dir, name, exists = fs.existsSync) {
   const first = path.join(dir, name);
-  if (!exists(first)) return first;
+  // В production fs получает системный путь. Нормализация нужна для адаптеров/тестов,
+  // где путь хранится URL-образно, и не меняет проверку настоящей файловой системы.
+  const taken = (candidate) => exists(candidate) || exists(candidate.replace(/\\/g, "/"));
+  if (!taken(first)) return first;
   const ext = path.extname(name);
   const stem = name.slice(0, name.length - ext.length);
   for (let n = 1; n < 1000; n += 1) {
     const candidate = path.join(dir, `${stem} (${n})${ext}`);
-    if (!exists(candidate)) return candidate;
+    if (!taken(candidate)) return candidate;
   }
   return path.join(dir, `${stem} (${Date.now()})${ext}`);
 }

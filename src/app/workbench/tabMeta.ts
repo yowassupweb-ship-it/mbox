@@ -3,7 +3,6 @@ import type { MboxData } from "../../hooks/useMboxData";
 import { fileIcon, fileKind } from "./Files";
 import { chatPeer, consoleLabel, isChatPane } from "./consoleLayout";
 import { noteTitle } from "./Notes";
-import { documentTitle } from "./DocumentsView";
 import { tableTitle } from "./TablesView";
 import { docTitle } from "./docsStore";
 import { folderGlyph } from "./TreeGlyph";
@@ -53,7 +52,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "note":
       return { title: noteTitle(key) || "Заметка", hint: "Заметка", icon: `${NAVIGATION}/notes.png` };
     case "document":
-      return { title: documentTitle(key), hint: "Документ Word", icon: `${NAVIGATION}/documents.png` };
+      return { title: titles[key] || "Документ", hint: "Документ Word", icon: `${NAVIGATION}/documents.png` };
     case "table":
       return { title: tableTitle(key) || "Таблица", hint: "Таблица", icon: "/icons/sheets.png" };
     case "doc":
