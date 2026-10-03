@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { warmUpEditors } from "./warmup";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RotateCcw, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
@@ -119,17 +120,21 @@ function BrowserTabsView({ tabs, urls, titles, onOpen }: {
           const fallbackTitle = url ? new URL(url).hostname : "Новая вкладка";
           const title = titles[tab.key] || fallbackTitle;
           return (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               className={tabs.active === tab.key ? "wb-browser-tab-item is-active" : "wb-browser-tab-item"}
               key={tab.key}
               onClick={() => open(tab.key)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(tab.key); } }}
+              onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); tabs.close(tab.key); } }}
               onContextMenu={(event) => { event.preventDefault(); setMenu({ key: tab.key, x: event.clientX, y: event.clientY }); }}
               title={url || title}
             >
-              {url ? <Favicon tabKey={tab.key} url={url} size={18} /> : <Globe2 size={18} aria-hidden="true" />}
-              <span className="wb-browser-tab-copy"><b>{title}</b>{url && <small>{url}</small>}</span>
-            </button>
+              <span className="wb-browser-tab-tile">{url ? <Favicon tabKey={tab.key} url={url} size={16} /> : <Globe2 size={16} aria-hidden="true" />}</span>
+              <span className="wb-browser-tab-copy"><b>{title}</b>{url && <small>{new URL(url).hostname.replace(/^www\./, "")}</small>}</span>
+              <button type="button" className="wb-browser-tab-close" aria-label={`Закрыть ${title}`} onClick={(event) => { event.stopPropagation(); tabs.close(tab.key); }}><X size={12} /></button>
+            </div>
           );
         })}
         {!browserTabs.length && (
@@ -171,6 +176,7 @@ function useDrag(onMove: (event: PointerEvent) => void) {
 }
 
 export function Workbench({ data, titleBar, renderers, status, user, onProjectContext }: Props) {
+  useEffect(() => warmUpEditors(), []);
   setWorkbenchStorageUser(user.username);
   const tabsState = useTabs();
   const [browserUrls, setBrowserUrls] = usePersistentState<Record<string, string>>("mbox.browser.urls", {});

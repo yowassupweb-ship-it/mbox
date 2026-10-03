@@ -2435,13 +2435,20 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-storage.is-compact .wb-storage-list td { display: table-cell; padding: var(--space-1) var(--space-2); }
 .wb-storage.is-compact .wb-storage-name { width: 100%; max-width: none; min-height: var(--space-7); }
 
-.wb-browser-tab-item { width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.wb-browser-tab-item { position: relative; width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: default; transition: background-color var(--duration-fast) var(--ease-standard); }
 .wb-browser-tab-item:hover { background: var(--wb-hover); color: var(--text-main); }
-.wb-browser-tab-item.is-active { background: var(--wb-selected); color: var(--text-main); }
-.wb-browser-tab-copy { min-width: 0; display: grid; gap: var(--space-1); }
+.wb-browser-tab-item.is-active { background: var(--accent-fill); color: var(--on-accent); }
+.wb-browser-tab-item:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-browser-tab-tile { flex: 0 0 auto; width: var(--space-7); height: var(--space-7); display: grid; place-items: center; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-main) 8%, transparent); }
+.wb-browser-tab-item.is-active .wb-browser-tab-tile { background: color-mix(in srgb, var(--on-accent) 22%, transparent); }
+.wb-browser-tab-copy { min-width: 0; flex: 1; display: grid; gap: 0; }
 .wb-browser-tab-copy b, .wb-browser-tab-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-browser-tab-copy b { font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .wb-browser-tab-copy small { color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-browser-tab-item.is-active .wb-browser-tab-copy small { color: color-mix(in srgb, var(--on-accent) 75%, transparent); }
+.wb-browser-tab-close { flex: 0 0 auto; width: var(--space-5); height: var(--space-5); display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard); }
+.wb-browser-tab-item:hover .wb-browser-tab-close, .wb-browser-tab-item:focus-within .wb-browser-tab-close { opacity: 1; }
+.wb-browser-tab-close:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
 .wb-browser-tab-favicon { width: var(--space-4); height: var(--space-4); margin-left: auto; object-fit: contain; }
 .wb-univer-sheet { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--container-bg); color: var(--text-main); }
 .wb-univer-sheet [data-u-comp="ribbon-header-menu"] { display: flex !important; align-items: center !important; justify-content: center !important; min-height: 46px !important; padding: var(--space-2) var(--space-3) !important; border-bottom: 1px solid var(--wb-line) !important; background: var(--surface-chrome) !important; }
