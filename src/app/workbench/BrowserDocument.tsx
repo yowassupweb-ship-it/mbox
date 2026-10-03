@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, Download, Eraser, ExternalLink, Folder, Globe, History, KeyRound, MoreHorizontal, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, ChevronDown, ChevronUp, Copy, Download, Eraser, ExternalLink, FileDown, FolderOpen, Globe, History, Import, KeyRound, MoreHorizontal, Pause, Play, Printer, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
-import { FolderIcon } from "./FileTypeIcon";
-import { askConfirm } from "../../ui/askText";
+import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
+import { askConfirm, showNotice } from "../../ui/askText";
+import { formatBytes } from "../../lib/format";
 import { readBrowserSettings, SEARCH_ENGINES, useBrowserSettings } from "./browserSettings";
+import { DOWNLOAD_START_EVENT, downloadPercent, useBrowserDownloads, wireBrowserDownloads, type BrowserDownload } from "./browserDownloads";
 
 /**
  * Вкладка встроенного браузера.
@@ -25,6 +27,8 @@ type BrowserState = {
   /** Масштаб страницы в процентах — меняется Ctrl+колесом над самой страницей. */
   zoom?: number;
   favicon?: string;
+  /** Поиск по странице: ordinal — номер текущего совпадения, matches — сколько их (-1, пока ответа нет). */
+  find?: { text: string; ordinal: number; matches: number } | null;
   /** Сайт просит HTTP-вход (Basic Auth): пока не ответили, страница спрятана и видна форма MBOX. */
   auth?: { id: string; host: string; realm: string; isProxy: boolean; failed?: boolean } | null;
 };
@@ -43,7 +47,11 @@ type BrowserBridge = {
   openBookmarkFolder?: (key: string, name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
   openBookmarkFolderMenu?: (name: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
   openBookmarkMenu?: (key: string, bookmark: BrowserBookmark, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
-  act: (key: string, command: string, payload?: string) => Promise<BrowserState | null>;
+  act: (key: string, command: string, payload?: unknown) => Promise<BrowserState | null>;
+  downloads?: () => Promise<BrowserDownload[]>;
+  downloadAction?: (id: number, action: string) => Promise<{ ok: boolean; error?: string }>;
+  clearDownloads?: () => Promise<unknown>;
+  openDownloadsFolder?: () => Promise<{ ok: boolean; error?: string }>;
   bookmarks: () => Promise<BrowserBookmark[]>;
   /** История переходов — общая, лежит на сервере MBOX (см. server/browser-state.mjs). */
   history?: (search: string, limit?: number) => Promise<BrowserHistoryEntry[]>;
@@ -57,7 +65,7 @@ type BrowserBridge = {
   fillPassword: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   /** Ответ на HTTP-вход сайта: null вместо имени — отменить. Нет у старых версий приложения. */
   auth?: (id: string, username: string | null, password?: string) => Promise<{ ok: boolean; error?: string }>;
-  onEvent: (handler: (payload: { type: string; url?: string; from?: string; bookmarks?: BrowserBookmark[] } & Partial<BrowserState>) => void) => () => void;
+  onEvent: (handler: (payload: { type: string; url?: string; from?: string; action?: string; bookmarks?: BrowserBookmark[]; download?: BrowserDownload } & Partial<BrowserState>) => void) => () => void;
 };
 
 type BrowserBookmark = { title: string; url: string; folder?: string; source?: string; imported?: boolean };
@@ -234,6 +242,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<BrowserHistoryEntry[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [downloadsOpen, setDownloadsOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findText, setFindText] = useState("");
+  const [findTick, setFindTick] = useState(0);
+  const addressRef = useRef<HTMLInputElement | null>(null);
+  const findRef = useRef<HTMLInputElement | null>(null);
+  const downloads = useBrowserDownloads();
+  const activeDownloads = downloads.filter((item) => item.state === "progressing").length;
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState("Default");
   const [credentials, setCredentials] = useState<{ username: string }[]>([]);
@@ -250,6 +266,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
   useEffect(() => { void bridge?.setSearchEngine?.(settings.search); }, [bridge, settings.search]);
 
   useEffect(() => { if (bridge) void bridge.bookmarks().then(setBookmarks); }, [bridge]);
+  useEffect(() => { wireBrowserDownloads(bridge); }, [bridge]);
   useEffect(() => {
     if (!bridge?.history || !historyOpen) return;
     const timer = window.setTimeout(() => { void bridge.history!(historyQuery).then(setHistoryRows).catch(() => setHistoryRows([])); }, historyQuery ? 220 : 0);
@@ -292,6 +309,13 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       }
       // Закладки общие: добавили звёздочкой в одной вкладке — панель обновляется во всех сразу.
       if (payload.type === "bookmarks") { setBookmarks(payload.bookmarks || []); return; }
+      if (payload.type === "shortcut" && payload.key === tabKey) {
+        if (payload.action === "address") { addressRef.current?.focus(); addressRef.current?.select(); }
+        else if (payload.action === "find") openFind();
+        else if (payload.action === "find-close") closeFind();
+        else if (payload.action === "bookmark") void toggleBookmark();
+        return;
+      }
       if (payload.type === "agent") {
         const agentPayload = payload as { key?: string; actor?: string; action?: string; note?: string };
         if (agentPayload.key === tabKey) setAgentNote({ actor: agentPayload.actor || "Агент", text: agentPayload.note || AGENT_ACTION_LABEL[agentPayload.action || ""] || "работает на странице" });
@@ -304,7 +328,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       if (payload.title) onTitle(tabKey, payload.title);
       if (!editing && payload.url) setAddress(payload.url);
     });
-  }, [bridge, tabKey, url, editing, tabs, onTitle, onOpenUrl]);
+  });
 
   useEffect(() => {
     if (!bridge?.favicon) return;
@@ -312,6 +336,21 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       if (favicon) publishFavicon({ key: tabKey, url: state?.url || url, favicon });
     }).catch(() => undefined);
   }, [bridge, tabKey, state?.url, url]);
+
+  // Ctrl+F при уже открытом поиске возвращает фокус в поле и выделяет текст — так делает и Chrome.
+  useEffect(() => {
+    if (!findTick) return;
+    findRef.current?.focus();
+    findRef.current?.select();
+  }, [findTick]);
+
+  // Скачивание началось — показываем панель загрузок в той вкладке, которую видит человек, как в Chrome.
+  useEffect(() => {
+    if (!visible) return;
+    const onStart = () => { setFolderOpen(null); setHistoryOpen(false); setToolsOpen(false); setDownloadsOpen(true); };
+    window.addEventListener(DOWNLOAD_START_EVENT, onStart);
+    return () => window.removeEventListener(DOWNLOAD_START_EVENT, onStart);
+  }, [visible]);
 
   // Куда положить страницу. Позиция меняется не только от размера окна: двигаются боковая панель,
   // консоль, строка вкладок — поэтому прямоугольник проверяется по таймеру, а отправляется только
@@ -342,7 +381,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     lastUrl.current = state?.url;
   }, [state?.url]);
   const overlayOpen = useOverlayOpen();
-  const hidden = Boolean(folderOpen) || historyOpen || toolsOpen || isBlank || overlayOpen;
+  const hidden = Boolean(folderOpen) || historyOpen || toolsOpen || downloadsOpen || isBlank || overlayOpen;
   // Снимок нужно сделать, пока страница ещё видна: capture() у спрятанной вкладки пустой. Раньше
   // уборка прошлого эффекта прятала страницу раньше снимка — и под «…» зияла пустота вместо сайта.
   const hiddenRef = useRef(hidden);
@@ -485,6 +524,35 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     setFolderOpen(null);
     setHistoryOpen(false);
     setToolsOpen(false);
+    setDownloadsOpen(false);
+  }
+
+  function openFind() {
+    closePanels();
+    setFindOpen(true);
+    setFindTick((tick) => tick + 1);
+  }
+
+  function closeFind() {
+    setFindOpen(false);
+    setFindText("");
+    void bridge!.act(tabKey, "find-stop");
+  }
+
+  function runFind(text: string, forward = true) {
+    setFindText(text);
+    void bridge!.act(tabKey, "find", { text, forward });
+  }
+
+  /** Действие из меню «Страница»: печать, PDF, сохранение — выполняет главный процесс. */
+  function pageAction(command: string) {
+    setToolsOpen(false);
+    void bridge!.act(tabKey, command);
+  }
+
+  async function downloadAction(item: BrowserDownload, action: string) {
+    const result = await bridge!.downloadAction?.(item.id, action);
+    if (result && !result.ok && result.error) void showNotice("Не получилось", result.error);
   }
 
   function navigate(target: string) {
@@ -532,8 +600,10 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
         <form className="wb-browser-address" onSubmit={submit}>
           {isBlank && !editing ? <Search size={14} aria-hidden="true" /> : <Favicon tabKey={tabKey} url={pageUrl} size={14} />}
           <input
+            ref={addressRef}
             value={isBlank && !editing ? "" : address}
             spellCheck={false}
+            onKeyDown={(event) => { if (event.key === "Escape") { setAddress(state?.url || url); event.currentTarget.blur(); } }}
             onChange={(event) => { setAddress(event.target.value); setEditing(true); }}
             onFocus={(event) => { setEditing(true); event.target.select(); }}
             onBlur={() => { setEditing(false); setAddress(state?.url || url); }}
@@ -551,6 +621,12 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
         </form>
         {agentNote && <span className="wb-browser-agent" role="status"><Sparkles size={13} aria-hidden="true" />{agentNote.actor}: {agentNote.text}</span>}
         <div className="wb-browser-actions">
+          {bridge.downloads && (
+            <button type="button" className={downloadsOpen ? "is-on wb-browser-downloads-button" : "wb-browser-downloads-button"} onClick={() => { const next = !downloadsOpen; closePanels(); setDownloadsOpen(next); }} title="Загрузки" aria-label={activeDownloads ? `Загрузки, идёт ${activeDownloads}` : "Загрузки"} aria-expanded={downloadsOpen}>
+              <Download size={16} />
+              {activeDownloads > 0 && <span className="wb-browser-badge" aria-hidden="true">{activeDownloads}</span>}
+            </button>
+          )}
           {bridge.history && (
             <button type="button" className={historyOpen ? "is-on" : undefined} onClick={() => { const next = !historyOpen; closePanels(); setHistoryOpen(next); }} title="История" aria-label="История" aria-expanded={historyOpen}>
               <History size={16} />
@@ -652,7 +728,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
       </div>
 
       {/* Плавающие окна: подложка ловит клик мимо и закрывает их. */}
-      {(folderOpen || historyOpen || toolsOpen) && (
+      {(folderOpen || historyOpen || toolsOpen || downloadsOpen) && (
         <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
@@ -684,6 +760,22 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
               );
             })}
             {!folderItems.length && <div className="wb-browser-pop-empty">Папка пуста</div>}
+          </div>
+        </div>
+      )}
+
+      {downloadsOpen && (
+        <div className="wb-browser-pop wb-browser-downloads" role="dialog" aria-label="Загрузки">
+          <div className="wb-browser-pop-head">
+            <Download size={14} /><span>Загрузки</span>
+            {downloads.some((item) => item.state !== "progressing") && <button type="button" className="wb-browser-pop-link" onClick={() => void bridge.clearDownloads?.()}>Очистить список</button>}
+          </div>
+          <div className="wb-browser-pop-list">
+            {downloads.map((item) => <DownloadRow key={item.id} item={item} onAction={(action) => void downloadAction(item, action)} />)}
+            {!downloads.length && <div className="wb-browser-pop-empty">Скачанных файлов пока нет</div>}
+          </div>
+          <div className="wb-browser-pop-foot">
+            <button type="button" className="wb-browser-pop-link" onClick={() => void bridge.openDownloadsFolder?.()}><FolderOpen size={13} /> Открыть папку загрузок</button>
           </div>
         </div>
       )}
@@ -720,6 +812,18 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
 
       {toolsOpen && (
         <div className="wb-browser-pop wb-browser-settings" role="dialog" aria-label="Настройки браузера">
+          {!isBlank && (
+            <section>
+              <h4>Страница</h4>
+              <div className="wb-browser-pop-buttons">
+                <button type="button" onClick={() => { setToolsOpen(false); openFind(); }}><Search size={14} /> Найти</button>
+                <button type="button" onClick={() => pageAction("print")}><Printer size={14} /> Печать</button>
+                <button type="button" onClick={() => pageAction("save-pdf")}><FileDown size={14} /> Сохранить как PDF</button>
+                <button type="button" onClick={() => pageAction("save-page")}><Download size={14} /> Сохранить страницу</button>
+                <button type="button" disabled={!/^https?:\/\//i.test(pageUrl)} onClick={() => { void bridge.act(tabKey, "copy-url"); setMessage("Адрес скопирован"); }}><Copy size={14} /> Копировать адрес</button>
+              </div>
+            </section>
+          )}
           <section>
             <h4>Поиск в строке адреса</h4>
             <div className="wb-segmented" role="radiogroup" aria-label="Поисковик">
@@ -756,7 +860,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
               <select value={profile} onChange={(event) => setProfile(event.target.value)} disabled={busy || !profiles.length} aria-label="Профиль Chrome">
                 {profiles.length ? profiles.map((item) => <option key={item} value={item}>{item}</option>) : <option value="Default">Профили не найдены</option>}
               </select>
-              <button type="button" disabled={busy || !profiles.length} onClick={() => void importBookmarks()}><Download size={14} /> Закладки</button>
+              <button type="button" disabled={busy || !profiles.length} onClick={() => void importBookmarks()}><Import size={14} /> Закладки</button>
               <button type="button" disabled={busy} onClick={() => void importPasswords()}><KeyRound size={14} /> Пароли из CSV</button>
             </div>
             <small>Пароли сначала экспортируйте в Chrome. Они сохранятся только на этом компьютере.</small>
@@ -771,18 +875,77 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
           )}
           {!isBlank && (
             <section>
-              <button type="button" className="wb-browser-pop-link" onClick={() => window.open(pageUrl, "_blank", "noopener")}><ExternalLink size={13} /> Открыть в системном браузере</button>
+              <button type="button" className="wb-browser-pop-link" onClick={() => pageAction("open-external")}><ExternalLink size={13} /> Открыть в системном браузере</button>
             </section>
           )}
           {message && <div className="wb-browser-tools-message" role="status">{message}</div>}
         </div>
       )}
-      {state?.error && <div className="wb-banner is-error">{state.error}</div>}
+      {findOpen && (
+        <div className="wb-browser-find" role="search">
+          <Search size={14} aria-hidden="true" />
+          <input
+            ref={findRef}
+            value={findText}
+            spellCheck={false}
+            placeholder="Найти на странице"
+            aria-label="Найти на странице"
+            onChange={(event) => runFind(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") { event.preventDefault(); closeFind(); }
+              else if (event.key === "Enter") { event.preventDefault(); if (findText) runFind(findText, !event.shiftKey); }
+            }}
+          />
+          <span className="wb-browser-find-count" role="status" aria-live="polite">
+            {findText && state?.find && state.find.matches >= 0 ? (state.find.matches ? `${state.find.ordinal} из ${state.find.matches}` : "Нет совпадений") : ""}
+          </span>
+          <button type="button" disabled={!state?.find?.matches || state.find.matches < 0} onClick={() => runFind(findText, false)} title="Предыдущее (Shift+Enter)" aria-label="Предыдущее совпадение"><ChevronUp size={15} /></button>
+          <button type="button" disabled={!state?.find?.matches || state.find.matches < 0} onClick={() => runFind(findText, true)} title="Следующее (Enter)" aria-label="Следующее совпадение"><ChevronDown size={15} /></button>
+          <button type="button" onClick={() => closeFind()} title="Закрыть (Esc)" aria-label="Закрыть поиск"><X size={14} /></button>
+        </div>
+      )}
+      {state?.error && <div className="wb-banner is-error" role="alert">{state.error}</div>}
       {/* Пустое место под страницу: её рисует поверх главный процесс по этим координатам. */}
       <div ref={stageRef} className="wb-browser-stage" data-scroll-memory="off">
         {isBlank && !state?.auth && <BrowserStartPage engine={engineLabel} bookmarks={bookmarks} history={bridge.history} onNavigate={navigate} />}
         {frozen && !isBlank && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} />}
         {state?.auth && bridge?.auth && <BrowserAuthForm key={state.auth.id} auth={state.auth} answer={bridge.auth} />}
+      </div>
+    </div>
+  );
+}
+
+function downloadStatus(item: BrowserDownload) {
+  if (item.state === "completed") return `${formatBytes(item.total || item.received)}${item.host ? ` · ${item.host}` : ""}`;
+  if (item.state === "cancelled") return "Отменено";
+  if (item.state === "interrupted") return item.error || "Загрузка прервана";
+  const percent = downloadPercent(item);
+  const size = item.total > 0 ? `${formatBytes(item.received)} из ${formatBytes(item.total)}` : formatBytes(item.received);
+  return `${item.paused ? "Пауза · " : ""}${size}${percent !== null ? ` · ${percent}%` : ""}`;
+}
+
+function DownloadRow({ item, onAction }: { item: BrowserDownload; onAction: (action: string) => void }) {
+  const percent = downloadPercent(item);
+  const live = item.state === "progressing";
+  const failed = item.state === "cancelled" || item.state === "interrupted";
+  return (
+    <div className={`wb-browser-download${failed ? " is-failed" : ""}`}>
+      <FileTypeIcon name={item.name} size={22} />
+      <div className="wb-browser-download-main">
+        <span className="wb-browser-download-name" title={item.path || item.name}>{item.name}</span>
+        <span className="wb-browser-download-meta">{downloadStatus(item)}{item.state === "completed" && item.risky ? " · исполняемый файл" : ""}</span>
+        {live && (
+          <div className="wb-browser-download-bar" role="progressbar" aria-label={`Загрузка ${item.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
+            <span className={percent === null ? "is-indeterminate" : undefined} style={percent === null ? undefined : { width: `${percent}%` }} />
+          </div>
+        )}
+      </div>
+      <div className="wb-browser-download-actions">
+        {live && <button type="button" onClick={() => onAction(item.paused ? "resume" : "pause")} title={item.paused ? "Продолжить" : "Приостановить"} aria-label={item.paused ? `Продолжить ${item.name}` : `Приостановить ${item.name}`}>{item.paused ? <Play size={14} /> : <Pause size={14} />}</button>}
+        {live && <button type="button" className="is-danger" onClick={() => onAction("cancel")} title="Отменить" aria-label={`Отменить ${item.name}`}><X size={14} /></button>}
+        {item.state === "completed" && !item.risky && <button type="button" onClick={() => onAction("open")} title="Открыть файл" aria-label={`Открыть ${item.name}`}><ExternalLink size={14} /></button>}
+        {item.state === "completed" && <button type="button" onClick={() => onAction("reveal")} title="Показать в папке" aria-label={`Показать ${item.name} в папке`}><FolderOpen size={14} /></button>}
+        {!live && <button type="button" className="is-danger" onClick={() => onAction("remove")} title="Убрать из списка" aria-label={`Убрать ${item.name} из списка`}><Trash2 size={14} /></button>}
       </div>
     </div>
   );
