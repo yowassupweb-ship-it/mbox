@@ -98,6 +98,9 @@ process.on("SIGTERM", () => {
 });
 process.on("exit", releaseSingleInstanceLock);
 
+// Под аккаунтом участника наблюдатель отвечает на его собственные сообщения (сервер отдаёт ему только их),
+// под аккаунтом владельца — не трогает сообщения участников: им отвечает Джарвис или их наблюдатель.
+const accountIsOwner = await mboxFetch("/api/mbox/auth/me").then((data) => (data.user?.role ?? "owner") === "owner").catch(() => true);
 await ping("session_start");
 // Список моделей для чата — кеш каталога самого Codex (~/.codex/models_cache.json, список OpenAI для аккаунта).
 publishModelCatalog({
@@ -473,7 +476,7 @@ async function pendingMentions() {
 function isMentionForCodex(item) {
   // Наблюдатель работает под аккаунтом владельца и с его диском — отвечает только владельцу.
   // Участникам (mbox_owner: false) отвечает Джарвис, если он у них включён.
-  if (item.props?.mbox_owner === false) return false;
+  if (accountIsOwner && item.props?.mbox_owner === false) return false;
   const to = String(item.props?.to || item.props?.target || item.props?.agent || "");
   if (aliases.some((alias) => to.toLowerCase() === alias.toLowerCase())) return true;
   if (broadcastAliases.some((alias) => to.toLowerCase() === alias.toLowerCase())) return true;

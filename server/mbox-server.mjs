@@ -1146,6 +1146,8 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/agent/threads"
     || /^\/api\/mbox\/agent\/threads\/[A-Za-z0-9_-]{1,80}$/.test(pathname)
     || pathname === "/api/mbox/agents"
+    // Свой наблюдатель участника (claude-inbox-watcher под его аккаунтом) отмечается в ростере: запись привязана к нему.
+    || pathname === "/api/mbox/agent/ping"
     || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history))?)?$/.test(pathname)
     || pathname === "/api/mbox/email/check"
     || pathname.startsWith("/api/mbox/seo")

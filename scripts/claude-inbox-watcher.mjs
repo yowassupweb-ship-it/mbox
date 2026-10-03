@@ -194,6 +194,9 @@ process.on("SIGINT", () => { stopping = true; releaseSingleInstanceLock(); });
 process.on("SIGTERM", () => { stopping = true; releaseSingleInstanceLock(); });
 process.on("exit", () => { killAllWarm(); releaseSingleInstanceLock(); });
 
+// Под аккаунтом участника наблюдатель отвечает на его собственные сообщения (сервер отдаёт ему только их),
+// под аккаунтом владельца — не трогает сообщения участников: им отвечает Джарвис или их наблюдатель.
+const accountIsOwner = await mboxFetch("/api/mbox/auth/me").then((data) => (data.user?.role ?? "owner") === "owner").catch(() => true);
 await ping("session_start");
 // Список моделей и уровней effort для чата — из самого Claude Code, а не из списка в коде MBOX.
 publishModelCatalog({
@@ -433,7 +436,7 @@ async function newInboxItems() {
 function isAddressedToMe(item) {
   // Наблюдатель работает под аккаунтом владельца и с его диском — отвечает только владельцу.
   // Участникам (mbox_owner: false) отвечает Джарвис, если он у них включён.
-  if (item.props?.mbox_owner === false) return false;
+  if (accountIsOwner && item.props?.mbox_owner === false) return false;
   const text = `${item.title || ""}\n${item.body || ""}`;
   const to = item.props?.to || item.props?.target || item.props?.agent;
   if (agentAliases.some((alias) => String(to || "").toLowerCase() === alias.toLowerCase())) return true;
