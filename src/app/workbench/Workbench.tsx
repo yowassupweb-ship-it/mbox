@@ -854,7 +854,6 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       agentsOnline={agentsOnline}
       tabs={tabs}
       renderChat={(paneId, debug, active) => renderChat(consoleVisible && active !== false, paneId, debug)}
-      ownerOnlyAgents={user.role !== "owner"}
       actions={consoleDock === "right" ? (
         <>
           <button type="button" className="wb-icon-btn" onClick={() => dockConsole("bottom")} title="Перенести чат вниз"><PanelBottom size={14} /></button>

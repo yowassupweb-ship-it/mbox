@@ -73,12 +73,12 @@ function scrollElementToBottom(el: HTMLElement | null) {
  * процессов. Вывод процесса агента теперь — режим отладки в шапке чата, а SSH и инструменты открываются
  * вкладками редактора.
  */
-export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, tabs, actions, ownerOnlyAgents = false }: { renderChat: ChatRenderer; onReveal?: () => void; agentGoals?: Record<string, string>; agentsOnline?: Record<string, boolean>; tabs: TabsApi; actions?: ReactNode; ownerOnlyAgents?: boolean }) {
+export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, tabs, actions }: { renderChat: ChatRenderer; onReveal?: () => void; agentGoals?: Record<string, string>; agentsOnline?: Record<string, boolean>; tabs: TabsApi; actions?: ReactNode }) {
   const desktop = useDesktopSessions();
   const [peer, setPeer] = usePersistentState("mbox.console.peer", "");
   const [debugOpen, setDebugOpen] = usePersistentState<Record<string, boolean>>("mbox.console.debug", {});
   // Claude и ChatGPT работают на компьютере владельца и отвечают только ему — участнику остаётся общий чат.
-  const kinds = ownerOnlyAgents ? CHAT_KINDS.filter((item) => !item.peer) : CHAT_KINDS;
+  const kinds = CHAT_KINDS;
   const kind = kinds.find((item) => item.peer === peer) ?? kinds[0];
   // Каждый чат держит свой черновик, прокрутку и ожидание ответа — не размонтируем его при переключении.
   const [visited, setVisited] = useState<string[]>(() => [kind.peer]);
@@ -144,7 +144,7 @@ export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, ta
               : "наблюдатель не запущен",
             start: () => void desktop.startAgent(item.peer as "Claude" | "ChatGPT"),
           };
-          const debug: ChatDebug | undefined = desktop.supported && !ownerOnlyAgents ? {
+          const debug: ChatDebug | undefined = desktop.supported ? {
             open,
             live: session?.status === "running",
             toggle: () => setDebugOpen({ ...debugOpen, [item.peer || "common"]: !open }),
