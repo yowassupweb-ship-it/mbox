@@ -179,9 +179,10 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
     const listener = workbook.onCommandExecuted((command) => {
       if (!ready || readOnly) return;
       // Выбор ячейки, фокус, прокрутка и пересчёт формул тоже проходят через command bus,
-      // но не должны помечать файл изменённым. Изменение ширины — delta-column-width,
-      // поэтому прежний узкий список команд его пропускал и Excel-снимок оставался старым.
-      if (!/^sheet\.(?:command|operation)\.(set-range-values|set-style|insert-|remove-|delete-|set-worksheet-name|move-range|hide-|show-|merge-|unmerge-|delta-column-width|delta-row-height|set-worksheet-col-width|set-row-height|set-col-is-auto-width|set-row-is-auto-height|paste-col-width|set-col-auto-width)/.test(command.id)) return;
+      // но не должны помечать файл изменённым. Изменение ширины столбца завершается
+      // мутацией `sheet.mutation.set-worksheet-col-width`, поэтому сохраняем снимок
+      // после команд, операций и мутаций листа.
+      if (!/^sheet\.(?:command|operation|mutation)\.(set-range-values|set-style|insert-|remove-|delete-|set-worksheet-name|move-range|hide-|show-|merge-|unmerge-|delta-column-width|delta-row-height|set-worksheet-col-width|set-worksheet-row-height|set-row-height|set-col-is-auto-width|set-row-is-auto-height|set-worksheet-row-is-auto-height|paste-col-width|set-col-auto-width)/.test(command.id)) return;
       window.clearTimeout(syncTimer);
       syncTimer = window.setTimeout(() => {
         applySnapshot(book, workbook.getWorkbook().getSnapshot());
