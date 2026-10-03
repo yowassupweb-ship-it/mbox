@@ -1,4 +1,28 @@
 import { createHash, randomBytes } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+const ROOT_PACKAGE = path.resolve(SCRIPTS_DIR, "..", "package.json");
+// Набор файлов, с которым наблюдатели работают на чужом компьютере: только встроенные модули Node, кроме MCP-сервера.
+const AGENT_KIT = ["mbox-agent.mjs", "claude-inbox-watcher.mjs", "codex-chat-watcher.mjs", "sync-skills.mjs", "inbox-wake.mjs", "model-catalog.mjs", "chat-threads.mjs", "mbox-mcp-server.mjs"];
+const AGENT_FAMILIES = ["claude", "codex"];
+
+function agentKitPackage() {
+  let deps = {};
+  try {
+    const root = JSON.parse(fs.readFileSync(ROOT_PACKAGE, "utf8"));
+    for (const name of ["@modelcontextprotocol/sdk", "zod"]) if (root.dependencies?.[name]) deps[name] = root.dependencies[name];
+  } catch { deps = {}; }
+  return JSON.stringify({ name: "mbox-agent", private: true, type: "module", dependencies: deps }, null, 2);
+}
+
+function agentKitFile(name) {
+  if (name === "package.json") return agentKitPackage();
+  if (!AGENT_KIT.includes(name)) return null;
+  try { return fs.readFileSync(path.join(SCRIPTS_DIR, name), "utf8"); } catch { return null; }
+}
 
 export async function ensureAccountsSchema(query) {
   await query(`CREATE TABLE IF NOT EXISTS project_memberships (
@@ -14,6 +38,8 @@ export async function ensureAccountsSchema(query) {
   // Когда сессией пользовались: при входе вытесняются давно не используемые, а не самые старые —
   // иначе каждый вход агента по паролю (MCP, наблюдатели) выбивал человека из браузера.
   await query("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ");
+  // Какие локальные агенты человек включил у себя: нет подписки на Claude Code или ChatGPT — выключает здесь, и наблюдатели не запускаются.
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_prefs JSONB NOT NULL DEFAULT '{}'");
   await query(`CREATE TABLE IF NOT EXISTS account_tokens (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -71,7 +97,48 @@ async function replaceMemberships(query, userId, projectIds) {
   }
 }
 
+function agentPrefsView(raw) {
+  const prefs = raw && typeof raw === "object" ? raw : {};
+  return Object.fromEntries(AGENT_FAMILIES.map((family) => [family, { enabled: prefs[family]?.enabled !== false }]));
+}
+
 export async function handleAccountsApi({ req, res, url, query, readBody, sendJson, user }) {
+  // Какие агенты включены у этого аккаунта (наблюдатели и интерфейс опрашивают это).
+  if (url.pathname === "/api/mbox/account/agents" && req.method === "GET") {
+    const row = (await query("SELECT agent_prefs FROM users WHERE id = $1", [user.id])).rows[0];
+    sendJson(res, 200, { agents: agentPrefsView(row?.agent_prefs) });
+    return true;
+  }
+  if (url.pathname === "/api/mbox/account/agents" && (req.method === "PUT" || req.method === "PATCH")) {
+    const body = await readBody(req);
+    const row = (await query("SELECT agent_prefs FROM users WHERE id = $1", [user.id])).rows[0];
+    const next = { ...(row?.agent_prefs && typeof row.agent_prefs === "object" ? row.agent_prefs : {}) };
+    for (const family of AGENT_FAMILIES) {
+      const value = body?.[family];
+      const enabled = typeof value === "boolean" ? value : typeof value?.enabled === "boolean" ? value.enabled : undefined;
+      if (enabled !== undefined) next[family] = { ...(next[family] || {}), enabled };
+    }
+    await query("UPDATE users SET agent_prefs = $2::jsonb WHERE id = $1", [user.id, JSON.stringify(next)]);
+    sendJson(res, 200, { agents: agentPrefsView(next) });
+    return true;
+  }
+  // Установка наблюдателей на чужом компьютере: файлы набора отдаются залогиненному (cookie или личный токен).
+  const kitMatch = url.pathname.match(/^\/api\/mbox\/agent-kit(?:\/([A-Za-z0-9._-]+))?$/);
+  if (kitMatch && req.method === "GET") {
+    if (!kitMatch[1]) {
+      const files = ["package.json", ...AGENT_KIT].map((name) => {
+        const text = agentKitFile(name);
+        return text === null ? null : { name, size: Buffer.byteLength(text), sha256: createHash("sha256").update(text).digest("hex") };
+      }).filter(Boolean);
+      sendJson(res, 200, { files });
+      return true;
+    }
+    const text = agentKitFile(kitMatch[1]);
+    if (text === null) { sendJson(res, 404, { error: "not_found" }); return true; }
+    res.writeHead(200, { "content-type": kitMatch[1].endsWith(".json") ? "application/json; charset=utf-8" : "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    res.end(text);
+    return true;
+  }
   if (url.pathname === "/api/mbox/account/tokens" && req.method === "GET") {
     const result = await query(
       "SELECT id::text, label, created_at::text, last_used_at::text FROM account_tokens WHERE user_id = $1 ORDER BY created_at DESC",

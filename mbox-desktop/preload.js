@@ -50,6 +50,7 @@ const desktopApi = {
   },
   // Встроенная консоль: процессы агентов и инструментов, которые запустило приложение.
   restartAgent: (name) => ipcRenderer.invoke("mbox-desktop:restart-agent", name),
+  setAgentEnabled: (name, enabled) => ipcRenderer.invoke("mbox-desktop:agent-enabled", name, enabled),
   setTitleBarTheme: (color, symbolColor) => ipcRenderer.invoke("mbox-desktop:titlebar-theme", color, symbolColor),
   startSsh: (target, cols, rows, options) => ipcRenderer.invoke("mbox-desktop:ssh-start", target, cols, rows, options),
   resizeSession: (id, cols, rows) => ipcRenderer.invoke("mbox-desktop:session-resize", id, cols, rows),

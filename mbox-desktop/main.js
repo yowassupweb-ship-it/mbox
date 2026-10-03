@@ -414,16 +414,34 @@ function wrapperPath(name) {
   return fs.existsSync(repoPath) ? repoPath : packagedPath;
 }
 
+// Нет подписки на Claude Code или ChatGPT — агента выключают в настройках MBOX; выбор хранится здесь,
+// чтобы следующий запуск приложения не поднимал выключенного наблюдателя ещё до загрузки интерфейса.
+const AGENTS_CONFIG = () => path.join(app.getPath("userData"), "agents-config.json");
+function disabledResponders() {
+  try { return new Set(JSON.parse(fs.readFileSync(AGENTS_CONFIG(), "utf8")).disabled || []); } catch { return new Set(); }
+}
+function setResponderEnabled(rawName, enabled) {
+  const name = responderName(rawName);
+  if (!name) return;
+  const disabled = disabledResponders();
+  if (enabled) disabled.delete(name); else disabled.add(name);
+  try { fs.writeFileSync(AGENTS_CONFIG(), JSON.stringify({ disabled: [...disabled] })); } catch (error) { log(`agents config not saved: ${error.message}`); }
+}
+
 async function startResponders(options = { takeover: true }) {
   const results = [];
-  results.push(await startResponder("Codex", options));
-  results.push(await startResponder("Claude", options));
+  const disabled = disabledResponders();
+  for (const name of ["Codex", "Claude"]) {
+    if (disabled.has(name)) { results.push({ agent: name, status: "disabled" }); continue; }
+    results.push(await startResponder(name, options));
+  }
   return results;
 }
 
 async function startResponder(rawName, { reveal = true, takeover = false } = {}) {
   const name = responderName(rawName);
   if (!name) throw new Error(`Неизвестный агент: ${rawName}`);
+  if (disabledResponders().has(name)) { wantedResponders.delete(name); return { agent: name, status: "disabled" }; }
   wantedResponders.add(name);
   if (tracked.has(name)) return { agent: name, status: "starting" };
   const foreign = (await processStatus()).filter((item) => responderName(item.agent) === name);
@@ -748,6 +766,15 @@ ipcMain.handle("mbox-desktop:stop", async (_event, name) => {
 });
 // Агент, запущенный вне приложения (автозапуск Windows, старая версия), не отдаёт вывод —
 // перезапуск переносит его внутрь, в сессию консоли.
+// Настройка «агент включён» из интерфейса: выключенного останавливаем и больше не поднимаем, включённого возвращаем.
+ipcMain.handle("mbox-desktop:agent-enabled", async (_event, name, enabled) => {
+  if (!responderName(name)) throw new Error("Неизвестный агент");
+  const was = !disabledResponders().has(responderName(name));
+  setResponderEnabled(name, Boolean(enabled));
+  if (!enabled) { wantedResponders.delete(responderName(name)); await stopResponder(name); }
+  else if (!was) await startResponder(name, { reveal: false, takeover: true });
+  return processStatus();
+});
 ipcMain.handle("mbox-desktop:restart-agent", async (_event, name) => {
   if (!responderName(name)) throw new Error("Неизвестный агент");
   await stopResponder(name);

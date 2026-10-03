@@ -8,6 +8,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY public ./public
 COPY server ./server
+COPY scripts ./scripts
 COPY skills ./skills
 
 EXPOSE 3000

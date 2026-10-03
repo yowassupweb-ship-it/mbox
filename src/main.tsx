@@ -35,6 +35,7 @@ import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/t
 import { TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
 import { EmptyState, ManualForm, Panel } from "./ui";
+import { AgentsOnThisComputer } from "./features/agents/AgentsOnThisComputer";
 import { bootstrapSeen, loadSeen } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
@@ -873,65 +874,8 @@ function TeamBoard({ user, projects }: { user: { username: string; role: string 
       {user.role === "owner"
         ? <AccountManager projects={projects} />
         : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
-      <ResponderAccess username={user.username} projects={projects} />
+      <AgentsOnThisComputer username={user.username} />
     </div>
-  );
-}
-
-type AccountToken = { id: string; label: string; created_at: string; last_used_at: string | null };
-
-function ResponderAccess({ username, projects }: { username: string; projects: Project[] }) {
-  const [tokens, setTokens] = useState<AccountToken[]>([]);
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const load = useCallback(() => fetchJson<{ tokens: AccountToken[] }>("/api/mbox/account/tokens").then((result) => setTokens(result.tokens)), []);
-  useEffect(() => { void load(); }, [load]);
-  const agentName = `ChatGPT-${username.replace(/\s+/g, "-")}`;
-  const responderProject = projects.find((project) => project.name === "MBOX") ?? projects[0];
-  const command = token ? [
-    `$env:MBOX_URL='https://mbox.shar-os.ru'`,
-    `$env:MBOX_USERNAME='${username.replace(/'/g, "''")}'`,
-    `$env:MBOX_TOKEN='${token}'`,
-    `$env:MBOX_AGENT_NAME='${agentName.replace(/'/g, "''")}'`,
-    responderProject ? `$env:MBOX_PROJECT='${responderProject.name.replace(/'/g, "''")}'` : "",
-    `node scripts/codex-chat-watcher.mjs`,
-  ].filter(Boolean).join("\n") : "";
-
-  async function createToken() {
-    setBusy(true);
-    try {
-      const result = await fetchJson<{ token: string }>("/api/mbox/account/tokens", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label: `${username} · VS Code` }),
-      });
-      setToken(result.token);
-      await load();
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <Panel title="Responder в VS Code" icon={Zap}>
-      <div className="responder-access">
-        <p>Персональный ключ подключает ChatGPT/Claude и MBOX MCP к вашему аккаунту. Он видит только ваши сообщения и назначенные проекты.</p>
-        <button className="primary-action" type="button" disabled={busy} onClick={() => void createToken()}><KeyRound size={16} />{busy ? "Создаю…" : "Создать ключ VS Code"}</button>
-        {token && (
-          <div className="responder-token">
-            <strong>Скопируйте сейчас — повторно ключ не показывается</strong>
-            <textarea value={command} readOnly rows={6} aria-label="Команды подключения responder" />
-            <button type="button" onClick={() => void navigator.clipboard.writeText(command)}>Скопировать команды</button>
-          </div>
-        )}
-        <div className="account-list">
-          {tokens.map((item) => (
-            <div className="account-row responder-key-row" key={item.id}>
-              <div className="account-identity"><strong>{item.label}</strong><span>Создан {formatDateTime(item.created_at)}{item.last_used_at ? ` · использован ${formatSince(item.last_used_at)}` : " · ещё не использован"}</span></div>
-              <button type="button" onClick={async () => { await fetchJson(`/api/mbox/account/tokens/${item.id}`, { method: "DELETE" }); await load(); }}>Отозвать</button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Panel>
   );
 }
 
@@ -1175,7 +1119,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
                 ) : (
                   <>
                     <ProjectAccessPicker projects={projects} selected={selected} onChange={(ids) => setDraftProjects((current) => ({ ...current, [account.id]: ids }))} />
-                    <label className="account-jarvis" title="Свой Джарвис: отдельная история и чаты, видит только проекты этого аккаунта. Claude и ChatGPT участникам не отвечают — они работают на компьютере владельца.">
+                    <label className="account-jarvis" title="Свой Джарвис: отдельная история и чаты, видит только проекты этого аккаунта.">
                       <input type="checkbox" checked={account.jarvis_enabled !== false} disabled={busy === `jarvis:${account.id}`} onChange={(event) => void toggleJarvis(account, event.target.checked)} />
                       Свой Джарвис
                     </label>

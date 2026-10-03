@@ -3,7 +3,7 @@ import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, 
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
-import { effectiveStatus, liveRunOf, CLOUD_AGENTS, agentDisplayName, isCloudAgent } from "../../lib/agents";
+import { agentFamily, effectiveStatus, liveRunOf, CLOUD_AGENTS, agentDisplayName, isCloudAgent } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
@@ -1458,7 +1458,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const awaitingDead = Boolean(peer && (cloudChat ? !cloudOnline : debug?.process?.state === "dead") && awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase());
   const awaitingPhase = useMemo(() => {
     if (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase()) return awaitingJarvisPhase;
-    const family = (name: string) => (/^(codex|chatgpt)$/i.test(name) ? "chatgpt" : name.toLowerCase());
+    const family = (name: string) => (isCloudAgent(name) ? name.toLowerCase() : agentFamily(name)?.key ?? name.toLowerCase());
     const row = agents.find((agent) => family(agent.name) === family(awaitingAgent));
     // Шаги по сокету — самый прямой признак работы: Codex не шлёт ни фазу, ни запуск, а цепочка идёт.
     const lastStep = liveSteps[liveSteps.length - 1];

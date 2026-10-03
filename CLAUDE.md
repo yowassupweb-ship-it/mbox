@@ -146,7 +146,7 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    у проекта папка `projects/<id>/`; участник видит и пишет только в папках своих проектов и в `notes/<id>/` доступных
    заметок (`storageAccessFor` в прод-сервере, то же в `vite.config.ts`; настройки бакета — только владельцу). Джарвис
    у участника — по флагу `users.jarvis_enabled` (админка «Команда»), видит только его проекты (`allowed_project_ids`).
-   Каждый аккаунт запускает свой Claude/Codex CLI: наблюдатель под логином участника отвечает на его сообщения (сервер отдаёт ему только их), наблюдатель владельца пропускает `props.mbox_owner === false`. Агенты принадлежат аккаунту: `agent_presence` уникальна по `(owner_user_id, agent_name)`, запуски помечены `props.mbox_user_id`, ростер и фазы — по аккаунту. У участника в `MBOX_USERNAME`/`MBOX_PASSWORD` (или `MBOX_TOKEN`) должны быть его данные.
+   Каждый аккаунт запускает свой Claude/Codex CLI: наблюдатель под логином участника отвечает на его сообщения (сервер отдаёт ему только их), наблюдатель владельца пропускает `props.mbox_owner === false`. Агенты принадлежат аккаунту: `agent_presence` уникальна по `(owner_user_id, agent_name)` (миграция сама при старте: `server/agent-presence.mjs`), запуски помечены `props.mbox_user_id`, ростер и фазы — по аккаунту. У участника в `MBOX_USERNAME`/`MBOX_PASSWORD` (или `MBOX_TOKEN`) должны быть его данные.
    Новый маршрут для участника — в `memberRouteAllowed`, иначе 403.
 20. **Контекст фокуса в чате.** Чипы над полем ввода — активная вкладка и вторая область (`chatFocus` в Workbench);
    уходят в `props.context` сообщения. Наблюдатели добавляют их в промпт (`focusLines` в `scripts/chat-threads.mjs`),
@@ -181,6 +181,14 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    (`MBOX_WATCH_WARM_IDLE_MS`), при смене модели/усилия, ротации сессии и синхронизации навыков; `MBOX_WATCH_WARM=0` — старый
    режим «процесс на сообщение». В чате действие агента — одна строка `ChainLine` (статус → итог), цепочка шагов раскрывается;
    статус появляется сразу при отправке, до ответа сервера (временный id `pending:`).
+
+25. **Установка наблюдателей на чужом ПК и отключение агентов.** `scripts/mbox-agent.mjs` — один файл (только Node 20+):
+   `install --url --user --token` скачивает набор (`GET /api/mbox/agent-kit`, `server/accounts.mjs`, белый список файлов `scripts/`),
+   ставит MCP-зависимости, настраивает автозапуск (Windows — Startup `.vbs`, macOS — LaunchAgent, Linux — systemd --user) и держит
+   наблюдателей под аккаунтом (`run`; `status|enable|disable|update|uninstall`). Агент выключен, если он выключен в `config.json` или в
+   настройках MBOX: `users.agent_prefs` (`GET/PUT /api/mbox/account/agents`, «Настройки → Команда → Агенты на этом компьютере»); служба
+   опрашивает это раз в 10 с. Интерфейс (`src/lib/agentPrefs.ts`) прячет выключенного агента из чата, а MBOX Desktop (`mbox-desktop/main.js`,
+   `agents-config.json`) останавливает его и не поднимает при старте. `Dockerfile.mbox` копирует `scripts/` — без этого набор не отдастся.
 
 ## Работа агента с MBOX
 
