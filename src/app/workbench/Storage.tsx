@@ -4,41 +4,13 @@ import { fetchJson } from "../../lib/api";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { usePersistentState } from "./tabs";
 import { askText, askConfirm } from "../../ui/askText";
-import { uploadToStorage, type UploadMode } from "../../lib/storageUpload";
-import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
+import { uploadToStorage } from "../../lib/storageUpload";
+import { isSheetFile } from "./StorageSheetDocument";
+import { STORAGE_CHANGED_EVENT, apiError, notifyStorageChanged, openSheetTab, uploadLabel, type Listing, type StorageConfig, type UploadItem } from "./storageApi";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 
-/** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
-function openSheetTab(key: string) {
-  window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: { kind: "tab", key: `${STORAGE_SHEET_TAB}${key}`, actor: "", reply_to: "", title: "", note: "", quiet: true } }));
-}
-
-/** member — участник: видит только папки своих проектов, настроек бакета у него нет. */
-type StorageConfig = { configured: boolean; endpoint: string; region: string; bucket: string; access_key_id: string; has_secret: boolean; member?: boolean };
-/** labels — подписи папок проектов: «projects/4/» → «Вокруг света». */
-type Listing = { prefix: string; folders: string[]; objects: Array<{ key: string; size: number; last_modified: string }>; next_token: string | null; labels?: Record<string, string> };
-type Upload = { name: string; loaded: number; total: number; error?: string; mode?: UploadMode; startedAt?: number; done?: boolean };
-
-/** Статус строки загрузки: байты, скорость и сколько осталось; через сервер прогресса нет — честно пишем это. */
-function uploadLabel(item: Upload) {
-  if (item.error) return item.error;
-  if (item.done) return `загружено · ${formatBytes(item.total)}`;
-  const seconds = item.startedAt ? Math.max(1, Math.round((Date.now() - item.startedAt) / 1000)) : 0;
-  if (item.mode === "proxy") return `идёт через сервер · ${formatBytes(item.total)} · ${seconds} с`;
-  if (!item.startedAt) return `подготовка · ${formatBytes(item.total)}`;
-  const speed = item.loaded / seconds;
-  const left = speed > 0 ? Math.round((item.total - item.loaded) / speed) : 0;
-  const eta = left > 90 ? `${Math.round(left / 60)} мин` : `${left} с`;
-  return `${formatBytes(item.loaded)} из ${formatBytes(item.total)} · ${formatBytes(speed)}/с · осталось ${eta}`;
-}
-
 const PROJECT_ICONS = "/assets/icons/project";
-
-async function apiError(response: Response) {
-  const data = await response.json().catch(() => ({}));
-  return (data as { error?: string }).error || `Ошибка ${response.status}`;
-}
 
 export function StorageDocument() {
   const [config, setConfig] = useState<StorageConfig | null>(null);
@@ -47,7 +19,7 @@ export function StorageDocument() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [uploads, setUploads] = useState<Upload[]>([]);
+  const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [, setTick] = useState(0);
@@ -73,6 +45,12 @@ export function StorageDocument() {
   }, []);
 
   useEffect(() => { if (config?.configured && !editing) void load(prefix); }, [config?.configured, editing, prefix, load]);
+  // Файл загрузили или удалили из дерева в боковой панели — таблица показывает то же самое.
+  useEffect(() => {
+    const onChanged = (event: Event) => { if ((event as CustomEvent<string>).detail !== "table" && config?.configured && !editing) void load(prefix); };
+    window.addEventListener(STORAGE_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(STORAGE_CHANGED_EVENT, onChanged);
+  }, [config?.configured, editing, prefix, load]);
 
   async function uploadFiles(files: FileList | File[]) {
     const list = [...files];
@@ -87,6 +65,7 @@ export function StorageDocument() {
       }
     }
     await load(prefix);
+    notifyStorageChanged("table");
     window.setTimeout(() => setUploads((current) => current.filter((item) => item.error)), 2500);
   }
 
@@ -109,6 +88,7 @@ export function StorageDocument() {
     const response = await fetch(`/api/mbox/storage/object?key=${encodeURIComponent(key)}`, { method: "DELETE" });
     if (!response.ok) setError(await apiError(response));
     await load(prefix);
+    notifyStorageChanged("table");
   }
 
   async function createFolder() {
@@ -117,6 +97,7 @@ export function StorageDocument() {
     const response = await fetch("/api/mbox/storage/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: `${prefix}${name.trim()}` }) });
     if (!response.ok) setError(await apiError(response));
     await load(prefix);
+    notifyStorageChanged("table");
   }
 
   function onDrop(event: DragEvent) {

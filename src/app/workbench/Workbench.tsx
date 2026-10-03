@@ -33,6 +33,7 @@ import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
+import { StorageView } from "./StorageView";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
@@ -52,7 +53,7 @@ import { askConfirm } from "../../ui/askText";
 import { TreeGlyph } from "./TreeGlyph";
 import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 
-type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
+type Activity = "explorer" | "notes" | "local" | "files" | "storage" | "search" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
 type PanelTab = "console" | "attention" | "journal";
 
@@ -285,7 +286,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }
 
   // Разделы, которые открываются не боковой панелью, а вкладкой документа.
-  const RAIL_TABS: Partial<Record<RailItemId, string>> = { storage: "storage", history: "history", browser: "web:" };
+  const RAIL_TABS: Partial<Record<RailItemId, string>> = { history: "history", browser: "web:" };
   const hasBrowser = Boolean(browserBridge());
   const railHidden = useRailHidden();
 
@@ -743,6 +744,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} />}
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
+        {activity === "storage" && <StorageView tabs={tabs} />}
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
