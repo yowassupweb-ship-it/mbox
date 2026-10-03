@@ -2008,3 +2008,23 @@
 .console-empty > svg { color: var(--text-muted); }
 .console-empty strong { font-size: var(--text-xl); letter-spacing: -0.01em; }
 .console-empty p { font-size: var(--text-md); line-height: 1.55; }
+
+/* Действие агента одной строкой: статус слева, шевроном раскрывается цепочка шагов. */
+.console-chain-block.is-live { opacity: 1; }
+.console-chain-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.console-chain-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--text-main) 5%, transparent); color: var(--text-muted); font: inherit; font-size: var(--text-xs); text-align: left; cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard); }
+.console-chain-toggle:hover:not(:disabled) { background: color-mix(in srgb, var(--text-main) 9%, transparent); }
+.console-chain-toggle:disabled { cursor: default; }
+.console-chain-toggle:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.console-chain-line > .console-chain-toggle { flex: 0 1 auto; max-width: 100%; }
+.console-chain-state { flex: none; width: var(--space-4); height: var(--space-4); display: grid; place-items: center; color: var(--state-success, var(--accent-color)); }
+.console-chain-block.is-failed .console-chain-state { color: var(--state-danger); }
+.console-chain-status { min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); overflow: hidden; font-variant-numeric: tabular-nums; }
+.console-chain-status strong { flex: none; max-width: 60%; overflow: hidden; color: var(--text-2); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.console-chain-status span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-chain-chevron { flex: none; transition: transform var(--duration-fast) var(--ease-standard); }
+.console-chain-block.is-open .console-chain-chevron { transform: rotate(90deg); }
+.console-chain-pulse { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--accent-color); animation: console-chain-pulse 1.1s ease-in-out infinite; }
+@keyframes console-chain-pulse { 50% { transform: scale(.55); opacity: .45; } }
+.console-chain-body { margin: var(--space-2) 0 0 var(--space-2); padding-left: var(--space-3); border-left: 1px solid var(--border-color); }
+@media (prefers-reduced-motion: reduce) { .console-chain-pulse { animation: none; } .console-chain-chevron { transition: none; } }

@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, Star, StickyNote, Table2, Wrench, X } from "lucide-react";
+import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, ChevronRight, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, Star, StickyNote, Table2, Wrench, X } from "lucide-react";
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
@@ -278,7 +278,7 @@ function repliedId(item: AgentInboxItem) {
 }
 
 function snippet(text: string, max = 140) {
-  const flat = text.replace(/\s+/g, " ").trim();
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
@@ -368,6 +368,7 @@ function agentState(agent: AgentActivity, runs: AgentRun[]) {
 
 const coarsePointer = () => window.matchMedia?.("(pointer: coarse)").matches ?? false;
 
+const PENDING_ID = "pending:";
 const THINKING_FRAMES =[1, 2, 3, 4, 5].map((n) => `/assets/icons/ai-thinking-spinner/${n}.png`);
 
 /** Живой спиннер вместо статичного "думает…" — кадры лежат в public/assets/icons/ai-thinking-spinner. */
@@ -688,17 +689,38 @@ function workParts(work: LogLine["work"]) {
 }
 
 /** Заголовок цепочки: крупно — что агент делал, мелко рядом — шаги, время и токены. */
-function ChainTitle({ steps, work }: { steps: ChainStep[]; work?: LogLine["work"] }) {
+function chainSummary(steps: ChainStep[], work?: LogLine["work"]) {
   const tools = steps.filter((step) => step.kind === "tool").length;
-  const digest = stepsDigest(steps);
   const stats = workParts(work);
   return (
-    <p className="console-chain-title">
-      <strong>{digest || "Ход работы"}</strong>
-      <span title={stats.join(" · ") || undefined}>
-        {tools} {plural(tools, "шаг", "шага", "шагов")}{stats.length ? ` · ${stats.join(" · ")}` : ""}
-      </span>
-    </p>
+    <>
+      <strong>{stepsDigest(steps) || "Ход работы"}</strong>
+      <span title={stats.join(" · ") || undefined}>{tools} {plural(tools, "шаг", "шага", "шагов")}{stats.length ? ` · ${stats.join(" · ")}` : ""}</span>
+    </>
+  );
+}
+
+/**
+ * Одна строка на всё действие агента: пока он работает — живой статус со значком и секундами, потом — итог
+ * («Прочитал 3 файла · 5 шагов · 14 с»). Щелчок раскрывает цепочку шагов, как раньше.
+ */
+function ChainLine({ steps, state, status, tail, children }: { steps: ChainStep[]; state: "live" | "done" | "failed"; status: ReactNode; tail?: ReactNode; children?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const expandable = steps.length > 0;
+  return (
+    <div className={`console-chain-block is-${state}${open ? " is-open" : ""}`}>
+      <div className="console-chain-line">
+        <button type="button" className="console-chain-toggle" onClick={() => expandable && setOpen((value) => !value)} aria-expanded={expandable ? open : undefined} disabled={!expandable}>
+          <span className="console-chain-state" aria-hidden="true">
+            {state === "live" ? <i className="console-chain-pulse" /> : state === "failed" ? <AlertTriangle size={12} /> : <Check size={12} />}
+          </span>
+          <span className="console-chain-status">{status}</span>
+          {expandable && <ChevronRight size={12} className="console-chain-chevron" aria-hidden="true" />}
+        </button>
+        {tail}
+      </div>
+      {open && expandable && <div className="console-chain-body"><ChainTimeline steps={steps} />{children}</div>}
+    </div>
   );
 }
 
@@ -1399,7 +1421,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // Раньше "думает…" висело одним и тем же текстом весь ответ — жалоба: непонятно, застрял агент
   // или реально работает. Опрашиваем ту же фазу, что сервер пишет в jarvisPhase (см. server/vite).
   useEffect(() => {
-    if (!awaitingJarvisId) { setAwaitingJarvisPhase(null); return; }
+    if (!awaitingJarvisId || awaitingJarvisId.startsWith(PENDING_ID)) { setAwaitingJarvisPhase(null); return; }
     // Фаза Джарвиса привязана к сообщению (он отвечает внутри сервера), фаза локального агента —
     // к нему самому: наблюдатель шлёт её через POST /agent/ping, и она приезжает в списке агентов.
     if (awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase()) return;
@@ -1461,6 +1483,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const cancelJarvis = useCallback(() => {
     if (!awaitingJarvisId) return;
     const id = awaitingJarvisId;
+    if (id.startsWith(PENDING_ID)) { setAwaitingJarvisId(null); setAwaitingJarvisSince(null); return; }
     setAwaitingJarvisId(null);
     setAwaitingJarvisSince(null);
     setAwaitingJarvisPhase(null);
@@ -1734,6 +1757,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     const localId = `local-${Date.now()}`;
     const localAt = new Date().toISOString();
     setPending((current) => [...current, { id: localId, body, at: localAt, sent: false, attachments: files.length ? files : undefined }]);
+    // Строка статуса появляется в ту же секунду, что и сообщение: id у него ещё нет, поэтому пока временный.
+    const optimisticId = `${PENDING_ID}${localId}`;
+    setAwaitingAgent(mentionTarget || defaultResponder);
+    setAwaitingJarvisId(optimisticId);
+    setAwaitingJarvisSince(Date.now());
+    setAwaitingJarvisVerb("думает");
 
     try {
       const messageProps: Record<string, unknown> = {};
@@ -1769,9 +1798,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if (result.inbox_item?.id) {
         acceptInboxItem(result.inbox_item);
         setAwaitingAgent(waitingFor);
-        setAwaitingJarvisId(result.inbox_item.id);
-        setAwaitingJarvisSince(Date.now());
-        setAwaitingJarvisVerb("думает");
+        setAwaitingJarvisId((current) => (current === optimisticId || current === null ? result.inbox_item!.id : current));
+      } else {
+        setAwaitingJarvisId((current) => (current === optimisticId ? null : current));
       }
       // Помечаем отправленным сразу. Ждать onSaved нельзя: он тянет одиннадцать ручек
       // через туннель к боевой базе, и «отправляется» висело бы секундами.
@@ -1779,6 +1808,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       onSaved("agent_inbox");
     } catch {
       setPending((current) => current.map((item) => item.id === localId ? { ...item, failed: true } : item));
+      setAwaitingJarvisId((current) => (current === optimisticId ? null : current));
+      setAwaitingJarvisSince(null);
     }
   }
 
@@ -2063,10 +2094,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                     {/* Цепочка идёт до самого ответа и всегда развёрнута — это часть переписки,
                         а не приложение к ней: сначала видно, что агент делал, потом что получилось. */}
                     {!!line.steps?.length && (
-                      <div className="console-chain-block">
-                        <ChainTitle steps={line.steps} work={line.work} />
-                        <ChainTimeline steps={line.steps} />
-                      </div>
+                      <ChainLine steps={line.steps} state={line.steps.some((step) => step.is_error) && line.failed ? "failed" : "done"} status={chainSummary(line.steps, line.work)} />
                     )}
                     <div className={line.failed ? "console-bubble is-failed" : "console-bubble"}>
                     {quote && (
@@ -2134,31 +2162,26 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             })}
             {/* Цепочка растёт на глазах: шаги приезжают по сокету, пока агент работает, и стоят
                 там же, где потом встанет готовая — над ответом. */}
-            {awaitingJarvisId && liveSteps.length > 0 && (
-              <div className="console-chain-block is-live">
-                <ChainTimeline steps={liveSteps} />
-              </div>
+            {awaitingJarvisId && !awaitingDead && (
+              <ChainLine
+                steps={liveSteps}
+                state="live"
+                status={<><strong><AgentName name={awaitingAgent} /></strong><span>{awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} · {awaitingJarvisSeconds} с</span></>}
+                tail={(
+                  /* Отмена снимает сообщение с очереди (status done): наблюдатель его уже не возьмёт.
+                     Джарвису она ещё и обрывает запрос к модели. CLI, который уже начал отвечать, не прерывается. */
+                  <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Отменить: сообщение уйдёт из очереди" aria-label="Отменить: сообщение уйдёт из очереди"><X size={11} /></button>
+                )}
+              />
             )}
-            {awaitingJarvisId && (
+            {awaitingJarvisId && awaitingDead && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
-                <span className={awaitingDead ? "console-thinking-row is-dead" : "console-thinking-row"}>
-                  {awaitingDead ? <AlertTriangle size={16} /> : <ThinkingSpinner />}
-                  {/* Шуточные глаголы — это голос Джарвиса. Для остальных агентов нужен простой
-                      признак жизни, а не «прячется в чернильное облако от смущения». */}
-                  {awaitingDead ? (
-                    <span className="console-log-text">{cloudChat ? `${peer} в облаке не на связи — сообщение ждёт в очереди, ответ придёт, когда агент на сервере снова подключится.` : `Наблюдатель ${peer} не работает (${debug?.process?.text}) — ответа не будет, пока его не запустить.`}</span>
-                  ) : <span className="console-log-text"><AgentName name={awaitingAgent} />: {awaitingPhase || (awaitingAgent.toLowerCase() === JARVIS_NAME.toLowerCase() ? `${awaitingJarvisVerb}…` : "работает…")} {awaitingJarvisSeconds}с</span>}
-                  {awaitingDead && debug?.process && (
-                    <button type="button" className="console-start-btn" onClick={debug.process.start}>Запустить</button>
-                  )}
-                  {/* Отмена снимает сообщение с очереди (status done): наблюдатель его уже не возьмёт.
-                      Джарвису она ещё и обрывает запрос к модели. CLI, который уже начал отвечать, не прерывается. */}
-                  {(
-                    <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Отменить: сообщение уйдёт из очереди" aria-label="Отменить: сообщение уйдёт из очереди">
-                      <X size={11} />
-                    </button>
-                  )}
+                <span className="console-thinking-row is-dead">
+                  <AlertTriangle size={16} />
+                  <span className="console-log-text">{cloudChat ? `${peer} в облаке не на связи — сообщение ждёт в очереди, ответ придёт, когда агент на сервере снова подключится.` : `Наблюдатель ${peer} не работает (${debug?.process?.text}) — ответа не будет, пока его не запустить.`}</span>
+                  {debug?.process && <button type="button" className="console-start-btn" onClick={debug.process.start}>Запустить</button>}
+                  <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Отменить: сообщение уйдёт из очереди" aria-label="Отменить: сообщение уйдёт из очереди"><X size={11} /></button>
                 </span>
               </div>
             )}
