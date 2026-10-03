@@ -727,7 +727,7 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
           <div className="wb-grid-corner" style={{ top: scroll.top, left: scroll.left, width: HEAD_W, height: HEAD_H }} onMouseDown={() => setSel({ anchor: { r: 1, c: 1 }, focus: { r: Math.max(dataRows, 1), c: Math.max(dataCols, 1) } })} title="Выделить всё" />
 
           {editing && editorPos && (
-            <textarea
+            <textarea aria-label="Содержимое ячейки"
               ref={editorRef}
               className="wb-grid-editor"
               style={{ top: editorPos.top, left: editorPos.left, minWidth: editorPos.width, height: Math.max(ROW_H, (editing.value.split("\n").length) * 18 + 6) }}

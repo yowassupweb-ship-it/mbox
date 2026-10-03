@@ -401,7 +401,7 @@ function GitRootSummary({ rootKey, name, git, tabs, multiple, onRefresh }: { roo
         {(git.ahead ?? 0) > 0 && <span title="Коммитов не отправлено">↑{git.ahead}</span>}
         {(git.behind ?? 0) > 0 && <span title="Коммитов не получено">↓{git.behind}</span>}
         <span className="wb-git-count">{git.changesTotal ?? changes.length} изм.</span>
-        <button type="button" className="wb-icon-btn" onClick={onRefresh} title="Обновить"><RefreshCw size={12} /></button>
+        <button type="button" className="wb-icon-btn" onClick={onRefresh} title="Обновить" aria-label="Обновить"><RefreshCw size={12} /></button>
       </div>
       {changes.slice(0, 40).map((change) => {
         const letter = gitLetter(change);

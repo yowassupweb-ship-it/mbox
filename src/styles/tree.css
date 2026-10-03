@@ -56,7 +56,7 @@
 
 .tree-row.todo-status-done span,
 .tree-row.todo-status-archived span {
-  color: #8f98a7;
+  color: var(--text-muted);
   text-decoration: line-through;
   text-decoration-thickness: 2px;
 }
@@ -75,7 +75,7 @@
 }
 
 .tree-row.tree-todo_group svg {
-  color: #9fc9ff;
+  color: var(--accent-color);
 }
 
 .tree-row.tree-git_group {
@@ -154,7 +154,7 @@
 
 .tree-row small {
   margin-left: auto;
-  color: #93a1b5;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -211,5 +211,5 @@
 
 .library-note {
   margin: 14px 0 0;
-  color: #93a1b5;
+  color: var(--text-muted);
 }

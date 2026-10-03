@@ -32,6 +32,12 @@
 }
 /* Полям ввода отдельного кольца нет: их фокус почти везде рисует контейнер (адресная строка браузера,
    поле чата, фильтры) — второе кольцо на самом input давало двойную подсветку. */
+/* Самостоятельные поля форм (не внутри капсулы с :focus-within) рисуют фокус сами: рамка и мягкое кольцо. */
+:is(.ask-dialog input, .manual-form, .project-entity-editor, .project-props-editor, .relation-form, .relation-entity-form, .secret-form, .seo-search, .needs-item-reply, .graph-link-tools, .editor-preview, .wb-board-add, .relation-description, .todo-props-field) :is(input, select, textarea):focus-visible,
+:is(.relation-description, .todo-props-field, .project-props-editor textarea):focus-visible {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 25%, transparent);
+}
 /* Поле ввода чата подсвечивает рамка вокруг всего композера (:focus-within) — второе кольцо на самом
    текстовом поле внутри неё было лишним. */
 .console-input-row textarea:focus,
@@ -360,8 +366,8 @@
 .ask-actions button:hover { background: var(--surface-hover); }
 .ask-actions button.is-primary { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); }
 .ask-actions button.is-primary:hover { background: var(--accent-fill-hover); }
-.ask-actions button.is-primary.is-danger { background: #d70015; color: #fff; }
-.ask-actions button.is-primary.is-danger:hover { background: #bf0013; }
+.ask-actions button.is-primary.is-danger { background: var(--danger-fill); color: var(--on-accent); }
+.ask-actions button.is-primary.is-danger:hover { background: var(--danger-fill-hover); }
 .ask-actions button:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent); }
 .wb-note-pin { top: 9px; right: 8px; border-radius: var(--radius-pill); }
 

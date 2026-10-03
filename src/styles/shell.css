@@ -109,7 +109,7 @@
 .artifact-card span,
 .setting-row small,
 .relation-item small {
-  color: #687386;
+  color: var(--text-muted);
 }
 
 .dark .brand-subtitle,
@@ -119,7 +119,7 @@
 .dark .artifact-card span,
 .dark .setting-row small,
 .dark .relation-item small {
-  color: #aeb8c8;
+  color: var(--text-2);
 }
 
 .nav-item,
@@ -175,7 +175,7 @@
 }
 
 .dark .nav-item.active {
-  color: #d9ecff;
+  color: var(--text-main);
   background: color-mix(in srgb, var(--accent-color) 22%, transparent);
 }
 
@@ -355,7 +355,7 @@
   border: var(--border-width) solid color-mix(in srgb, var(--text-main) 8%, transparent);
   border-radius: var(--radius-pill);
   padding: 0 13px;
-  color: #cfe3ff;
+  color: var(--text-main);
   background: color-mix(in srgb, var(--element-bg) 78%, transparent);
   box-shadow: var(--chin-shadow);
   font-size: var(--text-sm);
@@ -368,7 +368,7 @@
 }
 
 .desktop-pill strong {
-  color: #edf4ff;
+  color: var(--text-main);
 }
 
 .desktop-pill-logo {
@@ -380,11 +380,11 @@
 }
 
 .desktop-pill span {
-  color: #aeb8c8;
+  color: var(--text-2);
 }
 
 .desktop-pill.active {
-  color: #c7f0d0;
+  color: var(--state-ok);
   border-color: rgba(101, 214, 139, .2);
 }
 
@@ -532,7 +532,7 @@
   padding: 0 14px;
   background: color-mix(in srgb, var(--element-bg) 70%, transparent);
   box-shadow: var(--chin-shadow);
-  color: #aeb8c8;
+  color: var(--text-2);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   backdrop-filter: blur(18px) saturate(150%);
@@ -556,11 +556,11 @@
   cursor: pointer;
 }
 
-.topbar-logout:hover { color: var(--text-primary); background: color-mix(in srgb, var(--element-bg) 82%, white 8%); }
+.topbar-logout:hover { color: var(--text-main); background: color-mix(in srgb, var(--element-bg) 82%, white 8%); }
 .topbar-logout:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 
 .realtime-pill.monostatus strong {
-  color: #edf4ff;
+  color: var(--text-main);
   white-space: nowrap;
   transition: color .35s ease;
 }
@@ -570,16 +570,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #aeb8c8;
+  color: var(--text-2);
 }
 
 .realtime-pill.connected {
-  color: #c7f0d0;
+  color: var(--state-ok);
   border-color: rgba(101, 214, 139, .18);
 }
 
 .realtime-pill.thinking {
-  color: #cfe3ff;
+  color: var(--text-main);
   border-color: rgba(123, 180, 255, .18);
 }
 

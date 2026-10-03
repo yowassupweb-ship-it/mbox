@@ -243,7 +243,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
             <ListChecks size={14} />
           </button>
           <button type="button" onClick={() => setExpanded([])} title="Свернуть всё"><ChevronsDownUp size={14} /></button>
-          <button type="button" onClick={data.reload} title="Обновить"><RefreshCw size={13} /></button>
+          <button type="button" onClick={data.reload} title="Обновить" aria-label="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
       <div className="wb-filter">

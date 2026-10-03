@@ -171,7 +171,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
         <div className="wb-view-actions">
           <button type="button" onClick={() => tabs.open("file:new", true)} title="Новый файл"><FilePlus2 size={14} /></button>
           <button type="button" onClick={() => inputRef.current?.click()} title="Загрузить с диска (или перетащи файлы сюда)" disabled={uploading}><Upload size={14} /></button>
-          <button type="button" onClick={data.reload} title="Обновить"><RefreshCw size={13} /></button>
+          <button type="button" onClick={data.reload} title="Обновить" aria-label="Обновить"><RefreshCw size={13} /></button>
         </div>
         <input ref={inputRef} type="file" multiple hidden onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} />
       </header>
@@ -433,7 +433,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
           ) : (
             <>
               <button type="button" onClick={() => void copyContent()} title="Скопировать содержимое"><Copy size={14} />{copied ? " Скопировано" : ""}</button>
-              <button type="button" onClick={download} title="Скачать"><Download size={14} /></button>
+              <button type="button" onClick={download} title="Скачать" aria-label="Скачать"><Download size={14} /></button>
               <button type="button" onClick={() => void downloadWord()} disabled={wordState === "loading"} title="Скачать в Word (.docx)"><FileText size={14} /> {wordState === "error" ? "Не вышло" : "Word"}</button>
               <button type="button" onClick={startEdit}><Pencil size={14} /> Править</button>
               <button type="button" className="is-danger" onClick={() => void remove()} title="Удалить файл"><Trash2 size={14} /></button>

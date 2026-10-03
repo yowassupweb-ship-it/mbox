@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, Terminal, Wrench, X } from "lucide-react";
+import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, Star, StickyNote, Table2, Terminal, Wrench, X } from "lucide-react";
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
@@ -945,7 +945,7 @@ function PostPartCard({ part, index, onChange, onReject, onRate }: {
         </span>
         <button type="button" onClick={() => go(1)} aria-label={`${part.label}: следующий вариант`}>›</button>
         <button type="button" className="post-part-reject-toggle" onClick={() => setRejecting((v) => !v)}>
-          ✕ отклонить
+          <X size={13} aria-hidden="true" /> отклонить
         </button>
       </div>
       <div className="post-part-rating">
@@ -958,7 +958,7 @@ function PostPartCard({ part, index, onChange, onReject, onRate }: {
             onClick={() => submitRate(score)}
             aria-label={`Оценить «${part.label}» на ${score} из 5`}
           >
-            {rated !== null && score <= rated ? "★" : "☆"}
+            <Star size={15} fill={rated !== null && score <= rated ? "currentColor" : "none"} aria-hidden="true" />
           </button>
         ))}
       </div>
@@ -1012,7 +1012,7 @@ function PostBuilderCard({ parts, onSend }: { parts: PostPart[]; onSend: (text: 
       ))}
       <div className="post-builder-actions">
         <button type="button" className="post-builder-done" onClick={() => onSend(`Собрал финальный вариант:\n\n${assembled()}`)}>
-          ✓ Готово
+          <Check size={14} aria-hidden="true" /> Готово
         </button>
       </div>
       <div className="post-builder-critique">
@@ -2125,7 +2125,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                   {/* Отмена снимает сообщение с очереди (status done): наблюдатель его уже не возьмёт.
                       Джарвису она ещё и обрывает запрос к модели. CLI, который уже начал отвечать, не прерывается. */}
                   {(
-                    <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Отменить: сообщение уйдёт из очереди">
+                    <button type="button" className="console-cancel-btn" onClick={cancelJarvis} title="Отменить: сообщение уйдёт из очереди" aria-label="Отменить: сообщение уйдёт из очереди">
                       <X size={11} />
                     </button>
                   )}
