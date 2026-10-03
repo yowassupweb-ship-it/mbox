@@ -4039,3 +4039,25 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-chat-kind .agent-avatar::after { display: none; }
 .wb-chat-kind { height: 28px; gap: 5px; }
 .wb-chat-kind-dot { width: 7px; height: 7px; }
+
+/* ─── Хранилище S3 деревом (StorageView.tsx) ─── */
+.wb-tree-more { list-style: none; padding: 2px 0 4px calc(8px + var(--depth, 0) * 14px + 20px); }
+.wb-tree-more button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--accent-color);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.wb-tree-more button:hover { background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+.wb-tree-more button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-tree-more button:active { background: color-mix(in srgb, var(--accent-color) 22%, transparent); }
+.wb-view .wb-uploads { padding: 6px 12px; }
+.wb-view .wb-upload { flex-direction: column; gap: 2px; }
+.wb-view .wb-upload span, .wb-view .wb-upload em { position: relative; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-view .wb-view-actions button:disabled { opacity: 0.35; cursor: default; }

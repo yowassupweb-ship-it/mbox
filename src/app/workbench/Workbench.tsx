@@ -34,6 +34,7 @@ import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
 import { TableDocument, TablesView } from "./TablesView";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
+import { StorageView } from "./StorageView";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
@@ -904,7 +905,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
         {activity === "browser" && <BrowserTabsView tabs={tabs} urls={browserUrls} titles={titles} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
-        {activity === "storage" && <StorageDocument compact />}
+        {activity === "storage" && <StorageView tabs={tabs} />}
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
