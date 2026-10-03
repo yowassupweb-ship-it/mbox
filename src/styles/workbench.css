@@ -4190,3 +4190,4 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 }
 .wb-rcaret.is-below > b { top: 100%; bottom: auto; border-radius: 0 var(--radius-xs) var(--radius-xs) var(--radius-xs); }
 @media (prefers-reduced-motion: reduce) { .wb-rcaret { transition: none; } }
+.wb-browser-tabs-view .wb-view-body { display: grid; align-content: start; gap: 2px; padding: var(--space-1) var(--space-2) var(--space-3); }
