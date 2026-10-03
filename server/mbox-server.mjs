@@ -23,6 +23,7 @@ import { handleSpotlightApi } from "./spotlight.mjs";
 import { createPresenceHub } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
+import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
@@ -1333,6 +1334,7 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/agent/ping" && req.method === "POST") {
+    await agentPresenceReady;
     const body = await readBody(req);
     const name = String(body.agent || actorFromReq(req)).trim() || "Agent";
     const started = body.event === "session_start";
@@ -1507,6 +1509,7 @@ async function handleApiWithContext(req, res, url) {
 
   const agentMatch = url.pathname.match(/^\/api\/mbox\/agents\/(.+)$/);
   if (agentMatch && ["PATCH", "DELETE"].includes(req.method)) {
+    await agentPresenceReady;
     const agentName = decodeURIComponent(agentMatch[1] || "").trim();
     if (!agentName) return sendJson(res, 400, { error: "agent_name_required" });
     const body = req.method === "PATCH" ? await readBody(req) : {};
@@ -1538,6 +1541,7 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/agents") {
+    await agentPresenceReady;
     await closeStaleAgentRuns();
     const result = await query(
       `WITH presence AS (
@@ -3450,6 +3454,7 @@ releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.mess
 
 // Схемы создаём здесь, а не рядом с импортами: query() читает requestContext, объявленный ниже импортов, —
 // вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».
+const agentPresenceReady = ensureAgentPresenceSchema(query).catch((error) => console.error(`agent presence schema: ${error.message}`));
 ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
 ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
 ensureTablesSchema(query).catch((error) => console.error(`tables schema: ${error.message}`));

@@ -10,6 +10,7 @@ import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg
 import { WebSocket, WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
+import { ensureAgentPresenceSchema } from "./server/agent-presence.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./server/tables.mjs";
@@ -941,6 +942,7 @@ function mboxDevApi() {
         recordMemoryAction,
         openTab: (userId: string | null, event: Record<string, unknown>) => (userId ? sendOpenTab(realtimeClients, userId, event as never) : 0),
       });
+      ensureAgentPresenceSchema(queryPostgres).catch((error: Error) => console.error(`agent presence schema: ${error.message}`));
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
       ensureTablesSchema(queryPostgres).catch((error: Error) => console.error(`tables schema: ${error.message}`));
@@ -1203,9 +1205,9 @@ function mboxDevApi() {
             const name = String(body.agent || req.headers["x-mbox-agent"] || "Agent").trim() || "Agent";
             const started = body.event === "session_start";
             const result = await queryPostgres<{ agent_name: string; kind: string; client: string; scope: string; sessions: number; last_seen: string }>(
-              `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions)
-               VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1)
-               ON CONFLICT (agent_name) DO UPDATE
+              `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions, owner_user_id)
+               VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1, (SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1))
+               ON CONFLICT (owner_user_id, agent_name) DO UPDATE
                  SET last_seen = now(),
                      kind = COALESCE(NULLIF(EXCLUDED.kind, ''), agent_presence.kind),
                      client = COALESCE(NULLIF(EXCLUDED.client, ''), agent_presence.client),

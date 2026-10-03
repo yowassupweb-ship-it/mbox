@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { agentFamily } from "../../lib/agents";
 
 export type SessionLine = { stream: "out" | "err"; line: string };
 export type SessionMeta = {
@@ -182,7 +183,7 @@ export function useDesktopSessions() {
   }, []);
 
   const sessions = [...store.sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
-  const family = (name: string) => (/^(codex|chatgpt)$/i.test(name) ? "chatgpt" : name.toLowerCase());
+  const family = (name: string) => agentFamily(name)?.key ?? name.toLowerCase();
   const inApp = new Set(sessions.filter((session) => session.kind === "agent" && session.status === "running").map((session) => family(session.id.slice(6))));
   const outside = store.agents.filter((row) => !inApp.has(family(row.agent)));
 

@@ -55,7 +55,9 @@ const startedAt = new Date();
 // только пришедшие после старта. Теперь подхватываем открытые за последние startGraceMs — повторно
 // ответить нельзя: отвеченное уже done, взятое — doing, а claim с if_status не даст взять дважды.
 const cutoffAt = new Date(startedAt.getTime() - startGraceMs);
-const agentAliases = [agentName, ...(process.env.MBOX_AGENT_ALIASES || "Клод").split(",")]
+// Личное имя наблюдателя (Claude-Аня) не должно отрезать его от чата «Claude»: сообщения туда адресованы виду агента.
+const familyAliases = agentKind === "cloud_agent" ? [] : ["Claude"];
+const agentAliases = [agentName, ...familyAliases, ...(process.env.MBOX_AGENT_ALIASES || "Клод").split(",")]
   .map((alias) => alias.trim())
   .filter(Boolean);
 const broadcastAliases = (process.env.MBOX_BROADCAST_ALIASES || "Всем,Все,All,Everyone,Everybody")
