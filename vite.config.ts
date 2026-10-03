@@ -14,6 +14,8 @@ import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.m
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./server/tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi } from "./server/documents.mjs";
+import { handleSpotlightApi } from "./server/spotlight.mjs";
+import { createPresenceHub } from "./server/presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
@@ -144,7 +146,11 @@ function compactRecallMemoryRow(memory: Record<string, any>, limit = 140) {
   };
 }
 
+let presenceHub: ReturnType<typeof createPresenceHub> | null = null;
+
 function broadcastRealtime(clients: Set<WebSocket>, type: string, payload: Record<string, unknown> = {}) {
+  // Правка агента в документе уходит только тем, кто его сейчас смотрит.
+  if (type === "presence_agent") { presenceHub?.announce(payload); return; }
   const message = JSON.stringify({ type, ...payload, at: new Date().toISOString() });
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) client.send(message);
@@ -946,8 +952,11 @@ function mboxDevApi() {
       ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
 
+      presenceHub = createPresenceHub({ query: queryPostgres, scopeFor: devProjectScope });
+
       realtimeServer.on("connection", (socket) => {
         realtimeClients.add(socket);
+        presenceHub?.attach(socket);
         socket.send(JSON.stringify({ type: "connected", at: new Date().toISOString() }));
         socket.on("close", () => realtimeClients.delete(socket));
       });
@@ -1077,6 +1086,7 @@ function mboxDevApi() {
           if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: true, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleTablesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
           if (url.pathname.startsWith("/api/mbox/storage")) {
             // Зеркало прод-логики: папки хранилища по проектам, участнику — только свои (см. storageAccessFor на проде).
             const projects = (await queryPostgres<{ id: string; name: string }>(
