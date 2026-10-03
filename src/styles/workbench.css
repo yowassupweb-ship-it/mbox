@@ -188,7 +188,7 @@ body.wb-resizing * {
 .command-center kbd {
   padding: 1px 5px;
   border: 1px solid var(--wb-line);
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--text-main) 3%, transparent);
   /* --text-muted на подложке поиска — 4.3:1, ниже AA. */
   color: var(--text-2);
@@ -493,7 +493,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   width: 8px;
   height: 8px;
   flex: none;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: var(--project-color, var(--state-off));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-main) 12%, transparent);
 }
@@ -605,7 +605,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-hit mark {
   padding: 0 1px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--state-warn) 26%, transparent);
   color: #ffe2a3;
 }
@@ -626,7 +626,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   width: 38px;
   height: 3px;
   margin-left: auto;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--text-main) 8%, transparent);
   overflow: hidden;
 }
@@ -938,7 +938,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-memory-body h4.level-1 { font-size: var(--text-xl); }
 .wb-memory-body h4.level-3,
 .wb-memory-body h4.level-4 { font-size: var(--text-md); color: var(--eyebrow); }
-.wb-memory-body code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); font-size: 0.92em; }
+.wb-memory-body code { padding: 1px 5px; border-radius: var(--radius-2xs); background: var(--code-bg); color: var(--code-text); font-size: 0.92em; }
 
 .wb-memory-body pre {
   margin: 0.5em 0;
@@ -987,7 +987,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-props dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 .wb-props dd button { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; text-align: left; }
 .wb-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.wb-tags span { padding: 1px 6px; border: 1px solid var(--wb-line); border-radius: 3px; }
+.wb-tags span { padding: 1px 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-2xs); }
 
 .wb-props-form { display: grid; gap: 8px; margin: 0 8px; font-size: var(--text-xs); color: var(--text-muted); }
 .wb-props-form label { display: grid; gap: 4px; }
@@ -1276,7 +1276,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-spec { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: var(--text-sm); }
 .wb-spec dt { color: var(--text-muted); }
 .wb-spec dd { margin: 0; color: var(--text-main); line-height: 1.55; overflow-wrap: anywhere; }
-.wb-spec code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
+.wb-spec code { padding: 1px 5px; border-radius: var(--radius-2xs); background: var(--code-bg); color: var(--code-text); }
 .wb-spec a,
 .wb-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-color); text-decoration: none; }
 .wb-links { display: flex; flex-wrap: wrap; gap: 14px; }
@@ -1288,7 +1288,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   margin-left: 4px;
   padding: 1px 6px;
   border: 1px solid var(--wb-line);
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   background: none;
   color: var(--text-muted);
   font: inherit;
@@ -1486,11 +1486,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-nav button:hover:not(:disabled) { background: var(--wb-hover); color: var(--text-main); }
 .wb-browser-nav button:disabled { opacity: 0.35; cursor: default; }
 
-.wb-browser-address { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--element-bg); color: var(--text-muted); }
+.wb-browser-address { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-muted); }
 .wb-browser-address:focus-within { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
 .wb-browser-address svg, .wb-browser-address .wb-browser-favicon { flex: none; }
 .wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
-.wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; }
+.wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: var(--radius-2xs); object-fit: contain; }
 
 .wb-browser-bookmarks { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
 .wb-browser-bookmarks > svg { flex: none; margin-right: 2px; opacity: .72; }
@@ -1500,7 +1500,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-bookmarks button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-browser-bookmarks button:hover, .wb-browser-bookmarks button:focus-visible { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
 .wb-browser-bookmarks button.is-drop-target { color: var(--text-main); background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
-.wb-browser-bookmarks button.is-drop-target::before { content: ""; position: absolute; left: 2px; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent-color); }
+.wb-browser-bookmarks button.is-drop-target::before { content: ""; position: absolute; left: 2px; top: 5px; bottom: 5px; width: 2px; border-radius: var(--radius-2xs); background: var(--accent-color); }
 .wb-browser-bookmarks button:focus-visible, .wb-browser-tools button:focus-visible, .wb-browser-tools select:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 /* Меню папки — плавающий список по координатам кнопки, а не полоса, раздвигающая страницу. */
 .wb-browser-tools-message { color: var(--text-2); font-size: var(--text-sm); }
@@ -1830,12 +1830,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-git-letter { flex: none; width: 14px; text-align: center; font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .wb-git-letter.is-M { color: #e2c08d; }
 .wb-git-letter.is-A,
-.wb-git-letter.is-U { color: #73c991; }
+.wb-git-letter.is-U { color: var(--state-ok); }
 .wb-git-letter.is-D { color: #f48771; }
-.wb-git-letter.is-R { color: #8ab4ff; }
+.wb-git-letter.is-R { color: var(--accent-color); }
 .wb-tree-row.git-M .wb-tree-label { color: #e2c08d; }
 .wb-tree-row.git-A .wb-tree-label,
-.wb-tree-row.git-U .wb-tree-label { color: #73c991; }
+.wb-tree-row.git-U .wb-tree-label { color: var(--state-ok); }
 .wb-doc-crumbs .wb-git-letter { margin-left: 8px; }
 .wb-dirty-mark { color: var(--text-2); }
 
@@ -1927,10 +1927,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Правленая строка: текст показан один раз, фон нейтральный — красят только изменившиеся слова.
    Удалённое ещё и зачёркнуто: по одному цвету отличить убранное от дописанного нельзя. */
 .wb-diff-line.is-edit { background: rgba(138, 180, 255, 0.06); }
-.wb-diff-word { padding: 0 1px; border-radius: 2px; background: none; color: inherit; }
+.wb-diff-word { padding: 0 1px; border-radius: var(--radius-2xs); background: none; color: inherit; }
 .wb-diff-word.is-add { background: rgba(115, 201, 145, 0.32); color: #d6f5e2; }
 .wb-diff-word.is-del { background: rgba(244, 135, 113, 0.28); color: #ffd0c6; text-decoration: line-through; }
-.wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: #8ab4ff; }
+.wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: var(--accent-color); }
 .wb-diff-line.is-meta { color: var(--text-muted); }
 .wb-diff-gap { padding: 2px 16px; color: var(--text-muted); font-size: var(--text-xs); background: color-mix(in srgb, var(--text-main) 2%, transparent); }
 .wb-commit-meta { margin: 0; padding: 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); color: var(--text-main); font-size: var(--text-sm); white-space: pre-wrap; }
@@ -1945,10 +1945,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-version-list button.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); }
 .wb-version-list b { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
 .wb-version-list em { color: var(--text-muted); font-style: normal; }
-.wb-version-source { justify-self: start; padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--text-main) 6%, transparent); color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-version-source { justify-self: start; padding: 0 5px; border-radius: var(--radius-2xs); background: color-mix(in srgb, var(--text-main) 6%, transparent); color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-version-source.is-agent { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--accent-color); }
 .wb-version-source.is-disk { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
-.wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: #8ab4ff; }
+.wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: var(--accent-color); }
 /* Правка заметки человеком снаружи MBOX — отдельный цвет: по списку версий должно быть сразу видно,
    что текст поменял не владелец, а тот, кому дали ссылку. */
 .wb-version-source.is-share { background: color-mix(in srgb, var(--note-purple, #b18cff) 20%, transparent); color: var(--note-purple, #b18cff); }
@@ -2074,7 +2074,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-meta-strip > span + span::before { content: "·"; margin: 0 7px; color: rgba(238, 244, 241, 0.22); }
 .wb-meta-link { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; }
 .wb-meta-link:hover { text-decoration: underline; }
-.wb-meta-tag { padding: 0 5px; border: 1px solid var(--wb-line); border-radius: 3px; }
+.wb-meta-tag { padding: 0 5px; border: 1px solid var(--wb-line); border-radius: var(--radius-2xs); }
 
 .wb-memory-body { max-width: none; font-size: var(--wb-fs-reading); font-weight: var(--weight-text); line-height: 1.7; }
 .wb-memory-body h4 { font-weight: var(--weight-semibold); }
@@ -2475,7 +2475,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-howto { margin-top: 8px; padding: 14px 18px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
 .wb-howto h3 { margin: 0 0 8px; font-size: var(--text-sm); }
 .wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: var(--text-sm); line-height: 1.6; }
-.wb-howto code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
+.wb-howto code { padding: 0 4px; border-radius: var(--radius-2xs); background: var(--code-bg); color: var(--code-text); }
 .wb-howto i { color: var(--text-main); font-style: normal; }
 
 /* ─── Доска задач и задача ──────────────────────────── */
@@ -3144,7 +3144,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
-.wb-image-swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--wb-line); border-radius: 2px; vertical-align: -2px; }
+.wb-image-swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--wb-line); border-radius: var(--radius-2xs); vertical-align: -2px; }
 .wb-image-swatch.is-checker { background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0; }
 .wb-image-swatch.is-dark { background: #0b0c0e; }
 .wb-image-swatch.is-light { background: #f4f5f2; }
@@ -3596,7 +3596,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-sheet-footer { display: flex; align-items: stretch; min-width: 0; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
 .wb-sheet-footer .wb-sheet-tabs { flex: 1 1 auto; min-width: 0; border-top: 0; }
-.wb-sheet-add { min-width: 32px !important; padding: 0 !important; display: inline-grid; place-items: center; }
+.wb-sheet-tabs button.wb-sheet-add { min-width: 32px; padding: 0; display: inline-grid; place-items: center; }
 .wb-sheet-rename { width: 120px; margin: 3px; padding: 0 6px; border: 1px solid var(--accent-color); border-radius: var(--radius-xs); background: var(--surface-1); color: var(--text-main); font: inherit; font-size: var(--text-xs); }
 .wb-sheet-stats { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--text-2); font-size: var(--text-xs); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wb-sheet-filter { display: grid; gap: 6px; padding: 6px; min-width: 230px; }

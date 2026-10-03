@@ -104,7 +104,7 @@
   background: linear-gradient(180deg,
     color-mix(in srgb, var(--accent-color) 30%, var(--element-bg)),
     color-mix(in srgb, var(--accent-color) 20%, var(--element-bg)));
-  color: #eef4ff;
+  color: var(--text-main);
 }
 
 .agent-chat-shell .cs-message { margin-bottom: 2px; }
@@ -397,7 +397,7 @@
   border: 0;
   box-shadow: none;
   background: color-mix(in srgb, var(--accent-color) 26%, transparent);
-  color: #eaf1ff;
+  color: var(--text-main);
 }
 
 
@@ -927,6 +927,9 @@
 .post-part-dots i.is-active { background: var(--accent-color); }
 
 .post-part-reject-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
   border: 0;
   background: transparent;
@@ -962,8 +965,12 @@
   padding: 1px 2px;
 }
 
-.post-part-rating button.is-rated { color: #f5c542; }
-.post-part-rating button:hover { color: #f5c542; }
+.post-part-rating button { display: inline-grid; place-items: center; border-radius: var(--radius-xs); }
+.post-part-rating button.is-rated,
+.post-part-rating button:hover { color: var(--note-yellow); }
+.post-part-rating button:focus-visible,
+.post-part-reject-toggle:focus-visible,
+.post-builder-done:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 
 .post-part-reject {
   display: flex;
@@ -1000,10 +1007,13 @@
 .post-builder-actions { display: flex; justify-content: flex-end; }
 
 .post-builder-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 14px;
-  border: 1px solid color-mix(in srgb, var(--state-success, #3ecf8e) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-ok) 45%, transparent);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--state-success, #3ecf8e) 16%, transparent);
+  background: color-mix(in srgb, var(--state-ok) 16%, transparent);
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -1097,7 +1107,7 @@
 .console-input-pickers .console-picker-menu { left: auto; right: 0; max-width: min(280px, calc(100vw - 24px)); }
 .console-input-hints b { color: var(--text-2); font-weight: var(--weight-medium); }
 .console-input-newline { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
-.console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--surface-chrome); color: var(--text-2); font: inherit; text-align: center; }
+.console-input-hints kbd { min-width: 15px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: var(--radius-2xs); background: var(--surface-chrome); color: var(--text-2); font: inherit; text-align: center; }
 
 /* Подсказки по @/,/,$,# — плавающий список над composer'ом, не над логом. Раньше был голый список
    строк текста; теперь каждая строка — иконка триггера в цветном кружке + значение + пояснение,
@@ -1808,7 +1818,7 @@
   width: 42px;
   height: 5px;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   background: var(--surface-hover);
 }
 
@@ -1937,7 +1947,7 @@
   max-width: min(84%, 640px);
   padding: 8px 12px;
   border: 0;
-  border-radius: 14px 14px 4px 14px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-2xs) var(--radius-lg);
   background: color-mix(in srgb, var(--accent-color) 14%, var(--surface-panel, var(--bg-color)));
 }
 .console-log-line.out .console-log-text { color: var(--text-main); }
@@ -1952,7 +1962,7 @@
 .console-chain-title,
 .console-work-line { color: var(--text-muted); font-size: var(--text-xs); letter-spacing: 0.01em; }
 .console-tools-used { opacity: 0.8; }
-.console-bubble.is-failed { border-radius: 4px 10px 10px 4px; }
+.console-bubble.is-failed { border-radius: var(--radius-2xs) var(--radius-md) var(--radius-md) var(--radius-2xs); }
 
 .console-log-text code { font-size: 0.9em; }
 .console-log-pre { border-radius: var(--radius-sm); }
@@ -1969,7 +1979,7 @@
   height: 22px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-color) 10%, transparent);
   color: var(--text-main);
   font: inherit;

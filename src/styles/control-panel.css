@@ -425,7 +425,7 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--state-danger) 8%, var(--element-bg)), var(--element-bg) 62%);
 }
 
-.todo-note-card.is-done .todo-note-card-body { color: #9aa5b7; }
+.todo-note-card.is-done .todo-note-card-body { color: var(--text-muted); }
 
 .todo-drag-slot.is-dragging {
   opacity: .45;
@@ -547,7 +547,7 @@
 }
 
 .relation-direction em { color: var(--accent-color); font-style: normal; font-weight: var(--weight-medium); }
-.relation-why { margin: 0; color: #d8dfeb; font-size: var(--text-sm); line-height: 1.45; overflow-wrap: anywhere; }
+.relation-why { margin: 0; color: var(--text-2); font-size: var(--text-sm); line-height: 1.45; overflow-wrap: anywhere; }
 .relation-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-xs); }
 
 .relation-add {
@@ -644,7 +644,7 @@
 
 .folder-note p {
   margin: 0;
-  color: #d8dfeb;
+  color: var(--text-2);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
   white-space: pre-wrap;
@@ -705,7 +705,7 @@
 
 .source-summary {
   margin: 0;
-  color: #d8dfeb;
+  color: var(--text-2);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
   white-space: pre-wrap;
@@ -788,7 +788,7 @@
 }
 
 .git-link:hover { border-color: color-mix(in srgb, #7ee2a8 55%, var(--border-color)); }
-.git-link svg { color: #7ee2a8; flex: none; }
+.git-link svg { color: var(--state-ok); flex: none; }
 .git-repo { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .git-host { color: var(--text-muted); font-size: var(--text-sm); }
 
@@ -854,7 +854,7 @@
 /* Деплой */
 
 .deploy-steps { display: grid; gap: var(--space-1); width: min(100%, 560px); }
-.deploy-steps p { margin: 0; color: #d8dfeb; font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.deploy-steps p { margin: 0; color: var(--text-2); font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
 
 /* Философия */
 
@@ -869,7 +869,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--space-2);
   align-items: start;
-  color: #d8dfeb;
+  color: var(--text-2);
   font-size: var(--text-sm);
   line-height: 1.45;
 }
@@ -1015,7 +1015,7 @@
 
 .review-item-body p {
   margin: 0;
-  color: #aeb8c8;
+  color: var(--text-2);
   font-size: var(--text-sm);
   line-height: 1.45;
   display: -webkit-box;
@@ -1330,7 +1330,7 @@
 .project-memory-item small,
 .project-memory-empty {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 

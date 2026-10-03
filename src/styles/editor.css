@@ -29,7 +29,7 @@
 /* # заголовки */
 .wb-code-wrap.is-document .tok-keyword { color: var(--accent-color); }
 /* `код` и ```блоки``` */
-.wb-code-wrap.is-document .tok-string { color: var(--code-text); background: var(--code-bg); border-radius: 3px; }
+.wb-code-wrap.is-document .tok-string { color: var(--code-text); background: var(--code-bg); border-radius: var(--radius-2xs); }
 /* **жирный** */
 .wb-code-wrap.is-document .tok-tag { color: color-mix(in srgb, var(--note-orange) 75%, var(--text-main)); }
 /* [ссылки](адрес) */

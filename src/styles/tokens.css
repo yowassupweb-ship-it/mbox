@@ -29,6 +29,10 @@
   --surface-panel: #2a2b2f;
   --surface-hover: rgba(255, 255, 255, 0.06);
   --surface-selected: rgba(77, 163, 255, 0.17);
+  /* Три уровня рабочей поверхности: содержимое, полосы инструментов, подложка под «бумагой» (Word, PDF). */
+  --surface-1: var(--container-bg);
+  --surface-2: var(--surface-chrome);
+  --surface-deep: var(--bg-sunken);
 
   /* Текст — чуть холодный белый, в тон акцентному циану */
   --text-main: #f5f5f7;
@@ -129,6 +133,7 @@
 
   /* Радиусы — мягкие, как у контролов macOS: кнопки, поля, чипы и вкладки — пилюли (--radius-pill),
      карточки и панели — --radius-lg, всплывающие меню — --radius-md. */
+  --radius-2xs: 3px; /* код в строке, метки, kbd: у контролов в 18 px высотой радиус 6 px — уже пилюля */
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -164,6 +169,8 @@
   --duration-base: 0.2s;
 
   /* Лист Word всегда белый, как бумага, в обеих темах: цвета не наследуют тему. */
+  --danger-fill: #d70015;
+  --danger-fill-hover: #bf0013;
   --paper-bg: #ffffff;
   --paper-ink: #202124;
   --paper-heading: #17191d;
