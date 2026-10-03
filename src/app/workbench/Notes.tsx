@@ -1,3 +1,6 @@
+import { RemoteCarets } from "./RemoteCarets";
+import { usePresence } from "./presence";
+import { PresenceAvatars } from "./PresenceAvatars";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronDown, Copy, Eye, FileText, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, Upload, Users, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
@@ -13,7 +16,7 @@ import { DiffLines, lineDiff } from "./LocalFileDocument";
 import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
-import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
+import { MarkdownToolbarBay, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
 import { CodeEditor } from "./CodeEditor";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } from "./noteTabs";
@@ -258,6 +261,24 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const [viewing, setViewing] = useState<NoteVersionFull | null>(null);
   const [compare, setCompare] = useState(true);
   const [drawerOpen, setDrawerOpen] = useDrawer(`mbox.doc.note.history:${noteId}`);
+  const presence = usePresence(`note:${noteId}`, visible);
+
+  // Свой курсор и выделение для присутствия: смещения в тексте под заголовком, вкладка — в field.
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!visible || !textarea) return;
+    const publish = () => {
+      const backward = textarea.selectionDirection === "backward";
+      presence.update({ field: activeTabId, anchor: backward ? textarea.selectionEnd : textarea.selectionStart, head: backward ? textarea.selectionStart : textarea.selectionEnd, typing: true });
+    };
+    const rest = () => presence.update({ typing: false });
+    for (const name of ["select", "keyup", "click", "input", "focus"]) textarea.addEventListener(name, publish);
+    textarea.addEventListener("blur", rest);
+    return () => {
+      for (const name of ["select", "keyup", "click", "input", "focus"]) textarea.removeEventListener(name, publish);
+      textarea.removeEventListener("blur", rest);
+    };
+  }, [visible, mode, activeTabId, presence.update]); // eslint-disable-line react-hooks/exhaustive-deps
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
   const wordInputRef = useRef<HTMLInputElement | null>(null);
   const [wordState, setWordState] = useState<"idle" | "loading" | "error">("idle");
@@ -607,12 +628,13 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             {note.pinned && <span className="wb-note-flag" title="Закреплена сверху списка"><Pin size={11} aria-hidden="true" /> Закреплена</span>}
             {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
             {notices.map((text) => <span key={text} className="wb-note-notice">{text}</span>)}
+            <PresenceAvatars people={presence.people} agents={presence.agents} />
           </span>
-          {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
+          <MarkdownToolbarBay active={mode === "edit"} targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />
           <div className="wb-note-tools">
             <div className="wb-note-mode" role="radiogroup" aria-label="Режим">
               <button type="button" role="radio" aria-checked={mode === "preview"} className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(); setMode("preview"); }} title="Просмотр"><Eye size={14} aria-hidden="true" /><span>Просмотр</span></button>
-              <button type="button" role="radio" aria-checked={mode === "edit"} className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")} title="Правка"><Pencil size={13} aria-hidden="true" /><span>Правка</span></button>
+              <button type="button" role="radio" aria-checked={mode === "edit"} className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")} title="Правка"><Pencil size={14} aria-hidden="true" /><span>Правка</span></button>
             </div>
             <span className="wb-note-divider" aria-hidden="true" />
             <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
@@ -763,6 +785,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             onChange={(value) => setParts(titleText, value)}
             onBlur={() => void save()}
             onKeyDown={onBodyKey}
+            overlay={<RemoteCarets textareaRef={textareaRef} peers={presence.peers} field={activeTabId} value={bodyText} />}
             onPaste={images.onPaste}
             onDrop={images.onDrop}
             onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}

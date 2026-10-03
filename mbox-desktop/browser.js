@@ -10,10 +10,13 @@
 // Вход в сайты сохраняется между запусками: общий раздел сессии persist:mbox-browser. Он намеренно
 // отдельный от сессии самого MBOX — у сайтов не должно быть ни куки MBOX, ни моста к диску и агентам.
 
+const fs = require("node:fs");
 const path = require("node:path");
-const { WebContentsView, session } = require("electron");
+const { WebContentsView, session, Menu, clipboard, shell, dialog, app } = require("electron");
 const chromeImport = require("./import-chrome");
 const serverState = require("./server-state");
+const downloads = require("./browser-downloads");
+const contextMenu = require("./browser-menu");
 
 const PARTITION = "persist:mbox-browser";
 const HOME = "about:blank";
@@ -78,6 +81,7 @@ function stateOf(key) {
     error: tab.error || "",
     zoom: Math.round((contents.getZoomFactor() || 1) * 100),
     favicon: tab.favicon || "",
+    find: tab.find || null,
     auth: tab.auth ? { id: tab.auth.id, host: tab.auth.host, realm: tab.auth.realm, isProxy: tab.auth.isProxy, failed: tab.auth.failed } : null,
   };
 }
@@ -99,7 +103,7 @@ function create(key) {
       spellcheck: false,
     },
   });
-  const tab = { view, bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", auth: null, authTries: 0 };
+  const tab = { view, bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", auth: null, authTries: 0, find: null };
   pendingBounds.delete(key);
   tabs.set(key, tab);
 
@@ -162,9 +166,138 @@ function create(key) {
     event.preventDefault();
   });
 
+  // Результат поиска по странице: номер текущего совпадения и сколько их всего.
+  contents.on("found-in-page", (_event, result) => {
+    if (!tab.find) return;
+    tab.find = { ...tab.find, ordinal: result.activeMatchOrdinal || 0, matches: result.matches || 0 };
+    publish(key);
+  });
+  contents.on("did-navigate", () => { if (tab.find) { tab.find = null; publish(key); } });
+
+  contents.on("context-menu", (_event, params) => showContextMenu(key, params));
+  contents.on("before-input-event", (event, input) => { if (handleShortcut(key, tab, input)) event.preventDefault(); });
+
   window.contentView.addChildView(view);
   view.setVisible(false);
   return tab;
+}
+
+function searchUrl(text) {
+  return (SEARCH_ENGINES[searchEngine] || SEARCH_ENGINES.duckduckgo)(encodeURIComponent(text));
+}
+
+const ENGINE_LABEL = { yandex: "Яндексе", google: "Google", duckduckgo: "DuckDuckGo", bing: "Bing" };
+
+/** Сообщение интерфейсу: «в этой вкладке просят …» (поиск по странице, закладка, фокус на адресе). */
+function ask(key, action) {
+  emit({ type: "shortcut", key, action });
+}
+
+/** Меню правой кнопки: нативное, поэтому рисуется поверх страницы, которую главный процесс кладёт над окном. */
+function showContextMenu(key, params) {
+  const tab = tabs.get(key);
+  if (!tab || !window) return;
+  const contents = tab.view.webContents;
+  const pageUrl = contents.getURL();
+  const act = {
+    undo: () => contents.undo(),
+    redo: () => contents.redo(),
+    cut: () => contents.cut(),
+    copy: () => contents.copy(),
+    paste: () => contents.paste(),
+    pasteText: () => contents.pasteAndMatchStyle(),
+    selectAll: () => contents.selectAll(),
+    copyText: (text) => clipboard.writeText(String(text || "")),
+    copyImage: () => contents.copyImageAt(params.x, params.y),
+    openTab: (url) => emit({ type: "open", url, from: key }),
+    openExternal: (url) => { if (/^https?:/i.test(url)) void shell.openExternal(url); },
+    search: (text) => emit({ type: "open", url: searchUrl(text), from: key }),
+    download: (url, saveAs) => { if (saveAs) downloads.expectSaveAs(url); contents.downloadURL(url); },
+    back: () => contents.navigationHistory.canGoBack() && contents.navigationHistory.goBack(),
+    forward: () => contents.navigationHistory.canGoForward() && contents.navigationHistory.goForward(),
+    reload: () => contents.reload(),
+    find: () => ask(key, "find"),
+    bookmark: () => ask(key, "bookmark"),
+    savePage: () => void savePage(key),
+    savePdf: () => void savePdf(key),
+    print: () => printPage(key),
+    inspect: () => contents.inspectElement(params.x, params.y),
+  };
+  const template = contextMenu.buildTemplate(params, {
+    pageUrl,
+    canGoBack: contents.navigationHistory.canGoBack(),
+    canGoForward: contents.navigationHistory.canGoForward(),
+    engine: ENGINE_LABEL[searchEngine] || "поиске",
+    devTools: !app.isPackaged,
+  }, act);
+  if (template.length) Menu.buildFromTemplate(template).popup({ window });
+}
+
+/** Сочетания клавиш, как в обычном браузере. Без этого страница поверх окна съедала их все, а Ctrl+R
+ *  обновлял не сайт, а сам MBOX (пункт меню приложения). true — клавишу обработали, странице не отдаём. */
+function handleShortcut(key, tab, input) {
+  if (input.type !== "keyDown") return false;
+  const contents = tab.view.webContents;
+  const mod = input.control || input.meta;
+  const k = String(input.key || "").toLowerCase();
+  if (mod && !input.alt) {
+    if (k === "l" && !input.shift) { ask(key, "address"); return true; }
+    if (k === "f" && !input.shift) { ask(key, "find"); return true; }
+    if (k === "d" && !input.shift) { ask(key, "bookmark"); return true; }
+    if (k === "r") { if (input.shift) contents.reloadIgnoringCache(); else contents.reload(); return true; }
+    if (k === "p" && !input.shift) { printPage(key); return true; }
+    if (k === "s" && !input.shift) { void savePage(key); return true; }
+    if (k === "=" || k === "+") { act(key, "zoom-in"); return true; }
+    if (k === "-" || k === "_") { act(key, "zoom-out"); return true; }
+    if (k === "0") { act(key, "zoom-reset"); return true; }
+    return false;
+  }
+  if (k === "f5") { if (input.shift || input.control) contents.reloadIgnoringCache(); else contents.reload(); return true; }
+  if (input.alt && k === "arrowleft") { act(key, "back"); return true; }
+  if (input.alt && k === "arrowright") { act(key, "forward"); return true; }
+  if (k === "escape" && tab.find) { act(key, "find-stop"); ask(key, "find-close"); return true; }
+  return false;
+}
+
+function pageFileName(contents, ext) {
+  const base = downloads.safeFileName(contents.getTitle() || new URL(contents.getURL() || "about:blank").hostname || "page");
+  return `${base}.${ext}`;
+}
+
+async function savePage(key) {
+  const tab = tabs.get(key);
+  if (!tab || !window) return { ok: false };
+  const contents = tab.view.webContents;
+  const picked = await dialog.showSaveDialog(window, {
+    title: "Сохранить страницу",
+    defaultPath: path.join(app.getPath("downloads"), pageFileName(contents, "html")),
+    filters: [{ name: "Веб-страница, полностью", extensions: ["html"] }],
+  });
+  if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+  await contents.savePage(picked.filePath, "HTMLComplete");
+  downloads.addSaved(picked.filePath);
+  return { ok: true };
+}
+
+async function savePdf(key) {
+  const tab = tabs.get(key);
+  if (!tab || !window) return { ok: false };
+  const contents = tab.view.webContents;
+  const picked = await dialog.showSaveDialog(window, {
+    title: "Сохранить как PDF",
+    defaultPath: path.join(app.getPath("downloads"), pageFileName(contents, "pdf")),
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+  const data = await contents.printToPDF({ printBackground: true });
+  await fs.promises.writeFile(picked.filePath, data);
+  downloads.addSaved(picked.filePath);
+  return { ok: true };
+}
+
+function printPage(key) {
+  const tab = tabs.get(key);
+  if (tab) tab.view.webContents.print({ printBackground: true });
 }
 
 /** Прямоугольник приходит из интерфейса в его же пикселях — переводим по текущему масштабу окна. */
@@ -335,6 +468,21 @@ function act(key, command, payload) {
   if (command === "zoom-reset") contents.setZoomFactor(1);
   if (command === "zoom-in") contents.setZoomFactor(Math.min(3, (contents.getZoomFactor() || 1) * 1.1));
   if (command === "zoom-out") contents.setZoomFactor(Math.max(0.25, (contents.getZoomFactor() || 1) / 1.1));
+  if (command === "find") {
+    const text = String(payload?.text ?? "");
+    if (!text) { contents.stopFindInPage("clearSelection"); tab.find = null; }
+    else {
+      const fresh = !tab.find || tab.find.text !== text;
+      tab.find = { text, ordinal: fresh ? 0 : tab.find.ordinal, matches: fresh ? -1 : tab.find.matches };
+      contents.findInPage(text, { forward: payload?.forward !== false, findNext: !fresh, matchCase: Boolean(payload?.matchCase) });
+    }
+  }
+  if (command === "find-stop") { contents.stopFindInPage("clearSelection"); tab.find = null; }
+  if (command === "print") printPage(key);
+  if (command === "save-page") void savePage(key);
+  if (command === "save-pdf") void savePdf(key);
+  if (command === "copy-url" && /^https?:/i.test(contents.getURL())) clipboard.writeText(contents.getURL());
+  if (command === "open-external" && /^https?:/i.test(contents.getURL())) void shell.openExternal(contents.getURL());
   return stateOf(key);
 }
 
@@ -671,14 +819,16 @@ function attach(mainWindow, sendToUi) {
   browserSession.setUserAgent(chromeUserAgent());
   installChromeIdentity(browserSession);
 
-  // Сайты не получают разрешения, файловые загрузки и доступ к мосту MBOX.
-  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  browserSession.setPermissionCheckHandler(() => false);
-  browserSession.on("will-download", (event) => event.preventDefault());
+  // Сайты не получают разрешений (камера, геолокация, уведомления) и доступа к мосту MBOX. Исключение —
+  // запись текста в буфер обмена: без неё не работают кнопки «Копировать» на сайтах. Чтение буфера закрыто.
+  const allowed = (permission) => permission === "clipboard-sanitized-write";
+  browserSession.setPermissionRequestHandler((_contents, permission, callback) => callback(allowed(permission)));
+  browserSession.setPermissionCheckHandler((_contents, permission) => allowed(permission));
+  downloads.attach(browserSession, emit);
 
   // Масштаб интерфейса меняется — прямоугольник в пикселях окна становится другим.
   mainWindow.webContents.on("zoom-changed", () => { for (const tab of tabs.values()) applyBounds(tab); });
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, setSearchEngine, clearCache, state: stateOf, PARTITION };
+module.exports = { attach, downloads, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, setSearchEngine, clearCache, state: stateOf, PARTITION };

@@ -27,6 +27,8 @@
       "launch.js",
       "main.js",
       "browser.js",
+      "browser-downloads.js",
+      "browser-menu.js",
       "browser-tab-preload.js",
       "import-chrome.js",
       "preload.js",

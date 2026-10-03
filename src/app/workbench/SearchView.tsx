@@ -123,11 +123,11 @@ export function SearchView({ data, tabs, focusSignal }: { data: MboxData; tabs: 
       </div>
       {showFilters && (
         <div className="wb-search-filters">
-          <select value={filters.projectId} onChange={(event) => setFilters({ ...filters, projectId: event.target.value })}>
+          <select aria-label="Проект" value={filters.projectId} onChange={(event) => setFilters({ ...filters, projectId: event.target.value })}>
             <option value="">Все проекты</option>
             {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
-          <select value={filters.recency} onChange={(event) => setFilters({ ...filters, recency: event.target.value })}>
+          <select aria-label="Давность" value={filters.recency} onChange={(event) => setFilters({ ...filters, recency: event.target.value })}>
             <option value="0">За всё время</option>
             <option value="1">За сутки</option>
             <option value="7">За неделю</option>

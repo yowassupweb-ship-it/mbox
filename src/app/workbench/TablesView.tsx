@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronDown, Copy, Download, FolderClosed, Globe2, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, Save, Share2, Table2, Trash2, Upload, Users, X } from "lucide-react";
 import type { Workbook } from "exceljs";
 import type { MboxData } from "../../hooks/useMboxData";
@@ -9,7 +9,11 @@ import { askConfirm, askText } from "../../ui/askText";
 import { DocShell } from "./docLayout";
 import { bytesToBase64, base64ToArrayBuffer } from "./officeFormat";
 import { WbMenu } from "./WbMenu";
-import type { TabsApi } from "./tabs";
+import { usePersistentState, type TabsApi } from "./tabs";
+import { DocumentsView, SheetsDocsSwitch, type SheetsDocsMode } from "./DocumentsView";
+import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
+import { usePresence } from "./presence";
+import { PresenceAvatars } from "./PresenceAvatars";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
@@ -104,7 +108,15 @@ export async function createTableAndOpen(tabs: TabsApi, projectId: string | null
   tabs.open(`table:${table.id}`, true);
 }
 
-export function TablesView({ tabs, defaultProjectId = null, onOpen, switcher }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void; switcher?: ReactNode }) {
+/** Раздел «Таблицы и документы»: две сущности под одним переключателем, список каждой — свой. */
+export function TablesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
+  const [mode, setMode] = usePersistentState<SheetsDocsMode>("mbox.sheets.mode", "tables");
+  return mode === "docs"
+    ? <DocumentsView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />
+    : <TablesList tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />;
+}
+
+function TablesList({ tabs, defaultProjectId = null, onOpen, mode, onMode }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void; mode: SheetsDocsMode; onMode: (mode: SheetsDocsMode) => void }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(tablesStore.query);
   const [importing, setImporting] = useState(false);
@@ -186,9 +198,8 @@ export function TablesView({ tabs, defaultProjectId = null, onOpen, switcher }: 
 
   return (
     <div className="wb-view wb-tables-view">
-      <header className={switcher ? "wb-view-head wb-office-toolbar" : "wb-view-head"}>
-        {switcher ? <span aria-hidden="true" /> : <span className="wb-tables-heading"><Table2 size={14} aria-hidden="true" /> Таблицы</span>}
-        {switcher}
+      <header className="wb-view-head">
+        <SheetsDocsSwitch mode={mode} onMode={onMode} />
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importRef.current?.click()} title={canCreate ? "Импорт Excel (.xlsx)" : "Нет доступных проектов для таблиц"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createTableAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая таблица" : "Нет доступных проектов для таблиц"}><Plus size={14} /></button>
@@ -314,7 +325,15 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
   const [error, setError] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [shared, setShared] = useState(false);
+  const [conflict, setConflict] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
+  const presence = usePresence(`table:${tableId}`, visible);
+  // Версия на сервере, от которой мы правим, и зеркала состояния для обработчиков событий.
+  const baseRef = useRef(cached?.updated_at ?? "");
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  dirtyRef.current = dirty;
+  savingRef.current = saving;
 
   const loadWorkbook = useCallback(async (source: TableDoc) => {
     const { Workbook: ExcelWorkbook } = await import("exceljs");
@@ -333,6 +352,8 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
       const { table: loaded } = await fetchJson<{ table: TableDoc }>(`/api/mbox/tables/${tableId}`);
       setTable(loaded);
       patchListed(loaded);
+      baseRef.current = loaded.updated_at;
+      setConflict(false);
       await loadWorkbook(loaded);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -355,14 +376,17 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
       const { table: updated } = await fetchJson<{ table: TableDoc }>(`/api/mbox/tables/${tableId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, content }),
+        body: JSON.stringify({ title, content, base_updated_at: baseRef.current || undefined }),
       });
       setTable(updated);
       patchListed(updated);
+      baseRef.current = updated.updated_at;
       setDirty(false);
       tabs.pin(tabKey);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      // 409: пока человек правил, агент или коллега записали новую версию — решает человек, а не последняя запись.
+      if (cause instanceof Error && cause.message === "request_failed:409") setConflict(true);
+      else setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
@@ -371,10 +395,10 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
   // Таблица ведёт себя как заметка: после короткой паузы сохраняем снимок книги. Кнопка и Ctrl+S
   // остаются для немедленной записи, но закрытие/переключение вкладки больше не теряет правки.
   useEffect(() => {
-    if (!dirty || !book || saving) return;
+    if (!dirty || !book || saving || conflict) return;
     const timer = window.setTimeout(() => { void save(); }, 800);
     return () => window.clearTimeout(timer);
-  }, [changeRevision, dirty, book, saving]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [changeRevision, dirty, book, saving, conflict]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!visible) return;
@@ -384,6 +408,42 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // Агент или коллега изменили таблицу: если своих несохранённых правок нет, показываем новую версию сразу.
+  const pullRemote = useCallback(async () => {
+    if (dirtyRef.current || savingRef.current) return;
+    try {
+      const { table: latest } = await fetchJson<{ table: TableDoc }>(`/api/mbox/tables/${tableId}`);
+      if (dirtyRef.current || savingRef.current || latest.updated_at === baseRef.current) return;
+      baseRef.current = latest.updated_at;
+      setTable(latest);
+      patchListed(latest);
+      await loadWorkbook(latest);
+    } catch { /* сеть моргнула — следующий сигнал догонит */ }
+  }, [loadWorkbook, tableId]);
+
+  useEffect(() => {
+    const onEntity = (event: Event) => {
+      const entity = (event as CustomEvent<string>).detail;
+      if (!entity || entity === "tables") void pullRemote();
+    };
+    window.addEventListener(ENTITY_CHANGED_EVENT, onEntity);
+    window.addEventListener("focus", pullRemote);
+    return () => { window.removeEventListener(ENTITY_CHANGED_EVENT, onEntity); window.removeEventListener("focus", pullRemote); };
+  }, [pullRemote]);
+
+  /** Выбор при конфликте: взять версию с сервера (свои правки отбрасываются) или записать свою поверх. */
+  async function resolveConflict(keepMine: boolean) {
+    if (!keepMine) { setDirty(false); await load(); return; }
+    try {
+      const { table: latest } = await fetchJson<{ table: TableDoc }>(`/api/mbox/tables/${tableId}`);
+      baseRef.current = latest.updated_at;
+      setConflict(false);
+      await save();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
 
   async function update(patch: Partial<TableDoc>) {
     if (!table) return;
@@ -454,6 +514,7 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
             )}
             {table.pinned && <span className="wb-note-flag" title="Закреплена сверху списка"><Pin size={11} aria-hidden="true" /> Закреплена</span>}
             {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
+            <PresenceAvatars people={presence.people} agents={presence.agents} />
           </span>
           <div className="wb-note-tools">
             <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
@@ -502,7 +563,14 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
         </>
       )}
     >
-      {book && sheetName ? <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => { setDirty(true); setChangeRevision((value) => value + 1); }} visible={visible} /></Suspense> : <div className="wb-doc-missing">В книге нет листов.</div>}
+      {conflict && (
+        <div className="wb-banner is-error" role="alert">
+          Таблицу изменил агент или коллега, пока вы правили.
+          <button type="button" onClick={() => void resolveConflict(false)}>Взять версию с сервера</button>
+          <button type="button" onClick={() => void resolveConflict(true)}>Сохранить мою</button>
+        </div>
+      )}
+      {book && sheetName ? <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => { setDirty(true); setChangeRevision((value) => value + 1); }} visible={visible} peers={presence.peers} agents={presence.agents} onSelect={presence.update} /></Suspense> : <div className="wb-doc-missing">В книге нет листов.</div>}
     </DocShell>
   );
 }

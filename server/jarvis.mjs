@@ -566,10 +566,10 @@ async function tryFastPath(client, text) {
               count(*)::int AS calls
        FROM groq_usage GROUP BY model ORDER BY sum(total_tokens) DESC`,
     )).rows;
-    if (!rows.length) return "⚡ Расход токенов пока нулевой — ни одного вызова ещё не залогировано.";
+    if (!rows.length) return "Расход токенов пока нулевой — ни одного вызова ещё не залогировано.";
     const lines = rows.map((r) => `${r.model}: сегодня ${r.today || 0}, за 24ч ${r.last24h || 0}, всего ${r.total} (${r.calls} вызовов)`);
     const grandTotal = rows.reduce((sum, r) => sum + Number(r.total), 0);
-    return `⚡ Расход токенов по моделям:\n${lines.join("\n")}\n\nИтого по всем моделям: ${grandTotal}.`;
+    return `Расход токенов по моделям:\n${lines.join("\n")}\n\nИтого по всем моделям: ${grandTotal}.`;
   }
 
   if (/(сколько|число|количество).*(задач|todo)/.test(q) && !/(в проекте|по проекту|про |о\s)/.test(q)) {
@@ -577,20 +577,20 @@ async function tryFastPath(client, text) {
       `SELECT count(*)::int AS total, count(*) FILTER (WHERE status NOT IN ('done', 'archived'))::int AS open
        FROM todos`,
     )).rows[0];
-    return `⚡ Задач всего: ${row.total}, из них не закрыто (open/next/doing/blocked/review): ${row.open}.`;
+    return `Задач всего: ${row.total}, из них не закрыто (open/next/doing/blocked/review): ${row.open}.`;
   }
 
   if (/(сколько|число|количество).*(запис|памят)/.test(q)) {
     const row = (await client.query("SELECT count(*)::int AS total FROM memories")).rows[0];
-    return `⚡ Записей в памяти: ${row.total}.`;
+    return `Записей в памяти: ${row.total}.`;
   }
 
   if (/(статус|состояние).*сервер|как\s+(там\s+)?сервер/.test(q)) {
     const row = (await client.query(
       "SELECT hostname, load_1, cpu_percent, memory_used_mb, memory_total_mb, disk_used_mb, disk_total_mb, captured_at::text FROM server_metrics ORDER BY captured_at DESC LIMIT 1",
     )).rows[0];
-    if (!row) return "⚡ Метрик сервера пока нет.";
-    return `⚡ Сервер ${row.hostname}: CPU ${row.cpu_percent}%, память ${row.memory_used_mb}/${row.memory_total_mb} МБ, `
+    if (!row) return "Метрик сервера пока нет.";
+    return `Сервер ${row.hostname}: CPU ${row.cpu_percent}%, память ${row.memory_used_mb}/${row.memory_total_mb} МБ, `
       + `диск ${row.disk_used_mb}/${row.disk_total_mb} МБ, нагрузка ${row.load_1} (снято ${row.captured_at}).`;
   }
 

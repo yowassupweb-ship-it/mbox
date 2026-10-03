@@ -35,7 +35,7 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
       <header className="wb-view-head">
         <span>Навыки</span>
         <div className="wb-view-actions">
-          <button type="button" onClick={reload} title="Обновить"><RefreshCw size={13} /></button>
+          <button type="button" onClick={reload} title="Обновить" aria-label="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
       <Filter value={filter} onChange={setFilter} placeholder="Что нужно сделать?" />
@@ -165,7 +165,7 @@ export function ToolsView({ tabs }: { tabs: TabsApi }) {
       <header className="wb-view-head">
         <span>Инструменты</span>
         <div className="wb-view-actions">
-          <button type="button" onClick={reload} title="Обновить"><RefreshCw size={13} /></button>
+          <button type="button" onClick={reload} title="Обновить" aria-label="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
       <Filter value={filter} onChange={setFilter} placeholder="Найти инструмент" />

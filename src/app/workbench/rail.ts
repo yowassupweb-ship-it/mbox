@@ -54,7 +54,7 @@ export const RAIL_GROUPS: Array<{ id: string; title: string; items: RailItem[] }
     title: "Документы",
     items: [
       { id: "notes", label: "Заметки (Ctrl+Alt+N — новая)", short: "Заметки", icon: `${NAVIGATION}/notes.png` },
-      { id: "tables", label: "Таблицы и Документы", short: "Документы", icon: "/icons/tables and docs.png" },
+      { id: "tables", label: "Таблицы и документы", short: "Таблицы", icon: "/icons/sheets.png" },
       { id: "local", label: "Папки (локальные файлы и git)", short: "Папки", icon: `${NAVIGATION}/folders.png` },
       { id: "files", label: "Артефакты", short: "Артефакты", icon: `${NAVIGATION}/artifacts.png` },
       { id: "browser", label: "Браузер", short: "Браузер", icon: `${NAVIGATION}/browser.png`, desktopOnly: true },

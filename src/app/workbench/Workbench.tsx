@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { warmUpEditors } from "./warmup";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RotateCcw, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
@@ -31,11 +32,13 @@ import { FileDocument, FilesView } from "./Files";
 import { recentlyActiveAgent, useDesktopSessions } from "./desktopSessions";
 import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
-import { DocumentDocument } from "./DocumentsView";
-import { OfficeLibraryView } from "./OfficeLibraryView";
-import { TableDocument } from "./TablesView";
+import { createTableAndOpen, TableDocument, TablesView } from "./TablesView";
+import { DocDocument } from "./DocDocument";
+import { Spotlight, type SpotlightCommand } from "./Spotlight";
+import { createDocAndOpen } from "./docsStore";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
+import { StorageView } from "./StorageView";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
@@ -117,17 +120,21 @@ function BrowserTabsView({ tabs, urls, titles, onOpen }: {
           const fallbackTitle = url ? new URL(url).hostname : "Новая вкладка";
           const title = titles[tab.key] || fallbackTitle;
           return (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               className={tabs.active === tab.key ? "wb-browser-tab-item is-active" : "wb-browser-tab-item"}
               key={tab.key}
               onClick={() => open(tab.key)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(tab.key); } }}
+              onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); tabs.close(tab.key); } }}
               onContextMenu={(event) => { event.preventDefault(); setMenu({ key: tab.key, x: event.clientX, y: event.clientY }); }}
               title={url || title}
             >
-              {url ? <Favicon tabKey={tab.key} url={url} size={18} /> : <Globe2 size={18} aria-hidden="true" />}
-              <span className="wb-browser-tab-copy"><b>{title}</b>{url && <small>{url}</small>}</span>
-            </button>
+              <span className="wb-browser-tab-tile">{url ? <Favicon tabKey={tab.key} url={url} size={16} /> : <Globe2 size={16} aria-hidden="true" />}</span>
+              <span className="wb-browser-tab-copy"><b>{title}</b>{url && <small>{new URL(url).hostname.replace(/^www\./, "")}</small>}</span>
+              <button type="button" className="wb-browser-tab-close" aria-label={`Закрыть ${title}`} onClick={(event) => { event.stopPropagation(); tabs.close(tab.key); }}><X size={12} /></button>
+            </div>
           );
         })}
         {!browserTabs.length && (
@@ -169,6 +176,7 @@ function useDrag(onMove: (event: PointerEvent) => void) {
 }
 
 export function Workbench({ data, titleBar, renderers, status, user, onProjectContext }: Props) {
+  useEffect(() => warmUpEditors(), []);
   setWorkbenchStorageUser(user.username);
   const tabsState = useTabs();
   const [browserUrls, setBrowserUrls] = usePersistentState<Record<string, string>>("mbox.browser.urls", {});
@@ -414,11 +422,16 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     data.reload();
   }, [data]);
 
-  const openSearch = useCallback(() => {
+  /** Боковая панель «Поиск по памяти» (Ctrl+Shift+F, счётчик записей в статус-баре). */
+  const openMemorySearch = useCallback(() => {
     setActivity("search");
     setSidebarOpen(true);
     setSearchFocus((value) => value + 1);
   }, [setActivity, setSidebarOpen]);
+
+  /** Главный поиск (Ctrl+K, шапка): по всему MBOX, тексту заметок, таблицам и файлам. */
+  const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const openSearch = useCallback(() => setSpotlightOpen(true), []);
 
   /** Консоль живёт либо во вкладке нижней панели, либо отдельной колонкой справа — как чат в VS Code. */
   /** Телефон: чат лежит поверх всего, поэтому выбор раздела в нижнем меню сначала его закрывает. */
@@ -563,8 +576,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     function onKey(event: KeyboardEvent) {
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
-      if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); openSearch(); }
-      else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openSearch(); }
+      if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); setSpotlightOpen((value) => !value); }
+      else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openMemorySearch(); }
       else if (mod && event.code === "Backslash") { event.preventDefault(); if (splitOpen) collapseSplit(); else splitTab(tabs.active); }
       else if (mod && event.shiftKey && event.code === "KeyE") { event.preventDefault(); setActivity("explorer"); setSidebarOpen(true); }
       else if (mod && !event.shiftKey && event.code === "KeyB") { event.preventDefault(); setSidebarOpen((value) => !value); }
@@ -718,10 +731,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       }
       case "note":
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
-      case "document":
-        return <DocumentDocument documentId={first} />;
       case "table":
         return <TableDocument tableId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
+      case "doc":
+        return <DocDocument docId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
       case "s3sheet":
@@ -800,6 +813,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         }
         case "note":
         case "table":
+        case "doc":
         case "todo":
         case "memory":
           return [{ key, kind, title, id: first }];
@@ -849,6 +863,27 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       ) : undefined}
     />
   );
+
+  // Команды главного поиска собираются только пока он открыт: в покое это лишняя работа на каждый рендер.
+  const spotlightCommands: SpotlightCommand[] = spotlightOpen ? [
+    ...(defaultNoteProjectId !== undefined ? [
+      { id: "new-note", title: "Новая заметка", hint: "Пустая заметка во вкладке", keywords: "создать заметка note", shortcut: "Ctrl Alt N", run: () => void createNoteAndOpen(tabs, defaultNoteProjectId) },
+      { id: "new-table", title: "Новая таблица", hint: "Пустая таблица", keywords: "создать таблица excel sheet", run: () => void createTableAndOpen(tabs, defaultNoteProjectId ?? null) },
+      { id: "new-doc", title: "Новый документ", hint: "Документ с листами A4", keywords: "создать документ word docs", run: () => void createDocAndOpen(tabs, defaultNoteProjectId ?? null) },
+    ] : []),
+    ...(hasBrowser ? [{ id: "new-web", title: "Новая вкладка браузера", hint: "Встроенный браузер", keywords: "браузер сайт интернет", run: () => tabs.open(browserBlankTabKey(), true) }] : []),
+    ...RAIL_GROUPS.flatMap((group) => group.items)
+      .filter((item) => !railHidden.includes(item.id) && (!item.desktopOnly || hasBrowser))
+      .map((item) => ({ id: `go-${item.id}`, title: `Перейти: ${item.label.replace(/\s*\(.*\)$/, "")}`, hint: "Раздел боковой панели", keywords: `открыть раздел ${item.short}`, run: () => openRail(item.id) })),
+    { id: "settings", title: "Настройки", hint: "Сервер, доступ, внешний вид", keywords: "параметры настройки settings", run: () => tabs.open("settings", true) },
+    { id: "overview", title: "Обзор", hint: "Сводка по всем проектам", keywords: "главная welcome", run: () => tabs.open("welcome", true) },
+    { id: "chat", title: "Чат с агентами", hint: "Показать или скрыть чат", keywords: "чат агент claude джарвис", shortcut: "Ctrl `", run: () => toggleConsole() },
+    { id: "sidebar", title: "Боковая панель", hint: "Показать или скрыть", keywords: "панель sidebar", shortcut: "Ctrl B", run: () => setSidebarOpen((value) => !value) },
+    { id: "memory-search", title: "Поиск по памяти", hint: "Расширенный поиск с фильтрами", keywords: "память поиск фильтр", shortcut: "Ctrl Shift F", run: openMemorySearch },
+    { id: "theme-graphite", title: "Тема: Графит", hint: "Тёмная тема по умолчанию", keywords: "тема оформление dark", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "graphite" })) },
+    { id: "theme-light", title: "Тема: Светлая", hint: "Светлое оформление", keywords: "тема оформление light", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "light" })) },
+    { id: "theme-black", title: "Тема: Чёрная", hint: "Чёрное оформление", keywords: "тема оформление black oled", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "black" })) },
+  ] : [];
 
   return (
     <div className={["wb", sidebarOpen ? "has-sidebar" : "", panelOpen ? "has-panel" : "", consoleDock === "right" && rightOpen ? "has-right" : ""].filter(Boolean).join(" ")} style={layoutStyle}>
@@ -904,11 +939,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
         {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
-        {activity === "tables" && <OfficeLibraryView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
+        {activity === "tables" && <TablesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
         {activity === "browser" && <BrowserTabsView tabs={tabs} urls={browserUrls} titles={titles} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
-        {activity === "storage" && <StorageDocument compact />}
+        {activity === "storage" && <StorageView tabs={tabs} />}
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
@@ -1142,7 +1177,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
             <AlertTriangle size={12} /> {attentionCount}
           </button>
         )}
-        <button type="button" className="wb-status-item" onClick={openSearch} title="Записей памяти">
+        <button type="button" className="wb-status-item" onClick={openMemorySearch} title="Записей памяти">
           <Database size={12} /> {data.memoriesTotal.toLocaleString("ru-RU")} {plural(data.memoriesTotal, "запись", "записи", "записей")}
         </button>
         <button type="button" className="wb-status-item" onClick={() => setSidebarOpen((value) => !value)} title="Боковая панель (Ctrl+B)"><PanelLeft size={12} /></button>
@@ -1193,6 +1228,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <button type="button" role="menuitem" onClick={() => { tabs.open(browserBlankTabKey(), true); setRailMenu(null); }}>Новая вкладка</button>
         </WbMenu>
       )}
+      {spotlightOpen && <Spotlight open onClose={() => setSpotlightOpen(false)} tabs={tabs} commands={spotlightCommands} />}
     </div>
   );
 }
@@ -1388,7 +1424,7 @@ const TAB_GROUP_ORDER: TabGroup[] = ["work", "docs", "web", "system"];
 function tabGroupOf(key: string): TabGroup {
   const kind = key.split(":")[0];
   if (kind === "web") return "web";
-  if (["note", "table", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
+  if (["note", "table", "doc", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
   if (["todo", "todos", "entity", "folder", "project", "welcome"].includes(kind)) return "work";
   return "system";
 }

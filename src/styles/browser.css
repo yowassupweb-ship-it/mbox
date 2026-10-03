@@ -193,8 +193,9 @@
   font: inherit;
   font-size: var(--text-sm);
   cursor: pointer;
+  font-weight: var(--weight-medium);
 }
-.wb-segmented button.is-on { background: var(--bg-raised); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 0 0 1px var(--border-color), 0 1px 2px rgba(0, 0, 0, 0.14); }
+.wb-segmented button.is-on { background: var(--bg-raised); color: var(--text-main); box-shadow: var(--shadow-sm); }
 
 .wb-browser-radio { display: flex; align-items: center; gap: 8px; color: var(--text-main); font-size: var(--text-sm); cursor: pointer; }
 .wb-browser-radio input { margin: 0; accent-color: var(--accent-fill); }
@@ -255,7 +256,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-pill);
   background: var(--surface-panel);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-md);
   color: var(--text-muted);
 }
 .wb-browser-start-search:focus-within { border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-color) 18%, transparent); }
@@ -280,7 +281,7 @@
 }
 .wb-browser-start-tiles button:hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-browser-start-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--surface-panel); box-shadow: 0 0 0 1px var(--border-color); }
-.wb-browser-start-icon .wb-browser-favicon { width: 24px; height: 24px; border-radius: 4px; }
+.wb-browser-start-icon .wb-browser-favicon { width: 24px; height: 24px; border-radius: var(--radius-xs); }
 .wb-browser-start-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .wb-browser-start-recent { display: grid; gap: 2px; }
@@ -300,3 +301,143 @@
   cursor: pointer;
 }
 .wb-browser-start-recent button:hover { background: var(--wb-hover); }
+
+/* ─── Состояния кнопок панели: hover, focus-visible, active, disabled ─── */
+.wb-browser-nav button,
+.wb-browser-actions button { position: relative; transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.wb-browser-nav button:focus-visible,
+.wb-browser-actions button:focus-visible,
+.wb-browser-star:focus-visible,
+.wb-browser-address .wb-browser-zoom:focus-visible,
+.wb-browser-pop-link:focus-visible,
+.wb-browser-pop-buttons button:focus-visible,
+.wb-browser-pop-buttons select:focus-visible,
+.wb-segmented button:focus-visible,
+.wb-browser-start-tiles button:focus-visible,
+.wb-browser-start-recent button:focus-visible,
+.wb-browser-pop-row > button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-browser-nav button:active:not(:disabled),
+.wb-browser-actions button:active,
+.wb-browser-star:active:not(:disabled),
+.wb-browser-pop-buttons button:active:not(:disabled),
+.wb-browser-pop-link:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-browser-nav button:disabled { opacity: 0.35; cursor: default; }
+.wb-browser-pop-remove:active { background: color-mix(in srgb, var(--state-danger) 26%, transparent); }
+.wb-browser-pop-input:hover:not(:disabled) { border-color: var(--text-muted); }
+@media (prefers-reduced-motion: reduce) {
+  .wb-browser-nav button,
+  .wb-browser-actions button { transition: none; }
+}
+
+/* ─── Бейдж на кнопке «Загрузки» ─── */
+.wb-browser-badge {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* ─── Поиск по странице ─── */
+.wb-browser-find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+}
+.wb-browser-find > svg { flex: none; margin-right: 4px; }
+.wb-browser-find input {
+  flex: 0 1 280px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--bg-color);
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+}
+.wb-browser-find input:hover { border-color: var(--text-muted); }
+.wb-browser-find input:focus-visible { border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 20%, transparent); }
+.wb-browser-find-count { min-width: 72px; padding: 0 8px; font-size: var(--text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wb-browser-find button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.wb-browser-find button:hover:not(:disabled) { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-find button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-browser-find button:active:not(:disabled) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-browser-find button:disabled { opacity: 0.35; cursor: default; }
+
+/* ─── Загрузки ─── */
+.wb-browser-downloads { position: absolute; top: 54px; right: 8px; width: min(440px, calc(100% - 16px)); max-height: calc(100% - 60px); }
+.wb-browser-pop-foot { flex: none; padding: 6px 8px; border-top: 1px solid var(--border-color); }
+.wb-browser-download {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+}
+.wb-browser-download:hover { background: var(--wb-hover); }
+.wb-browser-download-main { min-width: 0; display: grid; gap: 2px; }
+.wb-browser-download-name { overflow: hidden; color: var(--text-main); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.wb-browser-download-meta { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.wb-browser-download.is-failed .wb-browser-download-name { color: var(--text-muted); text-decoration: line-through; }
+.wb-browser-download.is-failed .wb-browser-download-meta { color: var(--state-danger); }
+.wb-browser-download-bar { height: 4px; margin-top: 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-hover); }
+.wb-browser-download-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-fill); transition: width var(--duration-base) var(--ease-out); }
+.wb-browser-download-bar > span.is-indeterminate { width: 40%; animation: wb-download-slide 1.2s var(--ease-out) infinite; }
+@keyframes wb-download-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.wb-browser-download-actions { display: flex; gap: 2px; }
+.wb-browser-download-actions button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.wb-browser-download-actions button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-download-actions button.is-danger:hover { background: color-mix(in srgb, var(--state-danger) 16%, transparent); color: var(--state-danger); }
+.wb-browser-download-actions button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-browser-download-actions button:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .wb-browser-download-bar > span { transition: none; }
+  .wb-browser-download-bar > span.is-indeterminate { animation: none; width: 100%; opacity: 0.5; }
+}
+@media (max-width: 640px) {
+  .wb-browser-find input { flex: 1 1 auto; }
+  .wb-browser-find-count { min-width: 0; }
+}

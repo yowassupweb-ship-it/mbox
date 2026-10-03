@@ -10,7 +10,7 @@
 .agent-work-column {
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-xl);
-  background: var(--panel-bg);
+  background: var(--surface-panel);
   box-shadow: var(--chin-shadow);
   padding: 14px;
   min-width: 0;
@@ -27,7 +27,7 @@
   align-items: center;
   gap: 8px;
   min-height: 34px;
-  color: #e8edf7;
+  color: var(--text-main);
 }
 
 .agent-work-row + .agent-work-row {
@@ -35,7 +35,7 @@
 }
 
 .agent-work-row small {
-  color: #9aa5b7;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -65,7 +65,7 @@
 }
 
 .agent-state.active {
-  color: #7cc6ff;
+  color: var(--accent-color);
 }
 
 .agent-state.offline {
@@ -258,7 +258,7 @@
 
 .agent-roster-name {
   font-weight: var(--weight-bold);
-  color: #eef3fb;
+  color: var(--text-main);
 }
 
 .agent-roster-detail {
@@ -279,11 +279,11 @@
 .agent-roster-state {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  color: #9aa5b7;
+  color: var(--text-muted);
 }
 
-.agent-roster-state.active { color: #58d977; }
-.agent-roster-state.working { color: #7cc6ff; }
+.agent-roster-state.active { color: var(--state-ok-soft); }
+.agent-roster-state.working { color: var(--accent-color); }
 .agent-roster-state.offline { color: var(--text-muted); }
 
 .agent-roster-meta time {
@@ -333,8 +333,8 @@
 }
 
 .agent-activity-summary b { color: var(--text-main); font-weight: var(--weight-bold); }
-.agent-activity-summary .tone-active b { color: #58d977; }
-.agent-activity-summary .tone-working b { color: #7cc6ff; }
+.agent-activity-summary .tone-active b { color: var(--state-ok-soft); }
+.agent-activity-summary .tone-working b { color: var(--accent-color); }
 
 .dot-sep {
   width: 3px;
@@ -408,12 +408,12 @@
   font-weight: var(--weight-bold);
   padding: 4px 10px;
   border-radius: var(--radius-pill);
-  color: #9aa5b7;
+  color: var(--text-muted);
   background: color-mix(in srgb, var(--text-main) 6%, transparent);
   white-space: nowrap;
 }
 
-.agent-card-state.active { color: #58d977; background: rgba(53, 199, 89, .12); }
+.agent-card-state.active { color: var(--state-ok-soft); background: rgba(53, 199, 89, .12); }
 .agent-card-state.working { color: #051826; background: #7cc6ff; }
 .agent-card-state.offline { color: var(--text-muted); }
 
@@ -440,7 +440,7 @@
 
 .agent-card-now .activity-bars { margin-top: 3px; }
 
-.agent-card-goal.live { color: #e8edf7; font-weight: var(--weight-semibold); }
+.agent-card-goal.live { color: var(--text-main); font-weight: var(--weight-semibold); }
 
 .activity-bars {
   display: inline-flex;
@@ -452,7 +452,7 @@
 
 .activity-bars span {
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: var(--agent-accent, #7cc6ff);
   animation: activity-eq 1s ease-in-out infinite;
 }
@@ -502,7 +502,7 @@
   text-align: center;
 }
 
-.metric b { font-size: var(--text-lg); font-weight: var(--weight-bold); color: #eef3fb; font-variant-numeric: tabular-nums; }
+.metric b { font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--text-main); font-variant-numeric: tabular-nums; }
 .metric span { font-size: var(--text-2xs); color: var(--text-muted); text-transform: lowercase; }
 
 .agent-card-foot {

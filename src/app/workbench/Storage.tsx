@@ -8,6 +8,7 @@ import { uploadToStorage, type UploadMode } from "../../lib/storageUpload";
 import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
+import { notifyStorageChanged } from "./storageApi";
 
 const UniverDocumentViewer = lazy(() => import("./UniverDocumentViewer").then((module) => ({ default: module.UniverDocumentViewer })));
 
@@ -134,6 +135,7 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
       }
     }
     await load(prefix);
+    notifyStorageChanged("table");
     window.setTimeout(() => setUploads((current) => current.filter((item) => item.error)), 2500);
   }
 
@@ -167,6 +169,7 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
     if (!response.ok) setError(await apiError(response));
     if (selected?.key === key) setSelected(null);
     await load(prefix);
+    notifyStorageChanged("table");
   }
 
   async function createFolder() {
@@ -175,6 +178,7 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
     const response = await fetch("/api/mbox/storage/folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: `${prefix}${name.trim()}` }) });
     if (!response.ok) setError(await apiError(response));
     await load(prefix);
+    notifyStorageChanged("table");
   }
 
   function onDrop(event: DragEvent) {

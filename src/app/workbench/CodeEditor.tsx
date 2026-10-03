@@ -1,11 +1,11 @@
-import { useMemo, useRef, type ClipboardEventHandler, type DragEventHandler, type FocusEventHandler, type KeyboardEvent as ReactKeyboardEvent, type MouseEventHandler, type Ref } from "react";
+import { useMemo, useRef, type ReactNode, type ClipboardEventHandler, type DragEventHandler, type FocusEventHandler, type KeyboardEvent as ReactKeyboardEvent, type MouseEventHandler, type Ref } from "react";
 import { highlightCode, type CodeLanguage } from "./codeHighlight";
 
 /**
  * Редактор кода с подсветкой: подсвеченный слой <pre> под прозрачным textarea с теми же шрифтом, отступами
  * и переносами. Правка, выделение, IME и undo — родные у textarea; прокрутка слоя идёт за textarea.
  */
-export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPaste, onDrop, onContextMenu, textareaRef, placeholder, autoFocus, spellCheck = false, className, variant = "code", autoGrow = false }: {
+export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPaste, onDrop, onContextMenu, textareaRef, placeholder, autoFocus, spellCheck = false, className, variant = "code", autoGrow = false, overlay }: {
   value: string;
   onChange: (value: string) => void;
   language: CodeLanguage;
@@ -21,6 +21,8 @@ export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPas
   className?: string;
   variant?: "code" | "document";
   autoGrow?: boolean;
+  /** Слой поверх текста (курсоры коллег): лежит в обёртке редактора и не перехватывает указатель. */
+  overlay?: ReactNode;
 }) {
   const layerRef = useRef<HTMLPreElement | null>(null);
   // Последний перевод строки в <pre> схлопывается — добавляем пробел, чтобы высоты слоёв совпадали.
@@ -49,6 +51,7 @@ export function CodeEditor({ value, onChange, language, onKeyDown, onBlur, onPas
         placeholder={placeholder}
         autoFocus={autoFocus}
       />
+      {overlay}
     </div>
   );
 }

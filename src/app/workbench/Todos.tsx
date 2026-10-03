@@ -255,8 +255,8 @@ export function TodoDocument({ project, todo, tabs, tabKey, visible, onDirty, on
             ))}
             {!visibleProps.length && <p className="wb-empty">Свойств нет. Сюда агенты кладут факты: контекст, критерий готовности, зависимости.</p>}
             <form className="wb-kv-add" onSubmit={(event) => { event.preventDefault(); const key = newKey.trim(); if (!key) return; setDraft({ ...draft, props: { ...draft.props, [key]: draft.props[key] ?? "" } }); setNewKey(""); }}>
-              <input value={newKey} onChange={(event) => setNewKey(event.target.value)} placeholder="новое свойство" />
-              <button type="submit" disabled={!newKey.trim()}><Plus size={12} /></button>
+              <input aria-label="Название нового свойства" value={newKey} onChange={(event) => setNewKey(event.target.value)} placeholder="новое свойство" />
+              <button type="submit" disabled={!newKey.trim()} title="Добавить свойство" aria-label="Добавить свойство"><Plus size={12} /></button>
             </form>
           </div>
         </section>

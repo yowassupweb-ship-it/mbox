@@ -12,6 +12,20 @@ const FETCH_TIMEOUT_MS = 30_000;
 const LOCK_TOUCH_MS = 30_000;
 const LOCK_STALE_MS = 3 * 60_000;
 // Потолок на один ответ: зависший CLI раньше держал наблюдателя бесконечно. 45 минут хватает и на большую работу.
+const WARM_ENABLED = !["0", "false", "no"].includes(String(process.env.MBOX_WATCH_WARM || "true").toLowerCase());
+const WARM_IDLE_MS = Number(process.env.MBOX_WATCH_WARM_IDLE_MS || 10 * 60_000);
+const WARM_MAX = 4;
+/** Тёплые процессы CLI: чат -> { child, key, idle }. Занятый ходом процесс из пула вынут. */
+const warmPool = new Map();
+function killWarm(thread) {
+  const entry = warmPool.get(thread);
+  if (!entry) return;
+  warmPool.delete(thread);
+  clearTimeout(entry.idle);
+  if (process.platform === "win32") spawn("taskkill", ["/pid", String(entry.child.pid), "/T", "/F"], { windowsHide: true });
+  else entry.child.kill();
+}
+function killAllWarm() { for (const thread of [...warmPool.keys()]) killWarm(thread); }
 const RUN_TIMEOUT_MS = Number(process.env.MBOX_WATCH_RUN_TIMEOUT_MS || 45 * 60_000);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -178,7 +192,7 @@ setInterval(touchLock, LOCK_TOUCH_MS).unref();
 
 process.on("SIGINT", () => { stopping = true; releaseSingleInstanceLock(); });
 process.on("SIGTERM", () => { stopping = true; releaseSingleInstanceLock(); });
-process.on("exit", releaseSingleInstanceLock);
+process.on("exit", () => { killAllWarm(); releaseSingleInstanceLock(); });
 
 await ping("session_start");
 // Список моделей и уровней effort для чата — из самого Claude Code, а не из списка в коде MBOX.
@@ -221,7 +235,7 @@ while (!stopping) {
   try {
     if (Date.now() - lastHeartbeat > HEARTBEAT_MS) { lastHeartbeat = Date.now(); await ping("heartbeat"); }
     // Навыки не переписываем под работающим CLI — только в паузе между ответами.
-    if (!activeLanes.size && Date.now() - lastSkillSync > skillSyncMs) await refreshSkills();
+    if (!activeLanes.size && Date.now() - lastSkillSync > skillSyncMs) { killAllWarm(); await refreshSkills(); }
     const items = await newInboxItems();
     let started = 0;
     for (const item of items) {
@@ -670,6 +684,7 @@ async function runClaude(item) {
   if (rotated) {
     console.log(`${logPrefix} чат ${thread}: контекст ${sessions.contextOf(thread)} > ${ROTATE_CONTEXT_TOKENS} — начинаю новую сессию`);
     sessions.forget(thread);
+    killWarm(thread);
     sessionId = "";
   }
   if (sessionId) {
@@ -681,6 +696,7 @@ async function runClaude(item) {
       if (!isLostSession(error)) throw error;
       console.log(`${logPrefix} сессия чата ${thread} потеряна — начинаю заново`);
       sessions.forget(thread);
+      killWarm(thread);
     }
   }
   const outcome = await runClaudeTurn(item, "");
@@ -704,7 +720,7 @@ async function runClaudeTurn(item, resumeId) {
   // строку «Думает · 1,3k токенов» в чате, как в VS Code.
   // --include-partial-messages не нужен: события system/thinking_tokens приходят и без него,
   // а с ним поток раздувается в двадцать раз на тех же данных (проверено).
-  const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--input-format", "text"];
+  const args = ["-p", "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--input-format", WARM_ENABLED ? "stream-json" : "text"];
   if (resumeId) args.push("--resume", resumeId);
   // Модель и «усилие» человек выбирает рядом с полем ввода в MBOX (см. jarvisModels на сервере);
   // не выбрал — остаётся то, что настроено переменными окружения, а дальше умолчание самого CLI.
@@ -717,7 +733,10 @@ async function runClaudeTurn(item, resumeId) {
   if (rulesReady) args.push("--append-system-prompt-file", cliPath(rulesPath));
 
   timings.spawn(item.id);
-  const outcome = await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt, item.id);
+  // Тёплый процесс: CLI грузит MCP и навыки секунды, и платить за это на каждое сообщение чата незачем.
+  // Процесс живёт на чат, пока модель и усилие те же; следующее сообщение просто дописывается ему в stdin.
+  const warm = WARM_ENABLED ? { thread: threadOf(item), key: args.join("\u0000") } : null;
+  const outcome = await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt, item.id, warm);
   if (outcome.stats) outcome.stats.resumed = Boolean(resumeId);
   return outcome;
 }
@@ -743,13 +762,24 @@ function toolHint(input) {
  * токенов ушло на размышление, во что обошёлся ответ и где сейчас лимиты подписки. Пока агент
  * работает, то же самое уходит в MBOX фазой (POST /agent/ping), и чат показывает её живой строкой.
  */
-function spawnStreaming(command, args, options, input = "", inboxId = "") {
+function spawnStreaming(command, args, options, input = "", inboxId = "", warm = null) {
   return new Promise((resolve, reject) => {
     // windowsHide: наблюдатель сам работает без консоли, и без флага Windows открывала CLI агента
     // в отдельном видимом окне. claude на Windows — это claude.cmd, его запускает только cmd.exe.
-    const child = process.platform === "win32"
-      ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].join(" ")}"`], { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
-      : spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const reused = warm ? warmPool.get(warm.thread) : null;
+    if (reused && reused.key !== warm.key) killWarm(warm.thread);
+    const warmEntry = reused && reused.key === warm.key && reused.child.exitCode === null ? reused : null;
+    if (warmEntry) { warmPool.delete(warm.thread); clearTimeout(warmEntry.idle); }
+    const child = warmEntry
+      ? warmEntry.child
+      : process.platform === "win32"
+        ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[command, ...args].join(" ")}"`], { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
+        : spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    if (warm && !warmEntry) {
+      child.once("close", () => { if (warmPool.get(warm.thread)?.child === child) warmPool.delete(warm.thread); });
+      while (warmPool.size >= WARM_MAX) killWarm(warmPool.keys().next().value);
+    }
+    let settled = false;
     const runTimer = armRunTimeout(child);
 
     // steps — цепочка шагов для чата: что вызвано, с чем и что вернулось, в порядке событий.
@@ -758,12 +788,12 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
     const pendingTools = new Map();
     // Claude Code стартует несколько секунд (грузит MCP и навыки) и до первого события молчит —
     // без этой строки человек всё это время видел бы пустоту там, где агент уже занят.
-    reportPhase(inboxId, "Запускается");
+    reportPhase(inboxId, warmEntry ? "Думает" : "Запускается");
     let buffer = "";
     let plain = "";
     let stderr = "";
     let lastPhaseAt = 0;
-    let lastPhase = "Запускается";
+    let lastPhase = warmEntry ? "Думает" : "Запускается";
 
     // Новая фаза уходит сразу, повтор той же — не чаще раза в три секунды (каждая фаза — broadcast по
     // вебсокету, на него интерфейс перечитывает агентов). Раньше троттлилась любая фаза, а текст
@@ -867,7 +897,33 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
       }
     };
 
-    child.stdout.on("data", (chunk) => {
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(runTimer);
+      child.stdout.off("data", onStdout);
+      child.stderr.off("data", onStderr);
+      child.off("close", onClose);
+      child.off("error", onError);
+      reportPhase(inboxId, "");
+    };
+    // Ход закончен событием result: ответ уходит в чат сразу, не дожидаясь, пока CLI погасит MCP и выйдет.
+    const complete = () => {
+      finish();
+      if (state.failure) {
+        if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+        else child.kill();
+        const error = new Error(state.failure);
+        error.cliFailure = true;
+        reject(error);
+        return;
+      }
+      warmPool.set(warm.thread, { child, key: warm.key, idle: setTimeout(() => killWarm(warm.thread), WARM_IDLE_MS) });
+      warmPool.get(warm.thread).idle.unref?.();
+      console.log(`${logPrefix} готово: ${formatTokens(state.stats?.thinking_tokens || 0)} токенов размышления, инструментов ${state.toolsUsed.length}`);
+      resolve(state);
+    };
+    const onStdout = (chunk) => {
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
@@ -890,21 +946,26 @@ function spawnStreaming(command, args, options, input = "", inboxId = "") {
           } catch (error) {
             console.error(`${logPrefix} сбой разбора события ${event.type}: ${error.message}`);
           }
+          if (warm && event.type === "result" && !settled) { complete(); return; }
         }
       }
-    });
-    child.stderr.on("data", (chunk) => { stderr += chunk; process.stderr.write(chunk); });
-    if (input) child.stdin?.end(input);
-
-    child.on("error", reject);
-    child.on("close", (code) => {
-      clearTimeout(runTimer);
-      reportPhase(inboxId, "");
+    };
+    const onStderr = (chunk) => { stderr += chunk; process.stderr.write(chunk); };
+    const onError = (error) => { finish(); reject(error); };
+    const onClose = (code) => {
+      finish();
       if (code !== 0) { reject(describeCliFailure(command, code, `${plain}\n${state.text}`, stderr)); return; }
       if (state.failure) { const error = new Error(state.failure); error.cliFailure = true; reject(error); return; }
+      if (warm) { reject(new Error("CLI завершился, не ответив на сообщение")); return; }
       console.log(`${logPrefix} готово: ${formatTokens(state.stats?.thinking_tokens || 0)} токенов размышления, инструментов ${state.toolsUsed.length}`);
       resolve(state);
-    });
+    };
+    child.stdout.on("data", onStdout);
+    child.stderr.on("data", onStderr);
+    child.on("error", onError);
+    child.on("close", onClose);
+    if (warm) child.stdin?.write(`${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: input }] } })}\n`);
+    else if (input) child.stdin?.end(input);
   });
 }
 

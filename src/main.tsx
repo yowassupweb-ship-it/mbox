@@ -62,6 +62,16 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
 
+  // Смена темы из главного поиска и других мест, где нет доступа к состоянию приложения.
+  useEffect(() => {
+    const onTheme = (event: Event) => {
+      const next = (event as CustomEvent<string>).detail;
+      if (next === "light" || next === "black" || next === "graphite") setTheme(next);
+    };
+    window.addEventListener("mbox:set-theme", onTheme);
+    return () => window.removeEventListener("mbox:set-theme", onTheme);
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme === "light" ? "light" : "dark";
@@ -340,7 +350,7 @@ function ProjectRelationForm({ project, projects, onSaved }: { project: Project;
   return (
     <div className="project-relations">
       <div className="relation-form">
-        <select value={targetId} onChange={(event) => setTargetId(event.target.value)}>
+        <select aria-label="Связанный проект" value={targetId} onChange={(event) => setTargetId(event.target.value)}>
           {available.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
         <input value={edgeType} onChange={(event) => setEdgeType(event.target.value)} placeholder="Связь или большая сущность" />
@@ -433,18 +443,18 @@ function TodoNote({ project, todo, onSaved }: { project: Project; todo: Todo; on
   return (
     <div className="iphone-note">
       <div className="note-project-pill">{project.name} · {formatBytes(todo.memory_bytes)}</div>
-      <input className="note-title-input" value={title} onChange={(event) => {
+      <input aria-label="Название заметки" className="note-title-input" value={title} onChange={(event) => {
         setTitle(event.target.value);
         setSaveState("idle");
       }} />
       <div className="note-controls">
-        <select value={status} onChange={(event) => {
+        <select aria-label="Статус" value={status} onChange={(event) => {
           setStatus(event.target.value);
           setSaveState("idle");
         }}>
           {Object.entries(todoStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-        <select value={priority} onChange={(event) => {
+        <select aria-label="Приоритет" value={priority} onChange={(event) => {
           setPriority(event.target.value);
           setSaveState("idle");
         }}>
@@ -511,10 +521,10 @@ function RelationsBoard({ edges, projects, onSaved }: { edges: GraphEdge[]; proj
     <div className="content-grid relations-page">
       <Panel title="Связи" icon={GitBranch}>
         <div className="relation-entity-form">
-          <select value={fromId} onChange={(event) => setFromId(event.target.value)}>
+          <select aria-label="От проекта" value={fromId} onChange={(event) => setFromId(event.target.value)}>
             {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
-          <select value={toId} onChange={(event) => setToId(event.target.value)}>
+          <select aria-label="К проекту" value={toId} onChange={(event) => setToId(event.target.value)}>
             {projects.filter((project) => project.id !== fromId).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
           <input value={edgeType} onChange={(event) => setEdgeType(event.target.value)} placeholder="тип или большая сущность" />
@@ -797,7 +807,7 @@ function ProjectForm({ onSaved }: { onSaved: () => void }) {
       <input value={deployProvider} onChange={(event) => setDeployProvider(event.target.value)} placeholder="Деплой" />
       <input value={deployTarget} onChange={(event) => setDeployTarget(event.target.value)} placeholder="Сервер или Vercel" />
       <textarea value={props} onChange={(event) => setProps(event.target.value)} placeholder={"Свойства\nкомпания: Вокруг света\nтип: рабочий\nроль: клиентский проект"} />
-      <input type="color" value={color} onChange={(event) => setColor(event.target.value)} />
+      <input aria-label="Цвет" type="color" value={color} onChange={(event) => setColor(event.target.value)} />
     </ManualForm>
   );
 }
@@ -824,16 +834,16 @@ function TodoForm({ projects, onSaved }: { projects: Project[]; onSaved: () => v
       onSaved();
     }}>
       <input value={id} onChange={(event) => setId(event.target.value)} placeholder="ID для правки" />
-      <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+      <select aria-label="Проект" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
         {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
       </select>
       <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Todo" />
       <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Заметка" />
       <textarea value={props} onChange={(event) => setProps(event.target.value)} placeholder={"Свойства todo\nконтекст: интерфейс\nкритерий: удобно с телефона и ПК"} />
-      <select value={status} onChange={(event) => setStatus(event.target.value)}>
+      <select aria-label="Статус" value={status} onChange={(event) => setStatus(event.target.value)}>
         {Object.entries(todoStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
-      <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+      <select aria-label="Приоритет" value={priority} onChange={(event) => setPriority(event.target.value)}>
         {Object.entries(todoPriorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
     </ManualForm>
@@ -1235,7 +1245,7 @@ function SecretForm({ projects, onSubmit, initial, submitLabel = "Сохрани
         <strong>{initial ? "Правка логина и пароля" : "Новый логин и пароль"}</strong>
       </div>
       <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Название" />
-      <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+      <select aria-label="Проект" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
         <option value="">Без проекта</option>
         {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
       </select>

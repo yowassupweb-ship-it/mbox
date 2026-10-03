@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { appendRows, extractText, loadWorkbook, readTable, touchedRange, workbookFromRows, workbookToBase64, writeCells } from "./table-ops.mjs";
+import { announceAgentEdit } from "./presence.mjs";
 
 export const TABLES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tables (
@@ -15,6 +17,8 @@ CREATE TABLE IF NOT EXISTS tables (
 );
 ALTER TABLE tables ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE tables ADD COLUMN IF NOT EXISTS owner_user_id TEXT;
+ALTER TABLE tables ADD COLUMN IF NOT EXISTS text_content TEXT NOT NULL DEFAULT '';
+ALTER TABLE tables ADD COLUMN IF NOT EXISTS text_indexed_at TIMESTAMPTZ;
 ALTER TABLE tables ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'private';
 UPDATE tables SET owner_user_id = users.id::text FROM users
  WHERE tables.owner_user_id IS NULL AND lower(users.username) = lower(tables.author);
@@ -39,15 +43,47 @@ const ACCESS_LEVELS = ["private", "project", "all"];
 const MAX_TABLE_BYTES = 25 * 1024 * 1024;
 const SHARE_TOKEN = /^[A-Za-z0-9_-]{24,64}$/;
 
+/**
+ * Текст ячеек для поиска. Таблица лежит в базе файлом xlsx, поэтому по ней нельзя искать SQL-ом: после записи
+ * разбираем книгу в фоне и кладём ячейки текстом. Запись не ждёт разбора — большая таблица разбирается долго.
+ */
+export function indexTableText(query, tableId, content) {
+  setImmediate(async () => {
+    try {
+      const text = extractText(await loadWorkbook(content));
+      await query("UPDATE tables SET text_content = $1, text_indexed_at = now() WHERE id = $2", [text, tableId]);
+    } catch {
+      // файл не разобрался — поиск по названию остаётся
+      await query("UPDATE tables SET text_indexed_at = now() WHERE id = $1", [tableId]).catch(() => {});
+    }
+  });
+}
+
+async function backfillTableText(query) {
+  for (;;) {
+    const rows = (await query("SELECT id::text, content FROM tables WHERE text_indexed_at IS NULL ORDER BY id LIMIT 5")).rows;
+    if (!rows.length) return;
+    for (const row of rows) {
+      try {
+        await query("UPDATE tables SET text_content = $1, text_indexed_at = now() WHERE id = $2", [extractText(await loadWorkbook(row.content)), row.id]);
+      } catch {
+        await query("UPDATE tables SET text_indexed_at = now() WHERE id = $1", [row.id]);
+      }
+    }
+  }
+}
+
 export async function ensureTablesSchema(query) {
   await query(TABLES_SCHEMA_SQL);
+  // Старые таблицы без текста для поиска доиндексируем в фоне, не задерживая запуск сервера.
+  void backfillTableText(query).catch(() => {});
 }
 
 function accessLevel(value) {
   return ACCESS_LEVELS.includes(String(value)) ? String(value) : "private";
 }
 
-function tableScopeWhere(scope, alias = "tables") {
+export function tableScopeWhere(scope, alias = "tables") {
   const projectIds = Array.isArray(scope?.projectIds) ? scope.projectIds : [];
   if (scope?.userId) {
     return {
@@ -78,7 +114,8 @@ function cleanContent(value) {
 
 export async function handleTablesApi({ req, res, url, query, readBody, sendJson, actor, scope = { all: true, projectIds: [] }, broadcast }) {
   if (!url.pathname.startsWith("/api/mbox/tables")) return false;
-  const notify = (action, detail) => broadcast?.("entity_changed", { entity: "tables", action, actor: String(actor || ""), detail });
+  const silent = !req.headers["x-mbox-agent"];
+  const notify = (action, detail) => broadcast?.("entity_changed", { entity: "tables", action, actor: String(actor || ""), detail, silent });
 
   try {
     const shareMatch = url.pathname.match(/^\/api\/mbox\/tables\/(\d+)\/shares(?:\/(view|edit))?$/);
@@ -129,22 +166,51 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
     if (url.pathname === "/api/mbox/tables" && req.method === "POST") {
       const body = await readBody(req);
       if (!hasProjectAccess(scope, body.project_id)) { sendJson(res, 403, { error: "project_access_denied" }); return true; }
+      // rows — таблица из двумерного массива (агенты): первая строка заголовки, если headers не false.
+      const content = !body.content && Array.isArray(body.rows) ? await workbookFromRows(body.rows, { sheet: body.sheet, headers: body.headers !== false }) : body.content;
       const result = await query(
         `INSERT INTO tables(title, content, project_id, author, owner_user_id, access_level)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING ${TABLE_COLUMNS}`,
         [
           String(body.title || "Новая таблица").trim().slice(0, 200) || "Новая таблица",
-          cleanContent(body.content),
+          cleanContent(content),
           body.project_id || null,
           String(actor || ""),
           scope?.userId || null,
           accessLevel(body.access_level),
         ],
       );
+      indexTableText(query, result.rows[0].id, result.rows[0].content);
       notify("create", `«${result.rows[0].title}»`);
       sendJson(res, 201, { table: result.rows[0] });
       return true;
+    }
+
+    // Операции агентов: читать диапазон, писать ячейки и оформление, дописывать строки. Работают с xlsx в базе.
+    const opsMatch = url.pathname.match(/^\/api\/mbox\/tables\/(\d+)\/(cells|rows)$/);
+    if (opsMatch) {
+      const [, tableId, operation] = opsMatch;
+      const scopedOps = tableScopeWhere(scope, "tables");
+      const row = (await query(`SELECT id::text, title, content FROM tables WHERE id = $${scopedOps.values.length + 1} AND (${scopedOps.sql})`, [...scopedOps.values, tableId])).rows[0];
+      if (!row) { sendJson(res, 404, { error: "not_found" }); return true; }
+      if (operation === "cells" && req.method === "GET") {
+        const book = await loadWorkbook(row.content);
+        sendJson(res, 200, { table: { id: row.id, title: row.title }, ...readTable(book, { sheet: url.searchParams.get("sheet") || undefined, range: url.searchParams.get("range") || undefined, styles: url.searchParams.get("styles") === "1" }) });
+        return true;
+      }
+      if ((operation === "cells" && req.method === "PATCH") || (operation === "rows" && req.method === "POST")) {
+        const body = await readBody(req);
+        const book = await loadWorkbook(row.content);
+        const result = operation === "cells" ? writeCells(book, body) : appendRows(book, body);
+        const saved = (await query(`UPDATE tables SET content = $1, updated_at = now() WHERE id = $2 RETURNING ${TABLE_COLUMNS}`, [cleanContent(await workbookToBase64(book)), tableId])).rows[0];
+        indexTableText(query, saved.id, saved.content);
+        notify("update", `«${saved.title}»`);
+        announceAgentEdit(broadcast, { doc: `table:${saved.id}`, name: actor, sheet: result.sheet, range: operation === "cells" ? touchedRange(body.cells, body.format) : result.range });
+        sendJson(res, 200, { ...result, table: { id: saved.id, title: saved.title, updated_at: saved.updated_at } });
+        return true;
+      }
+      return false;
     }
 
     const match = url.pathname.match(/^\/api\/mbox\/tables\/(\d+)$/);
@@ -163,6 +229,11 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
       if (Object.prototype.hasOwnProperty.call(body, "project_id") && !hasProjectAccess(scope, body.project_id)) { sendJson(res, 403, { error: "project_access_denied" }); return true; }
       if ((Object.prototype.hasOwnProperty.call(body, "access_level") || Object.prototype.hasOwnProperty.call(body, "project_id")) && !(await ownsTable(query, match[1], scope))) {
         sendJson(res, 403, { error: "only_owner_changes_access" });
+        return true;
+      }
+      // Правка поверх версии, которую человек не видел (агент или коллега успели записать раньше), — не молча затираем.
+      if (Object.prototype.hasOwnProperty.call(body, "content") && body.base_updated_at && String(body.base_updated_at) !== existing.updated_at) {
+        sendJson(res, 409, { error: "conflict", updated_at: existing.updated_at });
         return true;
       }
       const hasProject = Object.prototype.hasOwnProperty.call(body, "project_id");
@@ -186,6 +257,7 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
           hasProject,
         ],
       );
+      if (Object.prototype.hasOwnProperty.call(body, "content")) indexTableText(query, result.rows[0].id, result.rows[0].content);
       notify("update", `«${result.rows[0].title}»`);
       sendJson(res, 200, { table: result.rows[0] });
       return true;

@@ -1563,6 +1563,201 @@ server.registerTool(
   },
 );
 
+// ─── Документы и таблицы MBOX (не файлы локальных папок): список, чтение, запись ─────────────────────
+
+const docIdOf = (value) => String(value || "").replace(/^#/, "").replace(/^doc:/, "");
+const tableIdOf = (value) => String(value || "").replace(/^#/, "").replace(/^table:/, "");
+
+server.registerTool(
+  "doc_search",
+  {
+    title: "Find MBOX documents (pages, Google-Docs style)",
+    description: "Search the owner's MBOX documents (the Documents section: paged A4 text documents, not notes and not local files) by title and body text. Empty query lists recent documents.",
+    inputSchema: { query: z.string().default(""), limit: z.number().int().min(1).max(50).default(15) },
+  },
+  async ({ query, limit }) => {
+    const { documents } = await mboxFetch(`/api/mbox/documents?q=${encodeURIComponent(query)}`);
+    if (!documents?.length) return textResult("No documents found.");
+    return textResult(documents.slice(0, limit).map((doc) => `#${doc.id} «${doc.title || "без названия"}» · ${String(doc.updated_at || "").slice(0, 16)} — ${String(doc.snippet || "").slice(0, 120)}`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "doc_read",
+  {
+    title: "Read an MBOX document as Markdown",
+    description: "Returns the document text as Markdown: headings (#, ##, ###), paragraphs, lists, **bold**, *italic*. Page layout and images are not part of the text.",
+    inputSchema: { doc_id: z.string() },
+  },
+  async ({ doc_id }) => {
+    const { document, markdown } = await mboxFetch(`/api/mbox/documents/${docIdOf(doc_id)}?format=markdown`);
+    return textResult(`Document #${document.id} «${document.title}» · updated ${document.updated_at}\n\n${markdown || "(empty)"}`);
+  },
+);
+
+server.registerTool(
+  "doc_write",
+  {
+    title: "Create or rewrite an MBOX document",
+    description: [
+      "Create a new document (no doc_id) or change an existing one from Markdown: # / ## / ### headings, paragraphs, - bullets, 1. numbered items, **bold**, *italic*.",
+      "mode=replace rewrites the whole text (keeps the page margins the owner set), mode=append adds to the end without touching what is already typed and formatted.",
+      "Markdown tables become plain lines (« a | b »): put tabular data into an MBOX table with table_write_cells instead.",
+      "If the owner is typing in the document right now they see your change appear; read it again before rewriting.",
+    ].join("\n"),
+    inputSchema: {
+      doc_id: z.string().default(""),
+      title: z.string().default(""),
+      markdown: z.string(),
+      mode: z.enum(["replace", "append"]).default("replace"),
+      access: z.enum(["private", "project", "all"]).default("private").describe("Who sees a NEW document: private (owner only, default), project (members of project_id), all (every MBOX user)"),
+      project_id: z.string().default(""),
+      show: showArg,
+    },
+  },
+  async ({ doc_id, title, markdown, mode, access, project_id, show }) => {
+    const id = docIdOf(doc_id);
+    if (!id) {
+      const { document } = await mboxFetch("/api/mbox/documents", { method: "POST", body: JSON.stringify({ title: title || "Новый документ", markdown, access_level: access, project_id: project_id || null }) });
+      return textResult(`Created document #${document.id} «${document.title}».${show ? await showInMbox(`doc:${document.id}`, document.title) : ""}`);
+    }
+    const { document } = await mboxFetch(`/api/mbox/documents/${id}`, { method: "PATCH", body: JSON.stringify({ markdown, mode, ...(title ? { title } : {}) }) });
+    return textResult(`Updated document #${document.id} «${document.title}» (${mode}).${show ? await showInMbox(`doc:${document.id}`, document.title) : ""}`);
+  },
+);
+
+server.registerTool(
+  "doc_edit",
+  {
+    title: "Edit part of an MBOX document",
+    description: "Replace an exact fragment of the document text (as doc_read shows it) with new text. old_text must match exactly once unless replace_all. Cheaper and safer than rewriting everything with doc_write.",
+    inputSchema: { doc_id: z.string(), old_text: z.string().min(1), new_text: z.string(), replace_all: z.boolean().default(false), show: showArg },
+  },
+  async ({ doc_id, old_text, new_text, replace_all, show }) => {
+    const id = docIdOf(doc_id);
+    const { markdown } = await mboxFetch(`/api/mbox/documents/${id}?format=markdown`);
+    const count = markdown.split(old_text).length - 1;
+    if (!count) throw new Error("old_text not found in the document — read it again with doc_read");
+    if (count > 1 && !replace_all) throw new Error(`old_text occurs ${count} times — add surrounding text or pass replace_all`);
+    const next = replace_all ? markdown.split(old_text).join(new_text) : markdown.replace(old_text, () => new_text);
+    const { document } = await mboxFetch(`/api/mbox/documents/${id}`, { method: "PATCH", body: JSON.stringify({ markdown: next, mode: "replace" }) });
+    return textResult(`Edited document #${document.id} «${document.title}»: ${replace_all ? count : 1} replacement(s).${show ? await showInMbox(`doc:${document.id}`, document.title) : ""}`);
+  },
+);
+
+server.registerTool(
+  "table_search",
+  {
+    title: "Find MBOX tables (spreadsheets)",
+    description: "List or search the owner's MBOX tables (the Tables section: Excel-like spreadsheets stored in MBOX, not local .xlsx files — those are workspace_read_table). Empty query lists recent tables.",
+    inputSchema: { query: z.string().default(""), limit: z.number().int().min(1).max(50).default(20) },
+  },
+  async ({ query, limit }) => {
+    const { tables } = await mboxFetch(`/api/mbox/tables?q=${encodeURIComponent(query)}`);
+    if (!tables?.length) return textResult("No tables found.");
+    return textResult(tables.slice(0, limit).map((table) => `#${table.id} «${table.title || "без названия"}» · ${String(table.updated_at || "").slice(0, 16)} · ${table.size_bytes} B`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "table_read",
+  {
+    title: "Read cells of an MBOX table",
+    description: [
+      "Read a range of an MBOX table as rows of cell inputs (formulas as =..., with the cached result when the file has one). Without range returns the used area; at most 500 rows × 60 columns per call — narrow the range for big tables.",
+      "styles=true adds fills, bold, colors as rectangles («A1:H1 fill #DDEBF7, bold»). Also lists the sheets of the workbook.",
+    ].join("\n"),
+    inputSchema: {
+      table_id: z.string(),
+      sheet: z.string().default("").describe("Sheet name; empty = first sheet"),
+      range: z.string().default("").describe("A1:H40, 1:10 (whole rows), A:C (whole columns); empty = everything used"),
+      styles: z.boolean().default(false),
+    },
+  },
+  async ({ table_id, sheet, range, styles }) => {
+    const params = new URLSearchParams();
+    if (sheet) params.set("sheet", sheet);
+    if (range) params.set("range", range);
+    if (styles) params.set("styles", "1");
+    const data = await mboxFetch(`/api/mbox/tables/${tableIdOf(table_id)}/cells?${params}`);
+    const header = `Table #${data.table.id} «${data.table.title}» · sheet «${data.sheet}» · sheets: ${data.sheets.map((item) => `${item.name} (${item.rows}×${item.columns})`).join(", ")}`;
+    const lines = data.rows.map((row) => `${row.row}\t${row.cells.join("\t")}`);
+    return textResult([header, `columns (from ${data.columns[0]}): ${data.columns.join("\t")}`, ...lines, ...(data.truncated ? ["… truncated — narrow the range"] : []), ...(data.styles ? ["", "Styles:", ...data.styles] : [])].join("\n"));
+  },
+);
+
+server.registerTool(
+  "table_write_cells",
+  {
+    title: "Write cells and formatting in an MBOX table",
+    description: [
+      "Set cells in an MBOX table: cells = {\"B3\": \"text\", \"C3\": 12, \"D3\": \"=B3*C3\", \"E3\": null (clear)}. Creates the sheet if it is missing; everything else stays as is.",
+      "format = [{range:\"A1:H1\", bold:true, fill:\"lightblue\"}, {range:\"D2:D40\", number_format:\"0%\"}] colors and styles ranges (fill, color, bold, italic, underline, strike, size, align, wrap, number_format, border). Colors: #RRGGBB or yellow/red/green/blue/orange/gray/lightgreen/lightred/lightyellow/lightblue.",
+      "To add rows below the last filled one use table_append_rows. If the owner has the table open they see the change appear.",
+    ].join("\n"),
+    inputSchema: {
+      table_id: z.string(),
+      sheet: z.string().default(""),
+      cells: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
+      format: z.array(z.object({
+        range: z.string(),
+        fill: z.string().nullable().optional(),
+        color: z.string().nullable().optional(),
+        bold: z.boolean().optional(),
+        italic: z.boolean().optional(),
+        underline: z.boolean().optional(),
+        strike: z.boolean().optional(),
+        size: z.number().optional(),
+        align: z.enum(["left", "center", "right", "general"]).optional(),
+        wrap: z.boolean().optional(),
+        number_format: z.string().optional(),
+        border: z.enum(["thin", "medium", "thick", "none"]).optional(),
+      })).default([]),
+      show: showArg,
+    },
+  },
+  async ({ table_id, sheet, cells, format, show }) => {
+    const id = tableIdOf(table_id);
+    const result = await mboxFetch(`/api/mbox/tables/${id}/cells`, { method: "PATCH", body: JSON.stringify({ ...(sheet ? { sheet } : {}), cells, format }) });
+    return textResult(`Table #${id} «${result.table.title}», sheet «${result.sheet}»: ${result.cells} cell(s) written, ${result.formatted} formatted.${show ? await showInMbox(`table:${id}`, result.table.title) : ""}`);
+  },
+);
+
+server.registerTool(
+  "table_append_rows",
+  {
+    title: "Append rows to an MBOX table",
+    description: "Add rows right below the last filled row of a sheet: rows = [[\"Иван\", 1200, \"=B5*2\"], [\"Анна\", 800, null]]. You do not need to count where the table ends. Numbers stay numbers, strings starting with = become formulas.",
+    inputSchema: { table_id: z.string(), rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).min(1), sheet: z.string().default(""), show: showArg },
+  },
+  async ({ table_id, rows, sheet, show }) => {
+    const id = tableIdOf(table_id);
+    const result = await mboxFetch(`/api/mbox/tables/${id}/rows`, { method: "POST", body: JSON.stringify({ rows, ...(sheet ? { sheet } : {}) }) });
+    return textResult(`Table #${id} «${result.table.title}»: ${result.rows} row(s) added at ${result.range} on sheet «${result.sheet}».${show ? await showInMbox(`table:${id}`, result.table.title) : ""}`);
+  },
+);
+
+server.registerTool(
+  "table_create",
+  {
+    title: "Create an MBOX table from data",
+    description: "Create a new MBOX table from rows (first row = headers, bold and frozen unless headers=false). Then refine with table_write_cells (formulas, colors).",
+    inputSchema: {
+      title: z.string().default("Новая таблица"),
+      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).default([]),
+      headers: z.boolean().default(true),
+      sheet: z.string().default("Лист 1"),
+      access: z.enum(["private", "project", "all"]).default("private"),
+      project_id: z.string().default(""),
+      show: showArg,
+    },
+  },
+  async ({ title, rows, headers, sheet, access, project_id, show }) => {
+    const { table } = await mboxFetch("/api/mbox/tables", { method: "POST", body: JSON.stringify({ title, rows, headers, sheet, access_level: access, project_id: project_id || null }) });
+    return textResult(`Created table #${table.id} «${table.title}».${show ? await showInMbox(`table:${table.id}`, table.title) : ""}`);
+  },
+);
+
 server.registerTool(
   "workspace_edit_file",
   {

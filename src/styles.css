@@ -17,5 +17,6 @@
 @import "./styles/browser.css";
 @import "./styles/catalog.css";
 @import "./styles/chrome.css";
+@import "./styles/spotlight.css";
 @import "./styles/editor.css";
 @import "./styles/mobile.css";

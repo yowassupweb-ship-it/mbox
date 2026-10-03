@@ -5,6 +5,7 @@ import { chatPeer, consoleLabel, isChatPane } from "./consoleLayout";
 import { noteTitle } from "./Notes";
 import { documentTitle } from "./DocumentsView";
 import { tableTitle } from "./TablesView";
+import { docTitle } from "./docsStore";
 import { folderGlyph } from "./TreeGlyph";
 
 const MENU = "/assets/icons/bottom-menu";
@@ -55,6 +56,8 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: documentTitle(key), hint: "Документ Word", icon: `${NAVIGATION}/documents.png` };
     case "table":
       return { title: tableTitle(key) || "Таблица", hint: "Таблица", icon: "/icons/sheets.png" };
+    case "doc":
+      return { title: docTitle(key) || "Документ", hint: "Документ", icon: `${PROJECT}/documents.png` };
     case "storage":
       return { title: "Хранилище S3", hint: "Yandex Object Storage", icon: `${NAVIGATION}/storage.png` };
     case "s3sheet": {

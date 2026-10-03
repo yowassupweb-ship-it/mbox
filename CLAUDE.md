@@ -165,6 +165,23 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    статус/приоритет и не даёт перехватить чужой активный лиз (409). Всё это только в `server/mbox-server.mjs`,
    dev-API в `vite.config.ts` не повторяет.
 
+23. **Документы, таблицы, поиск, присутствие.** «Таблицы | Документы» — один раздел (`TablesView` + `DocumentsView`).
+   Документы — Univer Docs на листах A4, снимок хранится как есть (`documents.snapshot`), Markdown для поиска/агентов
+   строит `server/doc-snapshot.mjs`; таблицы — Univer Sheets, текст ячеек индексируется в `tables.text_content`
+   (`server/table-ops.mjs`). MCP: `doc_search/read/write/edit`, `table_search/read/write_cells/append_rows/create`.
+   Поиск в шапке (Ctrl+K) — `Spotlight.tsx` + `server/spotlight.mjs` (`/api/mbox/spotlight?q=`): заметки со всеми вкладками,
+   документы, таблицы, проекты, задачи, память, артефакты; права как у остальных ручек. Присутствие — `server/presence.mjs`
+   (комнаты `note:|table:|doc:ID` в памяти, проверка доступа при входе) и `usePresence` на клиенте; правки агента
+   объявляются через `announceAgentEdit`. Курсоры коллег в Univer Docs используют внутренние сервисы
+   (`@univerjs/docs-ui`, `NodePositionConvertToCursor`) — при обновлении Univer проверять.
+
+24. **Скорость ответа агента.** Наблюдатель Claude держит «тёплый» процесс CLI на чат (`warmPool` в
+   `scripts/claude-inbox-watcher.mjs`, `--input-format stream-json`): следующее сообщение дописывается в stdin, MCP и навыки
+   заново не грузятся. Ход завершается по событию `result`, не по выходу процесса. Процесс гасится через 10 минут простоя
+   (`MBOX_WATCH_WARM_IDLE_MS`), при смене модели/усилия, ротации сессии и синхронизации навыков; `MBOX_WATCH_WARM=0` — старый
+   режим «процесс на сообщение». В чате действие агента — одна строка `ChainLine` (статус → итог), цепочка шагов раскрывается;
+   статус появляется сразу при отправке, до ответа сервера (временный id `pending:`).
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

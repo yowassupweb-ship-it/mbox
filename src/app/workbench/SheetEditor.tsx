@@ -640,21 +640,21 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
   return (
     <div className="wb-sheet-shell is-advanced">
       <div className="wb-sheet-toolbar" role="toolbar" aria-label="Таблица">
-        <button type="button" onClick={undo} disabled={!undoRef.current.length} title="Отменить (Ctrl+Z)"><Undo2 size={14} /></button>
-        <button type="button" onClick={redo} disabled={!redoRef.current.length} title="Повторить (Ctrl+Y)"><Redo2 size={14} /></button>
+        <button type="button" onClick={undo} disabled={!undoRef.current.length} title="Отменить (Ctrl+Z)" aria-label="Отменить (Ctrl+Z)"><Undo2 size={14} /></button>
+        <button type="button" onClick={redo} disabled={!redoRef.current.length} title="Повторить (Ctrl+Y)" aria-label="Повторить (Ctrl+Y)"><Redo2 size={14} /></button>
         <span className="wb-sheet-sep" />
-        <button type="button" disabled={readOnly} onClick={() => insertRows(range.r1, range.r2 - range.r1 + 1)} title="Вставить строки выше"><Rows3 size={14} /><Plus size={10} /></button>
-        <button type="button" disabled={readOnly} onClick={() => deleteRows(range.r1, range.r2)} title="Удалить выделенные строки"><Rows3 size={14} /><Trash2 size={10} /></button>
-        <button type="button" disabled={readOnly} onClick={() => insertCols(range.c1, range.c2 - range.c1 + 1)} title="Вставить столбцы слева"><Columns3 size={14} /><Plus size={10} /></button>
-        <button type="button" disabled={readOnly} onClick={() => deleteCols(range.c1, range.c2)} title="Удалить выделенные столбцы"><Columns3 size={14} /><Trash2 size={10} /></button>
+        <button type="button" disabled={readOnly} onClick={() => insertRows(range.r1, range.r2 - range.r1 + 1)} title="Вставить строки выше" aria-label="Вставить строки выше"><Rows3 size={14} /><Plus size={10} /></button>
+        <button type="button" disabled={readOnly} onClick={() => deleteRows(range.r1, range.r2)} title="Удалить выделенные строки" aria-label="Удалить выделенные строки"><Rows3 size={14} /><Trash2 size={10} /></button>
+        <button type="button" disabled={readOnly} onClick={() => insertCols(range.c1, range.c2 - range.c1 + 1)} title="Вставить столбцы слева" aria-label="Вставить столбцы слева"><Columns3 size={14} /><Plus size={10} /></button>
+        <button type="button" disabled={readOnly} onClick={() => deleteCols(range.c1, range.c2)} title="Удалить выделенные столбцы" aria-label="Удалить выделенные столбцы"><Columns3 size={14} /><Trash2 size={10} /></button>
         <span className="wb-sheet-sep" />
-        <button type="button" disabled={readOnly} onClick={() => sortBy(sel.focus.c, 1)} title={`Сортировать по столбцу ${columnName(sel.focus.c)}: А→Я, 0→9`}><ArrowDownAZ size={14} /></button>
-        <button type="button" disabled={readOnly} onClick={() => sortBy(sel.focus.c, -1)} title={`Сортировать по столбцу ${columnName(sel.focus.c)}: Я→А, 9→0`}><ArrowUpAZ size={14} /></button>
-        <button type="button" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterEdit({ c: sel.focus.c, x: rect.left, y: rect.bottom + 4 }); }} title={`Фильтр по столбцу ${columnName(sel.focus.c)}`}><Filter size={14} /></button>
-        {activeFilters > 0 && <button type="button" onClick={() => setFilters({})} title="Снять все фильтры"><FilterX size={14} /> {activeFilters}</button>}
-        <button type="button" className={frozen ? "is-on" : undefined} disabled={readOnly} onClick={toggleFreeze} title={frozen ? "Открепить первую строку" : "Закрепить первую строку как заголовки"}><Pin size={14} /></button>
+        <button type="button" disabled={readOnly} onClick={() => sortBy(sel.focus.c, 1)} title={`Сортировать по столбцу ${columnName(sel.focus.c)}: А→Я, 0→9`} aria-label={`Сортировать по столбцу ${columnName(sel.focus.c)}: А→Я, 0→9`}><ArrowDownAZ size={14} /></button>
+        <button type="button" disabled={readOnly} onClick={() => sortBy(sel.focus.c, -1)} title={`Сортировать по столбцу ${columnName(sel.focus.c)}: Я→А, 9→0`} aria-label={`Сортировать по столбцу ${columnName(sel.focus.c)}: Я→А, 9→0`}><ArrowUpAZ size={14} /></button>
+        <button type="button" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterEdit({ c: sel.focus.c, x: rect.left, y: rect.bottom + 4 }); }} title={`Фильтр по столбцу ${columnName(sel.focus.c)}`} aria-label={`Фильтр по столбцу ${columnName(sel.focus.c)}`}><Filter size={14} /></button>
+        {activeFilters > 0 && <button type="button" onClick={() => setFilters({})} title="Снять все фильтры" aria-label="Снять все фильтры"><FilterX size={14} /> {activeFilters}</button>}
+        <button type="button" className={frozen ? "is-on" : undefined} disabled={readOnly} onClick={toggleFreeze} title={frozen ? "Открепить первую строку" : "Закрепить первую строку как заголовки"} aria-label={frozen ? "Открепить первую строку" : "Закрепить первую строку как заголовки"}><Pin size={14} /></button>
         <span className="wb-sheet-sep" />
-        <button type="button" className={find.open ? "is-on" : undefined} onClick={() => setFind((current) => ({ ...current, open: !current.open }))} title="Найти (Ctrl+F)"><Search size={14} /></button>
+        <button type="button" className={find.open ? "is-on" : undefined} onClick={() => setFind((current) => ({ ...current, open: !current.open }))} title="Найти (Ctrl+F)" aria-label="Найти (Ctrl+F)"><Search size={14} /></button>
         {find.open && (
           <span className="wb-sheet-find">
             <input
@@ -729,7 +729,7 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
           <div className="wb-grid-corner" style={{ top: scroll.top, left: scroll.left, width: HEAD_W, height: HEAD_H }} onMouseDown={() => setSel({ anchor: { r: 1, c: 1 }, focus: { r: Math.max(dataRows, 1), c: Math.max(dataCols, 1) } })} title="Выделить всё" />
 
           {editing && editorPos && (
-            <textarea
+            <textarea aria-label="Содержимое ячейки"
               ref={editorRef}
               className="wb-grid-editor"
               style={{ top: editorPos.top, left: editorPos.left, minWidth: editorPos.width, height: Math.max(ROW_H, (editing.value.split("\n").length) * 18 + 6) }}

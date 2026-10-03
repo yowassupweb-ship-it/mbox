@@ -188,7 +188,7 @@ body.wb-resizing * {
 .command-center kbd {
   padding: 1px 5px;
   border: 1px solid var(--wb-line);
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--text-main) 3%, transparent);
   /* --text-muted на подложке поиска — 4.3:1, ниже AA. */
   color: var(--text-2);
@@ -315,7 +315,9 @@ body.wb-resizing * {
   text-transform: uppercase;
 }
 
-.wb-view-actions { display: flex; gap: 2px; }
+.wb-view-head { gap: 8px; min-width: 0; }
+.wb-view-head > :first-child { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-view-actions { flex: none; display: flex; gap: 2px; }
 
 .wb-view-actions button,
 .wb-icon-btn {
@@ -493,7 +495,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   width: 8px;
   height: 8px;
   flex: none;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: var(--project-color, var(--state-off));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-main) 12%, transparent);
 }
@@ -605,7 +607,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-hit mark {
   padding: 0 1px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--state-warn) 26%, transparent);
   color: #ffe2a3;
 }
@@ -626,7 +628,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   width: 38px;
   height: 3px;
   margin-left: auto;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--text-main) 8%, transparent);
   overflow: hidden;
 }
@@ -890,7 +892,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-doc-crumbs { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.wb-shared-note-label { margin-left: 7px; color: var(--accent); font-weight: var(--weight-medium); }
+.wb-shared-note-label { margin-left: 7px; color: var(--accent-color); font-weight: var(--weight-medium); }
 
 .wb-doc-actions { display: flex; align-items: center; gap: 6px; }
 
@@ -938,7 +940,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-memory-body h4.level-1 { font-size: var(--text-xl); }
 .wb-memory-body h4.level-3,
 .wb-memory-body h4.level-4 { font-size: var(--text-md); color: var(--eyebrow); }
-.wb-memory-body code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); font-size: 0.92em; }
+.wb-memory-body code { padding: 1px 5px; border-radius: var(--radius-2xs); background: var(--code-bg); color: var(--code-text); font-size: 0.92em; }
 
 .wb-memory-body pre {
   margin: 0.5em 0;
@@ -987,7 +989,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-props dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 .wb-props dd button { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; text-align: left; }
 .wb-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.wb-tags span { padding: 1px 6px; border: 1px solid var(--wb-line); border-radius: 3px; }
+.wb-tags span { padding: 1px 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-2xs); }
 
 .wb-props-form { display: grid; gap: 8px; margin: 0 8px; font-size: var(--text-xs); color: var(--text-muted); }
 .wb-props-form label { display: grid; gap: 4px; }
@@ -1276,7 +1278,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-spec { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: var(--text-sm); }
 .wb-spec dt { color: var(--text-muted); }
 .wb-spec dd { margin: 0; color: var(--text-main); line-height: 1.55; overflow-wrap: anywhere; }
-.wb-spec code { padding: 1px 5px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
+.wb-spec code { padding: 1px 5px; border-radius: var(--radius-2xs); background: var(--code-bg); color: var(--code-text); }
 .wb-spec a,
 .wb-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-color); text-decoration: none; }
 .wb-links { display: flex; flex-wrap: wrap; gap: 14px; }
@@ -1288,7 +1290,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   margin-left: 4px;
   padding: 1px 6px;
   border: 1px solid var(--wb-line);
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   background: none;
   color: var(--text-muted);
   font: inherit;
@@ -1486,11 +1488,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-nav button:hover:not(:disabled) { background: var(--wb-hover); color: var(--text-main); }
 .wb-browser-nav button:disabled { opacity: 0.35; cursor: default; }
 
-.wb-browser-address { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--element-bg); color: var(--text-muted); }
+.wb-browser-address { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-muted); }
 .wb-browser-address:focus-within { border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
 .wb-browser-address svg, .wb-browser-address .wb-browser-favicon { flex: none; }
 .wb-browser-address input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
-.wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; }
+.wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: var(--radius-2xs); object-fit: contain; }
 
 .wb-browser-bookmarks { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
 .wb-browser-bookmarks > svg { flex: none; margin-right: 2px; opacity: .72; }
@@ -1500,7 +1502,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-bookmarks button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-browser-bookmarks button:hover, .wb-browser-bookmarks button:focus-visible { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
 .wb-browser-bookmarks button.is-drop-target { color: var(--text-main); background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
-.wb-browser-bookmarks button.is-drop-target::before { content: ""; position: absolute; left: 2px; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent-color); }
+.wb-browser-bookmarks button.is-drop-target::before { content: ""; position: absolute; left: 2px; top: 5px; bottom: 5px; width: 2px; border-radius: var(--radius-2xs); background: var(--accent-color); }
 .wb-browser-bookmarks button:focus-visible, .wb-browser-tools button:focus-visible, .wb-browser-tools select:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 /* Меню папки — плавающий список по координатам кнопки, а не полоса, раздвигающая страницу. */
 .wb-browser-tools-message { color: var(--text-2); font-size: var(--text-sm); }
@@ -1550,18 +1552,25 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-pdf-view iframe { width: 100%; height: 100%; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: #fff; }
 
 .wb-office-scroll { height: 100%; overflow: auto; padding: 32px 24px 64px; background: var(--surface-deep); }
-.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: #202124; background: #fff; box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: var(--text-md); line-height: 1.55; }
-.wb-docx-page h1, .wb-docx-page h2, .wb-docx-page h3 { color: #17191d; line-height: 1.2; }
+.wb-docx-page { box-sizing: border-box; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; padding: 72px 78px; color: var(--paper-ink); background: var(--paper-bg); box-shadow: var(--shadow-md); font-family: Calibri, Arial, sans-serif; font-size: var(--text-md); line-height: var(--leading-reading); overflow-wrap: anywhere; }
+.wb-docx-page h1, .wb-docx-page h2, .wb-docx-page h3 { color: var(--paper-heading); line-height: var(--leading-tight); font-weight: var(--weight-semibold); }
+.wb-docx-page h1 { font-size: var(--text-2xl); }
+.wb-docx-page h2 { font-size: var(--text-xl); }
+.wb-docx-page h3 { font-size: var(--text-lg); }
+.wb-docx-page a { color: var(--paper-link); text-underline-offset: 2px; }
+.wb-docx-page a:focus-visible { outline: 2px solid var(--paper-link); outline-offset: 2px; border-radius: var(--radius-xs); }
 .wb-docx-page img { max-width: 100%; height: auto; }
-.wb-docx-page table { width: 100%; border-collapse: collapse; }
-.wb-docx-page td, .wb-docx-page th { padding: 5px 7px; border: 1px solid #cfd3d8; vertical-align: top; }
+.wb-docx-page table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.wb-docx-page td, .wb-docx-page th { padding: 5px 7px; border: 1px solid var(--paper-rule); vertical-align: top; }
+.wb-docx-page th { background: var(--paper-head-bg); font-weight: var(--weight-semibold); text-align: left; }
 .wb-office-warnings { width: min(816px, 100%); margin: 14px auto 0; color: var(--text-muted); font-size: var(--text-sm); }
 
 .wb-sheet-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: 35px minmax(0, 1fr) 30px; background: var(--surface-1); }
 .wb-sheet-formula { display: grid; grid-template-columns: 68px minmax(160px, 1fr) auto; align-items: center; border-bottom: 1px solid var(--wb-line); background: var(--surface-2); }
-.wb-sheet-formula b { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--wb-line); color: var(--text-muted); font: 600 11px var(--font-mono); }
-.wb-sheet-formula input { min-width: 0; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--text-main); background: transparent; font: 12px var(--font-mono); }
-.wb-sheet-formula input:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+.wb-sheet-formula b { align-self: stretch; display: grid; place-items: center; border-right: 1px solid var(--wb-line); color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.wb-sheet-formula input { min-width: 0; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--text-main); background: transparent; font-family: var(--font-mono); font-size: var(--text-xs); }
+.wb-sheet-formula input:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.wb-sheet-formula input:disabled { color: var(--text-muted); cursor: default; }
 .wb-sheet-formula span { padding: 0 9px; color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-sheet-grid-wrap { overflow: auto; overscroll-behavior: contain; }
 .wb-sheet-grid { table-layout: fixed; min-width: max-content; border-collapse: separate; border-spacing: 0; color: var(--text-main); background: var(--surface-1); font-size: var(--text-sm); }
@@ -1571,11 +1580,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-sheet-grid .is-corner { left: 0; z-index: 3; width: 48px; min-width: 48px; }
 .wb-sheet-grid td { cursor: cell; }
 .wb-sheet-grid td:hover { background: var(--surface-hover); }
-.wb-sheet-grid td.is-selected { position: relative; overflow: visible; box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
+.wb-sheet-grid td.is-selected { position: relative; overflow: visible; box-shadow: inset 0 0 0 2px var(--accent-color); background: color-mix(in srgb, var(--accent-color) 8%, var(--surface-1)); }
 .wb-sheet-tabs { display: flex; align-items: stretch; gap: 1px; overflow-x: auto; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
 .wb-sheet-tabs button { min-width: 86px; padding: 0 14px; border: 0; border-right: 1px solid var(--wb-line); color: var(--text-muted); background: transparent; font-size: var(--text-xs); }
 .wb-sheet-tabs button:hover { color: var(--text-main); background: var(--surface-hover); }
-.wb-sheet-tabs button.is-active { color: var(--text-main); background: var(--surface-1); box-shadow: inset 0 2px 0 var(--accent); }
+.wb-sheet-tabs button.is-active { color: var(--text-main); background: var(--surface-1); box-shadow: inset 0 2px 0 var(--accent-color); }
 
 @media (max-width: 720px) {
   .wb-docx-page { min-height: 0; padding: 36px 28px; }
@@ -1823,12 +1832,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-git-letter { flex: none; width: 14px; text-align: center; font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .wb-git-letter.is-M { color: #e2c08d; }
 .wb-git-letter.is-A,
-.wb-git-letter.is-U { color: #73c991; }
+.wb-git-letter.is-U { color: var(--state-ok); }
 .wb-git-letter.is-D { color: #f48771; }
-.wb-git-letter.is-R { color: #8ab4ff; }
+.wb-git-letter.is-R { color: var(--accent-color); }
 .wb-tree-row.git-M .wb-tree-label { color: #e2c08d; }
 .wb-tree-row.git-A .wb-tree-label,
-.wb-tree-row.git-U .wb-tree-label { color: #73c991; }
+.wb-tree-row.git-U .wb-tree-label { color: var(--state-ok); }
 .wb-doc-crumbs .wb-git-letter { margin-left: 8px; }
 .wb-dirty-mark { color: var(--text-2); }
 
@@ -1920,10 +1929,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Правленая строка: текст показан один раз, фон нейтральный — красят только изменившиеся слова.
    Удалённое ещё и зачёркнуто: по одному цвету отличить убранное от дописанного нельзя. */
 .wb-diff-line.is-edit { background: rgba(138, 180, 255, 0.06); }
-.wb-diff-word { padding: 0 1px; border-radius: 2px; background: none; color: inherit; }
+.wb-diff-word { padding: 0 1px; border-radius: var(--radius-2xs); background: none; color: inherit; }
 .wb-diff-word.is-add { background: rgba(115, 201, 145, 0.32); color: #d6f5e2; }
 .wb-diff-word.is-del { background: rgba(244, 135, 113, 0.28); color: #ffd0c6; text-decoration: line-through; }
-.wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: #8ab4ff; }
+.wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: var(--accent-color); }
 .wb-diff-line.is-meta { color: var(--text-muted); }
 .wb-diff-gap { padding: 2px 16px; color: var(--text-muted); font-size: var(--text-xs); background: color-mix(in srgb, var(--text-main) 2%, transparent); }
 .wb-commit-meta { margin: 0; padding: 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); color: var(--text-main); font-size: var(--text-sm); white-space: pre-wrap; }
@@ -1938,10 +1947,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-version-list button.is-active { background: var(--wb-selected); border-left-color: var(--accent-color); }
 .wb-version-list b { overflow: hidden; color: var(--text-main); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
 .wb-version-list em { color: var(--text-muted); font-style: normal; }
-.wb-version-source { justify-self: start; padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--text-main) 6%, transparent); color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-version-source { justify-self: start; padding: 0 5px; border-radius: var(--radius-2xs); background: color-mix(in srgb, var(--text-main) 6%, transparent); color: var(--text-muted); font-size: var(--text-2xs); }
 .wb-version-source.is-agent { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--accent-color); }
 .wb-version-source.is-disk { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
-.wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: #8ab4ff; }
+.wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: var(--accent-color); }
 /* Правка заметки человеком снаружи MBOX — отдельный цвет: по списку версий должно быть сразу видно,
    что текст поменял не владелец, а тот, кому дали ссылку. */
 .wb-version-source.is-share { background: color-mix(in srgb, var(--note-purple, #b18cff) 20%, transparent); color: var(--note-purple, #b18cff); }
@@ -2067,7 +2076,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-meta-strip > span + span::before { content: "·"; margin: 0 7px; color: rgba(238, 244, 241, 0.22); }
 .wb-meta-link { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; cursor: pointer; }
 .wb-meta-link:hover { text-decoration: underline; }
-.wb-meta-tag { padding: 0 5px; border: 1px solid var(--wb-line); border-radius: 3px; }
+.wb-meta-tag { padding: 0 5px; border: 1px solid var(--wb-line); border-radius: var(--radius-2xs); }
 
 .wb-memory-body { max-width: none; font-size: var(--wb-fs-reading); font-weight: var(--weight-text); line-height: 1.7; }
 .wb-memory-body h4 { font-weight: var(--weight-semibold); }
@@ -2438,13 +2447,20 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-storage.is-compact .wb-storage-list td { display: table-cell; padding: var(--space-1) var(--space-2); }
 .wb-storage.is-compact .wb-storage-name { width: 100%; max-width: none; min-height: var(--space-7); }
 
-.wb-browser-tab-item { width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.wb-browser-tab-item { position: relative; width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: default; transition: background-color var(--duration-fast) var(--ease-standard); }
 .wb-browser-tab-item:hover { background: var(--wb-hover); color: var(--text-main); }
-.wb-browser-tab-item.is-active { background: var(--wb-selected); color: var(--text-main); }
-.wb-browser-tab-copy { min-width: 0; display: grid; gap: var(--space-1); }
+.wb-browser-tab-item.is-active { background: var(--accent-fill); color: var(--on-accent); }
+.wb-browser-tab-item:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-browser-tab-tile { flex: 0 0 auto; width: var(--space-7); height: var(--space-7); display: grid; place-items: center; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-main) 8%, transparent); }
+.wb-browser-tab-item.is-active .wb-browser-tab-tile { background: color-mix(in srgb, var(--on-accent) 22%, transparent); }
+.wb-browser-tab-copy { min-width: 0; flex: 1; display: grid; gap: 0; }
 .wb-browser-tab-copy b, .wb-browser-tab-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-browser-tab-copy b { font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .wb-browser-tab-copy small { color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-browser-tab-item.is-active .wb-browser-tab-copy small { color: color-mix(in srgb, var(--on-accent) 75%, transparent); }
+.wb-browser-tab-close { flex: 0 0 auto; width: var(--space-5); height: var(--space-5); display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard); }
+.wb-browser-tab-item:hover .wb-browser-tab-close, .wb-browser-tab-item:focus-within .wb-browser-tab-close { opacity: 1; }
+.wb-browser-tab-close:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
 .wb-browser-tab-favicon { width: var(--space-4); height: var(--space-4); margin-left: auto; object-fit: contain; }
 .wb-univer-sheet { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--container-bg); color: var(--text-main); }
 :is(.wb-univer-sheet, .wb-univer-doc) [data-u-comp="ribbon-header-menu"] { display: flex !important; align-items: center !important; justify-content: center !important; min-height: 46px !important; padding: var(--space-2) var(--space-3) !important; border-bottom: 1px solid var(--wb-line) !important; background: var(--surface-chrome) !important; }
@@ -2483,7 +2499,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-howto { margin-top: 8px; padding: 14px 18px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); }
 .wb-howto h3 { margin: 0 0 8px; font-size: var(--text-sm); }
 .wb-howto ol { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--text-2); font-size: var(--text-sm); line-height: 1.6; }
-.wb-howto code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); color: var(--code-text); }
+.wb-howto code { padding: 0 4px; border-radius: var(--radius-2xs); background: var(--code-bg); color: var(--code-text); }
 .wb-howto i { color: var(--text-main); font-style: normal; }
 
 /* ─── Доска задач и задача ──────────────────────────── */
@@ -3152,7 +3168,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
-.wb-image-swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--wb-line); border-radius: 2px; vertical-align: -2px; }
+.wb-image-swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--wb-line); border-radius: var(--radius-2xs); vertical-align: -2px; }
 .wb-image-swatch.is-checker { background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0; }
 .wb-image-swatch.is-dark { background: #0b0c0e; }
 .wb-image-swatch.is-light { background: #f4f5f2; }
@@ -3599,12 +3615,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   font: inherit;
   font-size: var(--text-sm);
   line-height: 18px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-pop);
 }
 
 .wb-sheet-footer { display: flex; align-items: stretch; min-width: 0; border-top: 1px solid var(--wb-line); background: var(--surface-2); }
 .wb-sheet-footer .wb-sheet-tabs { flex: 1 1 auto; min-width: 0; border-top: 0; }
-.wb-sheet-add { min-width: 32px !important; padding: 0 !important; display: inline-grid; place-items: center; }
+.wb-sheet-tabs button.wb-sheet-add { min-width: 32px; padding: 0; display: inline-grid; place-items: center; }
 .wb-sheet-rename { width: 120px; margin: 3px; padding: 0 6px; border: 1px solid var(--accent-color); border-radius: var(--radius-xs); background: var(--surface-1); color: var(--text-main); font: inherit; font-size: var(--text-xs); }
 .wb-sheet-stats { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--text-2); font-size: var(--text-xs); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wb-sheet-filter { display: grid; gap: 6px; padding: 6px; min-width: 230px; }
@@ -3614,6 +3630,32 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-sheet-filter > div button { height: 26px; padding: 0 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-xs); background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .wb-sheet-filter > div button:first-child { border-color: var(--accent-color); color: var(--accent-color); }
 @media (max-width: 640px) { .wb-sheet-stats { display: none; } }
+
+/* Состояния редактора таблиц: hover, focus-visible, active, disabled у каждого интерактивного элемента */
+.wb-sheet-toolbar > button:active:not(:disabled) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-toolbar > button.is-on:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-color) 22%, transparent); }
+.wb-sheet-tabs button { cursor: pointer; transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.wb-sheet-tabs button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-sheet-tabs button:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-tabs button:disabled { opacity: 0.4; cursor: default; }
+.wb-sheet-find input:hover { border-color: var(--text-muted); }
+.wb-sheet-find input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; border-color: var(--accent-color); }
+.wb-sheet-find button:hover { background: var(--surface-hover); color: var(--text-main); }
+.wb-sheet-find button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-sheet-find button:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-rename:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-sheet-filter input:hover { border-color: var(--text-muted); }
+.wb-sheet-filter input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; border-color: var(--accent-color); }
+.wb-sheet-filter > div button { transition: background var(--duration-fast) var(--ease-out); }
+.wb-sheet-filter > div button:hover:not(:disabled) { background: var(--surface-hover); }
+.wb-sheet-filter > div button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-sheet-filter > div button:active:not(:disabled) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.wb-sheet-filter > div button:disabled { opacity: 0.4; cursor: default; }
+.wb-grid:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-color); }
+.wb-grid-resize:active { background: var(--accent-color); }
+@media (prefers-reduced-motion: reduce) {
+  .wb-sheet-tabs button, .wb-sheet-filter > div button { transition: none; }
+}
 
 /* ─── Тулбар заметки ───────────────────────────────────
    Слева — состояние (когда изменена, сохранилась ли), справа — три группы по частоте: режим,
@@ -3647,9 +3689,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   font-size: var(--text-xs);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  font-weight: var(--weight-medium);
 }
 .wb-note-mode button:hover { color: var(--text-main); }
-.wb-note-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
+.wb-note-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
 .wb-note-mode button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 
 /* Всплывающая кнопка macOS: подпись и шеврон без рамки, рамка — только под курсором. Сам select прозрачен поверх. */
@@ -4021,3 +4064,145 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-chat-kind .agent-avatar::after { display: none; }
 .wb-chat-kind { height: 28px; gap: 5px; }
 .wb-chat-kind-dot { width: 7px; height: 7px; }
+
+/* ─── Хранилище S3 деревом (StorageView.tsx) ─── */
+.wb-tree-more { list-style: none; padding: 2px 0 4px calc(8px + var(--depth, 0) * 14px + 20px); }
+.wb-tree-more button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--accent-color);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.wb-tree-more button:hover { background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+.wb-tree-more button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-tree-more button:active { background: color-mix(in srgb, var(--accent-color) 22%, transparent); }
+.wb-view .wb-uploads { padding: 6px 12px; }
+.wb-view .wb-upload { flex-direction: column; gap: 2px; }
+.wb-view .wb-upload span, .wb-view .wb-upload em { position: relative; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-view .wb-view-actions button:disabled { opacity: 0.35; cursor: default; }
+
+/* Панель форматирования в шапке документа занимает место всегда: в просмотре она только невидима. */
+.wb-md-bay { display: flex; flex: 1 1 0; min-width: 28px; justify-content: flex-end; }
+.wb-md-bay[data-active="false"] { visibility: hidden; }
+.wb-md-bay > .wb-md-toolbar { flex: 1 1 auto; }
+
+/* ─── Переключатель «Таблицы | Документы» и редактор документов ─── */
+.wb-mode-switch { display: inline-flex; min-width: 0; padding: 2px; border-radius: var(--radius-pill); background: var(--surface-hover); text-transform: none; letter-spacing: 0; }
+.wb-mode-switch button {
+  height: 24px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.wb-mode-switch button > svg { flex: none; }
+.wb-mode-switch button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-mode-switch button:hover:not(.is-on) { background: var(--surface-hover); color: var(--text-main); }
+.wb-mode-switch button.is-on { background: var(--bg-raised); color: var(--text-main); box-shadow: var(--shadow-sm); }
+.wb-mode-switch button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-mode-switch button:active:not(.is-on) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+@media (prefers-reduced-motion: reduce) { .wb-mode-switch button { transition: none; } }
+.wb-table-snippet { display: -webkit-box; margin-top: 2px; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-normal); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.wb-univer-doc.is-editor { height: 100%; min-height: 0; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] { display: flex !important; align-items: center !important; justify-content: center !important; min-height: 46px !important; padding: var(--space-2) var(--space-3) !important; border-bottom: 1px solid var(--wb-line) !important; background: var(--surface-chrome) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tablist"] { display: inline-flex !important; flex: 0 0 auto !important; align-items: center !important; justify-content: flex-start !important; width: auto !important; height: auto !important; gap: 2px !important; padding: 3px !important; border: 1px solid var(--wb-line) !important; border-radius: var(--radius-pill) !important; background: var(--bg-sunken) !important; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-main) 5%, transparent) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"] { min-height: 30px !important; padding: 0 var(--space-3) !important; border: 0 !important; border-radius: var(--radius-pill) !important; background: transparent !important; box-shadow: none !important; color: var(--text-muted) !important; font-family: var(--font-sans) !important; font-size: var(--text-sm) !important; font-weight: var(--weight-medium) !important; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"]:hover { background: var(--surface-hover) !important; color: var(--text-main) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"][aria-selected="true"] { background: var(--surface-panel) !important; box-shadow: 0 1px 2px color-mix(in srgb, #000 28%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--text-main) 8%, transparent) !important; color: var(--text-main) !important; font-weight: var(--weight-semibold) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"]:focus-visible { outline: 2px solid var(--accent-color) !important; outline-offset: 2px; }
+.wb-univer-mount { width: 100%; height: 100%; min-height: 0; }
+
+/* ─── Присутствие: аватарки коллег и подсветка их позиции ─── */
+.wb-presence { display: inline-flex; flex: none; align-items: center; padding-left: 4px; }
+.wb-presence-dot {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  margin-left: -6px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--peer, var(--accent-fill));
+  box-shadow: 0 0 0 2px var(--bg-color);
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  user-select: none;
+}
+.wb-presence-dot:first-child { margin-left: 0; }
+.wb-presence-dot img { width: 100%; height: 100%; object-fit: cover; background: var(--surface-panel); }
+.wb-presence-dot.is-agent { box-shadow: 0 0 0 2px var(--peer, var(--accent-fill)); }
+.wb-presence-dot.is-writing { animation: wb-presence-pulse 1.4s var(--ease-out) infinite; }
+.wb-presence-dot.is-more { background: var(--surface-hover); color: var(--text-2); box-shadow: 0 0 0 2px var(--bg-color), inset 0 0 0 1px var(--border-color); }
+.wb-presence-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@keyframes wb-presence-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--peer, var(--accent-fill)) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .wb-presence-dot.is-writing { animation: none; } }
+.wb-univer-wrap { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.wb-univer-wrap > .wb-univer-sheet { height: 100%; }
+.wb-presence-layer { position: absolute; z-index: 30; overflow: hidden; pointer-events: none; }
+.wb-cell-mark {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--peer, var(--accent-color));
+  background: color-mix(in srgb, var(--peer, var(--accent-color)) 14%, transparent);
+  transition: left var(--duration-base) var(--ease-out), top var(--duration-base) var(--ease-out), width var(--duration-base) var(--ease-out), height var(--duration-base) var(--ease-out);
+}
+.wb-cell-mark > b {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  max-width: 160px;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs) var(--radius-xs) var(--radius-xs) 0;
+  background: var(--peer, var(--accent-color));
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-cell-mark.is-agent { animation: wb-presence-flash 1.2s var(--ease-out) infinite; }
+@keyframes wb-presence-flash { 50% { background: color-mix(in srgb, var(--peer, var(--accent-color)) 30%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .wb-cell-mark { transition: none; } .wb-cell-mark.is-agent { animation: none; } }
+
+/* Курсоры коллег в тексте заметки (RemoteCarets.tsx) */
+.wb-carets { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.wb-carets-inner { position: absolute; left: 0; top: 0; }
+.wb-rcaret-selection { position: absolute; background: color-mix(in srgb, var(--peer, var(--accent-color)) 26%, transparent); border-radius: var(--radius-2xs); }
+.wb-rcaret { position: absolute; width: 2px; background: var(--peer, var(--accent-color)); transition: left var(--duration-fast) var(--ease-out), top var(--duration-fast) var(--ease-out); }
+.wb-rcaret > b {
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  padding: 0 6px;
+  border-radius: var(--radius-xs) var(--radius-xs) var(--radius-xs) 0;
+  background: var(--peer, var(--accent-color));
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.wb-rcaret.is-below > b { top: 100%; bottom: auto; border-radius: 0 var(--radius-xs) var(--radius-xs) var(--radius-xs); }
+@media (prefers-reduced-motion: reduce) { .wb-rcaret { transition: none; } }
+.wb-browser-tabs-view .wb-view-body { display: grid; align-content: start; gap: 2px; padding: var(--space-1) var(--space-2) var(--space-3); }

@@ -18,7 +18,9 @@ import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
-import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
+import { ensureDocumentsSchema, handleDocumentsApi } from "./documents.mjs";
+import { handleSpotlightApi } from "./spotlight.mjs";
+import { createPresenceHub } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
@@ -132,6 +134,8 @@ function sendJson(res, status, body) {
 const memberRedactedFields = ["detail", "notification", "step", "title", "text"];
 
 function broadcastRealtime(type, payload = {}) {
+  // Правка агента в документе уходит только тем, кто его сейчас смотрит, а не всем окнам.
+  if (type === "presence_agent") { presenceHub.announce(payload); return; }
   const full = { type, ...payload, at: new Date().toISOString() };
   const message = JSON.stringify(full);
   let redacted = null;
@@ -1159,6 +1163,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/notes"
     || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/documents"
+    || pathname === "/api/mbox/spotlight"
     || pathname === "/api/mbox/invites"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
@@ -1172,8 +1177,9 @@ function memberRouteAllowed(pathname) {
     || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
     || pathname === "/api/mbox/notes/import-docx"
     || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?|docx|import-docx))?$/.test(pathname)
-    || /^\/api\/mbox\/tables\/\d+(?:\/shares(?:\/(?:view|edit))?)?$/.test(pathname)
-    || /^\/api\/mbox\/documents\/\d+(?:\/shares(?:\/(?:view|edit))?)?$/.test(pathname)
+    || /^\/api\/mbox\/tables\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|cells|rows))?$/.test(pathname)
+    || pathname === "/api/mbox/documents/import-docx"
+    || /^\/api\/mbox\/documents\/\d+(?:\/docx)?$/.test(pathname)
     || /^\/api\/mbox\/agent\/inbox\/\d+(?:\/(?:phase|cancel|answer))?$/.test(pathname)
     || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
@@ -1285,6 +1291,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handleSpotlightApi({ req, res, url, query, sendJson, scope: { ...scope, userId: String(user.id) }, searchTerms })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
     if (await handleStorageApi({
@@ -3349,8 +3356,7 @@ const httpServer = http.createServer(async (req, res) => {
         },
         broadcast: (payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }),
       });
-      const sharedTable = !handled && await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) });
-      if (!handled && !sharedTable && !(await handleSharedDocumentApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
+      if (!handled && !(await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
       return;
     }
     return serveStatic(req, res, url);
@@ -3361,8 +3367,11 @@ const httpServer = http.createServer(async (req, res) => {
 
 const realtimeServer = new WebSocketServer({ noServer: true });
 
+const presenceHub = createPresenceHub({ query, scopeFor: projectScope });
+
 realtimeServer.on("connection", (socket) => {
   realtimeClients.add(socket);
+  presenceHub.attach(socket);
   socket.send(JSON.stringify({ type: "connected", at: new Date().toISOString() }));
   socket.on("close", () => realtimeClients.delete(socket));
 });

@@ -163,6 +163,15 @@ const GAP_WIDTH = 9;
  * Панель помещается в шапку любой ширины: кнопки, которым не хватило места, уходят в «⋯». Раньше шапка
  * переполнялась и выталкивала кнопки документа (проект, режим, закрепить) за край окна.
  */
+/** Панель форматирования держит своё место в шапке и в просмотре: появление и исчезновение двигало соседние значки. */
+export function MarkdownToolbarBay({ active, ...props }: { active: boolean; targetRef: RefObject<HTMLTextAreaElement | null>; onPickImages?: (files: File[]) => void; uploading?: number }) {
+  return (
+    <div className="wb-md-bay" inert={!active} aria-hidden={!active} data-active={active}>
+      <MarkdownToolbar {...props} />
+    </div>
+  );
+}
+
 export function MarkdownToolbar({ targetRef, onPickImages, uploading = 0 }: { targetRef: RefObject<HTMLTextAreaElement | null>; onPickImages?: (files: File[]) => void; uploading?: number }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
