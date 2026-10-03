@@ -182,6 +182,14 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    режим «процесс на сообщение». В чате действие агента — одна строка `ChainLine` (статус → итог), цепочка шагов раскрывается;
    статус появляется сразу при отправке, до ответа сервера (временный id `pending:`).
 
+25. **Установка наблюдателей на чужом ПК и отключение агентов.** `scripts/mbox-agent.mjs` — один файл (только Node 20+):
+   `install --url --user --token` скачивает набор (`GET /api/mbox/agent-kit`, `server/accounts.mjs`, белый список файлов `scripts/`),
+   ставит MCP-зависимости, настраивает автозапуск (Windows — Startup `.vbs`, macOS — LaunchAgent, Linux — systemd --user) и держит
+   наблюдателей под аккаунтом (`run`; `status|enable|disable|update|uninstall`). Агент выключен, если он выключен в `config.json` или в
+   настройках MBOX: `users.agent_prefs` (`GET/PUT /api/mbox/account/agents`, «Настройки → Команда → Агенты на этом компьютере»); служба
+   опрашивает это раз в 10 с. Интерфейс (`src/lib/agentPrefs.ts`) прячет выключенного агента из чата, а MBOX Desktop (`mbox-desktop/main.js`,
+   `agents-config.json`) останавливает его и не поднимает при старте. `Dockerfile.mbox` копирует `scripts/` — без этого набор не отдастся.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

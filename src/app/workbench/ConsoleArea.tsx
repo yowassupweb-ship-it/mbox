@@ -1,10 +1,11 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, MessagesSquare, PanelTop, Play, RotateCcw, Square, SquareTerminal, Trash2 } from "lucide-react";
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { CHAT, CHAT_PEERS, chatPeer, consoleLayout, isChatPane, useConsoleLayout } from "./consoleLayout";
 import { onSessionReveal, sshStatus, useDesktopSessions, useNow, type Session } from "./desktopSessions";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { ChatHeadSlot } from "./chatHeadSlot";
+import { agentPrefsLoaded, useAgentPrefs } from "../../lib/agentPrefs";
 // xterm — треть всего бандла (~325 КБ), а нужен только в SSH-панели приложения: грузим по требованию.
 const TerminalView = lazy(() => import("./TerminalView").then((module) => ({ default: module.TerminalView })));
 
@@ -77,8 +78,14 @@ export function ConsoleArea({ renderChat, agentGoals = {}, agentsOnline = {}, ta
   const desktop = useDesktopSessions();
   const [peer, setPeer] = usePersistentState("mbox.console.peer", "");
   const [debugOpen, setDebugOpen] = usePersistentState<Record<string, boolean>>("mbox.console.debug", {});
-  // Claude и ChatGPT работают на компьютере владельца и отвечают только ему — участнику остаётся общий чат.
-  const kinds = CHAT_KINDS;
+  // Выключенный в настройках агент (нет подписки) не показывается в чате и не запускается в Desktop.
+  const prefs = useAgentPrefs();
+  const kinds = useMemo(() => CHAT_KINDS.filter((item) => !item.peer || prefs[item.peer === "ChatGPT" ? "codex" : "claude"].enabled), [prefs]);
+  useEffect(() => {
+    if (!desktop.supported || !agentPrefsLoaded()) return;
+    void desktop.setAgentEnabled("Claude", prefs.claude.enabled);
+    void desktop.setAgentEnabled("ChatGPT", prefs.codex.enabled);
+  }, [prefs]); // eslint-disable-line react-hooks/exhaustive-deps
   const kind = kinds.find((item) => item.peer === peer) ?? kinds[0];
   // Каждый чат держит свой черновик, прокрутку и ожидание ответа — не размонтируем его при переключении.
   const [visited, setVisited] = useState<string[]>(() => [kind.peer]);

@@ -42,6 +42,7 @@ type Bridge = {
   start: (name: string) => Promise<AgentProcess[]>;
   stop: (name: string) => Promise<AgentProcess[]>;
   restartAgent?: (name: string) => Promise<AgentProcess[]>;
+  setAgentEnabled?: (name: string, enabled: boolean) => Promise<AgentProcess[]>;
   startSsh?: (target: string, cols?: number, rows?: number, options?: { direct?: boolean }) => Promise<{ ok: boolean; id?: string; pid?: number; target?: string }>;
   resizeSession?: (id: string, cols: number, rows: number) => Promise<unknown>;
   sessions?: () => Promise<Array<Session & { buffer?: string }>>;
@@ -195,6 +196,7 @@ export function useDesktopSessions() {
     startAgent: async (name: "ChatGPT" | "Codex" | "Claude" | "All") => { await bridge()?.start(name === "ChatGPT" ? "Codex" : name); void refreshAgents(); },
     stopAgent: async (name: string) => { await bridge()?.stop(name); void refreshAgents(); },
     restartAgent: async (name: string) => { await bridge()?.restartAgent?.(name); void refreshAgents(); },
+    setAgentEnabled: async (name: "Claude" | "ChatGPT", enabled: boolean) => { await bridge()?.setAgentEnabled?.(name === "ChatGPT" ? "Codex" : name, enabled); void refreshAgents(); },
     startSsh: async (target: string, options: { direct?: boolean } = {}) => {
       const api = bridge();
       if (!api?.startSsh) throw new Error("Эта версия MBOX Desktop не умеет SSH — обнови приложение.");
