@@ -24,6 +24,10 @@ services:
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-@cf/meta/llama-3.1-8b-instruct}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      # Установщики обновляются отдельно от Docker-образа: образ не должен содержать ~100 МБ .exe,
+      # а HTTP-серверу нужен доступ к ним для autoUpdater.
+      - ./public/downloads:/app/public/downloads:ro
     networks:
       - mbox-net
 
