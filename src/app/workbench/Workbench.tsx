@@ -31,7 +31,9 @@ import { FileDocument, FilesView } from "./Files";
 import { recentlyActiveAgent, useDesktopSessions } from "./desktopSessions";
 import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
-import { TableDocument, TablesView } from "./TablesView";
+import { DocumentDocument } from "./DocumentsView";
+import { OfficeLibraryView } from "./OfficeLibraryView";
+import { TableDocument } from "./TablesView";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
@@ -716,6 +718,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       }
       case "note":
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
+      case "document":
+        return <DocumentDocument documentId={first} />;
       case "table":
         return <TableDocument tableId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
@@ -900,7 +904,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
         {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
-        {activity === "tables" && <TablesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
+        {activity === "tables" && <OfficeLibraryView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
         {activity === "browser" && <BrowserTabsView tabs={tabs} urls={browserUrls} titles={titles} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}

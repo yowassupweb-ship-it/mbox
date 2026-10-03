@@ -13,6 +13,8 @@ const isDev = !app.isPackaged;
 const repoRoot = resolveRepoRoot();
 const packagedScriptRoot = path.join(process.resourcesPath || "", "scripts");
 const mboxUrl = (process.env.MBOX_URL || "https://mbox.shar-os.ru").replace(/\/+$/, "");
+// В HMR-режиме заголовок — явный индикатор, что открыто именно локальное окно, а не установленная версия.
+const isLocalDevWindow = isDev && /^https?:\/\/(127\.0\.0\.1|localhost)(?::\d+)?$/i.test(mboxUrl);
 const responderEnv = loadResponderEnv();
 const updateFeedUrl = `${mboxUrl}/downloads/`;
 const iconPath = path.join(__dirname, "resources", "mbox.png");
@@ -222,7 +224,7 @@ function createWindow() {
     ...(Number.isFinite(saved.x) ? { x: saved.x, y: saved.y } : {}),
     minWidth: 980,
     minHeight: 640,
-    title: "MBOX Desktop",
+    title: isLocalDevWindow ? "MBOX Dev · localhost" : "MBOX Desktop",
     icon: iconPath,
     // Не autoHideMenuBar: с ним Alt (в том числе Alt+Shift при смене раскладки) показывал меню окна —
     // окно дёргалось, фокус уходил в меню и курсор пропадал из заметки. Меню скрыто насовсем ниже,
@@ -262,6 +264,13 @@ function createWindow() {
   if (saved.maximized) mainWindow.maximize();
   for (const event of ["resize", "move", "maximize", "unmaximize"]) mainWindow.on(event, saveWindowState);
   mainWindow.webContents.on("did-finish-load", () => mainWindow?.webContents.setZoomFactor(saved.zoom || 1));
+  if (isLocalDevWindow) {
+    mainWindow.on("page-title-updated", (event) => {
+      // React меняет document.title на имя активной вкладки. Не даём ему скрыть dev-индикатор.
+      event.preventDefault();
+      mainWindow?.setTitle("MBOX Dev · localhost:5173");
+    });
+  }
   // Ctrl+колесо меняет масштаб мимо меню — ловим и сохраняем тоже.
   mainWindow.webContents.on("zoom-changed", (_event, direction) => setZoom(direction === "in" ? ZOOM_STEP : -ZOOM_STEP));
   mainWindow.webContents.setUserAgent(`${mainWindow.webContents.getUserAgent()} MBOXDesktop/${app.getVersion()}`);

@@ -68,7 +68,7 @@
   box-shadow: var(--float);
   color: var(--text-main);
 }
-.wb-browser-folder-menu { position: absolute; width: 320px; max-height: min(460px, calc(100dvh - 120px)); }
+.wb-browser-folder-menu { position: fixed; z-index: 1001; width: 320px; max-height: min(460px, calc(100dvh - 120px)); }
 .wb-browser { position: relative; }
 .wb-browser .wb-bookmark-scrim { position: absolute; inset: 0; z-index: 40; }
 .wb-browser-manager,

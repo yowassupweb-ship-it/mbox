@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Check, ChevronDown, Copy, Download, FolderClosed, Globe2, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, Save, Share2, Table2, Trash2, Upload, Users, X } from "lucide-react";
 import type { Workbook } from "exceljs";
 import type { MboxData } from "../../hooks/useMboxData";
@@ -104,7 +104,7 @@ export async function createTableAndOpen(tabs: TabsApi, projectId: string | null
   tabs.open(`table:${table.id}`, true);
 }
 
-export function TablesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
+export function TablesView({ tabs, defaultProjectId = null, onOpen, switcher }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void; switcher?: ReactNode }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(tablesStore.query);
   const [importing, setImporting] = useState(false);
@@ -186,8 +186,9 @@ export function TablesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Ta
 
   return (
     <div className="wb-view wb-tables-view">
-      <header className="wb-view-head">
-        <span className="wb-tables-heading"><Table2 size={14} aria-hidden="true" /> Таблицы</span>
+      <header className={switcher ? "wb-view-head wb-office-toolbar" : "wb-view-head"}>
+        {switcher ? <span aria-hidden="true" /> : <span className="wb-tables-heading"><Table2 size={14} aria-hidden="true" /> Таблицы</span>}
+        {switcher}
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importRef.current?.click()} title={canCreate ? "Импорт Excel (.xlsx)" : "Нет доступных проектов для таблиц"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createTableAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая таблица" : "Нет доступных проектов для таблиц"}><Plus size={14} /></button>

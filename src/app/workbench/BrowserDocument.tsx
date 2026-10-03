@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, ArrowRight, Bookmark, Download, Eraser, ExternalLink, Folder, Globe, History, KeyRound, MoreHorizontal, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
 import type { TabsApi } from "./tabs";
 import { FolderIcon } from "./FileTypeIcon";
@@ -221,7 +222,6 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
   const bridge = browserBridge();
   const url = browserTabUrl(tabKey);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<BrowserState | null>(null);
   const [address, setAddress] = useState(url);
   const [editing, setEditing] = useState(false);
@@ -468,11 +468,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     setToolsOpen(false);
     setHistoryOpen(false);
     setFolderOpen(null);
-    // Меню стоит внутри области браузера (у рабочего места contain: layout — fixed там считается от области,
-    // а не от окна), поэтому координаты кнопки переводим в координаты области.
     const point = pointerPoint(x, y, { width: 320, height: Math.min(window.innerHeight * 0.6, 440) });
-    const root = rootRef.current?.getBoundingClientRect();
-    setFolderOpen({ name, x: point.x - (root?.left ?? 0), y: point.y - (root?.top ?? 0) });
+    setFolderOpen({ name, x: point.x, y: point.y });
   }
 
   async function toggleBookmark() {
@@ -547,7 +544,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     : bookmarks;
 
   return (
-    <div className="wb-browser" ref={rootRef}>
+    <div className="wb-browser">
       <div className="wb-doc-bar wb-browser-bar">
         <div className="wb-browser-nav">
           <button type="button" disabled={!state?.canGoBack} onClick={() => void bridge.act(tabKey, "back")} title="Назад" aria-label="Назад"><ArrowLeft size={16} /></button>
@@ -682,12 +679,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
       </div>
 
       {/* Плавающие окна: подложка ловит клик мимо и закрывает их. */}
-      {(folderOpen || bookmarksOpen || historyOpen || toolsOpen) && (
+      {(bookmarksOpen || historyOpen || toolsOpen) && (
         <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
-      {folderOpen && (
-        <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
+      {folderOpen && createPortal(
+        <>
+          <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
+          <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
           <div className="wb-browser-pop-head"><FolderIcon size={16} open /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
           <div className="wb-browser-pop-list">
             {folderRows.map((row) => {
@@ -724,7 +723,9 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
             })}
             {!folderItems.length && <div className="wb-browser-pop-empty">Папка пуста</div>}
           </div>
-        </div>
+          </div>
+        </>,
+        document.body,
       )}
 
       {bookmarksOpen && (

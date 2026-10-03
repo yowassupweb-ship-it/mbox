@@ -13,6 +13,7 @@ import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./server/tables.mjs";
+import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./server/documents.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
@@ -936,6 +937,7 @@ function mboxDevApi() {
       ensureWorkspaceSchema(queryPostgres).catch((error: Error) => console.error(`workspace schema: ${error.message}`));
       ensureNotesSchema(queryPostgres).catch((error: Error) => console.error(`notes schema: ${error.message}`));
       ensureTablesSchema(queryPostgres).catch((error: Error) => console.error(`tables schema: ${error.message}`));
+      ensureDocumentsSchema(queryPostgres).catch((error: Error) => console.error(`documents schema: ${error.message}`));
       ensureChatThreadsSchema(queryPostgres).catch((error: Error) => console.error(`chat threads schema: ${error.message}`));
       ensureBrowserStateSchema(queryPostgres).catch((error: Error) => console.error(`browser state schema: ${error.message}`));
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
@@ -1012,7 +1014,8 @@ function mboxDevApi() {
               },
               broadcast: (payload) => broadcastRealtime(realtimeClients, "entity_changed", { ...payload, actor: "по ссылке" }),
             });
-            if (!handled && !(await handleSharedTableApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) }))) sendJson(res, 404, { error: "not_found" });
+            const sharedTable = !handled && await handleSharedTableApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) });
+            if (!handled && !sharedTable && !(await handleSharedDocumentApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) }))) sendJson(res, 404, { error: "not_found" });
           } catch (error) {
             sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
           }
@@ -1074,6 +1077,7 @@ function mboxDevApi() {
           const devActor = actor || await resolveRequestActor(req);
           if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: true, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleTablesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (url.pathname.startsWith("/api/mbox/storage")) {
             // Зеркало прод-логики: папки хранилища по проектам, участнику — только свои (см. storageAccessFor на проде).
             const projects = (await queryPostgres<{ id: string; name: string }>(

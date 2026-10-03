@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { CellValue, Workbook as ExcelWorkbook } from "exceljs";
+import type { Cell, CellValue, Workbook as ExcelWorkbook } from "exceljs";
 import { createUniver, LocaleType, mergeLocales, type ICellData, type IWorkbookData } from "@univerjs/presets";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import UniverPresetSheetsCoreRuRU from "@univerjs/preset-sheets-core/locales/ru-RU";
 import { defaultTheme, type Theme } from "@univerjs/themes";
+import { cellFillHex } from "./officeFormat";
 import "@univerjs/preset-sheets-core/lib/index.css";
 
 type Props = {
@@ -14,6 +15,12 @@ type Props = {
   visible: boolean;
   readOnly?: boolean;
 };
+
+function appTheme() {
+  return document.querySelector<HTMLElement>(".app[data-theme]")?.dataset.theme
+    || document.documentElement.dataset.theme
+    || "graphite";
+}
 
 /** Univer создаёт собственный canvas, поэтому одних CSS-токенов MBOX ему недостаточно. */
 function mboxSheetTheme(theme: string): Theme {
@@ -71,8 +78,26 @@ function valueToCell(value: CellValue): ICellData | null {
   return { v: String(value) };
 }
 
+function fillStyleId(cell: Cell, styles: IWorkbookData["styles"]) {
+  const fill = cellFillHex(cell);
+  if (!fill) return undefined;
+  const id = `mbox-fill-${fill.slice(1).toLowerCase()}`;
+  styles[id] ||= { bg: { rgb: fill } };
+  return id;
+}
+
+function univerFillArgb(style: unknown) {
+  const rgb = (style as { bg?: { rgb?: unknown } } | null)?.bg?.rgb;
+  if (typeof rgb !== "string") return "";
+  const value = rgb.trim().replace(/^#/, "");
+  if (/^[\da-f]{6}$/i.test(value)) return `FF${value.toUpperCase()}`;
+  if (/^[\da-f]{8}$/i.test(value)) return value.toUpperCase();
+  return "";
+}
+
 function excelToUniver(book: ExcelWorkbook): Partial<IWorkbookData> {
   const sheets: IWorkbookData["sheets"] = {};
+  const styles: IWorkbookData["styles"] = {};
   const sheetOrder: string[] = [];
   for (const [index, sheet] of book.worksheets.entries()) {
     const id = `sheet-${index + 1}`;
@@ -86,6 +111,8 @@ function excelToUniver(book: ExcelWorkbook): Partial<IWorkbookData> {
       row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
         const next = valueToCell(cell.value);
         if (!next) return;
+        const fill = fillStyleId(cell, styles);
+        if (fill) next.s = fill;
         (cellData[rowNumber - 1] ||= {})[columnNumber - 1] = next;
       });
     });
@@ -103,7 +130,7 @@ function excelToUniver(book: ExcelWorkbook): Partial<IWorkbookData> {
     name: "MBOX",
     appVersion: "1.0.2",
     locale: LocaleType.RU_RU,
-    styles: {},
+    styles,
     sheetOrder,
     sheets,
   };
@@ -120,6 +147,13 @@ function applySnapshot(book: ExcelWorkbook, snapshot: IWorkbookData) {
         const targetCell = target.getCell(Number(rowKey) + 1, Number(columnKey) + 1);
         if (cell.f) targetCell.value = { formula: cell.f.replace(/^=/, ""), result: cell.v as string | number | boolean | undefined };
         else targetCell.value = (cell.v ?? null) as CellValue;
+        if ("s" in cell) {
+          const style = typeof cell.s === "string" ? snapshot.styles[cell.s] : cell.s;
+          const fill = univerFillArgb(style);
+          targetCell.fill = fill
+            ? { type: "pattern", pattern: "solid", fgColor: { argb: fill } }
+            : { type: "pattern", pattern: "none" };
+        }
       }
     }
     for (const [columnKey, column] of Object.entries(source.columnData || {})) {
@@ -131,15 +165,16 @@ function applySnapshot(book: ExcelWorkbook, snapshot: IWorkbookData) {
 
 export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, readOnly = false }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || "graphite");
+  const [theme, setTheme] = useState(appTheme);
   const onChangeRef = useRef(onChange);
   const onSheetNameRef = useRef(onSheetName);
   onChangeRef.current = onChange;
   onSheetNameRef.current = onSheetName;
 
   useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(document.documentElement.dataset.theme || "graphite"));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const themeHost = document.querySelector<HTMLElement>(".app[data-theme]") || document.documentElement;
+    const observer = new MutationObserver(() => setTheme(appTheme()));
+    observer.observe(themeHost, { attributes: true, attributeFilter: ["data-theme"] });
     return () => observer.disconnect();
   }, []);
 

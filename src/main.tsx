@@ -1265,6 +1265,8 @@ const SharedNotePage = lazy(() => import("./pages/SharedNotePage").then((module)
 const sharedNoteToken = window.location.pathname.match(/^\/n\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 const SharedTablePage = lazy(() => import("./pages/SharedTablePage").then((module) => ({ default: module.SharedTablePage })));
 const sharedTableToken = window.location.pathname.match(/^\/t\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+const SharedDocumentPage = lazy(() => import("./pages/SharedDocumentPage").then((module) => ({ default: module.SharedDocumentPage })));
+const sharedDocumentToken = window.location.pathname.match(/^\/d\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -1275,6 +1277,10 @@ createRoot(document.getElementById("root")!).render(
     ) : sharedTableToken ? (
       <Suspense fallback={null}>
         <SharedTablePage token={sharedTableToken} />
+      </Suspense>
+    ) : sharedDocumentToken ? (
+      <Suspense fallback={null}>
+        <SharedDocumentPage token={sharedDocumentToken} />
       </Suspense>
     ) : (
       <App />

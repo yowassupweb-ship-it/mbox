@@ -18,6 +18,7 @@ import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
+import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
@@ -1157,6 +1158,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/todos"
     || pathname === "/api/mbox/notes"
     || pathname === "/api/mbox/tables"
+    || pathname === "/api/mbox/documents"
     || pathname === "/api/mbox/invites"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
@@ -1171,6 +1173,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/notes/import-docx"
     || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?|docx|import-docx))?$/.test(pathname)
     || /^\/api\/mbox\/tables\/\d+(?:\/shares(?:\/(?:view|edit))?)?$/.test(pathname)
+    || /^\/api\/mbox\/documents\/\d+(?:\/shares(?:\/(?:view|edit))?)?$/.test(pathname)
     || /^\/api\/mbox\/agent\/inbox\/\d+(?:\/(?:phase|cancel|answer))?$/.test(pathname)
     || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
@@ -1281,6 +1284,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
     if (await handleStorageApi({
@@ -3345,7 +3349,8 @@ const httpServer = http.createServer(async (req, res) => {
         },
         broadcast: (payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }),
       });
-      if (!handled && !(await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
+      const sharedTable = !handled && await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) });
+      if (!handled && !sharedTable && !(await handleSharedDocumentApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
       return;
     }
     return serveStatic(req, res, url);
@@ -3420,6 +3425,7 @@ releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.mess
 ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
 ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
 ensureTablesSchema(query).catch((error) => console.error(`tables schema: ${error.message}`));
+ensureDocumentsSchema(query).catch((error) => console.error(`documents schema: ${error.message}`));
 ensureChatThreadsSchema(query).catch((error) => console.error(`chat threads schema: ${error.message}`));
 ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
 ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));
