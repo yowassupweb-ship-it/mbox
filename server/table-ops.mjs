@@ -307,3 +307,46 @@ export function appendRows(book, { sheet: sheetName, rows = [] } = {}) {
   });
   return { sheet: sheet.name, range: `A${start}:${columnName(widest)}${start + rows.length - 1}`, rows: rows.length };
 }
+
+/** Все текстовые и числовые ячейки книги одной строкой — для поиска. Ограничено, чтобы огромная таблица не раздула базу. */
+export function extractText(book, limit = 200_000) {
+  const parts = [];
+  let size = 0;
+  for (const sheet of book.worksheets) {
+    if (size >= limit) break;
+    parts.push(sheet.name);
+    size += sheet.name.length;
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      if (size >= limit) return;
+      const cells = [];
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const value = cell.value;
+        const text = value && typeof value === "object" && "formula" in value ? (value.result != null ? rawValue(value.result) : "") : rawValue(value);
+        if (text) cells.push(text);
+      });
+      if (!cells.length) return;
+      const line = cells.join(" ");
+      parts.push(line);
+      size += line.length + 1;
+    });
+  }
+  return parts.join("\n").slice(0, limit);
+}
+
+/** Прямоугольник, накрывающий адреса ячеек и диапазоны оформления: что подсветить человеку, пока пишет агент. */
+export function touchedRange(cells = {}, format = []) {
+  let top = Infinity; let left = Infinity; let bottom = 0; let right = 0;
+  const take = (r1, c1, r2, c2) => { top = Math.min(top, r1); left = Math.min(left, c1); bottom = Math.max(bottom, r2); right = Math.max(right, c2); };
+  for (const address of Object.keys(cells || {})) {
+    const m = address.toUpperCase().match(/^([A-Z]{1,3})(\d{1,7})$/);
+    if (m) take(Number(m[2]), columnIndex(m[1]), Number(m[2]), columnIndex(m[1]));
+  }
+  for (const rule of Array.isArray(format) ? format : []) {
+    const m = String(rule?.range || "").toUpperCase().replace(/\s+/g, "").match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
+    if (m) take(Number(m[2]), columnIndex(m[1]), Number(m[4] ?? m[2]), m[3] ? columnIndex(m[3]) : columnIndex(m[1]));
+  }
+  if (!Number.isFinite(top)) return "";
+  const from = `${columnName(left)}${top}`;
+  const to = `${columnName(right)}${bottom}`;
+  return from === to ? from : `${from}:${to}`;
+}

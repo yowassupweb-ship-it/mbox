@@ -12,6 +12,8 @@ import { WbMenu } from "./WbMenu";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { DocumentsView, SheetsDocsSwitch, type SheetsDocsMode } from "./DocumentsView";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
+import { usePresence } from "./presence";
+import { PresenceAvatars } from "./PresenceAvatars";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
@@ -325,6 +327,7 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
   const [shared, setShared] = useState(false);
   const [conflict, setConflict] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
+  const presence = usePresence(`table:${tableId}`, visible);
   // Версия на сервере, от которой мы правим, и зеркала состояния для обработчиков событий.
   const baseRef = useRef(cached?.updated_at ?? "");
   const dirtyRef = useRef(false);
@@ -511,6 +514,7 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
             )}
             {table.pinned && <span className="wb-note-flag" title="Закреплена сверху списка"><Pin size={11} aria-hidden="true" /> Закреплена</span>}
             {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
+            <PresenceAvatars people={presence.people} agents={presence.agents} />
           </span>
           <div className="wb-note-tools">
             <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
@@ -566,7 +570,7 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
           <button type="button" onClick={() => void resolveConflict(true)}>Сохранить мою</button>
         </div>
       )}
-      {book && sheetName ? <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => { setDirty(true); setChangeRevision((value) => value + 1); }} visible={visible} /></Suspense> : <div className="wb-doc-missing">В книге нет листов.</div>}
+      {book && sheetName ? <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => { setDirty(true); setChangeRevision((value) => value + 1); }} visible={visible} peers={presence.peers} agents={presence.agents} onSelect={presence.update} /></Suspense> : <div className="wb-doc-missing">В книге нет листов.</div>}
     </DocShell>
   );
 }

@@ -12,6 +12,19 @@ export type RealtimeNotice = { id: string; text: string; at: string };
 export const ENTITY_CHANGED_EVENT = "mbox:entity-changed";
 export const WORKSPACE_VERSION_EVENT = "mbox:workspace-version";
 export const AGENT_INBOX_ITEM_EVENT = "mbox:agent-inbox-item";
+/** Присутствие в документах: сообщения сервера «кто где» и «агент пишет в этом диапазоне». */
+export const PRESENCE_EVENT = "mbox:presence";
+/** Сокет (пере)подключился — комнаты присутствия надо занять заново. */
+export const REALTIME_OPEN_EVENT = "mbox:realtime-open";
+
+let activeSocket: WebSocket | null = null;
+
+/** Отправить сообщение по общему вебсокету; false — сокет сейчас не открыт (присутствие эфемерно, потеря не страшна). */
+export function sendRealtime(payload: unknown): boolean {
+  if (activeSocket?.readyState !== WebSocket.OPEN) return false;
+  activeSocket.send(JSON.stringify(payload));
+  return true;
+}
 
 /**
  * Шаг работы агента в реальном времени: агент прислал его через POST /agent/ping, сервер разослал
@@ -74,6 +87,8 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
       socket = new WebSocket(`${protocol}//${server.host}/api/mbox/realtime`);
 
       socket.onopen = () => {
+        activeSocket = socket;
+        window.dispatchEvent(new Event(REALTIME_OPEN_EVENT));
         setState("connected");
         setLabel("Агент подключен");
         // Первое быстрое подключение приходит сразу за начальной загрузкой данных — перечитывать всё
@@ -90,10 +105,15 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
 
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string };
+          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string; silent?: boolean };
+          if (message.type === "presence" || message.type === "presence_agent") {
+            window.dispatchEvent(new CustomEvent(PRESENCE_EVENT, { detail: message }));
+            return;
+          }
           if (message.type === "entity_changed") {
             scheduleReload(message.entity);
-            announce(message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`);
+            // silent — правка человека (автосохранение): открытые окна обновятся, но писать «Агент изменил…» незачем.
+            if (!message.silent) announce(message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`);
           }
           if (message.type === "agent_step") {
             window.dispatchEvent(new CustomEvent(AGENT_STEP_EVENT, { detail: message }));
@@ -133,6 +153,7 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
       };
 
       socket.onclose = () => {
+        if (activeSocket === socket) activeSocket = null;
         if (!closed) {
           setState("offline");
           setLabel("Агент отключен");

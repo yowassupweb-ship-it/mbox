@@ -1,3 +1,4 @@
+import { announceAgentEdit } from "./presence.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import mammoth from "mammoth";
@@ -132,7 +133,7 @@ function noteAccessLevel(value) {
  * Какие заметки видит пользователь. scope.userId — кто смотрит; без него (внутренние вызовы) остаётся
  * прежнее правило «все / заметки своих проектов».
  */
-function noteScopeWhere(scope, alias = "notes") {
+export function noteScopeWhere(scope, alias = "notes") {
   const projectIds = Array.isArray(scope?.projectIds) ? scope.projectIds : [];
   if (scope?.userId) {
     return {
@@ -490,7 +491,10 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
           source: fromAgent ? "agent" : "mbox",
         }).catch(() => {});
       }
-      if (row) notifyAgentChange("update", `«${row.title}»`);
+      if (row) {
+        notifyAgentChange("update", `«${row.title}»`);
+        if (fromAgent) announceAgentEdit(broadcast, { doc: `note:${row.id}`, name: actor });
+      }
       sendJson(res, row ? 200 : 404, row ? { note: row } : { error: "not_found" });
       return true;
     }

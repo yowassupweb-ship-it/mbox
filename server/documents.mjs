@@ -3,6 +3,7 @@
 // текст чистым Markdown-подобным видом для поиска и для агентов, которым снимок читать незачем.
 
 import mammoth from "mammoth";
+import { announceAgentEdit } from "./presence.mjs";
 import { appendMarkdown, markdownToSnapshot, snapshotToMarkdown, snapshotToText } from "./doc-snapshot.mjs";
 import { documentToDocx, docxFileName, htmlToBlocks } from "./docx.mjs";
 
@@ -45,7 +46,7 @@ export async function ensureDocumentsSchema(query) {
 const accessLevel = (value) => (ACCESS_LEVELS.includes(String(value)) ? String(value) : "private");
 const has = (body, key) => Object.prototype.hasOwnProperty.call(body, key);
 
-function scopeWhere(scope, alias = "documents") {
+export function scopeWhere(scope, alias = "documents") {
   const projectIds = Array.isArray(scope?.projectIds) ? scope.projectIds : [];
   if (scope?.userId) {
     return {
@@ -113,7 +114,9 @@ async function docxToMarkdown(body) {
 
 export async function handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor, scope = { all: true, projectIds: [] }, broadcast }) {
   if (!url.pathname.startsWith("/api/mbox/documents")) return false;
-  const notify = (action, detail, id) => broadcast?.("entity_changed", { entity: "documents", action, actor: String(actor || ""), detail, id });
+  // Правки человека (автосохранение) рассылаем тихо: окна обновятся, а «Агент изменил…» писать не надо.
+  const silent = !req.headers["x-mbox-agent"];
+  const notify = (action, detail, id) => broadcast?.("entity_changed", { entity: "documents", action, actor: String(actor || ""), detail, id, silent });
 
   try {
     if (url.pathname === "/api/mbox/documents" && req.method === "GET") {
@@ -238,6 +241,8 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
         ],
       );
       notify("update", `«${result.rows[0].title}»`, result.rows[0].id);
+      // Текст через Markdown пишет агент (человек правит снимком из редактора): показываем его присутствие.
+      if (has(body, "markdown")) announceAgentEdit(broadcast, { doc: `doc:${result.rows[0].id}`, name: actor });
       sendJson(res, 200, { document: result.rows[0] });
       return true;
     }

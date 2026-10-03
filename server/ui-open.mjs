@@ -47,6 +47,8 @@ export function parseOpenRequest(body, actor) {
 export function tagSocketUser(socket, user) {
   socket.mboxUserId = user ? String(user.id) : "";
   socket.mboxOwner = user?.role === "owner";
+  socket.mboxUser = user || null;
+  socket.mboxName = user ? String(user.username || String(user.email || "").split("@")[0] || "") : "";
 }
 
 export function sendOpenTab(clients, userId, event) {

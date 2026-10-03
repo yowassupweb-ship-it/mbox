@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { appendRows, loadWorkbook, readTable, workbookFromRows, workbookToBase64, writeCells } from "./table-ops.mjs";
+import { appendRows, extractText, loadWorkbook, readTable, touchedRange, workbookFromRows, workbookToBase64, writeCells } from "./table-ops.mjs";
+import { announceAgentEdit } from "./presence.mjs";
 
 export const TABLES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tables (
@@ -16,6 +17,8 @@ CREATE TABLE IF NOT EXISTS tables (
 );
 ALTER TABLE tables ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE tables ADD COLUMN IF NOT EXISTS owner_user_id TEXT;
+ALTER TABLE tables ADD COLUMN IF NOT EXISTS text_content TEXT NOT NULL DEFAULT '';
+ALTER TABLE tables ADD COLUMN IF NOT EXISTS text_indexed_at TIMESTAMPTZ;
 ALTER TABLE tables ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'private';
 UPDATE tables SET owner_user_id = users.id::text FROM users
  WHERE tables.owner_user_id IS NULL AND lower(users.username) = lower(tables.author);
@@ -40,15 +43,47 @@ const ACCESS_LEVELS = ["private", "project", "all"];
 const MAX_TABLE_BYTES = 25 * 1024 * 1024;
 const SHARE_TOKEN = /^[A-Za-z0-9_-]{24,64}$/;
 
+/**
+ * Текст ячеек для поиска. Таблица лежит в базе файлом xlsx, поэтому по ней нельзя искать SQL-ом: после записи
+ * разбираем книгу в фоне и кладём ячейки текстом. Запись не ждёт разбора — большая таблица разбирается долго.
+ */
+export function indexTableText(query, tableId, content) {
+  setImmediate(async () => {
+    try {
+      const text = extractText(await loadWorkbook(content));
+      await query("UPDATE tables SET text_content = $1, text_indexed_at = now() WHERE id = $2", [text, tableId]);
+    } catch {
+      // файл не разобрался — поиск по названию остаётся
+      await query("UPDATE tables SET text_indexed_at = now() WHERE id = $1", [tableId]).catch(() => {});
+    }
+  });
+}
+
+async function backfillTableText(query) {
+  for (;;) {
+    const rows = (await query("SELECT id::text, content FROM tables WHERE text_indexed_at IS NULL ORDER BY id LIMIT 5")).rows;
+    if (!rows.length) return;
+    for (const row of rows) {
+      try {
+        await query("UPDATE tables SET text_content = $1, text_indexed_at = now() WHERE id = $2", [extractText(await loadWorkbook(row.content)), row.id]);
+      } catch {
+        await query("UPDATE tables SET text_indexed_at = now() WHERE id = $1", [row.id]);
+      }
+    }
+  }
+}
+
 export async function ensureTablesSchema(query) {
   await query(TABLES_SCHEMA_SQL);
+  // Старые таблицы без текста для поиска доиндексируем в фоне, не задерживая запуск сервера.
+  void backfillTableText(query).catch(() => {});
 }
 
 function accessLevel(value) {
   return ACCESS_LEVELS.includes(String(value)) ? String(value) : "private";
 }
 
-function tableScopeWhere(scope, alias = "tables") {
+export function tableScopeWhere(scope, alias = "tables") {
   const projectIds = Array.isArray(scope?.projectIds) ? scope.projectIds : [];
   if (scope?.userId) {
     return {
@@ -79,7 +114,8 @@ function cleanContent(value) {
 
 export async function handleTablesApi({ req, res, url, query, readBody, sendJson, actor, scope = { all: true, projectIds: [] }, broadcast }) {
   if (!url.pathname.startsWith("/api/mbox/tables")) return false;
-  const notify = (action, detail) => broadcast?.("entity_changed", { entity: "tables", action, actor: String(actor || ""), detail });
+  const silent = !req.headers["x-mbox-agent"];
+  const notify = (action, detail) => broadcast?.("entity_changed", { entity: "tables", action, actor: String(actor || ""), detail, silent });
 
   try {
     const shareMatch = url.pathname.match(/^\/api\/mbox\/tables\/(\d+)\/shares(?:\/(view|edit))?$/);
@@ -145,6 +181,7 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
           accessLevel(body.access_level),
         ],
       );
+      indexTableText(query, result.rows[0].id, result.rows[0].content);
       notify("create", `«${result.rows[0].title}»`);
       sendJson(res, 201, { table: result.rows[0] });
       return true;
@@ -167,7 +204,9 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
         const book = await loadWorkbook(row.content);
         const result = operation === "cells" ? writeCells(book, body) : appendRows(book, body);
         const saved = (await query(`UPDATE tables SET content = $1, updated_at = now() WHERE id = $2 RETURNING ${TABLE_COLUMNS}`, [cleanContent(await workbookToBase64(book)), tableId])).rows[0];
+        indexTableText(query, saved.id, saved.content);
         notify("update", `«${saved.title}»`);
+        announceAgentEdit(broadcast, { doc: `table:${saved.id}`, name: actor, sheet: result.sheet, range: operation === "cells" ? touchedRange(body.cells, body.format) : result.range });
         sendJson(res, 200, { ...result, table: { id: saved.id, title: saved.title, updated_at: saved.updated_at } });
         return true;
       }
@@ -218,6 +257,7 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
           hasProject,
         ],
       );
+      if (Object.prototype.hasOwnProperty.call(body, "content")) indexTableText(query, result.rows[0].id, result.rows[0].content);
       notify("update", `«${result.rows[0].title}»`);
       sendJson(res, 200, { table: result.rows[0] });
       return true;

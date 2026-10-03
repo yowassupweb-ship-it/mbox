@@ -62,6 +62,16 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
 
+  // Смена темы из главного поиска и других мест, где нет доступа к состоянию приложения.
+  useEffect(() => {
+    const onTheme = (event: Event) => {
+      const next = (event as CustomEvent<string>).detail;
+      if (next === "light" || next === "black" || next === "graphite") setTheme(next);
+    };
+    window.addEventListener("mbox:set-theme", onTheme);
+    return () => window.removeEventListener("mbox:set-theme", onTheme);
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme === "light" ? "light" : "dark";

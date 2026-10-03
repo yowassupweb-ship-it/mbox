@@ -11,6 +11,8 @@ import { DocShell } from "./docLayout";
 import { WbMenu } from "./WbMenu";
 import type { TabsApi } from "./tabs";
 import { docsStore, emitDocs, importDocx, patchDoc, type DocRecord } from "./docsStore";
+import { usePresence } from "./presence";
+import { PresenceAvatars } from "./PresenceAvatars";
 
 const DocEditor = lazy(() => import("./UniverDocEditor").then((module) => ({ default: module.DocEditor })));
 
@@ -54,6 +56,7 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
   const savingRef = useRef(false);
   const updatedAtRef = useRef("");
   const importRef = useRef<HTMLInputElement | null>(null);
+  const presence = usePresence(`doc:${docId}`, visible);
 
   const open = useCallback((loaded: DocRecord, reload: boolean) => {
     const next = parseSnapshot(loaded.content);
@@ -247,6 +250,7 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
               <span className="wb-note-save"><Check size={13} aria-hidden="true" /> Изменено {formatSince(doc.updated_at)}</span>
             )}
             {doc.pinned && <span className="wb-note-flag" title="Закреплён сверху списка"><Pin size={11} aria-hidden="true" /> Закреплён</span>}
+            <PresenceAvatars people={presence.people} agents={presence.agents} />
           </span>
           <div className="wb-note-tools">
             <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
@@ -296,7 +300,7 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
         </div>
       )}
       <Suspense fallback={<OctopusSpinner />}>
-        <DocEditor snapshot={snapshot} loadKey={loadKey} onChange={onChange} visible={visible} />
+        <DocEditor snapshot={snapshot} loadKey={loadKey} onChange={onChange} visible={visible} peers={presence.peers} onSelect={presence.update} />
       </Suspense>
     </DocShell>
   );

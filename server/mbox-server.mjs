@@ -19,6 +19,8 @@ import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi } from "./documents.mjs";
+import { handleSpotlightApi } from "./spotlight.mjs";
+import { createPresenceHub } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
@@ -132,6 +134,8 @@ function sendJson(res, status, body) {
 const memberRedactedFields = ["detail", "notification", "step", "title", "text"];
 
 function broadcastRealtime(type, payload = {}) {
+  // Правка агента в документе уходит только тем, кто его сейчас смотрит, а не всем окнам.
+  if (type === "presence_agent") { presenceHub.announce(payload); return; }
   const full = { type, ...payload, at: new Date().toISOString() };
   const message = JSON.stringify(full);
   let redacted = null;
@@ -1159,6 +1163,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/notes"
     || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/documents"
+    || pathname === "/api/mbox/spotlight"
     || pathname === "/api/mbox/invites"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
@@ -1286,6 +1291,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handleSpotlightApi({ req, res, url, query, sendJson, scope: { ...scope, userId: String(user.id) }, searchTerms })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
     if (await handleStorageApi({
@@ -3361,8 +3367,11 @@ const httpServer = http.createServer(async (req, res) => {
 
 const realtimeServer = new WebSocketServer({ noServer: true });
 
+const presenceHub = createPresenceHub({ query, scopeFor: projectScope });
+
 realtimeServer.on("connection", (socket) => {
   realtimeClients.add(socket);
+  presenceHub.attach(socket);
   socket.send(JSON.stringify({ type: "connected", at: new Date().toISOString() }));
   socket.on("close", () => realtimeClients.delete(socket));
 });

@@ -31,8 +31,10 @@ import { FileDocument, FilesView } from "./Files";
 import { recentlyActiveAgent, useDesktopSessions } from "./desktopSessions";
 import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
-import { TableDocument, TablesView } from "./TablesView";
+import { createTableAndOpen, TableDocument, TablesView } from "./TablesView";
 import { DocDocument } from "./DocDocument";
+import { Spotlight, type SpotlightCommand } from "./Spotlight";
+import { createDocAndOpen } from "./docsStore";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
 import { StorageView } from "./StorageView";
@@ -414,11 +416,16 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     data.reload();
   }, [data]);
 
-  const openSearch = useCallback(() => {
+  /** Боковая панель «Поиск по памяти» (Ctrl+Shift+F, счётчик записей в статус-баре). */
+  const openMemorySearch = useCallback(() => {
     setActivity("search");
     setSidebarOpen(true);
     setSearchFocus((value) => value + 1);
   }, [setActivity, setSidebarOpen]);
+
+  /** Главный поиск (Ctrl+K, шапка): по всему MBOX, тексту заметок, таблицам и файлам. */
+  const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const openSearch = useCallback(() => setSpotlightOpen(true), []);
 
   /** Консоль живёт либо во вкладке нижней панели, либо отдельной колонкой справа — как чат в VS Code. */
   /** Телефон: чат лежит поверх всего, поэтому выбор раздела в нижнем меню сначала его закрывает. */
@@ -563,8 +570,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     function onKey(event: KeyboardEvent) {
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
-      if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); openSearch(); }
-      else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openSearch(); }
+      if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); setSpotlightOpen((value) => !value); }
+      else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openMemorySearch(); }
       else if (mod && event.code === "Backslash") { event.preventDefault(); if (splitOpen) collapseSplit(); else splitTab(tabs.active); }
       else if (mod && event.shiftKey && event.code === "KeyE") { event.preventDefault(); setActivity("explorer"); setSidebarOpen(true); }
       else if (mod && !event.shiftKey && event.code === "KeyB") { event.preventDefault(); setSidebarOpen((value) => !value); }
@@ -850,6 +857,27 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       ) : undefined}
     />
   );
+
+  // Команды главного поиска собираются только пока он открыт: в покое это лишняя работа на каждый рендер.
+  const spotlightCommands: SpotlightCommand[] = spotlightOpen ? [
+    ...(defaultNoteProjectId !== undefined ? [
+      { id: "new-note", title: "Новая заметка", hint: "Пустая заметка во вкладке", keywords: "создать заметка note", shortcut: "Ctrl Alt N", run: () => void createNoteAndOpen(tabs, defaultNoteProjectId) },
+      { id: "new-table", title: "Новая таблица", hint: "Пустая таблица", keywords: "создать таблица excel sheet", run: () => void createTableAndOpen(tabs, defaultNoteProjectId ?? null) },
+      { id: "new-doc", title: "Новый документ", hint: "Документ с листами A4", keywords: "создать документ word docs", run: () => void createDocAndOpen(tabs, defaultNoteProjectId ?? null) },
+    ] : []),
+    ...(hasBrowser ? [{ id: "new-web", title: "Новая вкладка браузера", hint: "Встроенный браузер", keywords: "браузер сайт интернет", run: () => tabs.open(browserBlankTabKey(), true) }] : []),
+    ...RAIL_GROUPS.flatMap((group) => group.items)
+      .filter((item) => !railHidden.includes(item.id) && (!item.desktopOnly || hasBrowser))
+      .map((item) => ({ id: `go-${item.id}`, title: `Перейти: ${item.label.replace(/\s*\(.*\)$/, "")}`, hint: "Раздел боковой панели", keywords: `открыть раздел ${item.short}`, run: () => openRail(item.id) })),
+    { id: "settings", title: "Настройки", hint: "Сервер, доступ, внешний вид", keywords: "параметры настройки settings", run: () => tabs.open("settings", true) },
+    { id: "overview", title: "Обзор", hint: "Сводка по всем проектам", keywords: "главная welcome", run: () => tabs.open("welcome", true) },
+    { id: "chat", title: "Чат с агентами", hint: "Показать или скрыть чат", keywords: "чат агент claude джарвис", shortcut: "Ctrl `", run: () => toggleConsole() },
+    { id: "sidebar", title: "Боковая панель", hint: "Показать или скрыть", keywords: "панель sidebar", shortcut: "Ctrl B", run: () => setSidebarOpen((value) => !value) },
+    { id: "memory-search", title: "Поиск по памяти", hint: "Расширенный поиск с фильтрами", keywords: "память поиск фильтр", shortcut: "Ctrl Shift F", run: openMemorySearch },
+    { id: "theme-graphite", title: "Тема: Графит", hint: "Тёмная тема по умолчанию", keywords: "тема оформление dark", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "graphite" })) },
+    { id: "theme-light", title: "Тема: Светлая", hint: "Светлое оформление", keywords: "тема оформление light", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "light" })) },
+    { id: "theme-black", title: "Тема: Чёрная", hint: "Чёрное оформление", keywords: "тема оформление black oled", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "black" })) },
+  ] : [];
 
   return (
     <div className={["wb", sidebarOpen ? "has-sidebar" : "", panelOpen ? "has-panel" : "", consoleDock === "right" && rightOpen ? "has-right" : ""].filter(Boolean).join(" ")} style={layoutStyle}>
@@ -1143,7 +1171,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
             <AlertTriangle size={12} /> {attentionCount}
           </button>
         )}
-        <button type="button" className="wb-status-item" onClick={openSearch} title="Записей памяти">
+        <button type="button" className="wb-status-item" onClick={openMemorySearch} title="Записей памяти">
           <Database size={12} /> {data.memoriesTotal.toLocaleString("ru-RU")} {plural(data.memoriesTotal, "запись", "записи", "записей")}
         </button>
         <button type="button" className="wb-status-item" onClick={() => setSidebarOpen((value) => !value)} title="Боковая панель (Ctrl+B)"><PanelLeft size={12} /></button>
@@ -1194,6 +1222,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <button type="button" role="menuitem" onClick={() => { tabs.open(browserBlankTabKey(), true); setRailMenu(null); }}>Новая вкладка</button>
         </WbMenu>
       )}
+      {spotlightOpen && <Spotlight open onClose={() => setSpotlightOpen(false)} tabs={tabs} commands={spotlightCommands} />}
     </div>
   );
 }

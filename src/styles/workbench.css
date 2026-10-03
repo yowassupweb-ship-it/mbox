@@ -4105,3 +4105,81 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"][aria-selected="true"] { background: var(--surface-panel) !important; box-shadow: 0 1px 2px color-mix(in srgb, #000 28%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--text-main) 8%, transparent) !important; color: var(--text-main) !important; font-weight: var(--weight-semibold) !important; }
 .wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"]:focus-visible { outline: 2px solid var(--accent-color) !important; outline-offset: 2px; }
 .wb-univer-mount { width: 100%; height: 100%; min-height: 0; }
+
+/* ─── Присутствие: аватарки коллег и подсветка их позиции ─── */
+.wb-presence { display: inline-flex; flex: none; align-items: center; padding-left: 4px; }
+.wb-presence-dot {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  margin-left: -6px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--peer, var(--accent-fill));
+  box-shadow: 0 0 0 2px var(--bg-color);
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  user-select: none;
+}
+.wb-presence-dot:first-child { margin-left: 0; }
+.wb-presence-dot img { width: 100%; height: 100%; object-fit: cover; background: var(--surface-panel); }
+.wb-presence-dot.is-agent { box-shadow: 0 0 0 2px var(--peer, var(--accent-fill)); }
+.wb-presence-dot.is-writing { animation: wb-presence-pulse 1.4s var(--ease-out) infinite; }
+.wb-presence-dot.is-more { background: var(--surface-hover); color: var(--text-2); box-shadow: 0 0 0 2px var(--bg-color), inset 0 0 0 1px var(--border-color); }
+.wb-presence-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@keyframes wb-presence-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--peer, var(--accent-fill)) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .wb-presence-dot.is-writing { animation: none; } }
+.wb-univer-wrap { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.wb-univer-wrap > .wb-univer-sheet { height: 100%; }
+.wb-presence-layer { position: absolute; z-index: 30; overflow: hidden; pointer-events: none; }
+.wb-cell-mark {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--peer, var(--accent-color));
+  background: color-mix(in srgb, var(--peer, var(--accent-color)) 14%, transparent);
+  transition: left var(--duration-base) var(--ease-out), top var(--duration-base) var(--ease-out), width var(--duration-base) var(--ease-out), height var(--duration-base) var(--ease-out);
+}
+.wb-cell-mark > b {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  max-width: 160px;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs) var(--radius-xs) var(--radius-xs) 0;
+  background: var(--peer, var(--accent-color));
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-cell-mark.is-agent { animation: wb-presence-flash 1.2s var(--ease-out) infinite; }
+@keyframes wb-presence-flash { 50% { background: color-mix(in srgb, var(--peer, var(--accent-color)) 30%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .wb-cell-mark { transition: none; } .wb-cell-mark.is-agent { animation: none; } }
+
+/* Курсоры коллег в тексте заметки (RemoteCarets.tsx) */
+.wb-carets { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.wb-carets-inner { position: absolute; left: 0; top: 0; }
+.wb-rcaret-selection { position: absolute; background: color-mix(in srgb, var(--peer, var(--accent-color)) 26%, transparent); border-radius: var(--radius-2xs); }
+.wb-rcaret { position: absolute; width: 2px; background: var(--peer, var(--accent-color)); transition: left var(--duration-fast) var(--ease-out), top var(--duration-fast) var(--ease-out); }
+.wb-rcaret > b {
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  padding: 0 6px;
+  border-radius: var(--radius-xs) var(--radius-xs) var(--radius-xs) 0;
+  background: var(--peer, var(--accent-color));
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.wb-rcaret.is-below > b { top: 100%; bottom: auto; border-radius: 0 var(--radius-xs) var(--radius-xs) var(--radius-xs); }
+@media (prefers-reduced-motion: reduce) { .wb-rcaret { transition: none; } }
