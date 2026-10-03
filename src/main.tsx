@@ -1263,12 +1263,18 @@ function EntityLine({ title, value }: { title: string; value: string }) {
 // Заметка по ссылке (/n/<токен>) открывается без входа в MBOX — отдельная страница, грузится своим чанком.
 const SharedNotePage = lazy(() => import("./pages/SharedNotePage").then((module) => ({ default: module.SharedNotePage })));
 const sharedNoteToken = window.location.pathname.match(/^\/n\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+const SharedTablePage = lazy(() => import("./pages/SharedTablePage").then((module) => ({ default: module.SharedTablePage })));
+const sharedTableToken = window.location.pathname.match(/^\/t\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {sharedNoteToken ? (
       <Suspense fallback={null}>
         <SharedNotePage token={sharedNoteToken} />
+      </Suspense>
+    ) : sharedTableToken ? (
+      <Suspense fallback={null}>
+        <SharedTablePage token={sharedTableToken} />
       </Suspense>
     ) : (
       <App />

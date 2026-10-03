@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { ExternalLink, FolderOpen, RefreshCw, Save, Search } from "lucide-react";
 import type { Workbook } from "exceljs";
@@ -8,7 +8,10 @@ import { useDocumentFind } from "./DocumentTools";
 import { onWorkspaceChange, rootName, workspaceBridge, type DataRead } from "./localWorkspace";
 import type { TabsApi } from "./tabs";
 import { base64ToArrayBuffer, bytesToBase64, parseDelimited, delimitedContent } from "./officeFormat";
-import { SheetEditor } from "./SheetEditor";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
+
+const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
+const UniverDocumentViewer = lazy(() => import("./UniverDocumentViewer").then((module) => ({ default: module.UniverDocumentViewer })));
 
 type Kind = "pdf" | "docx" | "legacy" | "sheet";
 
@@ -163,11 +166,11 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
             <div className="wb-doc-missing">Старый формат {ext} открывается установленной программой. Для работы внутри MBOX сохраните файл как {ext === ".doc" ? ".docx" : ".xlsx"}.<button type="button" className="wb-inline-btn" onClick={() => void bridge.openDefault(rootKey, path)}>Открыть файл</button></div>
           ) : kind === "docx" ? (
             <div className="wb-office-scroll">
-              <article ref={previewRef} className="wb-docx-page" dangerouslySetInnerHTML={{ __html: docxHtml }} />
+              <article ref={previewRef} className="wb-docx-page is-univer-document"><Suspense fallback={<OctopusSpinner />}><UniverDocumentViewer html={docxHtml} title={path.split("/").pop() || path} /></Suspense></article>
               {!!docxWarnings.length && <details className="wb-office-warnings"><summary>Особенности преобразования · {docxWarnings.length}</summary>{docxWarnings.map((message, index) => <p key={index}>{message}</p>)}</details>}
             </div>
           ) : book && sheetName ? (
-            <SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setDirty(true)} visible={visible} />
+            <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setDirty(true)} visible={visible} /></Suspense>
           ) : <div className="wb-doc-missing">Не удалось прочитать документ.</div>}
     </DocShell>
   );

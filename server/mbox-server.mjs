@@ -17,6 +17,7 @@ import { UX_UI_SKILL_CATALOG } from "./ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
+import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
@@ -1155,6 +1156,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/decisions"
     || pathname === "/api/mbox/todos"
     || pathname === "/api/mbox/notes"
+    || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/invites"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
@@ -1166,7 +1168,9 @@ function memberRouteAllowed(pathname) {
     || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object)$/.test(pathname)
     || pathname === "/api/mbox/agent/inbox"
     || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
-    || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?))?$/.test(pathname)
+    || pathname === "/api/mbox/notes/import-docx"
+    || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?|docx|import-docx))?$/.test(pathname)
+    || /^\/api\/mbox\/tables\/\d+(?:\/shares(?:\/(?:view|edit))?)?$/.test(pathname)
     || /^\/api\/mbox\/agent\/inbox\/\d+(?:\/(?:phase|cancel|answer))?$/.test(pathname)
     || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
@@ -1276,6 +1280,7 @@ async function handleApiWithContext(req, res, url) {
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
     if (await handleStorageApi({
@@ -2824,10 +2829,11 @@ async function handleApiWithContext(req, res, url) {
       const result = await query(
         `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
          VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'notice'), $4, $5, COALESCE(NULLIF($6, ''), 'open'), COALESCE(NULLIF($7, ''), 'normal'), $8, $9)
-         RETURNING id::text`,
+         RETURNING ${INBOX_COLUMNS}`,
         [body.project_id || null, String(body.agent_name || actorFromReq(req)), String(body.item_type || ""), String(body.title || "").trim(), String(body.body || ""), String(body.status || ""), String(body.priority || ""), Boolean(body.requires_human), JSON.stringify(inboxProps)],
       );
       broadcastChange(req, "create", "agent_inbox", String(body.title || "").trim());
+      if (result.rows[0]) broadcastRealtime("agent_inbox_item", { inbox_item: result.rows[0] });
       const senderName = String(body.agent_name || actorFromReq(req));
       const addressedTo = body.props && typeof body.props === "object" ? String(body.props.to || "") : "";
       // Только вопросы. Служебные записи с agent_name "Claude" (agent_error/agent_response от
@@ -3339,7 +3345,7 @@ const httpServer = http.createServer(async (req, res) => {
         },
         broadcast: (payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }),
       });
-      if (!handled) sendJson(res, 404, { error: "not_found" });
+      if (!handled && !(await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
       return;
     }
     return serveStatic(req, res, url);
@@ -3413,6 +3419,7 @@ releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.mess
 // вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».
 ensureWorkspaceSchema(query).catch((error) => console.error(`workspace schema: ${error.message}`));
 ensureNotesSchema(query).catch((error) => console.error(`notes schema: ${error.message}`));
+ensureTablesSchema(query).catch((error) => console.error(`tables schema: ${error.message}`));
 ensureChatThreadsSchema(query).catch((error) => console.error(`chat threads schema: ${error.message}`));
 ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
 ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));

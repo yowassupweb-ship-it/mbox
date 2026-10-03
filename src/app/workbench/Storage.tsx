@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
-import { ChevronRight, Download, ExternalLink, FolderPlus, Link2, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { ChevronRight, Download, ExternalLink, FolderPlus, Link2, Maximize2, RefreshCw, Settings2, Trash2, Upload, X } from "lucide-react";
 import { fetchJson } from "../../lib/api";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { usePersistentState } from "./tabs";
@@ -8,6 +8,8 @@ import { uploadToStorage, type UploadMode } from "../../lib/storageUpload";
 import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
+
+const UniverDocumentViewer = lazy(() => import("./UniverDocumentViewer").then((module) => ({ default: module.UniverDocumentViewer })));
 
 /** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
 function openSheetTab(key: string) {
@@ -18,6 +20,7 @@ function openSheetTab(key: string) {
 type StorageConfig = { configured: boolean; endpoint: string; region: string; bucket: string; access_key_id: string; has_secret: boolean; member?: boolean };
 /** labels — подписи папок проектов: «projects/4/» → «Вокруг света». */
 type Listing = { prefix: string; folders: string[]; objects: Array<{ key: string; size: number; last_modified: string }>; next_token: string | null; labels?: Record<string, string> };
+type StorageObject = Listing["objects"][number];
 type Upload = { name: string; loaded: number; total: number; error?: string; mode?: UploadMode; startedAt?: number; done?: boolean };
 
 /** Статус строки загрузки: байты, скорость и сколько осталось; через сервер прогресса нет — честно пишем это. */
@@ -40,11 +43,17 @@ async function apiError(response: Response) {
   return (data as { error?: string }).error || `Ошибка ${response.status}`;
 }
 
-export function StorageDocument() {
+export function StorageDocument({ compact = false }: { compact?: boolean }) {
   const [config, setConfig] = useState<StorageConfig | null>(null);
   const [editing, setEditing] = useState(false);
   const [prefix, setPrefix] = usePersistentState("mbox.storage.prefix", "");
   const [listing, setListing] = useState<Listing | null>(null);
+  const [treeListings, setTreeListings] = useState<Record<string, Listing>>({});
+  const [expanded, setExpanded] = usePersistentState<string[]>("mbox.storage.expanded", [""]);
+  const [selected, setSelected] = useState<StorageObject | null>(null);
+  const [previewText, setPreviewText] = useState("");
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -69,10 +78,48 @@ export function StorageDocument() {
     setError("");
     const response = await fetch(`/api/mbox/storage/objects?prefix=${encodeURIComponent(nextPrefix)}`);
     if (!response.ok) { setError(await apiError(response)); setListing(null); return; }
-    setListing(await response.json());
+    const next = await response.json() as Listing;
+    setListing(next);
+    setTreeListings((current) => ({ ...current, [nextPrefix]: next }));
   }, []);
 
-  useEffect(() => { if (config?.configured && !editing) void load(prefix); }, [config?.configured, editing, prefix, load]);
+  const loadTree = useCallback(async (nextPrefix: string) => {
+    const response = await fetch(`/api/mbox/storage/objects?prefix=${encodeURIComponent(nextPrefix)}`);
+    if (!response.ok) { setError(await apiError(response)); return; }
+    const next = await response.json() as Listing;
+    setTreeListings((current) => ({ ...current, [nextPrefix]: next }));
+  }, []);
+
+  useEffect(() => {
+    if (!config?.configured || editing) return;
+    void load(prefix);
+    if (prefix) void loadTree("");
+  }, [config?.configured, editing, prefix, load, loadTree]);
+
+  useEffect(() => {
+    if (!selected) { setPreviewText(""); setPreviewHtml(""); setPreviewError(""); return; }
+    const textFile = /\.(txt|md|markdown|json|ya?ml|xml|csv|tsv|log|css|scss|html?|js|jsx|ts|tsx|mjs|cjs|py|sql|sh|ps1)$/i.test(selected.key) && selected.size <= 2 * 1024 * 1024;
+    const wordFile = /\.docx$/i.test(selected.key) && selected.size <= 20 * 1024 * 1024;
+    if (!textFile && !wordFile) return;
+    const controller = new AbortController();
+    setPreviewText("");
+    setPreviewHtml("");
+    setPreviewError("");
+    fetch(`/api/mbox/storage/file?key=${encodeURIComponent(selected.key)}`, { signal: controller.signal })
+      .then(async (response): Promise<string | ArrayBuffer> => {
+        if (!response.ok) throw new Error(`Ошибка ${response.status}`);
+        return wordFile ? response.arrayBuffer() : response.text();
+      })
+      .then(async (content) => {
+        if (typeof content === "string") setPreviewText(content);
+        else {
+          const mammoth = await import("mammoth");
+          setPreviewHtml((await mammoth.convertToHtml({ arrayBuffer: content })).value);
+        }
+      })
+      .catch((cause) => { if (!controller.signal.aborted) setPreviewError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => controller.abort();
+  }, [selected]);
 
   async function uploadFiles(files: FileList | File[]) {
     const list = [...files];
@@ -103,11 +150,22 @@ export function StorageDocument() {
     setNotice(`Ссылка скопирована, действует ${expires >= 86400 ? `${expires / 86400} дн.` : `${expires / 3600} ч`}`);
   }
 
+  async function downloadFile(key: string) {
+    const url = await link(key, true);
+    if (!url) return;
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = key.split("/").pop() || "file";
+    anchor.rel = "noopener";
+    anchor.click();
+  }
+
   async function remove(key: string) {
     const isFolder = key.endsWith("/");
     if (!(await askConfirm({ title: isFolder ? `Удалить папку «${key}» со всем содержимым?` : `Удалить «${key.split("/").pop()}»?`, confirmLabel: "Удалить", danger: true }))) return;
     const response = await fetch(`/api/mbox/storage/object?key=${encodeURIComponent(key)}`, { method: "DELETE" });
     if (!response.ok) setError(await apiError(response));
+    if (selected?.key === key) setSelected(null);
     await load(prefix);
   }
 
@@ -125,6 +183,56 @@ export function StorageDocument() {
     if (event.dataTransfer.files.length) void uploadFiles(event.dataTransfer.files);
   }
 
+  function toggleFolder(folder: string) {
+    const open = expanded.includes(folder);
+    setExpanded(open ? expanded.filter((item) => item !== folder) : [...expanded, folder]);
+    if (!open && !treeListings[folder]) void loadTree(folder);
+  }
+
+  function renderTree(prefixKey: string, depth: number): React.ReactNode {
+    const branch = treeListings[prefixKey];
+    if (!branch) return expanded.includes(prefixKey) ? <li className="wb-tree-empty" style={{ ["--depth" as string]: depth }}>…</li> : null;
+    return (
+      <>
+        {branch.folders.map((folder) => {
+          const open = expanded.includes(folder);
+          const name = branch.labels?.[folder] || folder.slice(prefixKey.length).replace(/\/$/, "");
+          return (
+            <li key={folder}>
+              <button type="button" className={prefix === folder ? "wb-tree-row is-selected" : "wb-tree-row"} style={{ ["--depth" as string]: depth }} onClick={() => { setPrefix(folder); setSelected(null); toggleFolder(folder); }} title={folder}>
+                <ChevronRight className={open ? "wb-chevron is-open" : "wb-chevron"} size={14} />
+                <FolderIcon open={open} size={16} />
+                <span className="wb-tree-label">{name}</span>
+              </button>
+              {open && <ul className="wb-tree-children">{renderTree(folder, depth + 1)}</ul>}
+            </li>
+          );
+        })}
+        {branch.objects.map((object) => (
+          <li key={object.key}>
+            <button type="button" className={selected?.key === object.key ? "wb-tree-row is-selected" : "wb-tree-row"} style={{ ["--depth" as string]: depth }} onClick={() => setSelected(object)} onDoubleClick={() => { if (isSheetFile(object.key)) openSheetTab(object.key); }} title={object.key}>
+              <span className="wb-chevron-space" />
+              <FileTypeIcon name={object.key} size={16} />
+              <span className="wb-tree-label">{object.key.slice(prefixKey.length)}</span>
+            </button>
+          </li>
+        ))}
+      </>
+    );
+  }
+
+  function renderPreview(object: StorageObject) {
+    const source = `/api/mbox/storage/file?key=${encodeURIComponent(object.key)}`;
+    if (/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i.test(object.key)) return <img className="wb-storage-preview-image" src={source} alt={object.key.split("/").pop() || object.key} />;
+    if (/\.pdf$/i.test(object.key)) return <iframe className="wb-storage-preview-frame" title={object.key} src={source} />;
+    if (/\.(mp4|webm|mov)$/i.test(object.key)) return <video className="wb-storage-preview-media" src={source} controls />;
+    if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(object.key)) return <audio className="wb-storage-preview-audio" src={source} controls />;
+    if (/\.docx$/i.test(object.key) && object.size <= 20 * 1024 * 1024) return previewError ? <div className="wb-doc-missing">{previewError}</div> : previewHtml ? <Suspense fallback={<OctopusSpinner />}><UniverDocumentViewer html={previewHtml} title={object.key.split("/").pop() || object.key} /></Suspense> : <OctopusSpinner />;
+    if (/\.(txt|md|markdown|json|ya?ml|xml|csv|tsv|log|css|scss|html?|js|jsx|ts|tsx|mjs|cjs|py|sql|sh|ps1)$/i.test(object.key) && object.size <= 2 * 1024 * 1024) return previewError ? <div className="wb-doc-missing">{previewError}</div> : <pre className="wb-storage-preview-text">{previewText || "Загрузка…"}</pre>;
+    if (isSheetFile(object.key)) return <div className="wb-doc-missing">Таблица открывается во встроенном редакторе.<button type="button" className="wb-inline-btn" onClick={() => openSheetTab(object.key)}>Открыть таблицу</button></div>;
+    return <div className="wb-doc-missing">Для этого формата нет быстрого предпросмотра. Файл можно скачать.</div>;
+  }
+
   if (!config) return <div className="wb-doc-missing">{error || "Загрузка…"}</div>;
   if (config.member && !config.configured) return <div className="wb-doc-missing">Хранилище ещё не подключено — это делает владелец MBOX.</div>;
   if (editing) return <StorageSettings config={config} onSaved={(next) => { setConfig(next); setEditing(!next.configured); }} onCancel={config.configured ? () => setEditing(false) : undefined} />;
@@ -137,7 +245,7 @@ export function StorageDocument() {
 
   return (
     <div
-      className={dragOver ? "wb-storage is-drop" : "wb-storage"}
+      className={["wb-storage", compact ? "is-compact" : "", dragOver ? "is-drop" : ""].filter(Boolean).join(" ")}
       onDragOver={(event) => { if ([...event.dataTransfer.types].includes("Files")) { event.preventDefault(); setDragOver(true); } }}
       onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(false); }}
       onDrop={onDrop}
@@ -153,7 +261,7 @@ export function StorageDocument() {
           ))}
         </nav>
         <div className="wb-doc-actions">
-          <button type="button" className="is-primary" disabled={rootLocked} onClick={() => inputRef.current?.click()} title={rootLocked ? "Откройте папку проекта" : undefined}><Upload size={14} /> Загрузить</button>
+          <button type="button" className="is-primary wb-storage-upload" disabled={rootLocked} onClick={() => inputRef.current?.click()} title={rootLocked ? "Откройте папку проекта" : "Загрузить"} aria-label="Загрузить файлы"><Upload size={14} /><span>Загрузить</span></button>
           <button type="button" disabled={rootLocked} onClick={() => void createFolder()} title={rootLocked ? "Откройте папку проекта" : "Новая папка"}><FolderPlus size={14} /></button>
           <button type="button" onClick={() => void load(prefix)} title="Обновить"><RefreshCw size={13} /></button>
           {!config.member && <button type="button" onClick={() => setEditing(true)} title="Настройки подключения"><Settings2 size={14} /></button>}
@@ -173,6 +281,20 @@ export function StorageDocument() {
           ))}
         </div>
       )}
+      <div className="wb-storage-browser">
+        <aside className="wb-storage-tree" aria-label="Дерево хранилища">
+          <ul className="wb-tree">
+            <li>
+              <button type="button" className={!prefix ? "wb-tree-row wb-tree-project is-selected" : "wb-tree-row wb-tree-project"} style={{ ["--depth" as string]: 0 }} onClick={() => { setPrefix(""); setSelected(null); toggleFolder(""); }}>
+                <ChevronRight className={expanded.includes("") ? "wb-chevron is-open" : "wb-chevron"} size={14} />
+                <FolderIcon open={expanded.includes("")} size={16} />
+                <span className="wb-tree-label">{config.bucket}</span>
+              </button>
+              {expanded.includes("") && <ul className="wb-tree-children">{renderTree("", 1)}</ul>}
+            </li>
+          </ul>
+        </aside>
+        <section className="wb-storage-content">
       <div className="wb-storage-list">
         {!listing ? <OctopusSpinner /> : (
           <table>
@@ -185,7 +307,7 @@ export function StorageDocument() {
               )}
               {listing.folders.map((folder) => (
                 <tr key={folder} className="is-folder">
-                  <td><button type="button" className="wb-storage-name" onClick={() => setPrefix(folder)}><FolderIcon size={16} />{folderName(folder)}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={() => { setPrefix(folder); setSelected(null); if (!expanded.includes(folder)) setExpanded([...expanded, folder]); }}><FolderIcon size={16} />{folderName(folder)}</button></td>
                   <td className="is-num">—</td>
                   <td />
                   <td className="wb-storage-actions"><button type="button" onClick={() => void remove(folder)} title="Удалить папку"><Trash2 size={13} /></button></td>
@@ -193,11 +315,11 @@ export function StorageDocument() {
               ))}
               {listing.objects.map((object) => (
                 <tr key={object.key}>
-                  <td><button type="button" className="wb-storage-name" onClick={async () => { if (isSheetFile(object.key)) { openSheetTab(object.key); return; } const url = await link(object.key, false); if (url) window.open(url, "_blank", "noopener"); }} title={isSheetFile(object.key) ? "Открыть таблицу в редакторе" : "Открыть в новом окне"}><FileTypeIcon name={object.key} size={16} />{object.key.slice(prefix.length)}</button></td>
+                  <td><button type="button" className="wb-storage-name" onClick={() => setSelected(object)} onDoubleClick={() => { if (isSheetFile(object.key)) openSheetTab(object.key); }} title="Показать файл"><FileTypeIcon name={object.key} size={16} />{object.key.slice(prefix.length)}</button></td>
                   <td className="is-num">{formatBytes(object.size)}</td>
                   <td>{object.last_modified ? formatDateTime(object.last_modified) : ""}</td>
                   <td className="wb-storage-actions">
-                    <button type="button" onClick={async () => { const url = await link(object.key, true); if (url) window.open(url, "_blank", "noopener"); }} title="Скачать"><Download size={13} /></button>
+                    <button type="button" onClick={() => void downloadFile(object.key)} title="Скачать"><Download size={13} /></button>
                     <button type="button" onClick={() => void copyLink(object.key, 3600)} title="Скопировать ссылку на 1 час"><Link2 size={13} /></button>
                     <button type="button" onClick={() => void copyLink(object.key, 7 * 86400)} title="Скопировать ссылку на 7 дней"><ExternalLink size={13} /></button>
                     <button type="button" className="is-danger" onClick={() => void remove(object.key)} title="Удалить"><Trash2 size={13} /></button>
@@ -210,6 +332,21 @@ export function StorageDocument() {
             </tbody>
           </table>
         )}
+      </div>
+      {selected && (
+        <section className="wb-storage-preview" aria-label={`Предпросмотр ${selected.key}`}>
+          <header>
+            <div><FileTypeIcon name={selected.key} size={18} /><span>{selected.key.split("/").pop()}</span><small>{formatBytes(selected.size)}</small></div>
+            <div>
+              {isSheetFile(selected.key) && <button type="button" onClick={() => openSheetTab(selected.key)} title="Открыть в редакторе"><Maximize2 size={14} /></button>}
+              <button type="button" onClick={() => void downloadFile(selected.key)} title="Скачать"><Download size={14} /></button>
+              <button type="button" onClick={() => setSelected(null)} title="Закрыть предпросмотр"><X size={14} /></button>
+            </div>
+          </header>
+          <div className="wb-storage-preview-body">{renderPreview(selected)}</div>
+        </section>
+      )}
+        </section>
       </div>
       {dragOver && <div className="wb-drop-hint"><Upload size={22} />Отпустите, чтобы загрузить в {config.bucket}/{prefix}</div>}
     </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Columns2, Database, MessageSquare, PanelBottom, PanelLeft, PanelRight, Power, RotateCcw, TerminalSquare, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RotateCcw, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -22,7 +22,7 @@ import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
-import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail } from "./BrowserDocument";
+import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail, type BrowserState } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
 import { useSkillsCatalog, useToolsCatalog } from "./catalog";
@@ -31,6 +31,7 @@ import { FileDocument, FilesView } from "./Files";
 import { recentlyActiveAgent, useDesktopSessions } from "./desktopSessions";
 import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
+import { TableDocument, TablesView } from "./TablesView";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
@@ -52,7 +53,7 @@ import { askConfirm } from "../../ui/askText";
 import { TreeGlyph } from "./TreeGlyph";
 import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 
-type Activity = "explorer" | "notes" | "local" | "files" | "search" | "agents" | "skills" | "tools" | "ssh";
+type Activity = "explorer" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
 type PanelTab = "console" | "attention" | "journal";
 
@@ -89,6 +90,65 @@ type Props = {
   onProjectContext: (project: Project, position: { x: number; y: number }) => void;
 };
 
+/** Открытые страницы — это тот же список документов, только с адресом и фавиконом вместо текста. */
+function BrowserTabsView({ tabs, urls, titles, onOpen }: {
+  tabs: TabsApi;
+  urls: Record<string, string>;
+  titles: Record<string, string>;
+  onOpen?: () => void;
+}) {
+  const browserTabs = tabs.tabs.filter((tab) => tab.key.startsWith("web:"));
+  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  const open = (key: string) => { tabs.open(key, true); onOpen?.(); };
+  const refresh = (key: string) => { void browserBridge()?.act(key, "reload"); };
+  return (
+    <div className="wb-view wb-browser-tabs-view">
+      <header className="wb-view-head">
+        <span>Браузер</span>
+        <div className="wb-view-actions">
+          <button type="button" onClick={() => open(browserBlankTabKey())} title="Новая вкладка"><Plus size={14} /></button>
+        </div>
+      </header>
+      <div className="wb-view-body">
+        {browserTabs.map((tab) => {
+          const url = urls[tab.key] || browserTabUrl(tab.key);
+          const fallbackTitle = url ? new URL(url).hostname : "Новая вкладка";
+          const title = titles[tab.key] || fallbackTitle;
+          return (
+            <button
+              type="button"
+              className={tabs.active === tab.key ? "wb-browser-tab-item is-active" : "wb-browser-tab-item"}
+              key={tab.key}
+              onClick={() => open(tab.key)}
+              onContextMenu={(event) => { event.preventDefault(); setMenu({ key: tab.key, x: event.clientX, y: event.clientY }); }}
+              title={url || title}
+            >
+              {url ? <Favicon tabKey={tab.key} url={url} size={18} /> : <Globe2 size={18} aria-hidden="true" />}
+              <span className="wb-browser-tab-copy"><b>{title}</b>{url && <small>{url}</small>}</span>
+            </button>
+          );
+        })}
+        {!browserTabs.length && (
+          <div className="wb-session-empty">
+            <p>Вкладок пока нет.</p>
+            <button type="button" onClick={() => open(browserBlankTabKey())}><Plus size={13} /> Новая вкладка</button>
+          </div>
+        )}
+      </div>
+      {menu && <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+        <div className="wb-note-menu">
+          <button type="button" role="menuitem" onClick={() => { open(menu.key); setMenu(null); }}>Открыть</button>
+          <button type="button" role="menuitem" onClick={() => { refresh(menu.key); setMenu(null); }}>Обновить</button>
+          <button type="button" role="menuitem" onClick={() => { tabs.pin(menu.key); setMenu(null); }}>Закрепить</button>
+          <div className="wb-menu-sep" role="separator" />
+          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(menu.key); setMenu(null); }}>Закрыть все, кроме этой</button>
+          <button type="button" role="menuitem" className="is-danger" onClick={() => { tabs.close(menu.key); setMenu(null); }}>Закрыть вкладку</button>
+        </div>
+      </WbMenu>}
+    </div>
+  );
+}
+
 function useDrag(onMove: (event: PointerEvent) => void) {
   return useCallback((event: ReactPointerEvent) => {
     event.preventDefault();
@@ -109,6 +169,7 @@ function useDrag(onMove: (event: PointerEvent) => void) {
 export function Workbench({ data, titleBar, renderers, status, user, onProjectContext }: Props) {
   setWorkbenchStorageUser(user.username);
   const tabsState = useTabs();
+  const [browserUrls, setBrowserUrls] = usePersistentState<Record<string, string>>("mbox.browser.urls", {});
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const defaultNoteProjectId = user.role === "owner" ? null : data.projects[0]?.id;
 
@@ -141,9 +202,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const [panelMaximized, setPanelMaximized] = usePersistentState("mbox.wb.panelMaximized", false);
   const [panelTab, setPanelTab] = usePersistentState<PanelTab>("mbox.wb.panelTab", "console");
   const [consoleDock, setConsoleDock] = usePersistentState<ConsoleDock>("mbox.wb.consoleDock", "bottom");
-  // Сплит центральной части: вторая группа редактора справа от основной. Держит ровно одну
-  // вкладку (браузер слева — заметка справа, и наоборот), поэтому хватает одного ключа и доли ширины.
-  const [splitKey, setSplitKey] = usePersistentState<string | null>("mbox.wb.splitKey", null);
+  // Вторая область — полноценная группа вкладок. Старый ключ сохраняем только как миграцию,
+  // чтобы после обновления не потерять открытую справа вкладку.
+  const [legacySplitKey] = usePersistentState<string | null>("mbox.wb.splitKey", null);
+  const [splitTabs, setSplitTabs] = usePersistentState<string[]>("mbox.wb.splitTabs", legacySplitKey ? [legacySplitKey] : []);
+  const [splitActive, setSplitActive] = usePersistentState<string>("mbox.wb.splitActive", legacySplitKey || "");
+  const splitKeys = useMemo(() => new Set(splitTabs), [splitTabs]);
+  const splitOpen = splitTabs.length > 0;
   // Телефон: нижнее меню — лента пилюль в капсуле, её листают. Активный раздел держим на виду — по центру.
   const activityRef = useRef<HTMLElement | null>(null);
   const [isPhone, setIsPhone] = useState(() => window.matchMedia("(max-width: 720px)").matches);
@@ -159,22 +224,22 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   // Открыли память проекта, из неё запись — «Назад» возвращает к списку, даже если его вкладку уже заменили.
   const navHistory = useRef<{ stack: string[]; index: number; jumping: boolean }>({ stack: [], index: -1, jumping: false });
   const [navState, setNavState] = useState({ back: false, forward: false });
-  // Экран разделён, и браузер только во второй области — новая вкладка браузера (из меню, от агента, по ссылке)
-  // встаёт туда же, а не в основную область с заметкой. Прежняя страница уходит в основной список вкладок.
+  // Если справа уже открыт браузер, новые страницы из браузерных действий остаются в той же группе.
   const routedOpen = useCallback((key: string, pin = false) => {
-    const nextKey = key === "web:" && splitKey?.startsWith("web:") && !tabsState.active.startsWith("web:")
+    const nextKey = key === "web:" && splitTabs.some((item) => item.startsWith("web:")) && !tabsState.active.startsWith("web:")
       ? browserBlankTabKey()
       : key;
     const isNewWeb = nextKey.startsWith("web:") && !tabsState.tabs.some((tab) => tab.key === nextKey);
-    if (isNewWeb && splitKey?.startsWith("web:") && !tabsState.active.startsWith("web:")) {
+    if (isNewWeb && splitTabs.some((item) => item.startsWith("web:")) && !tabsState.active.startsWith("web:")) {
       const mainActive = tabsState.active;
       tabsState.open(nextKey, true);
-      setSplitKey(nextKey);
+      setSplitTabs((current) => current.includes(nextKey) ? current : [...current, nextKey]);
+      setSplitActive(nextKey);
       if (mainActive) tabsState.open(mainActive);
       return;
     }
     tabsState.open(nextKey, pin);
-  }, [tabsState, splitKey, setSplitKey]);
+  }, [tabsState, splitTabs, setSplitTabs, setSplitActive]);
   const tabs = useMemo(() => ({ ...tabsState, open: routedOpen }), [tabsState, routedOpen]);
   const [splitRatio, setSplitRatio] = usePersistentState("mbox.wb.splitRatio", 0.5);
   const [rightOpen, setRightOpen] = usePersistentState("mbox.wb.rightOpen", true);
@@ -194,6 +259,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const [visited, setVisited] = useState<Set<string>>(() => new Set([tabs.active]));
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  const [railMenu, setRailMenu] = useState<{ id: RailItemId; x: number; y: number } | null>(null);
   const centerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -244,9 +310,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
   useEffect(() => {
     if (tabs.active) setVisited((current) => (current.has(tabs.active) ? current : new Set(current).add(tabs.active)));
+    if (splitActive) setVisited((current) => (current.has(splitActive) ? current : new Set(current).add(splitActive)));
     // На телефоне панели перекрывают документ целиком: открыли вкладку — показываем её.
     if (window.matchMedia("(max-width: 720px)").matches) { setSidebarOpen(false); setPanelOpen(false); }
-  }, [tabs.active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tabs.active, splitActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const listener = (event: Event) => {
@@ -265,6 +332,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onTitle = useCallback((key: string, title: string) => setTitles((current) => (current[key] === title ? current : { ...current, [key]: title })), []);
+  const onBrowserState = useCallback((key: string, next: BrowserState) => {
+    const url = /^https?:\/\//i.test(next.url || "") ? next.url : "";
+    setBrowserUrls((current) => current[key] === url ? current : { ...current, [key]: url });
+  }, [setBrowserUrls]);
   const onDirty = useCallback((key: string, value: boolean) => setDirty((current) => (Boolean(current[key]) === value ? current : { ...current, [key]: value })), []);
 
   useEffect(() => {
@@ -285,9 +356,41 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }
 
   // Разделы, которые открываются не боковой панелью, а вкладкой документа.
-  const RAIL_TABS: Partial<Record<RailItemId, string>> = { storage: "storage", history: "history", browser: "web:" };
+  const RAIL_TABS: Partial<Record<RailItemId, string>> = { history: "history" };
   const hasBrowser = Boolean(browserBridge());
   const railHidden = useRailHidden();
+
+  // HTTP(S)-ссылки из заметок, чата и остальных документов MBOX остаются в рабочем
+  // пространстве. Служебные ссылки текущего origin и загрузки продолжают работать
+  // как обычные ссылки приложения.
+  useEffect(() => {
+    if (!hasBrowser) return;
+    const onLinkClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      const target = event.target as Element | null;
+      const anchor = target?.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor || anchor.hasAttribute("download")) return;
+      let url: URL;
+      try { url = new URL(anchor.href, window.location.href); } catch { return; }
+      if (!/^https?:$/.test(url.protocol) || url.origin === window.location.origin) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const browserKey = browserTabKey(url.href);
+      const currentKey = tabsState.active;
+      // Внешняя ссылка из документа — второй рабочий контекст: открываем её в правой
+      // группе и возвращаем фокус исходному документу слева.
+      if (currentKey && !currentKey.startsWith("web:")) {
+        tabsState.open(browserKey, true);
+        setSplitTabs((current) => current.includes(browserKey) ? current : [...current, browserKey]);
+        setSplitActive(browserKey);
+        tabsState.open(currentKey, true);
+      } else {
+        tabs.open(browserKey, true);
+      }
+    };
+    document.addEventListener("click", onLinkClick, true);
+    return () => document.removeEventListener("click", onLinkClick, true);
+  }, [hasBrowser, tabs, tabsState, setSplitTabs, setSplitActive]);
 
   function railActive(id: RailItemId) {
     // Телефон: чат открыт поверх всего — активна только его пилюля.
@@ -385,40 +488,73 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
   async function closeTab(key: string) {
     if (dirty[key] && !(await askConfirm({ title: "Во вкладке несохранённые правки. Закрыть?", confirmLabel: "Закрыть без сохранения", danger: true }))) return;
-    if (key === splitKey) setSplitKey(null);
+    const nextSplitTabs = splitTabs.filter((item) => item !== key);
+    setSplitTabs(nextSplitTabs);
+    if (key === splitActive) setSplitActive(nextSplitTabs[0] || "");
     tabs.close(key);
   }
 
-  // Ссылка сайта на новое окно. Браузер во второй области открывает её там же: вкладка встаёт во вторую
-  // область вместо него (он уходит в основной список вкладок), основная область не меняется. Через ref —
+  // Вкладка, открытая из браузера справа, остаётся в правой группе. Через ref —
   // отрисованные документы кешируются и держат старое замыкание.
-  const splitKeyRef = useRef(splitKey);
-  splitKeyRef.current = splitKey;
+  const splitKeysRef = useRef(splitKeys);
+  splitKeysRef.current = splitKeys;
   const tabsApiRef = useRef(tabs);
   tabsApiRef.current = tabs;
   const openFromBrowser = useCallback((fromKey: string, url: string) => {
     const key = browserTabKey(url);
     const api = tabsApiRef.current;
-    if (splitKeyRef.current === fromKey) {
+    if (splitKeysRef.current.has(fromKey)) {
       const mainActive = api.active;
       api.open(key, true);
-      setSplitKey(key);
+      setSplitTabs((current) => current.includes(key) ? current : [...current, key]);
+      setSplitActive(key);
       if (mainActive && mainActive !== key) api.open(mainActive);
       return;
     }
     api.open(key, true);
-  }, [setSplitKey]);
+  }, [setSplitTabs, setSplitActive]);
 
-  /** Отправить вкладку во вторую область. Активной она при этом быть не может — иначе в основной
-   *  группе не останется документа, и левая половина будет пустой. */
-  function splitTab(key: string) {
-    // Делить нечего, если вкладка одна: слева осталась бы пустота вместо документа.
-    if (!key || tabs.tabs.length < 2) return;
-    setSplitKey(key);
+  const mainTabs = useMemo(() => tabs.tabs.filter((tab) => !splitKeys.has(tab.key)), [tabs.tabs, splitKeys]);
+
+  /** Переносит вкладку во вторую группу, сохраняя все уже открытые там вкладки. */
+  function splitTab(key: string, before?: string) {
+    if (!key || splitKeys.has(key) || mainTabs.length < 2) return;
+    setSplitTabs((current) => {
+      const index = before ? current.indexOf(before) : -1;
+      return index < 0 ? [...current, key] : [...current.slice(0, index), key, ...current.slice(index)];
+    });
+    setSplitActive(key);
     if (tabs.active === key) {
-      const neighbour = tabs.tabs.find((tab) => tab.key !== key);
+      const neighbour = mainTabs.find((tab) => tab.key !== key);
       if (neighbour) tabs.open(neighbour.key);
     }
+  }
+
+  function moveToSplit(key: string, before?: string) {
+    splitTab(key, before);
+  }
+
+  function moveToMain(key: string, before?: string) {
+    if (!splitKeys.has(key)) return;
+    setSplitTabs((current) => current.filter((item) => item !== key));
+    if (before) tabsState.move(key, before);
+    tabsState.open(key, true);
+  }
+
+  function moveSplitTab(key: string, before: string) {
+    if (key === before) return;
+    setSplitTabs((current) => {
+      const next = current.filter((item) => item !== key);
+      const index = next.indexOf(before);
+      return index < 0 ? [...next, key] : [...next.slice(0, index), key, ...next.slice(index)];
+    });
+  }
+
+  function collapseSplit() {
+    if (!splitOpen) return;
+    const active = splitActive;
+    setSplitTabs([]);
+    if (active) tabsState.open(active, true);
   }
 
   useEffect(() => {
@@ -427,7 +563,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       const key = event.key.toLowerCase();
       if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); openSearch(); }
       else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openSearch(); }
-      else if (mod && event.code === "Backslash") { event.preventDefault(); if (splitKey) setSplitKey(null); else splitTab(tabs.active); }
+      else if (mod && event.code === "Backslash") { event.preventDefault(); if (splitOpen) collapseSplit(); else splitTab(tabs.active); }
       else if (mod && event.shiftKey && event.code === "KeyE") { event.preventDefault(); setActivity("explorer"); setSidebarOpen(true); }
       else if (mod && !event.shiftKey && event.code === "KeyB") { event.preventDefault(); setSidebarOpen((value) => !value); }
       else if (mod && !event.shiftKey && event.code === "KeyJ") { event.preventDefault(); setPanelOpen((value) => !value); }
@@ -514,7 +650,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const renderedDocs = useRef(new Map<string, ReactNode>());
   function docNode(key: string, active: boolean): ReactNode {
     const cached = renderedDocs.current.get(key);
-    if (!active && cached !== undefined) return cached;
+    // У браузера и таблицы visible управляет не только React: браузерный WebContentsView
+    // нужно скрыть при уходе со вкладки, а Univer — сообщить о новой площади только активному листу.
+    // Кэшировать для них старое visible=true нельзя — он перекрывал другие документы и дёргал ribbon.
+    const tracksVisibility = key.startsWith("web:") || key.startsWith("table:");
+    if (!active && cached !== undefined && !tracksVisibility) return cached;
     const node = renderTab(key);
     renderedDocs.current.set(key, node);
     return node;
@@ -522,13 +662,18 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   useEffect(() => {
     const live = new Set(tabs.tabs.map((tab) => tab.key));
     for (const key of renderedDocs.current.keys()) if (!live.has(key)) renderedDocs.current.delete(key);
-  }, [tabs.tabs]);
+    setSplitTabs((current) => {
+      const next = current.filter((key) => live.has(key));
+      return next.length === current.length ? current : next;
+    });
+    if (splitActive && !live.has(splitActive)) setSplitActive("");
+  }, [tabs.tabs, splitActive, setSplitTabs, setSplitActive]);
 
   function renderTab(key: string): ReactNode {
     const [kind, first, second] = key.split(":");
     const rest = key.split(":").slice(2).join(":");
     const project = data.projects.find((item) => item.id === first);
-    const documentVisible = key === tabs.active || key === splitKey;
+    const documentVisible = key === tabs.active || (splitKeys.has(key) && key === splitActive);
     const lost = (text: string) => <div className="wb-doc-missing">{text}</div>;
     switch (kind) {
       case "welcome":
@@ -571,12 +716,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       }
       case "note":
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
+      case "table":
+        return <TableDocument tableId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
       case "s3sheet":
         return <StorageSheetDocument storageKey={key.slice(STORAGE_SHEET_TAB.length)} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "web":
-        return <BrowserDocument tabKey={key} visible={documentVisible} tabs={tabs} onTitle={onTitle} onOpenUrl={openFromBrowser} />;
+        return <BrowserDocument tabKey={key} visible={documentVisible} tabs={tabs} onTitle={onTitle} onState={onBrowserState} onOpenUrl={openFromBrowser} />;
       case "local":
         return IMAGE_FILE.test(rest)
           ? <LocalImageDocument rootKey={first} path={rest} />
@@ -633,10 +780,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     if (!nav || !window.matchMedia("(max-width: 720px)").matches) return;
     nav.querySelector<HTMLElement>(".wb-activity.is-active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   }, [activity, tabs.active, consoleVisible]);
-  // Что открыто сейчас: активная вкладка и вторая область. Агент получает это с сообщением и не ищет файл сам.
+  // Что открыто сейчас: активные вкладки обеих областей. Агент получает это с сообщением и не ищет файл сам.
   const chatFocus = useMemo<FocusItem[]>(() => {
-    const keys = [tabs.active, splitKey].filter((key): key is string => Boolean(key));
-    return keys.flatMap((key): FocusItem[] => {
+    const keys = [...new Set([tabs.active, splitActive].filter((key): key is string => Boolean(key)))];
+    const items = keys.flatMap((key): FocusItem[] => {
       const [kind, first] = key.split(":");
       const rest = key.split(":").slice(2).join(":");
       const title = tabMeta(key, data, catalogTitles).title;
@@ -648,6 +795,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           return [{ key, kind: kind === "local" ? "file" : "diff", title, detail: path }];
         }
         case "note":
+        case "table":
         case "todo":
         case "memory":
           return [{ key, kind, title, id: first }];
@@ -656,7 +804,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         case "s3sheet":
           return [{ key, kind: "storage", title, detail: key.slice("s3sheet:".length) }];
         case "web": {
-          const url = browserTabUrl(key);
+          const url = browserUrls[key] || browserTabUrl(key);
           return url ? [{ key, kind: "web", title, detail: url }] : [];
         }
         case "todos":
@@ -670,7 +818,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           return [];
       }
     });
-  }, [tabs.active, splitKey, data, catalogTitles, localWorkspace.roots]);
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const identity = item.id ? `${item.kind}:id:${item.id}` : item.detail ? `${item.kind}:detail:${item.detail}` : `${item.kind}:title:${item.title}`;
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+  }, [tabs.active, splitTabs, splitActive, data, catalogTitles, localWorkspace.roots]);
   const renderChat = (visible: boolean, paneId: string, debug?: ChatDebug) => (
     <AgentChat embedded visible={visible} peer={chatPeer(paneId)} debug={debug} jarvisEnabled={user.role === "owner" || user.jarvis_enabled !== false} defaultResponder={user.role === "owner" && user.jarvis_autoreply === false ? CLOUD_AGENTS.claude : undefined} focus={chatFocus} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
   );
@@ -721,6 +876,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   icon={<img src={item.icon} alt="" draggable={false} />}
                   active={railActive(item.id)}
                   onClick={() => { closePhoneChat(); openRail(item.id); }}
+                  onContextMenu={item.id === "browser" ? (event) => {
+                    event.preventDefault();
+                    setRailMenu({ id: item.id, x: event.clientX, y: event.clientY });
+                  } : undefined}
                   badge={item.id === "agents" ? needsHuman.length : undefined}
                 />
               ))}
@@ -729,7 +888,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         })}
         <span className="wb-activity-fill" />
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Чат с агентами">
-          <span className="wb-activity-icon" aria-hidden="true">{systemIcon("console.png")}</span>
+          <span className="wb-activity-icon" aria-hidden="true"><img src="/icons/dialog.png" alt="" draggable={false} /></span>
           <span className="wb-activity-label" aria-hidden="true">Чат</span>
           <span className="wb-activity-tip" role="tooltip">Чат с агентами</span>
         </button>
@@ -741,8 +900,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
         {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
+        {activity === "tables" && <TablesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         {activity === "local" && <LocalFoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
+        {activity === "browser" && <BrowserTabsView tabs={tabs} urls={browserUrls} titles={titles} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
+        {activity === "storage" && <StorageDocument compact />}
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
@@ -750,34 +912,41 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       </aside>
 
       <div className="wb-center" ref={centerRef}>
-        <div className={splitKey ? "wb-groups is-split" : "wb-groups"} ref={groupsRef} style={{ ["--wb-split" as string]: `${Math.round(splitRatio * 100)}%` }}>
+        <div className={splitOpen ? "wb-groups is-split" : "wb-groups"} ref={groupsRef} style={{ ["--wb-split" as string]: `${Math.round(splitRatio * 100)}%` }}>
         <section className="wb-editor" aria-label="Вкладки">
           <div
-            className="wb-tabs"
+            className={draggedTab && splitKeys.has(draggedTab) ? "wb-tabs is-tab-drop-target" : "wb-tabs"}
             role="tablist"
             onWheel={(event) => { event.currentTarget.scrollLeft += event.deltaY; }}
             // Панель консоли, брошенная на полосу вкладок, переезжает в редактор — как терминал в VS Code.
-            onDragOver={(event) => { if (event.dataTransfer.types.includes(PANE_MIME)) event.preventDefault(); }}
+            onDragOver={(event) => { if (event.dataTransfer.types.includes(PANE_MIME) || (draggedTab && splitKeys.has(draggedTab))) event.preventDefault(); }}
             onDrop={(event) => {
               const pane = event.dataTransfer.getData(PANE_MIME);
-              if (!pane) return;
-              event.preventDefault();
-              consoleLayout.detach(pane);
-              tabs.open(`${TERMINAL_TAB}${pane}`, true);
+              if (pane) {
+                event.preventDefault();
+                consoleLayout.detach(pane);
+                tabs.open(`${TERMINAL_TAB}${pane}`, true);
+                return;
+              }
+              if (draggedTab && splitKeys.has(draggedTab)) {
+                event.preventDefault();
+                moveToMain(draggedTab);
+                setDraggedTab(null);
+              }
             }}
           >
             <div className="wb-tabs-nav">
               <button type="button" disabled={!navState.back} onClick={() => navigate(-1)} title="Назад (Alt+←)" aria-label="Назад"><ArrowLeft size={15} /></button>
               <button type="button" disabled={!navState.forward} onClick={() => navigate(1)} title="Вперёд (Alt+→)" aria-label="Вперёд"><ArrowRight size={15} /></button>
             </div>
-            {orderTabs(tabs.tabs.filter((tab) => tab.key !== splitKey), groupTabs).map((tab, index, list) => {
+            {orderTabs(mainTabs, groupTabs).map((tab, index, list) => {
               const meta = tabMeta(tab.key, data, catalogTitles);
               const group = tabGroupOf(tab.key);
               // Разделитель — там, где начинается новая группа; подпись группы — в подсказке.
               const groupStart = groupTabs && index > 0 && tabGroupOf(list[index - 1].key) !== group;
               const active = tab.key === tabs.active;
               const isFileTab = tab.key.startsWith("file:") || tab.key.startsWith("local:");
-              const browserUrl = tab.key.startsWith("web:") ? browserTabUrl(tab.key) : "";
+              const browserUrl = tab.key.startsWith("web:") ? browserUrls[tab.key] || browserTabUrl(tab.key) : "";
               const browserFavicon = browserUrl
                 ? browserFavicons[tab.key] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(tab.key, browserUrl)
                 : "";
@@ -796,7 +965,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   draggable
                   onDragStart={() => setDraggedTab(tab.key)}
                   onDragOver={(event) => { if (draggedTab) event.preventDefault(); }}
-                  onDrop={(event) => { event.preventDefault(); if (draggedTab) tabs.move(draggedTab, tab.key); setDraggedTab(null); }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (draggedTab && splitKeys.has(draggedTab)) moveToMain(draggedTab, tab.key);
+                    else if (draggedTab) tabs.move(draggedTab, tab.key);
+                    setDraggedTab(null);
+                  }}
                   onDragEnd={() => setDraggedTab(null)}
                 >
                   {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={tab.key} url={browserUrl} size={18} /> : meta.glyph && !browserFavicon ? <TreeGlyph kind={meta.glyph} size={16} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
@@ -821,7 +996,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                 </dl>
               </div>
             )}
-            {tabs.tabs.filter((tab) => (visited.has(tab.key) || tab.key === tabs.active) && tab.key !== splitKey).map((tab) => (
+            {mainTabs.filter((tab) => visited.has(tab.key) || tab.key === tabs.active).map((tab) => (
               <div key={tab.key} className="wb-doc" hidden={tab.key !== tabs.active} data-scroll-scope={`tab:${tab.key}`}>
                 {docNode(tab.key, tab.key === tabs.active)}
               </div>
@@ -829,33 +1004,59 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           </div>
         </section>
 
-        {/* Вторая группа: один документ рядом с основным — браузер и заметка одновременно.
-            Документ живёт только здесь, из основной группы он на это время исключён. */}
-        {splitKey && (
+        {/* Вторая группа со своей лентой и активной вкладкой. */}
+        {splitOpen && (
           <>
             <div className="wb-sash is-vertical is-left" onPointerDown={resizeSplit} role="separator" aria-orientation="vertical" aria-label="Ширина второй области" />
             <section className="wb-editor is-split" aria-label="Вторая область">
-              <div className="wb-tabs" role="tablist">
-                {(() => {
-                  const meta = tabMeta(splitKey, data, catalogTitles);
-                  const isFileTab = splitKey.startsWith("file:") || splitKey.startsWith("local:");
-                  const browserUrl = splitKey.startsWith("web:") ? browserTabUrl(splitKey) : "";
+              <div
+                className={draggedTab && !splitKeys.has(draggedTab) ? "wb-tabs is-tab-drop-target" : "wb-tabs"}
+                role="tablist"
+                onDragOver={(event) => { if (draggedTab && !splitKeys.has(draggedTab)) event.preventDefault(); }}
+                onDrop={(event) => {
+                  if (!draggedTab || splitKeys.has(draggedTab)) return;
+                  event.preventDefault();
+                  moveToSplit(draggedTab);
+                  setDraggedTab(null);
+                }}
+              >
+                {splitTabs.map((key) => {
+                  const meta = tabMeta(key, data, catalogTitles);
+                  const isFileTab = key.startsWith("file:") || key.startsWith("local:");
+                  const browserUrl = key.startsWith("web:") ? browserUrls[key] || browserTabUrl(key) : "";
                   const browserFavicon = browserUrl
-                    ? browserFavicons[splitKey] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(splitKey, browserUrl)
+                    ? browserFavicons[key] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(key, browserUrl)
                     : "";
                   return (
-                    <div className="wb-tab is-active" role="tab" aria-selected title={meta.hint}>
-                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={splitKey} url={browserUrl} size={18} /> : meta.glyph && !browserFavicon ? <TreeGlyph kind={meta.glyph} size={16} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
+                    <div
+                      key={key}
+                      className={["wb-tab", key === splitActive ? "is-active" : "", dirty[key] ? "is-dirty" : "", draggedTab && draggedTab !== key ? "is-drop-zone" : ""].filter(Boolean).join(" ")}
+                      role="tab"
+                      aria-selected={key === splitActive}
+                      title={meta.hint}
+                      onClick={() => setSplitActive(key)}
+                      onDoubleClick={() => tabs.pin(key)}
+                      onMouseDown={(event) => { if (event.button === 1) { event.preventDefault(); void closeTab(key); } }}
+                      onContextMenu={(event) => { event.preventDefault(); setTabMenu({ key, x: event.clientX, y: event.clientY }); }}
+                      draggable
+                      onDragStart={() => setDraggedTab(key)}
+                      onDragOver={(event) => { if (draggedTab) event.preventDefault(); }}
+                      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); if (draggedTab && splitKeys.has(draggedTab)) moveSplitTab(draggedTab, key); else if (draggedTab) moveToSplit(draggedTab, key); setDraggedTab(null); }}
+                      onDragEnd={() => setDraggedTab(null)}
+                    >
+                      {isFileTab ? <FileTypeIcon name={meta.title} size={18} /> : browserUrl ? <Favicon tabKey={key} url={browserUrl} size={18} /> : meta.glyph && !browserFavicon ? <TreeGlyph kind={meta.glyph} size={16} /> : <img src={browserFavicon || meta.icon} width={18} height={18} alt="" />}
                       <span className="wb-tab-title">{meta.title}</span>
-                      <button type="button" className="wb-tab-close" onClick={() => setSplitKey(null)} aria-label="Закрыть вторую область">
+                      <button type="button" className="wb-tab-close" onClick={(event) => { event.stopPropagation(); void closeTab(key); }} aria-label={`Закрыть ${meta.title}`}>
                         <X size={13} />
                       </button>
                     </div>
                   );
-                })()}
+                })}
               </div>
               <div className="wb-docs">
-                <div className="wb-doc" data-scroll-scope={`split:${splitKey}`}>{docNode(splitKey, true)}</div>
+                {splitTabs.filter((key) => visited.has(key) || key === splitActive).map((key) => (
+                  <div key={key} className="wb-doc" hidden={key !== splitActive} data-scroll-scope={`split:${key}`}>{docNode(key, key === splitActive)}</div>
+                ))}
               </div>
             </section>
           </>
@@ -918,7 +1119,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       <aside className="wb-right" aria-label="Чат с агентами">
         {consoleDock === "right" && (
           <>
-            <div className="wb-sash is-vertical is-left" onPointerDown={resizeRight} role="separator" aria-orientation="vertical" aria-label="Ширина консоли" />
+            <div className="wb-sash is-vertical is-left" onPointerDown={resizeRight} role="separator" aria-orientation="vertical" aria-label="Ширина чата" />
             <div className="wb-right-body">{chat}</div>
           </>
         )}
@@ -929,7 +1130,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <i className="wb-state-dot" />{status.label}
         </button>
         <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
-          <TerminalSquare size={12} /> {working.length > 0 ? `${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : "Чат"}
+          <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} /> {working.length > 0 ? `${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : "Чат"}
         </button>
         <span className="wb-status-fill" />
         {attentionCount > 0 && (
@@ -944,9 +1145,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         <button type="button" className="wb-status-item" onClick={() => setPanelOpen((value) => !value)} title="Нижняя панель (Ctrl+J)"><PanelBottom size={12} /></button>
         <button
           type="button"
-          className={splitKey ? "wb-status-item is-on" : "wb-status-item"}
-          onClick={() => { if (splitKey) setSplitKey(null); else splitTab(tabs.active); }}
-          title={splitKey ? "Убрать вторую область (Ctrl+\)" : "Разделить на две области (Ctrl+\)"}
+          className={splitOpen ? "wb-status-item is-on" : "wb-status-item"}
+          onClick={() => { if (splitOpen) collapseSplit(); else splitTab(tabs.active); }}
+          title={splitOpen ? "Убрать вторую область (Ctrl+\)" : "Разделить на две области (Ctrl+\)"}
         >
           <Columns2 size={12} />
         </button>
@@ -972,12 +1173,20 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       {tabMenu && (
         <WbMenu x={tabMenu.x} y={tabMenu.y} onClose={() => setTabMenu(null)}>
           <button type="button" role="menuitem" onClick={() => { closeTab(tabMenu.key); setTabMenu(null); }}>Закрыть</button>
-          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}>Закрыть остальные</button>
+          {tabMenu.key.startsWith("web:") && <button type="button" role="menuitem" onClick={() => { void browserBridge()?.act(tabMenu.key, "reload"); setTabMenu(null); }}>Обновить</button>}
+          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}>Закрыть все, кроме этой</button>
           <button type="button" role="menuitem" onClick={() => { tabs.pin(tabMenu.key); setTabMenu(null); }}>Закрепить</button>
-          <button type="button" role="menuitem" onClick={() => { splitTab(tabMenu.key); setTabMenu(null); }}>Открыть во второй области</button>
-          {splitKey && <button type="button" role="menuitem" onClick={() => { setSplitKey(null); setTabMenu(null); }}>Убрать вторую область</button>}
+          <button type="button" role="menuitem" onClick={() => { splitKeys.has(tabMenu.key) ? moveToMain(tabMenu.key) : splitTab(tabMenu.key); setTabMenu(null); }}>
+            {splitKeys.has(tabMenu.key) ? "Перенести в основную область" : "Открыть во второй области"}
+          </button>
+          {splitOpen && <button type="button" role="menuitem" onClick={() => { collapseSplit(); setTabMenu(null); }}>Убрать вторую область</button>}
           <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}>Копировать ссылку</button>
           <button type="button" role="menuitemcheckbox" aria-checked={groupTabs} onClick={() => { setGroupTabs(!groupTabs); setTabMenu(null); }}>{groupTabs ? "Не группировать вкладки" : "Группировать вкладки по видам"}</button>
+        </WbMenu>
+      )}
+      {railMenu?.id === "browser" && (
+        <WbMenu x={railMenu.x} y={railMenu.y} onClose={() => setRailMenu(null)}>
+          <button type="button" role="menuitem" onClick={() => { tabs.open(browserBlankTabKey(), true); setRailMenu(null); }}>Новая вкладка</button>
         </WbMenu>
       )}
     </div>
@@ -991,9 +1200,9 @@ function placeActivityTip(event: { currentTarget: HTMLElement }) {
   event.currentTarget.style.setProperty("--tip-top", `${Math.round(rect.top + rect.height / 2)}px`);
 }
 
-function ActivityButton({ label, short, icon, active, onClick, badge }: { label: string; short?: string; icon: ReactNode; active: boolean; onClick: () => void; badge?: number }) {
+function ActivityButton({ label, short, icon, active, onClick, onContextMenu, badge }: { label: string; short?: string; icon: ReactNode; active: boolean; onClick: () => void; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; badge?: number }) {
   return (
-    <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} aria-label={label} aria-pressed={active} onMouseEnter={placeActivityTip} onFocus={placeActivityTip}>
+    <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} onContextMenu={onContextMenu} aria-label={label} aria-pressed={active} onMouseEnter={placeActivityTip} onFocus={placeActivityTip}>
       <span className="wb-activity-icon" aria-hidden="true">{icon}</span>
       {/* Подпись видна только в нижнем меню телефона (см. mobile.css); на компьютере — подсказка. */}
       <span className="wb-activity-label" aria-hidden="true">{short || label}</span>
@@ -1175,7 +1384,7 @@ const TAB_GROUP_ORDER: TabGroup[] = ["work", "docs", "web", "system"];
 function tabGroupOf(key: string): TabGroup {
   const kind = key.split(":")[0];
   if (kind === "web") return "web";
-  if (["note", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
+  if (["note", "table", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
   if (["todo", "todos", "entity", "folder", "project", "welcome"].includes(kind)) return "work";
   return "system";
 }

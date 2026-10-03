@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
+import mammoth from "mammoth";
+import { documentToDocx, docxFileName } from "./docx.mjs";
 
 // Заметки — свои короткие записи человека (не память агентов): быстро записать, найти, закрепить.
 // Общий модуль для прод-сервера и dev-API в vite.config.ts, таблица создаётся при старте.
@@ -70,6 +72,7 @@ const NOTE_COLORS = new Set(["default", "red", "orange", "yellow", "green", "cya
 const NOTE_THEMES = new Set(["light", "graphite", "black"]);
 const MAX_NOTE_TABS = 50;
 const MAX_VERSION_BYTES = 1024 * 1024;
+const MAX_DOCX_IMPORT_BYTES = 20 * 1024 * 1024;
 const VERSIONS_PER_NOTE = 60;
 // Заметка сохраняется сама, раз в несколько секунд. Без склейки история за один вечер превратилась бы
 // в сотню одинаковых строк, в которых уже ничего не найти.
@@ -166,6 +169,34 @@ export async function ensureNotesSchema(query) {
 function titleFrom(content) {
   const line = String(content || "").split("\n").map((item) => item.replace(/^#+\s*/, "").trim()).find(Boolean) || "";
   return line.slice(0, 200);
+}
+
+function noteFileBase(name) {
+  return String(name || "Заметка Word").replace(/\.[a-z0-9]+$/i, "").replace(/[\\/:*?"<>|]+/g, "-").trim() || "Заметка Word";
+}
+
+function noteDocxContent(note) {
+  const tabs = noteTabs(note.tabs, note.content);
+  if (tabs.length <= 1) return tabs[0]?.content || note.content || "";
+  return tabs.map((tab) => `# ${tab.title}\n\n${tab.content || ""}`.trim()).join("\n\n");
+}
+
+function decodeBase64File(body) {
+  const encoded = String(body?.data || "").replace(/^data:[^,]+,/, "");
+  const buffer = Buffer.from(encoded, "base64");
+  if (!buffer.length) throw new Error("empty_docx");
+  if (buffer.length > MAX_DOCX_IMPORT_BYTES) throw new Error("docx_too_large");
+  return buffer;
+}
+
+async function docxToNoteInput(body) {
+  const name = String(body?.name || "Заметка Word.docx");
+  if (!/\.docx$/i.test(name)) throw new Error("docx_required");
+  const { value } = await mammoth.extractRawText({ buffer: decodeBase64File(body) });
+  const text = String(value || "").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!text) throw new Error("docx_empty_text");
+  const title = String(body?.title || titleFrom(text) || noteFileBase(name)).trim().slice(0, 200);
+  return { name, title, content: `# ${title}\n\n${text}`.trim() };
 }
 
 export async function listNotes(query, search = "", limit = 200, scope = { all: true, projectIds: [] }) {
@@ -324,6 +355,15 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
       sendJson(res, 200, { versions: await listNoteVersions(query, noteId, url.searchParams.get("limit")) });
       return true;
     }
+    if (url.pathname === "/api/mbox/notes/import-docx" && req.method === "POST") {
+      const body = await readBody(req);
+      if (!hasProjectAccess(scope, body.project_id)) { sendJson(res, 403, { error: "project_access_denied" }); return true; }
+      const input = await docxToNoteInput(body);
+      const note = await createNote(query, { title: input.title, content: input.content, project_id: body.project_id || null, author: actor, owner_user_id: scope?.userId || null });
+      notifyAgentChange("create", `«${note.title}»`);
+      sendJson(res, 201, { note });
+      return true;
+    }
     if (url.pathname === "/api/mbox/notes" && req.method === "GET") {
       sendJson(res, 200, { notes: await listNotes(query, url.searchParams.get("q") || "", url.searchParams.get("limit"), scope) });
       return true;
@@ -334,6 +374,44 @@ export async function handleNotesApi({ req, res, url, query, readBody, sendJson,
       const note = await createNote(query, { ...body, author: actor, owner_user_id: scope?.userId || null });
       notifyAgentChange("create", `«${note.title}»`);
       sendJson(res, 201, { note });
+      return true;
+    }
+    const docxMatch = url.pathname.match(/^\/api\/mbox\/notes\/(\d+)\/docx$/);
+    if (docxMatch && req.method === "GET") {
+      if (!(await canAccessNote(query, docxMatch[1], scope))) { sendJson(res, 404, { error: "not_found" }); return true; }
+      const row = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [docxMatch[1]])).rows[0];
+      if (!row) { sendJson(res, 404, { error: "not_found" }); return true; }
+      const file = documentToDocx({ content: noteDocxContent(row), name: `${row.title || `note-${docxMatch[1]}`}.md`, title: row.title || `Заметка ${docxMatch[1]}` });
+      res.writeHead(200, {
+        "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "content-length": file.length,
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(docxFileName(row.title || `note-${docxMatch[1]}`))}`,
+      });
+      res.end(file);
+      return true;
+    }
+    const importMatch = url.pathname.match(/^\/api\/mbox\/notes\/(\d+)\/import-docx$/);
+    if (importMatch && req.method === "POST") {
+      if (!(await canAccessNote(query, importMatch[1], scope))) { sendJson(res, 404, { error: "not_found" }); return true; }
+      if (!(await ownsNote(query, importMatch[1], scope))) { sendJson(res, 403, { error: "only_owner_imports" }); return true; }
+      const current = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [importMatch[1]])).rows[0];
+      const input = await docxToNoteInput(await readBody(req));
+      const tabs = [{ id: "main", title: "Основная", content: input.content }];
+      const row = (await query(
+        `UPDATE notes SET title = $1, content = $2, tabs = $3::jsonb, updated_at = now() WHERE id = $4 RETURNING ${NOTE_COLUMNS}`,
+        [input.title, input.content, JSON.stringify(tabs), importMatch[1]],
+      )).rows[0];
+      await recordNoteVersion(query, {
+        noteId: importMatch[1],
+        title: row.title,
+        content: row.content,
+        tabs: row.tabs,
+        previous: current ? { title: current.title, content: current.content, tabs: current.tabs, sha: versionSha(current.title, noteTabs(current.tabs, current.content)) } : null,
+        author: String(actor || ""),
+        source: fromAgent ? "agent" : "mbox",
+      }).catch(() => {});
+      notifyAgentChange("update", `«${row.title}»`);
+      sendJson(res, 200, { note: row });
       return true;
     }
     const match = url.pathname.match(/^\/api\/mbox\/notes\/(\d+)$/);

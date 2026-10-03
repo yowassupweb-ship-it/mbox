@@ -205,7 +205,7 @@
 
 /* Кнопка вызова */
 
-/* Прямоугольная кнопка чата с агентами (FAB): иконка + подпись «Консоль» в ряд, счётчики — угловыми бейджами. */
+/* Прямоугольная кнопка чата с агентами (FAB): иконка + подпись в ряд, счётчики — угловыми бейджами. */
 .agent-chat-toggle {
   position: relative;
   display: inline-flex;
@@ -226,6 +226,7 @@
 
 .agent-chat-toggle:hover { transform: translateY(-1px); }
 .agent-chat-toggle:active { transform: translateY(1px); box-shadow: var(--container-inset); }
+.agent-chat-toggle-icon { width: 16px; height: 16px; object-fit: contain; }
 
 .agent-chat-toggle-label {
   font-size: var(--text-2xs);
@@ -312,6 +313,8 @@
     width: 20px;
     height: 20px;
   }
+
+  .agent-chat-toggle-icon { width: 20px; height: 20px; }
 
   .agent-chat-toggle-label {
     position: absolute;

@@ -580,6 +580,8 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
     if (inRange(r, c)) classes.push("is-in-range");
     if (sel.focus.r === r && sel.focus.c === c) classes.push("is-focus");
     if (hasFormula && !text) classes.push("is-formula-empty");
+    const isEditingCell = Boolean(editing && editing.pos.r === r && editing.pos.c === c);
+    if (isEditingCell) classes.push("is-editing");
     return (
       <div
         key={`${r}:${c}`}
@@ -590,7 +592,7 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
         onContextMenu={(event) => onCellContext(event, { r, c }, "cell")}
         title={text.length > 24 ? text : undefined}
       >
-        {text || (hasFormula ? cellInput(cell) : "")}
+        {isEditingCell ? "" : text || (hasFormula ? cellInput(cell) : "")}
       </div>
     );
   };

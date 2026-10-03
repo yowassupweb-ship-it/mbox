@@ -3,6 +3,7 @@ import type { MboxData } from "../../hooks/useMboxData";
 import { fileIcon, fileKind } from "./Files";
 import { chatPeer, consoleLabel, isChatPane } from "./consoleLayout";
 import { noteTitle } from "./Notes";
+import { tableTitle } from "./TablesView";
 import { folderGlyph } from "./TreeGlyph";
 
 const MENU = "/assets/icons/bottom-menu";
@@ -49,6 +50,8 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     }
     case "note":
       return { title: noteTitle(key) || "Заметка", hint: "Заметка", icon: `${NAVIGATION}/notes.png` };
+    case "table":
+      return { title: tableTitle(key) || "Таблица", hint: "Таблица", icon: "/icons/sheets.png" };
     case "storage":
       return { title: "Хранилище S3", hint: "Yandex Object Storage", icon: `${NAVIGATION}/storage.png` };
     case "s3sheet": {
@@ -80,8 +83,13 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "web": {
       // Пока сайт не загрузился, заголовка нет — показываем домен, он уже в ключе вкладки.
       const address = key.slice(4);
+      const isBlank = address.startsWith("blank-");
       const host = address.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
-      return { title: titles[key] || host || "Браузер", hint: address || "Встроенный браузер", icon: "/assets/icons/navigation/browser.png" };
+      return {
+        title: titles[key] || (isBlank ? "Новая вкладка" : host || "Браузер"),
+        hint: isBlank ? "Новая вкладка встроенного браузера" : address || "Встроенный браузер",
+        icon: "/assets/icons/navigation/browser.png",
+      };
     }
     case "tool":
       return { title: titles[key] ?? first, hint: "Инструмент", icon: `${NAVIGATION}/tools.png` };
@@ -99,7 +107,11 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "term": {
       const pane = key.slice(5);
       const title = consoleLabel(pane) || (chatPeer(pane) ? `Чат с ${chatPeer(pane)}` : isChatPane(pane) ? "Чат агентов" : pane.startsWith("agent:") ? pane.slice(6) : pane.startsWith("ssh:") ? `SSH · ${pane.slice(4)}` : pane.replace(/^tool:/, ""));
-      return { title, hint: "Терминал в редакторе — вернуть в консоль можно кнопкой в заголовке", icon: pane.startsWith("ssh:") ? `${PROJECT}/ssh.png` : `${SYSTEM}/console.png` };
+      return {
+        title,
+        hint: isChatPane(pane) ? "Чат в редакторе — вернуть в панель можно кнопкой в заголовке" : "Терминал в редакторе — вернуть в панель можно кнопкой в заголовке",
+        icon: pane.startsWith("ssh:") ? `${PROJECT}/ssh.png` : isChatPane(pane) ? "/icons/dialog.png" : `${SYSTEM}/console.png`,
+      };
     }
     default:
       return { title: key, hint: key, icon: `${PROJECT}/folder.png` };

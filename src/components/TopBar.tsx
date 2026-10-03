@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Download, FolderOpen, LogOut, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Download, FolderOpen, LogOut, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS, AgentName } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
@@ -278,8 +278,8 @@ export function TopBar({
           </button>
         )}
         {onToggleConsole && (
-          <button className="topbar-icon-action" type="button" onClick={onToggleConsole} aria-label="Консоль" title="Консоль">
-            <TerminalSquare size={16} />
+          <button className="topbar-icon-action" type="button" onClick={onToggleConsole} aria-label="Чат" title="Чат">
+            <img className="topbar-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
           </button>
         )}
       <div className={isDesktopShell || desktopApi ? "desktop-slot is-desktop-shell" : "desktop-slot"}>

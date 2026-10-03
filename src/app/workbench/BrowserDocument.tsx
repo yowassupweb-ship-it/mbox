@@ -14,7 +14,7 @@ import { readBrowserSettings, SEARCH_ENGINES, useBrowserSettings } from "./brows
  * ни доступа к содержимому сайта.
  */
 
-type BrowserState = {
+export type BrowserState = {
   key: string;
   url: string;
   title: string;
@@ -217,7 +217,7 @@ function claimVisibleBrowser(bridge: BrowserBridge, key: string) {
   };
 }
 
-export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: { tabKey: string; visible: boolean; tabs: TabsApi; onTitle: (key: string, title: string) => void; onOpenUrl?: (fromKey: string, url: string) => void }) {
+export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpenUrl }: { tabKey: string; visible: boolean; tabs: TabsApi; onTitle: (key: string, title: string) => void; onState?: (key: string, state: BrowserState) => void; onOpenUrl?: (fromKey: string, url: string) => void }) {
   const bridge = browserBridge();
   const url = browserTabUrl(tabKey);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -273,12 +273,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     void bridge.open(tabKey, url || startUrl).then((next) => {
       if (!next) return;
       setState(next);
+      onState?.(tabKey, next);
+      if (next.title) onTitle(tabKey, next.title);
       if (next.favicon) publishFavicon({ key: tabKey, url: next.url || url, favicon: next.favicon });
     });
     return () => {
       pendingClose.set(tabKey, window.setTimeout(() => { pendingClose.delete(tabKey); void bridge.close(tabKey); }, 400));
     };
-  }, [bridge, tabKey, url]);
+  }, [bridge, tabKey, url, onState, onTitle]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -300,13 +302,15 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
         return;
       }
       if (payload.type !== "state" || payload.key !== tabKey) return;
-      setState(payload as BrowserState);
+      const next = payload as BrowserState;
+      setState(next);
+      onState?.(tabKey, next);
       if (payload.favicon) publishFavicon({ key: tabKey, url: payload.url || url, favicon: payload.favicon });
       // Заголовок вкладки MBOX — заголовок сайта: иначе во вкладке остаётся один домен.
       if (payload.title) onTitle(tabKey, payload.title);
       if (!editing && payload.url) setAddress(payload.url);
     });
-  }, [bridge, tabKey, url, editing, tabs, onTitle, onOpenUrl]);
+  }, [bridge, tabKey, url, editing, tabs, onTitle, onState, onOpenUrl]);
 
   useEffect(() => {
     if (!bridge?.favicon) return;
@@ -408,6 +412,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     void bridge!.act(tabKey, "navigate", address).then((next) => {
       if (!next) return;
       setState(next);
+      onState?.(tabKey, next);
       if (next.favicon) publishFavicon({ key: tabKey, url: next.url || address, favicon: next.favicon });
     });
   }
@@ -509,6 +514,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onOpenUrl }: {
     void bridge!.act(tabKey, "navigate", target).then((next) => {
       if (!next) return;
       setState(next);
+      onState?.(tabKey, next);
       if (next.favicon) publishFavicon({ key: tabKey, url: next.url || target, favicon: next.favicon });
     });
   }

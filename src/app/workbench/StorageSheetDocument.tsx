@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { RefreshCw, Save } from "lucide-react";
 import type { Workbook } from "exceljs";
 import { fetchJson } from "../../lib/api";
 import { uploadToStorage } from "../../lib/storageUpload";
 import { DocShell } from "./docLayout";
 import { delimitedContent, parseDelimited } from "./officeFormat";
-import { SheetEditor } from "./SheetEditor";
 import type { TabsApi } from "./tabs";
 import { askConfirm } from "../../ui/askText";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
+
+const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
 
 export const STORAGE_SHEET_TAB = "s3sheet:";
 export const isSheetFile = (name: string) => /\.(xlsx|xlsm|csv|tsv)$/i.test(name);
@@ -107,7 +109,7 @@ export function StorageSheetDocument({ storageKey, tabs, tabKey, visible, onDirt
     >
       {error && <div className="wb-banner is-error">{error}</div>}
       {loading ? <div className="wb-doc-missing">Открываю {storageKey.split("/").pop()}…</div>
-        : book && sheetName ? <SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setDirty(true)} visible={visible} />
+        : book && sheetName ? <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setDirty(true)} visible={visible} /></Suspense>
           : !error && <div className="wb-doc-missing">Не удалось прочитать таблицу.</div>}
     </DocShell>
   );

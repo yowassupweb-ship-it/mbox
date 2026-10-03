@@ -36,7 +36,7 @@ html {
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
   /* svh, а не vh: на iPhone панель Safari то появляется, то уезжает, и 100vh выше видимой области. */
   min-height: 100svh;
   background: var(--bg-color);

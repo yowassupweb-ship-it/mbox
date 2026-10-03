@@ -76,6 +76,7 @@
   }
   .wb-activity-icon,
   .wb-activity-icon img { width: 30px; height: 30px; }
+  .wb-activity-icon img[src="/icons/sheets.png"] { width: 27px; height: 27px; }
   .wb-activity-icon svg { width: 20px; height: 20px; }
   .wb-activity-label {
     display: inline;
@@ -267,4 +268,15 @@
   .wb-agent-actions { opacity: 1; }
   .wb-menu-item-launch { opacity: 1; transform: translateY(-50%) scale(1); }
   .wb-tab.is-active .wb-tab-close { visibility: visible; width: 22px; }
+}
+
+@media (max-width: 720px) {
+  .wb-storage-browser { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 34%) minmax(0, 1fr); }
+  .wb-storage-tree { border-right: 0; border-bottom: 1px solid var(--wb-line); }
+  .wb-storage-content { grid-template-rows: minmax(120px, 1fr) minmax(150px, 1fr); }
+  .wb-storage-list { padding-inline: 4px; }
+  .wb-storage-list th:nth-child(2),
+  .wb-storage-list th:nth-child(3),
+  .wb-storage-list td:nth-child(2),
+  .wb-storage-list td:nth-child(3) { display: none; }
 }

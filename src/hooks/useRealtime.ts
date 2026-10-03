@@ -11,6 +11,7 @@ export type RealtimeNotice = { id: string; text: string; at: string };
  */
 export const ENTITY_CHANGED_EVENT = "mbox:entity-changed";
 export const WORKSPACE_VERSION_EVENT = "mbox:workspace-version";
+export const AGENT_INBOX_ITEM_EVENT = "mbox:agent-inbox-item";
 
 /**
  * Шаг работы агента в реальном времени: агент прислал его через POST /agent/ping, сервер разослал
@@ -96,6 +97,10 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
           }
           if (message.type === "agent_step") {
             window.dispatchEvent(new CustomEvent(AGENT_STEP_EVENT, { detail: message }));
+            return;
+          }
+          if (message.type === "agent_inbox_item") {
+            window.dispatchEvent(new CustomEvent(AGENT_INBOX_ITEM_EVENT, { detail: message }));
             return;
           }
           if (message.type === "workspace_version") {

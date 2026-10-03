@@ -315,7 +315,7 @@ export function ConsolePaneDocument({ paneId, renderChat, agentGoals = {}, agent
         labels={state.labels}
         draggable
         actions={
-          <button type="button" className="wb-icon-btn" onClick={() => { tabs.close(`${TERMINAL_TAB}${paneId}`); consoleLayout.reveal(paneId); onReveal(); }} title="Вернуть в консоль">
+          <button type="button" className="wb-icon-btn" onClick={() => { tabs.close(`${TERMINAL_TAB}${paneId}`); consoleLayout.reveal(paneId); onReveal(); }} title={isChatPane(paneId) ? "Вернуть в чат" : "Вернуть в панель"}>
             <PanelTop size={13} />
           </button>
         }

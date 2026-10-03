@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, Terminal, Wrench, X } from "lucide-react";
+import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, Wrench, X } from "lucide-react";
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
@@ -11,7 +11,7 @@ import { scopedStorageKey, usePersistentState } from "../../app/workbench/tabs";
 import { useDraft } from "../../app/workbench/uiMemory";
 import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
 import { serverOrigin } from "../../lib/serverOrigin";
-import { AGENT_STEP_EVENT } from "../../hooks/useRealtime";
+import { AGENT_INBOX_ITEM_EVENT, AGENT_STEP_EVENT } from "../../hooks/useRealtime";
 import { markOverlay } from "../../app/workbench/BrowserDocument";
 import { formatBytes } from "../../lib/format";
 import type { ChatDebug } from "../../app/workbench/ConsoleArea";
@@ -94,6 +94,22 @@ type Suggestion = { value: string; hint?: string };
 export type FocusItem = { key: string; kind: string; title: string; id?: string; detail?: string };
 
 const FOCUS_ICON: Record<string, typeof FileText> = { file: FileText, diff: FileText, note: StickyNote, todo: SquareCheck, web: Globe, storage: Table2, memory: Brain };
+
+/** Один и тот же контекст может прийти из двух областей редактора или от старого состояния
+ * раскладки. В композере и в запросе к агенту он должен быть представлен единственным чипом. */
+function uniqueFocus(items: FocusItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const identity = item.id
+      ? `${item.kind}:id:${item.id}`
+      : item.detail
+        ? `${item.kind}:detail:${item.detail}`
+        : `${item.kind}:title:${item.title}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
 
 /** Ведущее @Имя в начале сообщения — раньше был отдельный ростер кнопок для выбора адресата,
  * теперь то же самое просто печатается в тексте (см. подсказки по @) и парсится отсюда. */
@@ -1076,7 +1092,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [threadsAside, setThreadsAside] = usePersistentState("mbox.chat.threadsAside", false);
   // Отжатые чипы фокуса — по ключу вкладки: снова открытая вкладка остаётся отжатой, пока её не включат.
   const [mutedFocus, setMutedFocus] = useState<string[]>([]);
-  const sharedFocus = focus.filter((item) => !mutedFocus.includes(item.key));
+  const composerFocus = useMemo(() => uniqueFocus(focus), [focus]);
+  const sharedFocus = composerFocus.filter((item) => !mutedFocus.includes(item.key));
   const [catalog, setCatalog] = useState<JarvisCatalog>({ models: [], efforts: [], effortLabels: {}, defaultModel: "", defaults: {}, defaultEffort: "" });
   // Текущий чат у каждого собеседника свой; пусто — старый общий чат без thread.
   const [thread, setThread] = usePersistentState(peer ? `mbox.chat.thread:${peer}` : "mbox.chat.thread", "");
@@ -1087,6 +1104,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [renaming, setRenaming] = useState<string | null>(null);
   // Сообщения выбранного чата, которых нет среди 200 последних в общем inbox (старый чат).
   const [threadInbox, setThreadInbox] = useState<AgentInboxItem[]>([]);
+  // Свежие сообщения из POST-ответа и realtime: живут до обычной синхронизации inbox/threadInbox.
+  const [acceptedInbox, setAcceptedInbox] = useState<AgentInboxItem[]>([]);
+  const acceptInboxItem = useCallback((item?: AgentInboxItem | null) => {
+    if (!item?.id) return;
+    setAcceptedInbox((current) => {
+      if (current.some((row) => String(row.id) === String(item.id))) return current;
+      return [...current, item].slice(-100);
+    });
+  }, []);
   useEffect(() => {
     let alive = true;
     // Каталог публикуют наблюдатели при старте — перечитываем при возврате в окно и раз в 5 минут,
@@ -1271,7 +1297,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const currentThread = threads.find((item) => item.id === thread);
   const conversation = useMemo(() => {
     const byId = new Map<string, AgentInboxItem>();
-    for (const item of [...threadInbox, ...inbox]) byId.set(String(item.id), item);
+    for (const item of [...threadInbox, ...inbox, ...acceptedInbox]) byId.set(String(item.id), item);
     const all = [...byId.values()].filter((item) => CONVERSATION.has(item.item_type) && (!peer || belongsToPeer(item, peer)));
     // Ответ агента, который ещё не знает про чаты (старая версия наблюдателя), приходит без метки —
     // но он отвечает на сообщение из этого чата, значит, и показывать его надо здесь.
@@ -1280,7 +1306,19 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       .filter((item) => threadOfItem(item) === thread || (thread !== "" && !threadOfItem(item) && own.has(repliedId(item))))
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .slice(-CHAT_HISTORY_LIMIT);
-  }, [inbox, threadInbox, peer, thread]);
+  }, [inbox, threadInbox, acceptedInbox, peer, thread]);
+  useEffect(() => {
+    const synced = new Set([...inbox, ...threadInbox].map((item) => String(item.id)));
+    if (!synced.size) return;
+    setAcceptedInbox((current) => current.filter((item) => !synced.has(String(item.id))));
+  }, [inbox, threadInbox]);
+  useEffect(() => {
+    const listener = (event: Event) => {
+      acceptInboxItem((event as CustomEvent<{ inbox_item?: AgentInboxItem }>).detail?.inbox_item);
+    };
+    window.addEventListener(AGENT_INBOX_ITEM_EVENT, listener);
+    return () => window.removeEventListener(AGENT_INBOX_ITEM_EVENT, listener);
+  }, [acceptInboxItem]);
   const refreshThreads = useCallback(() => {
     fetchJson<{ threads: ChatThread[] }>("/api/mbox/agent/threads").then((data) => setThreads(data.threads || [])).catch(() => {});
   }, []);
@@ -1328,7 +1366,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     return null;
   }, [conversation]);
   const contextShare = contextLoad?.window ? contextLoad.tokens / contextLoad.window : 0;
-  const inboxById = useMemo(() => new Map(inbox.map((item) => [String(item.id), item])), [inbox]);
+  const inboxById = useMemo(() => new Map([...inbox, ...threadInbox, ...acceptedInbox].map((item) => [String(item.id), item])), [inbox, threadInbox, acceptedInbox]);
 
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
   const arrivedIds = useMemo(() => new Set(conversation.map((item) => String(item.id))), [conversation]);
@@ -1415,15 +1453,6 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   useEffect(() => {
     if (!awaitingJarvisSince) return;
     const interval = window.setInterval(() => setElapsedTick((value) => value + 1), 1000);
-    return () => window.clearInterval(interval);
-  }, [awaitingJarvisSince]);
-
-  // Пока не пришла настоящая фаза с сервера, плашка сама по себе выглядела застывшей — один и
-  // тот же случайный глагол висел весь цикл ожидания. Перебираем каждые 2с, реальная фаза
-  // (awaitingJarvisPhase) всё равно перебивает это в рендере, когда она известна.
-  useEffect(() => {
-    if (!awaitingJarvisSince) return;
-    const interval = window.setInterval(() => setAwaitingJarvisVerb((current) => randomThinkingVerb(current)), 2000);
     return () => window.clearInterval(interval);
   }, [awaitingJarvisSince]);
 
@@ -1720,7 +1749,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if (files.length) messageProps.attachments = files;
       if (thread) messageProps.thread = thread;
       if (sharedFocus.length) messageProps.context = sharedFocus.map(({ kind, title, id, detail }) => ({ kind, title, ...(id ? { id } : {}), ...(detail ? { detail } : {}) }));
-      const result = await fetchJson<{ inbox_item?: { id: string } }>("/api/mbox/agent/inbox", {
+      const result = await fetchJson<{ inbox_item?: AgentInboxItem }>("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1738,10 +1767,11 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       // без адресата ждём его; с адресатом — того, кому написали (Claude, Codex).
       const waitingFor = mentionTarget || defaultResponder;
       if (result.inbox_item?.id) {
+        acceptInboxItem(result.inbox_item);
         setAwaitingAgent(waitingFor);
         setAwaitingJarvisId(result.inbox_item.id);
         setAwaitingJarvisSince(Date.now());
-        setAwaitingJarvisVerb(randomThinkingVerb());
+        setAwaitingJarvisVerb("думает");
       }
       // Помечаем отправленным сразу. Ждать onSaved нельзя: он тянет одиннадцать ручек
       // через туннель к боевой базе, и «отправляется» висело бы секундами.
@@ -2192,9 +2222,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               </button>
               <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { void attachFiles([...(event.target.files ?? [])]); event.target.value = ""; }} />
               <div className="console-input-body">
-                {focus.length > 0 && (
+                {composerFocus.length > 0 && (
                   <div className="console-focus" aria-label="Что агент увидит как открытое у вас">
-                    {focus.map((item) => {
+                    {composerFocus.map((item) => {
                       const off = mutedFocus.includes(item.key);
                       const Icon = FOCUS_ICON[item.kind] || AppWindow;
                       return (
@@ -2271,9 +2301,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         </div>
       )}
 
-      {!embedded && <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Консоль агентов, ${unread} непрочитанных` : "Консоль агентов"} title="Консоль агентов">
-        <Terminal size={11} />
-        <span className="agent-chat-toggle-label">Консоль</span>
+      {!embedded && <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Чат с агентами, ${unread} непрочитанных` : "Чат с агентами"} title="Чат с агентами">
+        <img className="agent-chat-toggle-icon" src="/icons/dialog.png" alt="" draggable={false} />
+        <span className="agent-chat-toggle-label">Чат</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}
       </button>}

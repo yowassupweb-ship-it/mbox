@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Copy, Eye, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, Users, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Copy, Eye, FileText, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, Upload, Users, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
@@ -33,6 +33,15 @@ type NoteVersion = { id: string; title: string; sha: string; size_bytes: number;
 type NoteVersionFull = NoteVersion & { content: string; tabs: NoteTab[] };
 
 const VERSION_SOURCE_LABEL: Record<string, string> = { mbox: "MBOX", agent: "агент", share: "по ссылке", baseline: "начало" };
+
+function readFileDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("file_read_failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 /** Текст всей заметки для сравнения. Вкладки разделяем заголовком — иначе правка во второй вкладке
  *  выглядела бы как правка первой, и дифф врал бы про то, что именно поменялось. */
@@ -114,6 +123,8 @@ function snippetOf(note: Note) {
 export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(notesStore.query);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const canCreate = defaultProjectId !== undefined;
 
   useEffect(() => {
@@ -136,6 +147,23 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
   const pinned = notesStore.list.filter((note) => note.pinned);
   const rest = notesStore.list.filter((note) => !note.pinned);
 
+  async function importWordAsNote(file: File) {
+    if (!/\.docx$/i.test(file.name)) return;
+    setImporting(true);
+    try {
+      const { note } = await fetchJson<{ note: Note }>("/api/mbox/notes/import-docx", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name, data: await readFileDataUrl(file), project_id: defaultProjectId ?? null }),
+      });
+      patchListed(note);
+      tabs.open(`note:${note.id}`, true);
+      onOpen?.();
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function renderItem(note: Note) {
     const key = `note:${note.id}`;
     return (
@@ -155,7 +183,9 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
       <header className="wb-view-head">
         <span>Заметки</span>
         <div className="wb-view-actions">
+          <button type="button" disabled={!canCreate || importing} onClick={() => importInputRef.current?.click()} title={canCreate ? "Импорт Word в новую заметку" : "Нет доступных проектов для заметок"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createNoteAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая заметка (Ctrl+Alt+N)" : "Нет доступных проектов для заметок"}><Plus size={14} /></button>
+          <input ref={importInputRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWordAsNote(file); event.target.value = ""; }} />
         </div>
       </header>
       <div className="wb-filter">
@@ -229,6 +259,9 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const [compare, setCompare] = useState(true);
   const [drawerOpen, setDrawerOpen] = useDrawer(`mbox.doc.note.history:${noteId}`);
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
+  const wordInputRef = useRef<HTMLInputElement | null>(null);
+  const [wordState, setWordState] = useState<"idle" | "loading" | "error">("idle");
+  const [wordNotice, setWordNotice] = useState("");
   const images = useImageInsert(textareaRef, `notes/${noteId}`, (message) => { setImageError(message); window.setTimeout(() => setImageError(""), 8000); });
   const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content, enabled: visible });
 
@@ -393,6 +426,55 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
     tabs.close(tabKey);
   }
 
+  async function downloadWord() {
+    setWordState("loading");
+    setWordNotice("");
+    try {
+      await save();
+      const response = await fetch(`/api/mbox/notes/${noteId}/docx`);
+      if (!response.ok) throw new Error("download_failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${(note?.title || `note-${noteId}`).replace(/\.[a-z0-9]+$/i, "")}.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setWordState("idle");
+    } catch {
+      setWordState("error");
+      setWordNotice("Word-файл не скачался");
+    }
+  }
+
+  async function importWordIntoNote(file: File) {
+    if (!/\.docx$/i.test(file.name)) {
+      setWordNotice("Нужен файл .docx");
+      return;
+    }
+    if (noteTabs.some((tab) => tab.content.trim()) && !(await askConfirm({ title: "Заменить заметку содержимым Word-файла?", confirmLabel: "Импортировать" }))) return;
+    setWordState("loading");
+    setWordNotice("");
+    try {
+      const { note: updated } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${noteId}/import-docx`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name, data: await readFileDataUrl(file) }),
+      });
+      const importedTabs = noteTabsOf(updated);
+      setNote(updated);
+      setNoteTabs(importedTabs);
+      savedRef.current = importedTabs;
+      baseUpdatedRef.current = updated.updated_at;
+      patchListed(updated);
+      setMode("edit");
+      setWordState("idle");
+    } catch {
+      setWordState("error");
+      setWordNotice("Word-файл не импортировался");
+    }
+  }
+
   // Как в «Заметках» iPhone: первая строка — крупный заголовок, остальное — текст. Хранится одной строкой.
   const breakAt = content.indexOf("\n");
   const titleText = breakAt < 0 ? content : content.slice(0, breakAt);
@@ -508,7 +590,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   const projectName = data.projects.find((project) => project.id === note.project_id)?.name;
   const activeTheme = note.theme || "graphite";
   const activeColor = note.color || "default";
-  const notices = [imageError, mergeNotice, accessError].filter(Boolean);
+  const notices = [imageError, mergeNotice, accessError, wordNotice].filter(Boolean);
 
   return (
     <DocShell
@@ -552,6 +634,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             </label>
             <span className="wb-note-divider" aria-hidden="true" />
             <ShareButton noteId={noteId} onSharedChange={setShared} />
+            <input ref={wordInputRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWordIntoNote(file); event.target.value = ""; }} />
             <button type="button" className={`wb-note-icon${drawerOpen ? " is-on" : ""}`} onClick={() => setDrawerOpen(!drawerOpen)} aria-pressed={drawerOpen} title={drawerOpen ? "Скрыть историю версий" : "История версий"} aria-label="История версий">
               <History size={14} aria-hidden="true" />
               {versions.length > 0 && <b>{versions.length}</b>}
@@ -603,6 +686,12 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
                 <div className="wb-menu-sep" role="separator" />
                 <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); void pullRemote(true); }} title="Заметку правят и агенты, и владельцы ссылок — обычно она подхватывается сама">
                   <span><RefreshCw size={14} />Перечитать с сервера</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); void downloadWord(); }}>
+                  <span><FileText size={14} />Экспорт в Word</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); wordInputRef.current?.click(); }}>
+                  <span><Upload size={14} />Импорт из Word</span>
                 </button>
                 <div className="wb-menu-sep" role="separator" />
                 <button type="button" role="menuitem" className="is-danger" onClick={() => { setMoreMenu(null); void remove(); }}>

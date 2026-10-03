@@ -20,6 +20,10 @@ const HOME = "about:blank";
 
 const tabs = new Map();
 const visibleKeys = new Set();
+// IPC от React приходит асинхронно. При открытии новой вкладки setBounds/show могут
+// успеть раньше create(), поэтому держим первый прямоугольник до создания WebContentsView.
+// Без этого браузерная шапка уже показывает адрес, а сама страница остаётся невидимой.
+const pendingBounds = new Map();
 // Запросы HTTP-авторизации (Basic/Digest, прокси): id → callback Chromium. Пока ответа нет, страница
 // вкладки спрятана — она рисуется поверх окна и закрыла бы форму входа, которую показывает интерфейс.
 const pendingAuth = new Map();
@@ -95,7 +99,8 @@ function create(key) {
       spellcheck: false,
     },
   });
-  const tab = { view, bounds: null, visible: false, error: "", pending: "", favicon: "", auth: null, authTries: 0 };
+  const tab = { view, bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", auth: null, authTries: 0 };
+  pendingBounds.delete(key);
   tabs.set(key, tab);
 
   const contents = view.webContents;
@@ -177,13 +182,23 @@ function open(key, url) {
     tab.pending = next;
     void tab.view.webContents.loadURL(next);
   }
+  // show() мог быть вызван из рендера на один IPC раньше open(). В таком случае
+  // вкладка уже числится видимой, но созданный view ещё не получил это состояние.
+  if (visibleKeys.has(key) && !tab.auth && !tab.visible) {
+    tab.visible = true;
+    tab.view.setVisible(true);
+    applyBounds(tab);
+  }
   publish(key);
   return stateOf(key);
 }
 
 function setBounds(key, bounds) {
   const tab = tabs.get(key);
-  if (!tab) return;
+  if (!tab) {
+    pendingBounds.set(key, bounds);
+    return;
+  }
   tab.bounds = bounds;
   applyBounds(tab);
 }
@@ -293,6 +308,7 @@ function installChromeIdentity(browserSession) {
 
 function close(key) {
   const tab = tabs.get(key);
+  pendingBounds.delete(key);
   if (!tab) return;
   for (const [pendingId, entry] of pendingAuth) {
     if (entry.key === key) { pendingAuth.delete(pendingId); try { entry.callback(); } catch { /* вкладка уже закрыта */ } }
