@@ -131,7 +131,7 @@ function sendJson(res, status, body) {
 
 // Участник (не владелец) получает только сам факт изменения: заголовки, тексты уведомлений и шаги агентов
 // относятся к проектам, которые ему могут быть недоступны. Этого хватает, чтобы интерфейс перечитал данные.
-const memberRedactedFields = ["detail", "notification", "step", "title", "text"];
+const memberRedactedFields = ["detail", "notification", "step", "title", "text", "agent"];
 
 function broadcastRealtime(type, payload = {}) {
   // Правка агента в документе уходит только тем, кто его сейчас смотрит, а не всем окнам.
@@ -1322,16 +1322,17 @@ async function handleApiWithContext(req, res, url) {
     const name = String(body.agent || actorFromReq(req)).trim() || "Agent";
     const started = body.event === "session_start";
     const result = await query(
-      `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions)
-       VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1)
+      `INSERT INTO agent_presence(agent_name, kind, client, scope, sessions, owner_user_id)
+       VALUES ($1, COALESCE(NULLIF($2, ''), 'ai_agent'), $3, $4, 1, $6)
        ON CONFLICT (agent_name) DO UPDATE
          SET last_seen = now(),
+             owner_user_id = COALESCE(agent_presence.owner_user_id, EXCLUDED.owner_user_id),
              kind = COALESCE(NULLIF(EXCLUDED.kind, ''), agent_presence.kind),
              client = COALESCE(NULLIF(EXCLUDED.client, ''), agent_presence.client),
              scope = COALESCE(NULLIF(EXCLUDED.scope, ''), agent_presence.scope),
              sessions = agent_presence.sessions + $5
        RETURNING agent_name, kind, client, scope, sessions, last_seen::text`,
-      [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0],
+      [name, String(body.kind || ""), String(body.client || ""), String(body.scope || ""), started ? 1 : 0, user.id],
     );
     if (started) broadcastRealtime("agent_presence", { agent: name, event: "session_start" });
     if (typeof body.phase === "string") {
@@ -1527,6 +1528,7 @@ async function handleApiWithContext(req, res, url) {
       `WITH presence AS (
          SELECT agent_name AS name, kind, client, scope, sessions, first_seen, last_seen
          FROM agent_presence
+         WHERE $1::boolean OR owner_user_id = $2::bigint
        ),
        audited AS (
          SELECT actor AS name, count(*)::int AS events, max(created_at) AS last_seen
@@ -1561,6 +1563,7 @@ async function handleApiWithContext(req, res, url) {
        LEFT JOIN audited a ON a.name = n.name
        LEFT JOIN ran r ON r.name = n.name
        ORDER BY GREATEST(p.last_seen, a.last_seen, r.last_seen) DESC NULLS LAST`,
+      [scope.all, user.id],
     );
 
     const now = Date.now();
@@ -3032,7 +3035,7 @@ async function handleApiWithContext(req, res, url) {
       return sendJson(res, 201, { run: result.rows[0], auto_memory });
     }
     await closeStaleAgentRuns();
-    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE $1::boolean OR project_id = ANY($2::bigint[]) ORDER BY started_at DESC LIMIT 100", [scope.all, scope.projectIds]);
+    const result = await query("SELECT id::text, project_id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, pg_column_size(agent_runs)::int AS memory_bytes, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE $1::boolean OR (project_id = ANY($2::bigint[]) AND (agent_name = $4 OR agent_name IN (SELECT agent_name FROM agent_presence WHERE owner_user_id = $3::bigint))) ORDER BY started_at DESC LIMIT 100", [scope.all, scope.projectIds, user.id, JARVIS_NAME]);
     return sendJson(res, 200, { runs: result.rows });
   }
 
