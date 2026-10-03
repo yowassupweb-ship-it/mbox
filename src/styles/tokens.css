@@ -163,6 +163,15 @@
   --duration-fast: 0.12s;
   --duration-base: 0.2s;
 
+  /* Лист Word всегда белый, как бумага, в обеих темах: цвета не наследуют тему. */
+  --paper-bg: #ffffff;
+  --paper-ink: #202124;
+  --paper-heading: #17191d;
+  --paper-rule: #cfd3d8;
+  --paper-head-bg: #f1f3f5;
+  --paper-link: #0b57d0;
+  --shadow-pop: 0 6px 18px rgba(0, 0, 0, 0.25);
+
   font-family: var(--font-sans);
   font-optical-sizing: auto;
   /* cv05 — «l» с хвостиком, cv08 — «I» с засечками: l, I и 1 не путаются в названиях и путях. */
