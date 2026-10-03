@@ -271,6 +271,35 @@ function createWindow() {
     if (/^https?:/i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  // Правая кнопка в самом интерфейсе MBOX: поля ввода и выделенный текст. Своё меню страницы (дерево файлов,
+  // закладки, вкладки) отменяет событие через preventDefault — тогда сюда оно не доходит.
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    const flags = params.editFlags || {};
+    const template = [];
+    if (params.isEditable) {
+      template.push(
+        { label: "Отменить", enabled: flags.canUndo, click: () => mainWindow.webContents.undo() },
+        { label: "Повторить", enabled: flags.canRedo, click: () => mainWindow.webContents.redo() },
+        { type: "separator" },
+        { label: "Вырезать", enabled: flags.canCut, click: () => mainWindow.webContents.cut() },
+        { label: "Копировать", enabled: flags.canCopy, click: () => mainWindow.webContents.copy() },
+        { label: "Вставить", enabled: flags.canPaste, click: () => mainWindow.webContents.paste() },
+        { label: "Вставить без форматирования", enabled: flags.canPaste, click: () => mainWindow.webContents.pasteAndMatchStyle() },
+        { label: "Выделить всё", enabled: flags.canSelectAll, click: () => mainWindow.webContents.selectAll() },
+      );
+    } else if (params.selectionText && params.selectionText.trim()) {
+      template.push({ label: "Копировать", click: () => mainWindow.webContents.copy() });
+    }
+    if (params.linkURL && /^https?:/i.test(params.linkURL)) {
+      if (template.length) template.push({ type: "separator" });
+      template.push(
+        { label: "Копировать адрес ссылки", click: () => clipboard.writeText(params.linkURL) },
+        { label: "Открыть в системном браузере", click: () => void shell.openExternal(params.linkURL) },
+      );
+    }
+    if (isDev) template.push({ type: "separator" }, { label: "Исследовать элемент", click: () => mainWindow.webContents.inspectElement(params.x, params.y) });
+    if (template.length) Menu.buildFromTemplate(template).popup({ window: mainWindow });
+  });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const inside = useLocalUi ? url.startsWith(`${localUi.APP_ORIGIN}/`) : url.startsWith(mboxUrl);
     if (inside) return;
@@ -341,6 +370,19 @@ function setMenu() {
         { label: "Отключить автозапуск", click: () => removeResponderAutostart() },
         { type: "separator" },
         { label: "Показать статус", click: () => showStatusDialog() }
+      ]
+    },
+    {
+      label: "Правка",
+      submenu: [
+        { role: "undo", label: "Отменить" },
+        { role: "redo", label: "Повторить" },
+        { type: "separator" },
+        { role: "cut", label: "Вырезать" },
+        { role: "copy", label: "Копировать" },
+        { role: "paste", label: "Вставить" },
+        { role: "pasteAndMatchStyle", label: "Вставить без форматирования" },
+        { role: "selectAll", label: "Выделить всё" }
       ]
     },
     {
@@ -748,6 +790,14 @@ ipcMain.handle("mbox-desktop:browser-search-engine", async (event, id) => { asse
 ipcMain.handle("mbox-desktop:browser-clear-cache", async (event) => { assertBrowserHost(event); return browser.clearCache(); });
 ipcMain.handle("mbox-desktop:browser-favicon", async (event, url) => { assertBrowserHost(event); return browser.favicon(String(url || "")); });
 ipcMain.handle("mbox-desktop:browser-act", async (event, key, command, payload) => { assertBrowserHost(event); return browser.act(String(key), String(command), payload); });
+// Загрузки встроенного браузера: список, пауза/отмена, открыть и показать в папке (mbox-desktop/browser-downloads.js).
+ipcMain.handle("mbox-desktop:browser-downloads", async (event) => { assertBrowserHost(event); return browser.downloads.list(); });
+ipcMain.handle("mbox-desktop:browser-download-action", async (event, id, action) => {
+  assertBrowserHost(event);
+  return browser.downloads.act(Number(id), String(action || ""));
+});
+ipcMain.handle("mbox-desktop:browser-downloads-clear", async (event) => { assertBrowserHost(event); return browser.downloads.clearFinished(); });
+ipcMain.handle("mbox-desktop:browser-downloads-folder", async (event) => { assertBrowserHost(event); return browser.downloads.openFolder(); });
 // Действие агента во вкладке браузера (server/browser-agent.mjs → страница MBOX → сюда).
 ipcMain.handle("mbox-desktop:browser-agent", async (event, key, action, args, actor, note) => {
   assertBrowserHost(event);
