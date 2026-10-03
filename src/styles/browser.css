@@ -193,8 +193,9 @@
   font: inherit;
   font-size: var(--text-sm);
   cursor: pointer;
+  font-weight: var(--weight-medium);
 }
-.wb-segmented button.is-on { background: var(--bg-raised); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: var(--shadow-sm); }
+.wb-segmented button.is-on { background: var(--bg-raised); color: var(--text-main); box-shadow: var(--shadow-sm); }
 
 .wb-browser-radio { display: flex; align-items: center; gap: 8px; color: var(--text-main); font-size: var(--text-sm); cursor: pointer; }
 .wb-browser-radio input { margin: 0; accent-color: var(--accent-fill); }

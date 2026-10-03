@@ -315,7 +315,9 @@ body.wb-resizing * {
   text-transform: uppercase;
 }
 
-.wb-view-actions { display: flex; gap: 2px; }
+.wb-view-head { gap: 8px; min-width: 0; }
+.wb-view-head > :first-child { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-view-actions { flex: none; display: flex; gap: 2px; }
 
 .wb-view-actions button,
 .wb-icon-btn {
@@ -3665,9 +3667,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   font-size: var(--text-xs);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  font-weight: var(--weight-medium);
 }
 .wb-note-mode button:hover { color: var(--text-main); }
-.wb-note-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
+.wb-note-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), inset 0 0 0 0.5px var(--wb-line); }
 .wb-note-mode button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 
 /* Всплывающая кнопка macOS: подпись и шеврон без рамки, рамка — только под курсором. Сам select прозрачен поверх. */
@@ -4061,3 +4064,44 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-view .wb-upload { flex-direction: column; gap: 2px; }
 .wb-view .wb-upload span, .wb-view .wb-upload em { position: relative; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-view .wb-view-actions button:disabled { opacity: 0.35; cursor: default; }
+
+/* Панель форматирования в шапке документа занимает место всегда: в просмотре она только невидима. */
+.wb-md-bay { display: flex; flex: 1 1 0; min-width: 28px; justify-content: flex-end; }
+.wb-md-bay[data-active="false"] { visibility: hidden; }
+.wb-md-bay > .wb-md-toolbar { flex: 1 1 auto; }
+
+/* ─── Переключатель «Таблицы | Документы» и редактор документов ─── */
+.wb-mode-switch { display: inline-flex; min-width: 0; padding: 2px; border-radius: var(--radius-pill); background: var(--surface-hover); text-transform: none; letter-spacing: 0; }
+.wb-mode-switch button {
+  height: 24px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.wb-mode-switch button > svg { flex: none; }
+.wb-mode-switch button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-mode-switch button:hover:not(.is-on) { background: var(--surface-hover); color: var(--text-main); }
+.wb-mode-switch button.is-on { background: var(--bg-raised); color: var(--text-main); box-shadow: var(--shadow-sm); }
+.wb-mode-switch button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wb-mode-switch button:active:not(.is-on) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+@media (prefers-reduced-motion: reduce) { .wb-mode-switch button { transition: none; } }
+.wb-table-snippet { display: -webkit-box; margin-top: 2px; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-normal); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.wb-univer-doc.is-editor { height: 100%; min-height: 0; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] { display: flex !important; align-items: center !important; justify-content: center !important; min-height: 46px !important; padding: var(--space-2) var(--space-3) !important; border-bottom: 1px solid var(--wb-line) !important; background: var(--surface-chrome) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tablist"] { display: inline-flex !important; flex: 0 0 auto !important; align-items: center !important; justify-content: flex-start !important; width: auto !important; height: auto !important; gap: 2px !important; padding: 3px !important; border: 1px solid var(--wb-line) !important; border-radius: var(--radius-pill) !important; background: var(--bg-sunken) !important; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-main) 5%, transparent) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"] { min-height: 30px !important; padding: 0 var(--space-3) !important; border: 0 !important; border-radius: var(--radius-pill) !important; background: transparent !important; box-shadow: none !important; color: var(--text-muted) !important; font-family: var(--font-sans) !important; font-size: var(--text-sm) !important; font-weight: var(--weight-medium) !important; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"]:hover { background: var(--surface-hover) !important; color: var(--text-main) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"][aria-selected="true"] { background: var(--surface-panel) !important; box-shadow: 0 1px 2px color-mix(in srgb, #000 28%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--text-main) 8%, transparent) !important; color: var(--text-main) !important; font-weight: var(--weight-semibold) !important; }
+.wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] [role="tab"]:focus-visible { outline: 2px solid var(--accent-color) !important; outline-offset: 2px; }
+.wb-univer-mount { width: 100%; height: 100%; min-height: 0; }

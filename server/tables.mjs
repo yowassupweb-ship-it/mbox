@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { appendRows, loadWorkbook, readTable, workbookFromRows, workbookToBase64, writeCells } from "./table-ops.mjs";
 
 export const TABLES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tables (
@@ -129,13 +130,15 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
     if (url.pathname === "/api/mbox/tables" && req.method === "POST") {
       const body = await readBody(req);
       if (!hasProjectAccess(scope, body.project_id)) { sendJson(res, 403, { error: "project_access_denied" }); return true; }
+      // rows — таблица из двумерного массива (агенты): первая строка заголовки, если headers не false.
+      const content = !body.content && Array.isArray(body.rows) ? await workbookFromRows(body.rows, { sheet: body.sheet, headers: body.headers !== false }) : body.content;
       const result = await query(
         `INSERT INTO tables(title, content, project_id, author, owner_user_id, access_level)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING ${TABLE_COLUMNS}`,
         [
           String(body.title || "Новая таблица").trim().slice(0, 200) || "Новая таблица",
-          cleanContent(body.content),
+          cleanContent(content),
           body.project_id || null,
           String(actor || ""),
           scope?.userId || null,
@@ -145,6 +148,30 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
       notify("create", `«${result.rows[0].title}»`);
       sendJson(res, 201, { table: result.rows[0] });
       return true;
+    }
+
+    // Операции агентов: читать диапазон, писать ячейки и оформление, дописывать строки. Работают с xlsx в базе.
+    const opsMatch = url.pathname.match(/^\/api\/mbox\/tables\/(\d+)\/(cells|rows)$/);
+    if (opsMatch) {
+      const [, tableId, operation] = opsMatch;
+      const scopedOps = tableScopeWhere(scope, "tables");
+      const row = (await query(`SELECT id::text, title, content FROM tables WHERE id = $${scopedOps.values.length + 1} AND (${scopedOps.sql})`, [...scopedOps.values, tableId])).rows[0];
+      if (!row) { sendJson(res, 404, { error: "not_found" }); return true; }
+      if (operation === "cells" && req.method === "GET") {
+        const book = await loadWorkbook(row.content);
+        sendJson(res, 200, { table: { id: row.id, title: row.title }, ...readTable(book, { sheet: url.searchParams.get("sheet") || undefined, range: url.searchParams.get("range") || undefined, styles: url.searchParams.get("styles") === "1" }) });
+        return true;
+      }
+      if ((operation === "cells" && req.method === "PATCH") || (operation === "rows" && req.method === "POST")) {
+        const body = await readBody(req);
+        const book = await loadWorkbook(row.content);
+        const result = operation === "cells" ? writeCells(book, body) : appendRows(book, body);
+        const saved = (await query(`UPDATE tables SET content = $1, updated_at = now() WHERE id = $2 RETURNING ${TABLE_COLUMNS}`, [cleanContent(await workbookToBase64(book)), tableId])).rows[0];
+        notify("update", `«${saved.title}»`);
+        sendJson(res, 200, { ...result, table: { id: saved.id, title: saved.title, updated_at: saved.updated_at } });
+        return true;
+      }
+      return false;
     }
 
     const match = url.pathname.match(/^\/api\/mbox\/tables\/(\d+)$/);
@@ -163,6 +190,11 @@ export async function handleTablesApi({ req, res, url, query, readBody, sendJson
       if (Object.prototype.hasOwnProperty.call(body, "project_id") && !hasProjectAccess(scope, body.project_id)) { sendJson(res, 403, { error: "project_access_denied" }); return true; }
       if ((Object.prototype.hasOwnProperty.call(body, "access_level") || Object.prototype.hasOwnProperty.call(body, "project_id")) && !(await ownsTable(query, match[1], scope))) {
         sendJson(res, 403, { error: "only_owner_changes_access" });
+        return true;
+      }
+      // Правка поверх версии, которую человек не видел (агент или коллега успели записать раньше), — не молча затираем.
+      if (Object.prototype.hasOwnProperty.call(body, "content") && body.base_updated_at && String(body.base_updated_at) !== existing.updated_at) {
+        sendJson(res, 409, { error: "conflict", updated_at: existing.updated_at });
         return true;
       }
       const hasProject = Object.prototype.hasOwnProperty.call(body, "project_id");

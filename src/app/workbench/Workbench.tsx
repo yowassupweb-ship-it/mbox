@@ -32,6 +32,7 @@ import { recentlyActiveAgent, useDesktopSessions } from "./desktopSessions";
 import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
 import { TableDocument, TablesView } from "./TablesView";
+import { DocDocument } from "./DocDocument";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
 import { StorageView } from "./StorageView";
@@ -719,6 +720,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "table":
         return <TableDocument tableId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
+      case "doc":
+        return <DocDocument docId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
       case "s3sheet":
@@ -797,6 +800,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         }
         case "note":
         case "table":
+        case "doc":
         case "todo":
         case "memory":
           return [{ key, kind, title, id: first }];
@@ -1385,7 +1389,7 @@ const TAB_GROUP_ORDER: TabGroup[] = ["work", "docs", "web", "system"];
 function tabGroupOf(key: string): TabGroup {
   const kind = key.split(":")[0];
   if (kind === "web") return "web";
-  if (["note", "table", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
+  if (["note", "table", "doc", "notes", "file", "local", "memory", "artifact", "gitdiff", "commit", "storage", "sheet"].includes(kind)) return "docs";
   if (["todo", "todos", "entity", "folder", "project", "welcome"].includes(kind)) return "work";
   return "system";
 }

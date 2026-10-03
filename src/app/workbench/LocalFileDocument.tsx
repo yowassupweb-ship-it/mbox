@@ -10,7 +10,7 @@ import { hasDraft, useDraft } from "./uiMemory";
 import { CodeEditor } from "./CodeEditor";
 import { languageOf } from "./codeHighlight";
 import { buildLocalPreview } from "./localPreview";
-import { MarkdownToolbar, markdownShortcut, toggleTask } from "./MarkdownToolbar";
+import { MarkdownToolbarBay, markdownShortcut, toggleTask } from "./MarkdownToolbar";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { WORKSPACE_VERSION_EVENT } from "../../hooks/useRealtime";
 
@@ -365,7 +365,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
       toolbar={(
         <>
           <span className="wb-doc-crumbs">{rootName(rootKey)} › {path.split("/").join(" › ")}{letter && <span className={`wb-git-letter is-${letter}`}>{letter}</span>}{dirty && <b className="wb-dirty-mark"> ●</b>}</span>
-          {isMarkdown && mode === "edit" && <MarkdownToolbar targetRef={editorRef} />}
+          {isMarkdown && <MarkdownToolbarBay active={mode === "edit"} targetRef={editorRef} />}
           <div className="wb-doc-actions">
             {isHtml && mode === "preview" && (
               <div className="wb-segmented">

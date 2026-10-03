@@ -13,7 +13,7 @@ import { DiffLines, lineDiff } from "./LocalFileDocument";
 import { renderDocument } from "./MemoryDocument";
 import type { TabsApi } from "./tabs";
 import { useRemembered } from "./uiMemory";
-import { MarkdownToolbar, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
+import { MarkdownToolbarBay, markdownShortcut, toggleTask, useImageInsert } from "./MarkdownToolbar";
 import { CodeEditor } from "./CodeEditor";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } from "./noteTabs";
@@ -608,11 +608,11 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
             {notices.map((text) => <span key={text} className="wb-note-notice">{text}</span>)}
           </span>
-          {mode === "edit" && <MarkdownToolbar targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />}
+          <MarkdownToolbarBay active={mode === "edit"} targetRef={textareaRef} onPickImages={(files) => void images.insertImages(files)} uploading={images.uploading} />
           <div className="wb-note-tools">
             <div className="wb-note-mode" role="radiogroup" aria-label="Режим">
               <button type="button" role="radio" aria-checked={mode === "preview"} className={mode === "preview" ? "is-on" : undefined} onClick={() => { void save(); setMode("preview"); }} title="Просмотр"><Eye size={14} aria-hidden="true" /><span>Просмотр</span></button>
-              <button type="button" role="radio" aria-checked={mode === "edit"} className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")} title="Правка"><Pencil size={13} aria-hidden="true" /><span>Правка</span></button>
+              <button type="button" role="radio" aria-checked={mode === "edit"} className={mode === "edit" ? "is-on" : undefined} onClick={() => setMode("edit")} title="Правка"><Pencil size={14} aria-hidden="true" /><span>Правка</span></button>
             </div>
             <span className="wb-note-divider" aria-hidden="true" />
             <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
