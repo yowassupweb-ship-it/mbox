@@ -10,6 +10,8 @@ export type JarvisDeps = {
   recordMemoryAction: (input: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) => Promise<unknown>;
   /** Открыть вкладку в окнах пользователя (без userId — владельца): созданное агентом появляется на глазах. */
   openTab?: (userId: string | null, event: Record<string, unknown>) => number;
+  /** Действие во встроенном браузере пользователя (MBOX Desktop); только для владельца. */
+  browserOp?: (userId: string, action: string, input: { tab?: string; args?: Record<string, unknown>; note?: string }) => Promise<Record<string, any>>;
 };
 
 export type JarvisTool = { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } };

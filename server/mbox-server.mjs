@@ -32,7 +32,7 @@ import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-over
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
-import { handleBrowserAgentApi } from "./browser-agent.mjs";
+import { handleBrowserAgentApi, runBrowserOp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
 
@@ -52,6 +52,7 @@ configureJarvis({
     for (const client of realtimeClients) if (client.mboxOwner) delivered += sendOpenTab(new Set([client]), client.mboxUserId, event);
     return delivered;
   },
+  browserOp: (userId, action, input = {}) => runBrowserOp({ clients: realtimeClients, userId, action, tab: input.tab, args: input.args, actor: "Джарвис", note: input.note }),
 });
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
 

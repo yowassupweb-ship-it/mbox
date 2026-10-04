@@ -25,6 +25,23 @@ function sendToUser(clients, userId, message) {
   return delivered;
 }
 
+/** Одно действие в браузере пользователя; ждёт ответа окна до 25 с. Общая часть для HTTP-ручки (MCP) и Джарвиса. */
+export async function runBrowserOp({ clients, userId, action, tab = "", args = {}, actor = "Агент", note = "" }) {
+  if (!BROWSER_AGENT_ACTIONS.includes(action)) return { ok: false, error: `unknown_action:${action}` };
+  const id = randomUUID();
+  const result = new Promise((resolve) => {
+    const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "timeout" }); }, WAIT_MS);
+    pending.set(id, { resolve, timer });
+  });
+  const delivered = sendToUser(clients, userId, { type: "browser_op", id, action, tab: String(tab || ""), args: args && typeof args === "object" ? args : {}, actor: String(actor).slice(0, 60), note: String(note).slice(0, 300) });
+  if (!delivered) {
+    const entry = pending.get(id);
+    if (entry) { clearTimeout(entry.timer); pending.delete(id); }
+    return { ok: false, error: "no_window", message: "MBOX не открыт ни в одном окне владельца — браузер недоступен." };
+  }
+  return result;
+}
+
 /** Маршруты /api/mbox/browser/agent*. Только владелец: браузер — его сессии и куки на его машине. */
 export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson, user, owner, actor, clients }) {
   if (!url.pathname.startsWith("/api/mbox/browser/agent")) return false;

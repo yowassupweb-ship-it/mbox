@@ -209,6 +209,14 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    с основного сервера. Наблюдателям Desktop по-прежнему нужен системный Node.js; MCP-инструменты MBOX у них есть только при полном наборе
    (`mbox-agent install`), в Desktop у чужого ПК их зависимостей нет.
 
+28. **Документы: права и общий доступ.** `documents.access_mode` (`edit|view` для тех, кто видит документ по уровню доступа) и
+   `document_shares` (поимённо, `view|edit`). Права считает `permissionsFor` в `server/documents.mjs`: GET отдаёт `is_owner`/`can_edit`/`role`,
+   PATCH/DELETE без права правки — 403 `read_only`; доступ меняет и выдаёт только владелец (`/documents/:id/shares`, справочник людей —
+   `/api/mbox/directory`). Редактор читателя — `readOnly`. Джарвис правит документы теми же правилами (`update_document`).
+   Джарвис умеет документы и таблицы (`search/read/create/update_document`, `search_tables/read_table/write_table_cells`) и браузер владельца
+   (`browser_*` через `runBrowserOp`, группа `browser`). Совместное редактирование — по-прежнему снимками с присутствием коллег; настоящего OT/CRDT нет.
+   Просмотр и правка файлов: `PdfViewer.tsx` (pdf.js legacy), `ImageEditor.tsx`, `StorageImage.tsx` — см. §10.14 доктрины.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

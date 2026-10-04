@@ -16,9 +16,10 @@ let broadcastRealtime;
 let rankMemories;
 let recordMemoryAction;
 let openTab;
+let browserOp;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -613,7 +614,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
-  "create_note", "update_note", "create_document", "update_document", "write_table_cells",
+  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1415,6 +1416,61 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "browser_tabs",
+      description: "Список вкладок встроенного браузера MBOX у владельца (MBOX Desktop): ключ вкладки, адрес, заголовок. Работает, только пока MBOX открыт у владельца.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_snapshot",
+      description: "Прочитать страницу, открытую во вкладке браузера: адрес, заголовок, выделенный текст, заголовки, видимый текст, поля форм и кнопки/ссылки с номерами (f12, b7) для browser_fill и browser_click. Без tab — вкладка, которую владелец видит сейчас.",
+      parameters: { type: "object", properties: { tab: { type: "string", description: "Ключ вкладки web:… из browser_tabs, необязательно" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_navigate",
+      description: "Открыть адрес в браузере владельца (в текущей вкладке или новой, если вкладок нет).",
+      parameters: { type: "object", properties: { url: { type: "string" }, tab: { type: "string" } }, required: ["url"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_click",
+      description: "Нажать кнопку или ссылку по номеру из browser_snapshot (b7). Человек видит подсветку.",
+      parameters: { type: "object", properties: { ref: { type: "string" }, tab: { type: "string" } }, required: ["ref"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_fill",
+      description: "Заполнить поля формы: fields — массив {ref, value} (ref из browser_snapshot) или {label, value} по видимой подписи. Человек видит заполнение. Платежи и отправку форм не подтверждай без прямого «да» человека.",
+      parameters: {
+        type: "object",
+        properties: {
+          fields: { type: "array", items: { type: "object", properties: { ref: { type: "string" }, label: { type: "string" }, value: { type: "string" } } } },
+          tab: { type: "string" },
+        },
+        required: ["fields"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_scroll",
+      description: "Прокрутить страницу: to = down | up | top | bottom, либо к элементу по ref.",
+      parameters: { type: "object", properties: { to: { type: "string" }, ref: { type: "string" }, tab: { type: "string" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1624,6 +1680,11 @@ export const TOOL_GROUPS = {
     // группы notes не было, Джарвис брал search_memory и правил похоже названную запись памяти (#318).
     match: /(заметк|заметок|заметке|заметку|заметки|запиш[иу] себе|блокнот)/,
     tools: ["search_notes", "read_note", "create_note", "update_note"],
+  },
+  browser: {
+    label: "встроенный браузер владельца в MBOX Desktop: список вкладок, прочитать страницу, открыть адрес, нажать, заполнить форму, прокрутить",
+    match: /(браузер|вкладк|страниц[ауеы]? в|открой (сайт|страниц|ссылк)|на сайте|кликни|нажми на|заполни (форм|поле|анкет)|форм[уа] на|прокрути)/,
+    tools: ["browser_tabs", "browser_snapshot", "browser_navigate", "browser_click", "browser_fill", "browser_scroll"],
   },
   docs: {
     label: "документы (листы A4) и таблицы (Excel-подобные) в MBOX: найти, прочитать, создать, дописать, править ячейки",
@@ -2879,6 +2940,21 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     );
     await recordMemoryAction({ memoryId: id, actor: JARVIS_NAME, action: "update", note: "memory updated via Jarvis tool" });
     return `обновлена запись памяти «${title}» (#${id})`;
+  }
+
+  // Встроенный браузер владельца: тот же путь, что у MCP browser_* (окно MBOX Desktop выполняет действие с подсветкой).
+  if (name.startsWith("browser_")) {
+    if (!browserOp) return "браузер недоступен в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "браузером MBOX управляет только владелец";
+    const action = name.slice("browser_".length);
+    const payload = {
+      tab: String(args.tab || ""),
+      note: { snapshot: "читаю страницу", navigate: "открываю страницу", click: "нажимаю", fill: "заполняю форму", scroll: "прокручиваю", tabs: "смотрю вкладки" }[action] || "",
+      args: action === "navigate" ? { url: String(args.url || "") } : action === "click" ? { ref: String(args.ref || "") } : action === "fill" ? { fields: Array.isArray(args.fields) ? args.fields : [] } : action === "scroll" ? { to: args.to, ref: args.ref } : {},
+    };
+    const result = await browserOp(String(viewer.userId), action, payload);
+    if (result?.ok === false) return `браузер: ${result.message || result.error || "не получилось"}`;
+    return JSON.stringify(result).slice(0, 14000);
   }
 
   // Документы и таблицы: те же права, что у людей (владелец, проект, «все»), та же запись, что у MCP.
