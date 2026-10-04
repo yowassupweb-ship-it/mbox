@@ -10,6 +10,8 @@
 // Всё — только владельцу.
 
 import { getSeoSettings, saveSeoSettings } from "./seo-wizard.mjs";
+import { gmailStatus } from "./gmail.mjs";
+import { googleCall } from "./google-docs.mjs";
 
 const secretKey = () => process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
 const MAX_RESPONSE_CHARS = 60_000;
@@ -65,6 +67,13 @@ const BUILTIN = {
   },
 };
 
+/** API Google с входом владельца (карточка «Google» в настройках): ключ не нужен, токен подставляется по OAuth. */
+const GOOGLE_API = {
+  google_drive: { label: "Google Диск", base: "https://www.googleapis.com/drive/v3", docs: "https://developers.google.com/drive/api/reference/rest/v3", hint: "Файлы и папки владельца. Пути: files?q=…&fields=files(id,name), files/{id}, files/{id}/export?mimeType=text/plain." },
+  google_docs: { label: "Google Документы", base: "https://docs.googleapis.com/v1", docs: "https://developers.google.com/docs/api/reference/rest", hint: "Структура документа и правки. Пути: documents/{id} (GET), documents/{id}:batchUpdate (POST, requests). Для простого чтения и дописывания удобнее gdoc_read / gdoc_append." },
+  google_sheets: { label: "Google Таблицы", base: "https://sheets.googleapis.com/v4", docs: "https://developers.google.com/sheets/api/reference/rest", hint: "Таблицы владельца. Пути: spreadsheets/{id}, spreadsheets/{id}/values/{A1:C20} (GET), …/values/{range}?valueInputOption=USER_ENTERED (PUT, body {values:[[…]]})." },
+};
+
 const AUTH_TYPES = {
   bearer: "Authorization: Bearer <ключ>",
   oauth: "Authorization: OAuth <ключ> (Яндекс)",
@@ -110,7 +119,7 @@ async function customRow(query, id) {
   )).rows[0] || null;
 }
 
-export async function listIntegrations(query) {
+export async function listIntegrations(query, userId) {
   const out = [];
   for (const [id, spec] of Object.entries(BUILTIN)) {
     const { values, from } = await builtinValues(query, id);
@@ -119,6 +128,10 @@ export async function listIntegrations(query) {
       configured: spec.required.every((key) => Boolean(values[key])),
       fields: spec.fields.map((field) => ({ key: field.key, label: field.label, secret: field.secret, optional: Boolean(field.optional), filled: Boolean(values[field.key]), source: from[field.key], value: field.secret ? "" : values[field.key] })),
     });
+  }
+  const google = userId ? await gmailStatus(query, userId, "").catch(() => null) : null;
+  for (const [id, spec] of Object.entries(GOOGLE_API)) {
+    out.push({ service: id, label: spec.label, kind: "google", base_url: spec.base, docs: spec.docs, hint: `${spec.hint}${google?.docs_ok ? "" : " Подключается в карточке «Google»."}`, configured: Boolean(google?.docs_ok), fields: [] });
   }
   const custom = (await query("SELECT service, label, base_url, auth_type, auth_name, notes, secret_ciphertext IS NOT NULL AS has_secret, updated_at::text FROM integrations ORDER BY lower(label)")).rows;
   for (const row of custom) {
@@ -186,7 +199,18 @@ function buildUrl(base, path, params) {
 }
 
 /** Вызов API сервиса с подстановкой ключа. Возвращает { ok, status, data, truncated } и никогда — секрет. */
-export async function callIntegration(query, id, { method, path, query: params, body, max_chars: maxChars } = {}) {
+export async function callIntegration(query, id, { method, path, query: params, body, max_chars: maxChars } = {}, ctx = {}) {
+  if (GOOGLE_API[id]) {
+    if (!ctx.userId) return { ok: false, error: "no_user", message: "Google доступен только от имени владельца" };
+    try {
+      const data = await googleCall(query, ctx.userId, { base: GOOGLE_API[id].base, method: String(method || "GET").toUpperCase(), path, params, body });
+      const serialized = typeof data === "string" ? data : JSON.stringify(data);
+      const limit = Math.min(Math.max(Number(maxChars) || 30_000, 1000), MAX_RESPONSE_CHARS);
+      return { ok: true, status: 200, data: serialized.length > limit ? serialized.slice(0, limit) : data, truncated: serialized.length > limit, ...(serialized.length > limit ? { total_chars: serialized.length, hint: "Ответ обрезан: уточните fields/range или поднимите max_chars до 60000." } : {}) };
+    } catch (error) {
+      return { ok: false, status: error.status, error: error.code === "not_connected" ? "not_configured" : "api_error", message: error.message, data: undefined };
+    }
+  }
   let base;
   let headers = {};
   let defaultMethod = "GET";
@@ -243,7 +267,14 @@ export async function callIntegration(query, id, { method, path, query: params, 
   }
 }
 
-export async function testIntegration(query, id) {
+export async function testIntegration(query, id, ctx = {}) {
+  if (GOOGLE_API[id]) {
+    const probe = await callIntegration(query, id, { path: id === "google_drive" ? "about" : id === "google_docs" ? "documents/__probe__" : "spreadsheets/__probe__", query: id === "google_drive" ? { fields: "user(emailAddress)" } : undefined, max_chars: 500 }, ctx);
+    if (probe.ok) return { ok: true, message: "Google подключён" };
+    // Для документов и таблиц «не найден» на пробном id означает: токен принят, доступ есть.
+    if (probe.status === 404 || probe.status === 400) return { ok: true, message: "Google подключён" };
+    return { ok: false, message: probe.message || "Google недоступен" };
+  }
   if (BUILTIN[id]) {
     const probe = BUILTIN[id].test;
     const result = await callIntegration(query, id, { method: probe.method, path: probe.path, query: probe.query, body: probe.body, max_chars: 2000 });
@@ -259,12 +290,12 @@ export async function testIntegration(query, id) {
   return { ok: result.status < 500, message: `Адрес отвечает (HTTP ${result.status}). Ключ проверится первым настоящим вызовом.` };
 }
 
-export async function handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner, actor }) {
+export async function handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner, actor, userId }) {
   if (!url.pathname.startsWith("/api/mbox/integrations")) return false;
   if (!owner) { sendJson(res, 403, { error: "owner_required" }); return true; }
   try {
     if (url.pathname === "/api/mbox/integrations" && req.method === "GET") {
-      sendJson(res, 200, { integrations: await listIntegrations(query), auth_types: AUTH_TYPES });
+      sendJson(res, 200, { integrations: await listIntegrations(query, userId), auth_types: AUTH_TYPES });
       return true;
     }
     const match = url.pathname.match(/^\/api\/mbox\/integrations\/([a-z][a-z0-9_-]{1,39})(?:\/(test|call))?$/);
@@ -272,7 +303,7 @@ export async function handleIntegrationsApi({ req, res, url, query, readBody, se
     const [, id, action] = match;
     if (!action && req.method === "PUT") {
       await saveIntegration(query, id, await readBody(req));
-      sendJson(res, 200, { ok: true, integrations: await listIntegrations(query) });
+      sendJson(res, 200, { ok: true, integrations: await listIntegrations(query, userId) });
       return true;
     }
     if (!action && req.method === "DELETE") {
@@ -281,11 +312,11 @@ export async function handleIntegrationsApi({ req, res, url, query, readBody, se
       return true;
     }
     if (action === "test" && req.method === "POST") {
-      sendJson(res, 200, await testIntegration(query, id));
+      sendJson(res, 200, await testIntegration(query, id, { userId }));
       return true;
     }
     if (action === "call" && req.method === "POST") {
-      const result = await callIntegration(query, id, await readBody(req));
+      const result = await callIntegration(query, id, await readBody(req), { userId });
       console.log(`integration ${id}: ${actor || "?"} ${result.ok ? "ok" : result.error || result.status}`);
       sendJson(res, 200, result);
       return true;

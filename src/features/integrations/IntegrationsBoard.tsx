@@ -8,12 +8,37 @@ import { GmailCard } from "./GmailCard";
 
 type Field = { key: string; label: string; secret: boolean; optional: boolean; filled: boolean; source: string; value: string };
 type Integration = {
-  service: string; label: string; kind: "builtin" | "custom"; base_url: string; docs: string; hint: string; configured: boolean;
+  service: string; label: string; kind: "builtin" | "custom" | "google"; base_url: string; docs: string; hint: string; configured: boolean;
   auth_type?: string; auth_name?: string; fields: Field[];
 };
 type Result = { ok: boolean; message: string };
 
 const SOURCE_LABEL: Record<string, string> = { env: "из переменных окружения сервера", mbox: "сохранено в MBOX" };
+
+/** API Google: ключей нет, вход делается в карточке «Google: почта и документы» выше — здесь только состояние и проверка. */
+function GoogleApiRow({ item }: { item: Integration }) {
+  const [result, setResult] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function test() {
+    setBusy(true);
+    setResult(null);
+    try { setResult(await fetchJson<Result>(`/api/mbox/integrations/${item.service}/test`, { method: "POST" })); }
+    catch { setResult({ ok: false, message: "Не удалось проверить: сервер не ответил." }); }
+    finally { setBusy(false); }
+  }
+  return (
+    <Panel title={item.label} icon={Plug} actions={<span className={item.configured ? "meta-chip tone-ok" : "meta-chip tone-warn"}>{item.configured ? <><CheckCircle2 size={12} /> Подключено</> : <><CircleAlert size={12} /> Нужен вход Google</>}</span>}>
+      <div className="integration-form">
+        <p className="integration-hint">{item.hint}</p>
+        {item.docs && <a className="integration-docs" href={item.docs} target="_blank" rel="noreferrer"><ExternalLink size={12} /> Документация API</a>}
+        <div className="integration-actions">
+          <button className="ghost-action" type="button" disabled={busy || !item.configured} onClick={() => void test()}>{busy ? "Проверяю…" : "Проверить подключение"}</button>
+          {result && <span className={result.ok ? "integration-result is-ok" : "integration-result is-bad"} role="status">{result.message}</span>}
+        </div>
+      </div>
+    </Panel>
+  );
+}
 
 function IntegrationCard({ item, authTypes, onChanged }: { item: Integration; authTypes: Record<string, string>; onChanged: (list: Integration[]) => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(item.fields.map((field) => [field.key, field.secret ? "" : field.value])));
@@ -130,7 +155,7 @@ export function IntegrationsBoard() {
         {error && <p className="account-error" role="alert">{error}</p>}
       </Panel>
       <GmailCard />
-      {items.map((item) => <IntegrationCard key={item.service} item={item} authTypes={authTypes} onChanged={setItems} />)}
+      {items.map((item) => (item.kind === "google" ? <GoogleApiRow key={item.service} item={item} /> : <IntegrationCard key={item.service} item={item} authTypes={authTypes} onChanged={setItems} />))}
       <Panel title="Своё API" icon={Plus}>
         {adding ? (
           <form className="integration-form" onSubmit={create}>

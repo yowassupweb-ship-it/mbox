@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { Check, CheckCircle2, CircleAlert, Copy, Mail } from "lucide-react";
+import { Check, CheckCircle2, CircleAlert, Copy, ExternalLink, FileText, Mail, Search } from "lucide-react";
 import { ApiError, fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
 import { Panel, PasswordInput } from "../../ui";
 
-type Status = { client_id: string; has_secret: boolean; connected: boolean; email: string; redirect_uri: string };
+type Status = { client_id: string; has_secret: boolean; connected: boolean; email: string; redirect_uri: string; gmail_ok: boolean; docs_ok: boolean };
+type GFile = { id: string; name: string; type: string; modified: string; url: string; owner: string };
 type Mail = { id: string; from: string; subject: string; date: string; snippet: string; unread: boolean };
 
 /**
@@ -20,6 +21,8 @@ export function GmailCard() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [mails, setMails] = useState<Mail[] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [files, setFiles] = useState<GFile[] | null>(null);
+  const [fileQuery, setFileQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -78,6 +81,25 @@ export function GmailCard() {
     finally { setBusy(""); }
   }
 
+  async function findFiles(event?: FormEvent) {
+    event?.preventDefault();
+    setBusy("files");
+    setMessage(null);
+    try { setFiles((await fetchJson<{ files: GFile[] }>(`/api/mbox/gdocs/search?kind=any&max=15&q=${encodeURIComponent(fileQuery)}`)).files); }
+    catch (cause) { setFiles(null); setMessage({ ok: false, text: problem(cause, "Не удалось получить список документов") }); }
+    finally { setBusy(""); }
+  }
+
+  async function importFile(file: GFile) {
+    setBusy(`import:${file.id}`);
+    setMessage(null);
+    try {
+      const created = await fetchJson<{ id: string; title: string }>("/api/mbox/gdocs/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: file.id }) });
+      setMessage({ ok: true, text: `«${created.title}» перенесён в MBOX: раздел «Документы».` });
+    } catch (cause) { setMessage({ ok: false, text: problem(cause, "Не удалось перенести документ") }); }
+    finally { setBusy(""); }
+  }
+
   async function copy(text: string) {
     await navigator.clipboard.writeText(text);
     setCopied(true);
@@ -85,12 +107,13 @@ export function GmailCard() {
   }
 
   return (
-    <Panel title="Gmail" icon={Mail} actions={<span className={status?.connected ? "meta-chip tone-ok" : "meta-chip tone-warn"}>{status?.connected ? <><CheckCircle2 size={12} /> {status.email || "Подключено"}</> : <><CircleAlert size={12} /> Не подключено</>}</span>}>
+    <Panel title="Google: почта и документы" icon={Mail} actions={<span className={status?.connected ? "meta-chip tone-ok" : "meta-chip tone-warn"}>{status?.connected ? <><CheckCircle2 size={12} /> {status.email || "Подключено"}</> : <><CircleAlert size={12} /> Не подключено</>}</span>}>
       <div className="integration-form">
-        <p className="integration-hint">Google не пускает во встроенный браузер, поэтому Gmail подключается через официальный вход в обычном браузере (один раз). После этого агенты и Джарвис читают почту, готовят черновики и отправляют письма по вашей просьбе.</p>
+        <p className="integration-hint">Google не пускает во встроенный браузер (сообщение «браузер или приложение небезопасны»), поэтому аккаунт подключается через официальный вход в обычном браузере, один раз. После этого MBOX и агенты работают с вашей почтой, Документами, Таблицами и Диском: читают, ищут, дописывают, создают, переносят документы в MBOX. Сам редактор Google Документов внутри MBOX показать нельзя — «Открыть в Google» открывает документ в обычном браузере, где вы уже вошли.</p>
+        {status?.connected && !status.docs_ok && <p className="account-error" role="alert">Почта подключена, а прав на документы нет. Нажмите «Подключить заново» и разрешите все пункты в окне Google.</p>}
         {!status?.connected && (
           <ol className="integration-steps">
-            <li>В <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noreferrer">Google Cloud Console</a> создайте проект и включите Gmail API.</li>
+            <li>В <a href="https://console.cloud.google.com/apis/library" target="_blank" rel="noreferrer">Google Cloud Console</a> создайте проект и включите четыре API: Gmail, Google Docs, Google Sheets и Google Drive.</li>
             <li>«Экран согласия OAuth»: тип «Внешний», добавьте себя в тестовые пользователи и переведите приложение в статус «В производство», иначе вход перестанет работать через 7 дней.</li>
             <li>«Учётные данные» → «Создать» → «Идентификатор клиента OAuth» → «Веб-приложение». Адрес перенаправления вставьте ниже.</li>
             <li>Скопируйте Client ID и секрет сюда, сохраните и нажмите «Подключить Gmail».</li>
@@ -115,6 +138,30 @@ export function GmailCard() {
             {message && <span className={message.ok ? "integration-result is-ok" : "integration-result is-bad"} role="status">{message.text}</span>}
           </div>
         </form>
+        {status?.docs_ok && (
+          <div className="integration-form">
+            <h4 className="agent-pref-title">Мои документы Google</h4>
+            <form className="integration-actions" onSubmit={findFiles}>
+              <input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder="Название или текст (пусто — последние)" aria-label="Поиск по Диску" />
+              <button className="ghost-action" type="submit" disabled={busy !== ""}><Search size={14} /> {busy === "files" ? "Ищу…" : "Найти"}</button>
+            </form>
+            {files && (
+              <ul className="integration-mails">
+                {files.map((file) => (
+                  <li key={file.id}>
+                    <strong><FileText size={13} aria-hidden="true" /> {file.name}</strong>
+                    <span>{file.type === "doc" ? "Документ" : file.type === "sheet" ? "Таблица" : "Файл"} · изменён {formatSince(file.modified)}{file.owner ? ` · ${file.owner}` : ""}</span>
+                    <div className="integration-actions">
+                      <button className="ghost-action" type="button" onClick={() => window.open(file.url, "_blank", "noopener")}><ExternalLink size={13} /> Открыть в Google</button>
+                      {file.type === "doc" && <button className="ghost-action" type="button" disabled={busy !== ""} onClick={() => void importFile(file)}>{busy === `import:${file.id}` ? "Переношу…" : "Перенести в MBOX"}</button>}
+                    </div>
+                  </li>
+                ))}
+                {!files.length && <li><small>Ничего не нашлось.</small></li>}
+              </ul>
+            )}
+          </div>
+        )}
         {mails && mails.length > 0 && (
           <ul className="integration-mails">
             {mails.map((mail) => (

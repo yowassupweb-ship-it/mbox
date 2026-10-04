@@ -230,6 +230,10 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    подлинность — одноразовый `oauth_states.state`, 10 минут). Постоянный токен и секрет клиента — `oauth_connections` под `pgp_sym_encrypt`. Агентам:
    MCP `gmail_search/read/draft/send`, Джарвису — те же (группа `mail`); отправка только по прямой просьбе, по умолчанию — черновик. Экран согласия Google
    должен быть «В производство», иначе токен живёт 7 дней.
+   Тот же вход открывает Документы, Таблицы и Диск владельца (`server/google-docs.mjs`, права `GOOGLE_SCOPES.docs`; старое подключение только к почте
+   надо переподключить): MCP/Джарвис `gdoc_search/read/append/replace/create/import`, сервисы `google_drive|google_docs|google_sheets` в `integration_call`.
+   Редактор Google Документов внутри MBOX показать нельзя (Google запрещает встраивание и вход во встроенном браузере) — «Открыть в Google» уходит в системный браузер.
+   Не путать с `read_google_doc` и др. (сервисный аккаунт агента, `docs/gdocs-mcp.md`).
 
 ## Работа агента с MBOX
 

@@ -2151,6 +2151,91 @@ server.registerTool(
   },
 );
 
+// ─── Документы Google владельца (server/google-docs.mjs): тот же вход Google, что и у Gmail ───────────────────────────────
+// Не путать с read_google_doc/create_google_doc: те работают от сервисного аккаунта агента в отдельной папке; gdoc_* — от аккаунта владельца.
+
+const gdocText = (error) => `Google: ${String(error?.message || error).replace(/^MBOX \d+: /, "")}`;
+
+server.registerTool(
+  "gdoc_search",
+  {
+    title: "Search the owner's Google Drive",
+    description: "Find the OWNER's Google Docs / Sheets by name or text (kind: docs | sheets | any). Returns id, name, type, modified date, URL. Not MBOX documents (those are doc_search). If not connected: owner connects Google in MBOX → Settings → Integrations → Google.",
+    inputSchema: { query: z.string().default(""), kind: z.enum(["docs", "sheets", "any"]).default("docs"), max: z.number().optional() },
+  },
+  async ({ query, kind, max }) => {
+    try {
+      const result = await mboxFetch(`/api/mbox/gdocs/search?q=${encodeURIComponent(query)}&kind=${kind}&max=${max || 15}`);
+      return textResult(result.files.length ? result.files.map((file) => `id ${file.id} | ${file.name} | ${file.type} | modified ${String(file.modified).slice(0, 10)}\n   ${file.url}`).join("\n") : "nothing found");
+    } catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_read",
+  {
+    title: "Read a Google Doc",
+    description: "Read a Google Doc as plain text by id (from gdoc_search or the URL docs.google.com/document/d/<id>/edit).",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { const doc = await mboxFetch(`/api/mbox/gdocs/read?id=${encodeURIComponent(id)}`); return textResult(`${doc.title}\n${doc.url}\n\n${doc.text}`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_append",
+  {
+    title: "Append text to a Google Doc",
+    description: "Append text to the end of the owner's Google Doc. A real edit, visible in Google at once: do it only when the owner asked.",
+    inputSchema: { id: z.string(), text: z.string() },
+  },
+  async ({ id, text }) => {
+    try { await mboxFetch("/api/mbox/gdocs/append", { method: "POST", body: JSON.stringify({ id, text }) }); return textResult("Appended."); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_replace",
+  {
+    title: "Replace text in a Google Doc",
+    description: "Replace every exact (case-sensitive) occurrence of find with replace in the owner's Google Doc.",
+    inputSchema: { id: z.string(), find: z.string(), replace: z.string() },
+  },
+  async ({ id, find, replace }) => {
+    try { const result = await mboxFetch("/api/mbox/gdocs/replace", { method: "POST", body: JSON.stringify({ id, find, replace }) }); return textResult(`Replaced occurrences: ${result.replaced}`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_create",
+  {
+    title: "Create a Google Doc",
+    description: "Create a new Google Doc in the owner's Drive with a title and optional starting text. Returns the URL.",
+    inputSchema: { title: z.string(), text: z.string().default("") },
+  },
+  async ({ title, text }) => {
+    try { const created = await mboxFetch("/api/mbox/gdocs/create", { method: "POST", body: JSON.stringify({ title, text }) }); return textResult(`Created: ${created.title}\n${created.url}`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_import",
+  {
+    title: "Copy a Google Doc into MBOX",
+    description: "Import a Google Doc as a new MBOX document (headings, lists, bold are kept) so it can be edited, shared and printed inside MBOX.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { const created = await mboxFetch("/api/mbox/gdocs/import", { method: "POST", body: JSON.stringify({ id }) }); return textResult(`Imported into MBOX as document #${created.id} "${created.title}".`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

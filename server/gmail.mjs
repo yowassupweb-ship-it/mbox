@@ -19,7 +19,13 @@ const secretKey = () => process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL 
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
-const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.compose"];
+// Один вход Google на всё: почта и документы (Документы, Таблицы, Диск владельца). Старое подключение только к почте остаётся рабочим для почты;
+// для документов его нужно переподключить («Подключить заново»), чтобы Google выдал новые права.
+export const GOOGLE_SCOPES = {
+  gmail: ["https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.compose"],
+  docs: ["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"],
+};
+const SCOPES = ["openid", "email", ...GOOGLE_SCOPES.gmail, ...GOOGLE_SCOPES.docs];
 const STATE_TTL_MIN = 10;
 const tokenCache = new Map();
 
@@ -59,7 +65,10 @@ async function load(query, userId) {
 
 export async function gmailStatus(query, userId, origin) {
   const row = await load(query, userId);
+  const granted = String(row?.scopes || "").split(/\s+/);
   return {
+    gmail_ok: Boolean(row?.refresh_token) && GOOGLE_SCOPES.gmail.every((scope) => granted.includes(scope)),
+    docs_ok: Boolean(row?.refresh_token) && GOOGLE_SCOPES.docs.every((scope) => granted.includes(scope)),
     client_id: row?.client_id || "",
     has_secret: Boolean(row?.client_secret),
     connected: Boolean(row?.refresh_token),
@@ -149,6 +158,15 @@ export async function disconnectGmail(query, userId) {
   if (row?.refresh_token) await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(row.refresh_token)}`, { method: "POST" }).catch(() => {});
   await query("UPDATE oauth_connections SET refresh_ciphertext = NULL, email = '', scopes = '', connected_at = NULL WHERE provider = 'google' AND owner_user_id = $1", [String(userId)]);
   tokenCache.delete(String(userId));
+}
+
+export async function googleAccessToken(query, userId, needs = "") {
+  if (needs) {
+    const row = await load(query, userId);
+    const granted = String(row?.scopes || "").split(/\s+/);
+    if (row?.refresh_token && !GOOGLE_SCOPES[needs].every((scope) => granted.includes(scope))) throw Object.assign(new Error("У подключённого Google нет прав на документы. Нажмите «Подключить заново» в «Настройки → Интеграции → Google» и разрешите доступ."), { code: "not_connected" });
+  }
+  return accessToken(query, userId);
 }
 
 async function accessToken(query, userId) {

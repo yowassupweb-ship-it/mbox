@@ -19,9 +19,10 @@ let openTab;
 let browserOp;
 let integrations;
 let gmail;
+let gdocs;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail, gdocs } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -616,7 +617,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
-  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "gmail_draft", "gmail_send",
+  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "gmail_draft", "gmail_send", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1532,6 +1533,54 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "gdoc_search",
+      description: "Найти файлы на Google Диске владельца: документы (kind=docs), таблицы (kind=sheets) или любые (any) по названию и тексту. Возвращает id, название, дату, ссылку. Это ЕГО документы Google, а не документы MBOX (те — search_documents).",
+      parameters: { type: "object", properties: { query: { type: "string" }, kind: { type: "string", enum: ["docs", "sheets", "any"] }, max: { type: "number" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_read",
+      description: "Прочитать документ Google целиком (простой текст) по id из gdoc_search или из адреса docs.google.com/document/d/<id>.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_append",
+      description: "Дописать текст в конец документа Google владельца. Правка настоящая и сразу видна в Google; не используй без просьбы человека.",
+      parameters: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } }, required: ["id", "text"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_replace",
+      description: "Заменить в документе Google все вхождения точного текста find на replace (с учётом регистра).",
+      parameters: { type: "object", properties: { id: { type: "string" }, find: { type: "string" }, replace: { type: "string" } }, required: ["id", "find", "replace"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_create",
+      description: "Создать новый документ Google на Диске владельца с названием и начальным текстом; возвращает ссылку.",
+      parameters: { type: "object", properties: { title: { type: "string" }, text: { type: "string" } }, required: ["title"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_import",
+      description: "Перенести документ Google в MBOX новым документом (заголовки, списки, жирный сохраняются) — чтобы работать с ним в MBOX и делиться правами MBOX.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1746,6 +1795,11 @@ export const TOOL_GROUPS = {
     label: "почта владельца в Gmail: найти и прочитать письма, подготовить черновик, отправить (только по прямой просьбе)",
     match: /(почт|письм|gmail|имейл|email|e-mail|inbox|входящ|ответь (ему|ей|им)|отправь (письмо|ему|ей)|рассылк)/,
     tools: ["gmail_search", "gmail_read", "gmail_draft", "gmail_send"],
+  },
+  google_docs: {
+    label: "документы и таблицы Google на Диске владельца: найти, прочитать, дописать, заменить текст, создать, перенести в MBOX",
+    match: /(google\s*(docs|doc|док|таблиц|sheet|диск|drive)|гугл\s*(докс|док|таблиц|диск)|гугл-?док|docs\.google|google-?док|на (гугл|google) диске)/,
+    tools: ["gdoc_search", "gdoc_read", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import"],
   },
   integrations: {
     label: "внешние API с ключами владельца: Topvisor (позиции, проекты, аудит), Яндекс Вебмастер и Метрика, любые добавленные API",
@@ -3017,10 +3071,10 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     if (!integrations) return "интеграции недоступны в этом режиме";
     if (!viewer?.userId || !viewer.all) return "внешние API с ключами доступны только владельцу MBOX";
     if (name === "integration_list") {
-      const rows = await integrations.list();
+      const rows = await integrations.list(String(viewer.userId));
       return rows.map((row) => `${row.service} — ${row.label}: ${row.configured ? "подключён" : "ключи не заполнены"}; адрес ${row.base_url}${row.hint ? `\n   ${row.hint}` : ""}${row.kind === "builtin" ? `\n   по умолчанию: ${row.fields.filter((field) => !field.secret && field.value).map((field) => `${field.label} = ${field.value}`).join(", ") || "—"}` : ""}`).join("\n");
     }
-    const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars });
+    const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars }, String(viewer.userId));
     if (result.ok === false && (!result.status || result.error === "api_error")) return `API: ${result.message || result.error}`;
     return `HTTP ${result.status}${result.ok ? "" : " (ошибка)"}\n${typeof result.data === "string" ? result.data : JSON.stringify(result.data)}${result.truncated ? `\n[ответ обрезан: ${result.total_chars} символов; ${result.hint}]` : ""}`;
   }
@@ -3043,6 +3097,27 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
       return `письмо отправлено (id ${sent.id})`;
     } catch (error) {
       return `Gmail: ${error.message}`;
+    }
+  }
+
+  if (name.startsWith("gdoc_")) {
+    if (!gdocs) return "Google Документы недоступны в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "Google подключён только у владельца MBOX";
+    const uid = String(viewer.userId);
+    try {
+      if (name === "gdoc_search") {
+        const result = await gdocs.search(uid, { q: args.query, kind: args.kind, max: args.max });
+        return result.files.length ? result.files.map((file) => `id ${file.id} · ${file.name} · ${file.type} · изменён ${String(file.modified).slice(0, 10)}\n   ${file.url}`).join("\n") : "ничего не нашлось";
+      }
+      if (name === "gdoc_read") { const doc = await gdocs.read(uid, String(args.id || "")); return `«${doc.title}»\n${doc.url}\n\n${doc.text}`; }
+      if (name === "gdoc_append") { await gdocs.append(uid, String(args.id || ""), String(args.text || "")); return "текст дописан в конец документа Google"; }
+      if (name === "gdoc_replace") { const result = await gdocs.replace(uid, String(args.id || ""), String(args.find || ""), String(args.replace ?? "")); return `заменено вхождений: ${result.replaced}`; }
+      if (name === "gdoc_create") { const created = await gdocs.create(uid, String(args.title || ""), String(args.text || "")); return `создан документ Google «${created.title}»: ${created.url}`; }
+      const imported = await gdocs.import(uid, String(args.id || ""));
+      try { openTab?.(uid, { kind: "tab", key: `doc:${imported.id}`, title: imported.title, note: "Документ перенесён из Google", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+      return `документ Google перенесён в MBOX как «${imported.title}» (#${imported.id})`;
+    } catch (error) {
+      return `Google: ${error.message}`;
     }
   }
 

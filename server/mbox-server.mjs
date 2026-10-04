@@ -35,6 +35,7 @@ import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { handleBrowserAgentApi, runBrowserOp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
+import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
 import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
 import { callIntegration, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
@@ -56,7 +57,8 @@ configureJarvis({
     return delivered;
   },
   gmail: { search: (userId, input) => gmailSearch(query, userId, input), read: (userId, id) => gmailRead(query, userId, id), draft: (userId, input) => gmailDraft(query, userId, input), send: (userId, input) => gmailSend(query, userId, input) },
-  integrations: { list: (...args) => listIntegrations(query, ...args), call: (id, input) => callIntegration(query, id, input) },
+  gdocs: { search: (userId, input) => gdocSearch(query, userId, input), read: (userId, id) => gdocRead(query, userId, id), append: (userId, id, text) => gdocAppend(query, userId, id, text), replace: (userId, id, find, replace) => gdocReplace(query, userId, id, find, replace), create: (userId, title, text) => gdocCreate(query, userId, title, text), import: (userId, id) => gdocImport(query, userId, id, { ownerUserId: userId }) },
+  integrations: { list: (userId) => listIntegrations(query, userId), call: (id, input, userId) => callIntegration(query, id, input, { userId }) },
   browserOp: (userId, action, input = {}) => runBrowserOp({ clients: realtimeClients, userId, action, tab: input.tab, args: input.args, actor: "Джарвис", note: input.note }),
 });
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
@@ -1272,7 +1274,8 @@ async function handleApiWithContext(req, res, url) {
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
   if (await handleGmailApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, origin: publicOrigin(req) })) return;
-  if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req) })) return;
+  if (await handleGoogleDocsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, broadcast: broadcastRealtime })) return;
+  if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), userId: user.id })) return;
   if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: scope.all })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
