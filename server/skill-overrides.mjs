@@ -131,13 +131,15 @@ async function writeFiles(query, skillsRoot, { id, files, author, message }) {
  *   GET  /api/mbox/agent/skills/packages/:id/history?file=<путь> — версии файла
  * Возвращает true, если запрос обработан.
  */
-export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot, actor, sendJson, readBody, onChange }) {
+export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot, actor, sendJson, readBody, onChange, access }) {
+  // access (необязательно): { allowed: null | Set<id>, canWrite } — кого и что пускать; без него (dev) всё открыто.
   const base = "/api/mbox/agent/skills/packages";
   if (!url.pathname.startsWith(base)) return false;
   const rest = url.pathname.slice(base.length);
 
   if (rest === "" && req.method === "GET") {
-    sendJson(res, 200, { packages: await listMerged(query, skillsRoot) });
+    const all = await listMerged(query, skillsRoot);
+    sendJson(res, 200, { packages: access?.allowed ? all.filter((item) => access.allowed.has(item.id)) : all });
     return true;
   }
 
@@ -145,6 +147,9 @@ export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot,
   if (!match) return false;
   const [, id, action] = match;
   const file = url.searchParams.get("file") || "";
+  // Закрытый навык не показываем и не подтверждаем его существование: для человека без доступа его нет.
+  if (access?.allowed && !access.allowed.has(id)) { sendJson(res, 404, { error: "skill_not_found" }); return true; }
+  if (access && access.canWrite === false && action === "/files" && req.method !== "GET") { sendJson(res, 403, { error: "owner_required" }); return true; }
 
   if (!action && req.method === "GET") {
     const skillPackage = await mergedPackage(query, skillsRoot, id);

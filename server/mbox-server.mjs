@@ -29,6 +29,7 @@ import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePubl
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
+import { allowedSkills, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
@@ -1071,7 +1072,7 @@ function looksLikePasswordHash(value) {
 async function createSessionForUser(req, res, userId) {
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')", [userId, tokenHash]);
+  await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at, user_agent, ip) VALUES ($1, $2, now() + interval '30 days', $3, $4)", [userId, tokenHash, String(req.headers["user-agent"] || "").slice(0, 300), clientAddress(req).slice(0, 80)]);
   res.setHeader("set-cookie", sessionCookie(req, encodeURIComponent(token), 2592000));
 }
 
@@ -1211,7 +1212,7 @@ async function handleApiWithContext(req, res, url) {
 
     const token = randomBytes(32).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
-    await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')", [user.rows[0].id, tokenHash]);
+    await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at, user_agent, ip) VALUES ($1, $2, now() + interval '30 days', $3, $4)", [user.rows[0].id, tokenHash, String(req.headers["user-agent"] || "").slice(0, 300), clientAddress(req).slice(0, 80)]);
     await query(
       `DELETE FROM auth_sessions
        WHERE expires_at < now()
@@ -1325,8 +1326,11 @@ async function handleApiWithContext(req, res, url) {
 
   // Пакеты навыков: skills/ в репозитории плюс правки агентов из базы (server/skill-overrides.mjs).
   // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill/edit_skill_file.
+  const skillAllowed = await allowedSkills(query, user);
+  if (await handleSkillAccessApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), skillsRoot: path.join(root, "skills") })) return;
   if (await handleSkillPackagesApi({
     req, res, url, query, skillsRoot: path.join(root, "skills"), actor: actorFromReq(req), sendJson, readBody,
+    access: { allowed: skillAllowed, canWrite: isOwner(user) },
     onChange: (change) => {
       broadcastRealtime("skill_file_changed", change);
       recordActivityMemory({
@@ -1363,14 +1367,15 @@ async function handleApiWithContext(req, res, url) {
         last_model: row?.last_model || null,
       };
     };
-    const catalog = [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG];
+    const skillAllowedList = await allowedSkills(query, user);
+    const catalog = [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG].filter((skill) => isCatalogSkillAllowed(skillAllowedList, skill.id));
     const skills = catalog.map((skill) => ({ ...skill, ...withUsage(skill.id) }));
     const modes = Object.entries(SERVICE_MODES).map(([id, name]) => ({ id, name, ...withUsage(id) }));
     // Навык, который кто-то залогировал, но забыл описать в каталоге — иначе он молча пропал бы из UI.
-    const unknown = usage.rows
+    const unknown = (skillAllowedList === null ? usage.rows : [])
       .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
       .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
-    return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
+    return sendJson(res, 200, { skills: [...skills, ...unknown], modes: skillAllowedList === null ? modes : [] });
   }
 
   // Какие модели и «усилия» доступны чату: список собирает jarvis.mjs по наличию ключей —
@@ -3426,6 +3431,7 @@ ensureGmailSchema(query).catch((error) => console.error(`gmail schema: ${error.m
 ensureIntegrationsSchema(query).catch((error) => console.error(`integrations schema: ${error.message}`));
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
+ensureSkillAccessSchema(query).catch((error) => console.error(`skill access schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
 

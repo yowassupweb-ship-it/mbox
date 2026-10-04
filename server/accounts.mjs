@@ -38,6 +38,9 @@ export async function ensureAccountsSchema(query) {
   // Когда сессией пользовались: при входе вытесняются давно не используемые, а не самые старые —
   // иначе каждый вход агента по паролю (MCP, наблюдатели) выбивал человека из браузера.
   await query("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ");
+  // С какого устройства вход: показывается в «Аккаунт → Сессии», чтобы лишнюю можно было выбить.
+  await query("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''");
+  await query("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT ''");
   // Какие локальные агенты человек включил у себя: нет подписки на Claude Code или ChatGPT — выключает здесь, и наблюдатели не запускаются.
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_prefs JSONB NOT NULL DEFAULT '{}'");
   // Вход в локальные Claude Code / Codex: состояние присылает служба на компьютере человека, запросы «войти/выйти» ставит интерфейс.
@@ -353,6 +356,31 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     const keepHash = keep ? createHash("sha256").update(decodeURIComponent(keep)).digest("hex") : "";
     await query("DELETE FROM auth_sessions WHERE user_id = $1 AND token_hash <> $2", [user.id, keepHash]);
     sendJson(res, 200, { ok: true });
+    return true;
+  }
+  const currentSessionHash = () => {
+    const raw = String(req.headers.cookie || "").match(/(?:^|;\s*)mbox_session=([^;]+)/)?.[1];
+    return raw ? createHash("sha256").update(decodeURIComponent(raw)).digest("hex") : "";
+  };
+  if (url.pathname === "/api/mbox/account/sessions" && req.method === "GET") {
+    const current = currentSessionHash();
+    const rows = (await query(
+      `SELECT id::text, user_agent, ip, created_at::text, last_used_at::text, expires_at::text, token_hash
+       FROM auth_sessions WHERE user_id = $1 AND expires_at > now() ORDER BY COALESCE(last_used_at, created_at) DESC`,
+      [user.id],
+    )).rows;
+    sendJson(res, 200, { sessions: rows.map(({ token_hash: hash, ...row }) => ({ ...row, current: hash === current })) });
+    return true;
+  }
+  if (url.pathname === "/api/mbox/account/sessions/revoke-others" && req.method === "POST") {
+    const result = await query("DELETE FROM auth_sessions WHERE user_id = $1 AND token_hash <> $2 RETURNING id", [user.id, currentSessionHash()]);
+    sendJson(res, 200, { revoked: result.rowCount });
+    return true;
+  }
+  const sessionMatch = url.pathname.match(/^\/api\/mbox\/account\/sessions\/(\d+)$/);
+  if (sessionMatch && req.method === "DELETE") {
+    const result = await query("DELETE FROM auth_sessions WHERE id = $1 AND user_id = $2 RETURNING id", [sessionMatch[1], user.id]);
+    sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { ok: true } : { error: "not_found" });
     return true;
   }
   if (url.pathname === "/api/mbox/account/security" && req.method === "GET") {
