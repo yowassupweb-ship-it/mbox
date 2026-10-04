@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { IRenderManagerService } from "@univerjs/engine-render";
 import { defaultTheme, type Theme } from "@univerjs/themes";
 
 /** Univer создаёт собственный canvas, поэтому одних CSS-токенов MBOX ему недостаточно. */
@@ -52,4 +53,26 @@ export function useDocumentTheme() {
     return () => observer.disconnect();
   }, []);
   return theme;
+}
+
+type DocBackground = { setFillColors?: (...colors: Array<string | undefined>) => void; _noMarginMarks?: boolean };
+
+/**
+ * Univer рисует на каждом листе «уголки» по краям полей, как рамку текста в Word. В MBOX они выглядят мусором поверх
+ * текста, а настройки для них нет — подменяем цвет уголков на прозрачный в самом слое фона листа.
+ */
+export function hideMarginMarks(univer: unknown, unitId: string) {
+  const injector = (univer as { __getInjector: () => { get: <T>(token: unknown) => T } }).__getInjector();
+  let tries = 0;
+  const apply = () => {
+    const unit = injector.get<IRenderManagerService>(IRenderManagerService).getRenderUnitById(unitId) as unknown as { components?: Map<string, DocBackground> } | null;
+    const background = unit?.components?.get("__Document_Render_Background__");
+    if (!background?.setFillColors) { if (tries++ < 60) window.requestAnimationFrame(apply); return; }
+    if (background._noMarginMarks) return;
+    const original = background.setFillColors.bind(background);
+    background.setFillColors = (fill, page, stroke) => original(fill, page, stroke, "transparent");
+    background._noMarginMarks = true;
+    background.setFillColors(undefined, undefined, undefined);
+  };
+  apply();
 }
