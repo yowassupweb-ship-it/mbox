@@ -3,9 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const baseUrl = process.env.MBOX_URL;
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const accessToken = String(process.env.MBOX_TOKEN || "").trim();
 const password = process.env.MBOX_PASSWORD;
+if (!accessToken && !username) throw new Error("MBOX: укажите MBOX_TOKEN или MBOX_USERNAME и MBOX_PASSWORD");
 // Имя агента обязательно. Молчаливый дефолт «MBOX Agent» плодил призраков: сессия без переменной
 // окружения заводила отдельного агента, и в ростере появлялись лишние имена рядом с настоящими.
 const agentName = process.env.MBOX_AGENT_NAME;
@@ -1956,7 +1957,7 @@ server.registerTool(
     title: "Read the page open in the owner's MBOX browser",
     description: [
       "Read the page the owner has open in the MBOX browser: url, title, the text the owner selected, headings, visible text (clipped), every visible form field with a ref (f12), label, kind, current value, options for selects, and clickable buttons/links with refs (b7).",
-      "Use refs with browser_fill / browser_click / browser_highlight. Refs live until the page reloads — take a new snapshot after navigation.",
+      "Use refs with browser_fill / browser_click / browser_type / browser_highlight. Refs live until the page reloads — take a new snapshot after navigation. The result includes scroll/viewport and `blockers` (captcha, login wall, 2FA, bot protection, cookie banner, paywall): if one blocks you, call browser_ask_help instead of retrying.",
       "Password values are never returned. Frames (iframes) are not read.",
     ].join("\n"),
     inputSchema: { tab: BROWSER_TAB, max_text: z.number().default(6000).describe("How many characters of page text to return") },
@@ -1986,11 +1987,197 @@ server.registerTool(
 server.registerTool(
   "browser_click",
   {
-    title: "Click a button or link on the owner's page, visibly",
-    description: "Click an element by ref from browser_snapshot; it is highlighted with your caption first. Do not click submit/send/buy/delete buttons unless the owner explicitly asked for exactly that.",
-    inputSchema: { ref: z.string(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+    title: "Click on the owner's page with a visible cursor",
+    description: [
+      "Click with a real, trusted mouse click while a visible cursor labelled with your name glides to the element and a ripple shows the click — the owner watches it happen.",
+      "Target: ref from browser_snapshot, OR page coordinates x,y (CSS pixels of the visible viewport; use browser_screenshot to read them). double=true for a double click, right=true for a context menu.",
+      "If the element is covered by a banner/dialog the call fails with covered — close that first (or force=true). trusted=false falls back to a plain DOM click for pages that ignore mouse events.",
+      "Do not click submit/send/buy/pay/delete buttons unless the owner explicitly asked for exactly that.",
+    ].join("\n"),
+    inputSchema: { ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), double: z.boolean().default(false), right: z.boolean().default(false), force: z.boolean().default(false), trusted: z.boolean().default(true), tab: BROWSER_TAB, note: BROWSER_NOTE },
   },
-  async ({ ref, tab, note }) => browserText(await browserOp("click", { ref }, tab, note)),
+  async ({ ref, x, y, double, right, force, trusted, tab, note }) => browserText(await browserOp(double ? "double_click" : right ? "right_click" : "click", { ref, x, y, force, trusted }, tab, note)),
+);
+
+server.registerTool(
+  "browser_type",
+  {
+    title: "Type into a field like a person",
+    description: [
+      "Type text with real keystrokes into a field (ref from browser_snapshot, or coordinates x,y; without a target it types into whatever is focused). The cursor clicks the field first; clear=true (default) selects the old text so it is replaced.",
+      "Use this instead of browser_fill for rich editors, search boxes with suggestions, chat inputs and Google Docs-like canvases where setting a value does not register. slow=true types character by character. submit=true presses Enter afterwards.",
+      "Never type passwords, card numbers or one-time codes — ask the owner (browser_ask_help).",
+    ].join("\n"),
+    inputSchema: { text: z.string(), ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), clear: z.boolean().default(true), submit: z.boolean().default(false), slow: z.boolean().default(false), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ text, ref, x, y, clear, submit, slow, tab, note }) => browserText(await browserOp("type", { text, ref, x, y, clear, submit, slow }, tab, note)),
+);
+
+server.registerTool(
+  "browser_press",
+  {
+    title: "Press keys on the owner's page",
+    description: "Press one or more keys/shortcuts: Enter, Tab, Escape, Backspace, Delete, ArrowDown, PageDown, Home, End, Control+A, Control+Enter, Shift+Tab, F5 … Keys go to the focused element.",
+    inputSchema: { keys: z.array(z.string()).min(1), tab: BROWSER_TAB },
+  },
+  async ({ keys, tab }) => browserText(await browserOp("press", { keys }, tab, "нажимает клавиши")),
+);
+
+server.registerTool(
+  "browser_hover",
+  {
+    title: "Hover the cursor over an element",
+    description: "Move the visible cursor over an element (ref) or point (x,y) without clicking — opens hover menus and tooltips.",
+    inputSchema: { ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), tab: BROWSER_TAB },
+  },
+  async ({ ref, x, y, tab }) => browserText(await browserOp("hover", { ref, x, y }, tab, "наводит курсор")),
+);
+
+server.registerTool(
+  "browser_cursor",
+  {
+    title: "Move the visible cursor (to point at something)",
+    description: "Glide the labelled cursor to an element or point and leave it there — to show the owner where you are looking, without clicking.",
+    inputSchema: { ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ ref, x, y, tab, note }) => browserText(await browserOp("move_cursor", { ref, x, y }, tab, note)),
+);
+
+server.registerTool(
+  "browser_drag",
+  {
+    title: "Drag and drop with the cursor",
+    description: "Press on the source (ref or x,y), drag to the target (ref or x,y) and release — sliders, sortable lists, kanban cards, file drop zones.",
+    inputSchema: { from_ref: z.string().default(""), from_x: z.number().optional(), from_y: z.number().optional(), to_ref: z.string().default(""), to_x: z.number().optional(), to_y: z.number().optional(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ from_ref, from_x, from_y, to_ref, to_x, to_y, tab, note }) => browserText(await browserOp("drag", { from: { ref: from_ref, x: from_x, y: from_y }, to: { ref: to_ref, x: to_x, y: to_y } }, tab, note)),
+);
+
+server.registerTool(
+  "browser_wait",
+  {
+    title: "Wait for the page",
+    description: "Wait (up to 20 s) until text appears (text) / disappears (gone_text), an element ref becomes visible (or gone=true), a CSS selector shows up, the URL contains url_contains, or the page finished loading (load=true). Use after clicks that navigate or load content, instead of guessing delays. On timeout take a browser_snapshot — and if you are stuck, browser_ask_help.",
+    inputSchema: { text: z.string().optional(), gone_text: z.string().optional(), ref: z.string().optional(), gone: z.boolean().default(false), selector: z.string().optional(), url_contains: z.string().optional(), load: z.boolean().default(false), ms: z.number().default(10000), tab: BROWSER_TAB },
+  },
+  async ({ tab, ...args }) => browserText(await browserOp("wait", args, tab, "ждёт страницу")),
+);
+
+server.registerTool(
+  "browser_nav",
+  {
+    title: "Back / forward / reload",
+    description: "Go back or forward in the tab's history, or reload the page.",
+    inputSchema: { to: z.enum(["back", "forward", "reload"]), tab: BROWSER_TAB },
+  },
+  async ({ to, tab }) => browserText(await browserOp(to, {}, tab)),
+);
+
+server.registerTool(
+  "browser_new_tab",
+  {
+    title: "Open a URL in a new browser tab",
+    description: "Open a URL in a NEW browser tab in MBOX (the current one stays). Call browser_tabs a moment later to get its key.",
+    inputSchema: { url: z.string(), tab: BROWSER_TAB },
+  },
+  async ({ url, tab }) => browserText(await browserOp("new_tab", { url }, tab)),
+);
+
+server.registerTool(
+  "browser_extract",
+  {
+    title: "Pull structured data off the page",
+    description: "Extract data without reading the whole snapshot: kind = links (text+href), tables (rows of cells), lists (items), text (of an element ref, or the whole page). Cheaper and cleaner than parsing browser_snapshot text.",
+    inputSchema: { kind: z.enum(["links", "tables", "lists", "text"]), ref: z.string().default(""), max: z.number().default(100), tab: BROWSER_TAB },
+  },
+  async ({ kind, ref, max, tab }) => browserText(await browserOp("extract", { kind, ref, max }, tab, "собирает данные")),
+);
+
+server.registerTool(
+  "browser_find",
+  {
+    title: "Find text on the page",
+    description: "Find visible elements containing a text; returns refs you can click/highlight even when they are not buttons or links.",
+    inputSchema: { query: z.string(), tab: BROWSER_TAB },
+  },
+  async ({ query, tab }) => browserText(await browserOp("find_text", { query }, tab, "ищет на странице")),
+);
+
+server.registerTool(
+  "browser_blockers",
+  {
+    title: "Check what blocks the page",
+    description: "Detect captchas, login walls, 2FA code prompts, bot-protection stops, cookie banners and paywalls on the current page (browser_snapshot includes the same list). If it says captcha/login/two_factor/blocked — do not try to get around it: call browser_ask_help.",
+    inputSchema: { tab: BROWSER_TAB },
+  },
+  async ({ tab }) => browserText(await browserOp("blockers", {}, tab)),
+);
+
+server.registerTool(
+  "browser_status",
+  {
+    title: "Is the human holding you?",
+    description: "Whether the owner paused or stopped you in this tab (paused_by_human / stopped_by_human), plus the current URL and loading state. Check it if actions keep failing with paused/stopped.",
+    inputSchema: { tab: BROWSER_TAB },
+  },
+  async ({ tab }) => browserText(await browserOp("status", {}, tab)),
+);
+
+// ─── Совместная работа: застрял — попроси помощи и жди ─────────────────────────────────────────────────────────────────
+
+const helpText = (view) => {
+  if (!view) return "Help request not found.";
+  if (view.status === "done") return `The owner says DONE.${view.message ? ` Comment: ${view.message}` : ""} Take a fresh browser_snapshot and continue.`;
+  if (view.status === "stopped") return `The owner asked you to STOP.${view.message ? ` Comment: ${view.message}` : ""} Do not continue the task; report in chat what you did and what is left.`;
+  if (view.status === "cancelled") return "The request was cancelled.";
+  if (view.status === "unknown") return view.message;
+  return `Still waiting for the owner (request ${view.id}). Call browser_wait_help with this id again, or work on something else meanwhile.`;
+};
+
+server.registerTool(
+  "browser_ask_help",
+  {
+    title: "Ask the owner for help and wait",
+    description: [
+      "Use when you are stuck: captcha, login, one-time code, a form you do not understand, a page that does not respond, an irreversible choice that is not yours. A bar «Агент просит помощи» appears above the page (and a notification / inbox item), the owner fixes it by hand on the live page and presses «Готово, продолжай» — or «Остановить».",
+      "reason = one line (what blocks you); need = what exactly the owner should do. The call waits up to 40 s for the answer; if it returns «still waiting», call browser_wait_help with the id (you may do so repeatedly). After «DONE» take a fresh browser_snapshot — the page changed.",
+      "Ask EARLY: a captcha or login wall is not something to retry five times. Do not ask for things you can do yourself.",
+    ].join("\n"),
+    inputSchema: { reason: z.string(), need: z.string().default(""), tab: BROWSER_TAB },
+  },
+  async ({ reason, need, tab }) => {
+    try {
+      const created = await mboxFetch("/api/mbox/browser/help", { method: "POST", body: JSON.stringify({ reason, need, tab }) });
+      const view = await mboxFetch(`/api/mbox/browser/help/${created.id}?wait=40`);
+      return textResult(`${helpText(view)}${view.status === "pending" ? "" : ""}`);
+    } catch (error) { return textResult(`Could not ask for help: ${String(error?.message || error)}`); }
+  },
+);
+
+server.registerTool(
+  "browser_wait_help",
+  {
+    title: "Keep waiting for the owner's answer",
+    description: "Wait up to 40 s more for the owner to answer a browser_ask_help request (id from its «still waiting» reply).",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { return textResult(helpText(await mboxFetch(`/api/mbox/browser/help/${encodeURIComponent(id)}?wait=40`))); }
+    catch (error) { return textResult(`Wait failed: ${String(error?.message || error)}`); }
+  },
+);
+
+server.registerTool(
+  "browser_cancel_help",
+  {
+    title: "Withdraw a help request",
+    description: "Take back a help request you no longer need (you solved it, or changed plan). Removes the bar and the inbox item.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { await mboxFetch(`/api/mbox/browser/help/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ action: "cancel" }) }); return textResult("Request withdrawn."); }
+    catch (error) { return textResult(`Cancel failed: ${String(error?.message || error)}`); }
+  },
 );
 
 server.registerTool(
@@ -2035,6 +2222,299 @@ server.registerTool(
     const match = String(data?.image || "").match(/^data:(image\/[a-z]+);base64,(.+)$/);
     if (!match) return browserText(data);
     return withPush({ content: [{ type: "image", mimeType: match[1], data: match[2] }, { type: "text", text: `Screenshot of ${data.url}` }] });
+  },
+);
+
+// ─── Внешние API с ключами владельца (server/integrations.mjs) ─────────────────────────────────────────────────────────
+// Ключи лежат на сервере MBOX и агенту не показываются: вызов идёт через MBOX, ключ подставляется там.
+
+server.registerTool(
+  "integration_list",
+  {
+    title: "List connected external APIs",
+    description: "External APIs the owner connected in MBOX (Topvisor, Yandex Webmaster, Yandex Metrica and any custom API): service code, whether keys are filled, base URL, usage hint. Keys are never shown. Call this before integration_call when unsure which services exist. If a service is not configured, tell the owner to add the keys in MBOX → Settings → Integrations.",
+    inputSchema: {},
+  },
+  async () => {
+    const { integrations } = await mboxFetch("/api/mbox/integrations");
+    return textResult(integrations.map((item) => `${item.service} — ${item.label}: ${item.configured ? "connected" : "NOT configured"}; base ${item.base_url}${item.hint ? `\n   ${item.hint}` : ""}${item.docs ? `\n   docs: ${item.docs}` : ""}${item.kind === "builtin" ? `\n   defaults: ${item.fields.filter((field) => !field.secret && field.value).map((field) => `${field.label}=${field.value}`).join(", ") || "-"}` : ""}`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "integration_call",
+  {
+    title: "Call an external API through MBOX",
+    description: [
+      "Call an external API with the owner's stored key (MBOX adds the auth header; you never see the key). service = code from integration_list: topvisor, yandex_webmaster, yandex_metrica or a custom one.",
+      "Topvisor API v2: path is the method name, e.g. get/projects_2/projects, get/keywords_2/keywords, get/positions_2/history; send parameters as JSON in body (method POST). Other services: method GET/POST/PUT/PATCH/DELETE, path relative to the base URL (no query string), URL parameters in query.",
+      "Read-only by default: do not change data in an external service (create/delete projects, keywords, goals) unless the owner explicitly asked. Large answers are truncated — narrow with limit/filters or raise max_chars (max 60000).",
+    ].join("\n"),
+    inputSchema: {
+      service: z.string().describe("Service code from integration_list"),
+      path: z.string().describe("Path relative to the API base URL, no query string"),
+      method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).optional(),
+      query: z.record(z.any()).optional().describe("URL query parameters"),
+      body: z.any().optional().describe("JSON request body"),
+      max_chars: z.number().optional(),
+    },
+  },
+  async ({ service, ...input }) => {
+    try {
+      const result = await mboxFetch(`/api/mbox/integrations/${encodeURIComponent(service)}/call`, { method: "POST", body: JSON.stringify(input) });
+      if (result.ok === false && (!result.status || result.error === "api_error")) return textResult(`API error: ${result.message || result.error}`);
+      const data = typeof result.data === "string" ? result.data : JSON.stringify(result.data);
+      return textResult(`HTTP ${result.status}${result.ok ? "" : " (error)"}\n${data}${result.truncated ? `\n[truncated: ${result.total_chars} chars. ${result.hint}]` : ""}`);
+    } catch (error) {
+      return textResult(`Integration call failed: ${String(error?.message || error)}`);
+    }
+  },
+);
+
+// ─── Gmail владельца (server/gmail.mjs): вход в Google делается один раз в «Настройки → Интеграции → Gmail» ─────────────────
+
+async function gmailFetch(path, init) {
+  try { return await mboxFetch(path, init); } catch (error) {
+    const raw = String(error?.message || error);
+    const body = raw.match(/^MBOX \d+: ([\s\S]*)$/)?.[1];
+    try { throw new Error(JSON.parse(body).error); } catch (inner) { throw inner instanceof SyntaxError ? new Error(raw) : inner; }
+  }
+}
+
+server.registerTool(
+  "gmail_search",
+  {
+    title: "Search the owner's Gmail",
+    description: "Search the owner's Gmail with Gmail query syntax (is:unread, from:x@y.ru, subject:invoice, newer_than:7d, has:attachment). Returns id, from, subject, date, snippet. Empty query = latest mail. If Gmail is not connected, tell the owner to connect it in MBOX → Settings → Integrations → Gmail.",
+    inputSchema: { query: z.string().default(""), max: z.number().optional() },
+  },
+  async ({ query, max }) => {
+    try {
+      const result = await gmailFetch(`/api/mbox/gmail/search?q=${encodeURIComponent(query)}&max=${max || 10}`);
+      return textResult(result.messages.length ? result.messages.map((item) => `${item.unread ? "* " : ""}id ${item.id} | ${item.date} | ${item.from}\n   ${item.subject} - ${item.snippet.slice(0, 160)}`).join("\n") : "no messages");
+    } catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+server.registerTool(
+  "gmail_read",
+  {
+    title: "Read a Gmail message",
+    description: "Read one message by id from gmail_search: headers, plain-text body (HTML stripped), attachment names.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try {
+      const mail = await gmailFetch(`/api/mbox/gmail/message?id=${encodeURIComponent(id)}`);
+      return textResult(`From: ${mail.from}\nTo: ${mail.to}${mail.cc ? `\nCc: ${mail.cc}` : ""}\nDate: ${mail.date}\nSubject: ${mail.subject}${mail.attachments.length ? `\nAttachments: ${mail.attachments.map((file) => `${file.filename} (${file.size} B)`).join(", ")}` : ""}\n\n${mail.body}`);
+    } catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+server.registerTool(
+  "gmail_draft",
+  {
+    title: "Create a Gmail draft",
+    description: "Create a DRAFT in the owner's Gmail (nothing is sent). Pass reply_to_id to keep it in the same thread. Prefer this over gmail_send: the owner reviews and sends it.",
+    inputSchema: { to: z.string(), subject: z.string().default(""), body: z.string(), cc: z.string().optional(), reply_to_id: z.string().optional() },
+  },
+  async (input) => {
+    try { const draft = await gmailFetch("/api/mbox/gmail/draft", { method: "POST", body: JSON.stringify(input) }); return textResult(`Draft created (id ${draft.draft_id}). It is in Gmail Drafts; nothing was sent.`); }
+    catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+server.registerTool(
+  "gmail_send",
+  {
+    title: "Send a Gmail message",
+    description: "SEND an email from the owner's Gmail. Irreversible and leaves the building: call it only when the owner explicitly asked to send and has seen or dictated the recipient and text. Otherwise use gmail_draft.",
+    inputSchema: { to: z.string(), subject: z.string().default(""), body: z.string(), cc: z.string().optional(), reply_to_id: z.string().optional() },
+  },
+  async (input) => {
+    try { const sent = await gmailFetch("/api/mbox/gmail/send", { method: "POST", body: JSON.stringify(input) }); return textResult(`Sent (id ${sent.id}).`); }
+    catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+// ─── Документы Google владельца (server/google-docs.mjs): тот же вход Google, что и у Gmail ───────────────────────────────
+// Не путать с read_google_doc/create_google_doc: те работают от сервисного аккаунта агента в отдельной папке; gdoc_* — от аккаунта владельца.
+
+const gdocText = (error) => `Google: ${String(error?.message || error).replace(/^MBOX \d+: /, "")}`;
+
+server.registerTool(
+  "gdoc_search",
+  {
+    title: "Search the owner's Google Drive",
+    description: "Find the OWNER's Google Docs / Sheets by name or text (kind: docs | sheets | any). Returns id, name, type, modified date, URL. Not MBOX documents (those are doc_search). If not connected: owner connects Google in MBOX → Settings → Integrations → Google.",
+    inputSchema: { query: z.string().default(""), kind: z.enum(["docs", "sheets", "any"]).default("docs"), max: z.number().optional() },
+  },
+  async ({ query, kind, max }) => {
+    try {
+      const result = await mboxFetch(`/api/mbox/gdocs/search?q=${encodeURIComponent(query)}&kind=${kind}&max=${max || 15}`);
+      return textResult(result.files.length ? result.files.map((file) => `id ${file.id} | ${file.name} | ${file.type} | modified ${String(file.modified).slice(0, 10)}\n   ${file.url}`).join("\n") : "nothing found");
+    } catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_read",
+  {
+    title: "Read a Google Doc",
+    description: "Read a Google Doc as plain text by id (from gdoc_search or the URL docs.google.com/document/d/<id>/edit).",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { const doc = await mboxFetch(`/api/mbox/gdocs/read?id=${encodeURIComponent(id)}`); return textResult(`${doc.title}\n${doc.url}\n\n${doc.text}`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_append",
+  {
+    title: "Append text to a Google Doc",
+    description: "Append text to the end of the owner's Google Doc. A real edit, visible in Google at once: do it only when the owner asked.",
+    inputSchema: { id: z.string(), text: z.string() },
+  },
+  async ({ id, text }) => {
+    try { await mboxFetch("/api/mbox/gdocs/append", { method: "POST", body: JSON.stringify({ id, text }) }); return textResult("Appended."); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_replace",
+  {
+    title: "Replace text in a Google Doc",
+    description: "Replace every exact (case-sensitive) occurrence of find with replace in the owner's Google Doc.",
+    inputSchema: { id: z.string(), find: z.string(), replace: z.string() },
+  },
+  async ({ id, find, replace }) => {
+    try { const result = await mboxFetch("/api/mbox/gdocs/replace", { method: "POST", body: JSON.stringify({ id, find, replace }) }); return textResult(`Replaced occurrences: ${result.replaced}`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_create",
+  {
+    title: "Create a Google Doc",
+    description: "Create a new Google Doc in the owner's Drive with a title and optional starting text. Returns the URL.",
+    inputSchema: { title: z.string(), text: z.string().default("") },
+  },
+  async ({ title, text }) => {
+    try { const created = await mboxFetch("/api/mbox/gdocs/create", { method: "POST", body: JSON.stringify({ title, text }) }); return textResult(`Created: ${created.title}\n${created.url}`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+server.registerTool(
+  "gdoc_import",
+  {
+    title: "Copy a Google Doc into MBOX",
+    description: "Import a Google Doc as a new MBOX document (headings, lists, bold are kept) so it can be edited, shared and printed inside MBOX.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { const created = await mboxFetch("/api/mbox/gdocs/import", { method: "POST", body: JSON.stringify({ id }) }); return textResult(`Imported into MBOX as document #${created.id} "${created.title}".`); }
+    catch (error) { return textResult(gdocText(error)); }
+  },
+);
+
+const storageError = (error) => textResult(`Storage: ${error instanceof Error ? error.message : String(error)}`);
+const storageUrl = (path, params) => `/api/mbox/storage/${path}?${new URLSearchParams(params)}`;
+
+server.registerTool(
+  "storage_list",
+  {
+    title: "List S3 storage files",
+    description: "List files and folders of the MBOX S3 storage (Yandex Object Storage). One bucket; each project has its own folder projects/<id>/, notes images are in notes/<id>/. Empty prefix lists the root (for a project member — only their projects' folders). Prefix must end with \"/\". Use token from the previous result to page.",
+    inputSchema: { prefix: z.string().default(""), token: z.string().default("") },
+  },
+  async ({ prefix, token }) => {
+    try {
+      const data = await mboxFetch(`/api/mbox/storage/objects?${new URLSearchParams({ prefix, ...(token ? { token } : {}) })}`);
+      const lines = [
+        ...data.folders.map((folder) => `📁 ${folder}${data.labels?.[folder] ? `  (${data.labels[folder]})` : ""}`),
+        ...data.objects.map((item) => `${item.key}  ·  ${item.size} B  ·  ${String(item.last_modified).slice(0, 16)}`),
+      ];
+      return textResult(`${lines.join("\n") || "Empty."}${data.next_token ? `\n\nMore: storage_list token=${data.next_token}` : ""}`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_read",
+  {
+    title: "Read an S3 storage file",
+    description: "Read a file from the MBOX S3 storage. Text formats (txt, md, json, csv, html, code), .docx and .xlsx come back as text; png/jpg/gif/webp as an image you can see. Other formats (pdf, archives, video) are not readable — use storage_link. Long text is cut at max_chars.",
+    inputSchema: { key: z.string(), max_chars: z.number().int().min(1000).max(400000).default(60000) },
+  },
+  async ({ key, max_chars }) => {
+    try {
+      const data = await mboxFetch(storageUrl("read", { key, max_chars: String(max_chars) }));
+      if (data.kind === "image") return { content: [{ type: "image", mimeType: data.content_type, data: data.base64 }, { type: "text", text: `${data.key} · ${data.size} B` }] };
+      if (data.kind === "missing") return textResult(`${key}: file not found.`);
+      if (data.kind === "binary") return textResult(`${data.key} · ${data.size} B · ${data.note || "binary"}`);
+      return textResult(`${data.key} · ${data.kind} · ${data.size} B${data.truncated ? ` · TRUNCATED (${data.total_chars ?? "?"} chars total, showing ${data.text.length})` : ""}\n\n${data.text}`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_write",
+  {
+    title: "Write an S3 storage file",
+    description: "Create or replace a file in the MBOX S3 storage from text (or base64 for binary), up to 25 MB. Write only into the folder of the right project (projects/<id>/…). overwrite=false fails if the file exists — prefer it unless the user asked to replace. Does not edit .docx/.xlsx in place: for those create a new text/CSV file or use MBOX documents/tables.",
+    inputSchema: { key: z.string(), text: z.string().optional(), base64: z.string().optional(), content_type: z.string().default(""), overwrite: z.boolean().default(false) },
+  },
+  async ({ key, text, base64, content_type, overwrite }) => {
+    try {
+      const data = await mboxFetch("/api/mbox/storage/write", { method: "POST", body: JSON.stringify({ key, text, base64, content_type, overwrite }) });
+      return textResult(`Written ${data.key} (${data.size} B).`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_mkdir",
+  {
+    title: "Create an S3 storage folder",
+    description: "Create an (empty) folder in the MBOX S3 storage, e.g. projects/4/reports/.",
+    inputSchema: { prefix: z.string() },
+  },
+  async ({ prefix }) => {
+    try { const data = await mboxFetch("/api/mbox/storage/folder", { method: "POST", body: JSON.stringify({ prefix }) }); return textResult(`Folder ${data.key} created.`); }
+    catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_link",
+  {
+    title: "Temporary link to an S3 file",
+    description: "Signed link to download/open a storage file (any format, any size). Valid 1 hour by default, up to 7 days. Anyone with the link can open the file — give it to the user, don't publish it elsewhere.",
+    inputSchema: { key: z.string(), expires_minutes: z.number().int().min(1).max(10080).default(60), download: z.boolean().default(false) },
+  },
+  async ({ key, expires_minutes, download }) => {
+    try {
+      const data = await mboxFetch(storageUrl("link", { key, expires: String(expires_minutes * 60), ...(download ? { download: "1" } : {}) }));
+      return textResult(`${data.url}\n(valid ${Math.round(data.expires / 60)} min)`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_delete",
+  {
+    title: "Delete from S3 storage",
+    description: "Permanently delete a storage file, or a whole folder (key ending with \"/\" deletes everything under it). Irreversible — only on the user's explicit request, and for folders confirm the exact prefix first.",
+    inputSchema: { key: z.string() },
+  },
+  async ({ key }) => {
+    try { const data = await mboxFetch(storageUrl("object", { key }), { method: "DELETE" }); return textResult(`Deleted objects: ${data.deleted}.`); }
+    catch (error) { return storageError(error); }
   },
 );
 

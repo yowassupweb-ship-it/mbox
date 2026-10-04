@@ -1,5 +1,9 @@
 import { Client } from "pg";
 import { canAccessNote, createNote, listNotes, recordNoteVersion } from "./notes.mjs";
+import { scopeWhere as documentScope } from "./documents.mjs";
+import { appendMarkdown, markdownToSnapshot, snapshotToMarkdown } from "./doc-snapshot.mjs";
+import { indexTableText, tableScopeWhere } from "./tables.mjs";
+import { appendRows, loadWorkbook, readTable, workbookToBase64, writeCells } from "./table-ops.mjs";
 import { describeWorkspaceError, findWorkspace, listVersions, listWorkspaces, requestWorkspaceOp } from "./workspaces.mjs";
 
 // Джарвис целиком: инструменты, агентный цикл, модели, источники данных. Раньше он жил в трёх копиях
@@ -12,9 +16,15 @@ let broadcastRealtime;
 let rankMemories;
 let recordMemoryAction;
 let openTab;
+let browserOp;
+let integrations;
+let gmail;
+let gdocs;
+let storage;
+let browserHelp;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail, gdocs, browserHelp, storage } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -609,7 +619,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
-  "create_note", "update_note",
+  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "browser_type", "browser_press", "gmail_draft", "gmail_send", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1337,6 +1347,322 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_documents",
+      description: "Найти ДОКУМЕНТЫ (текстовые листы A4 в редакторе документов) по словам в названии или тексте. Документ — не заметка и не запись памяти. Пусто — последние документы. Номер документа #N не связан с номером заметки #N: смотри на тип.",
+      parameters: { type: "object", properties: { query: { type: "string", description: "Слова для поиска" }, limit: { type: "number", description: "Сколько вернуть, по умолчанию 10" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_document",
+      description: "Прочитать документ целиком по ID (Markdown-вид). Если человек спрашивает «что в документе» и у него открыт документ — это он; ID бери из открытого или из search_documents.",
+      parameters: { type: "object", properties: { document_id: { type: "string", description: "Номер документа (ID)" } }, required: ["document_id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_document",
+      description: "Создать новый документ с названием и текстом (Markdown: заголовки #, списки, **жирный**, таблицы).",
+      parameters: { type: "object", properties: { title: { type: "string" }, markdown: { type: "string", description: "Текст документа, Markdown" } }, required: ["title"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_document",
+      description: "Изменить документ: дописать Markdown в конец (append, по умолчанию) или заменить текст целиком (replace), переименовать. Человек видит правку на глазах и может отменить.",
+      parameters: {
+        type: "object",
+        properties: {
+          document_id: { type: "string" },
+          markdown: { type: "string", description: "Текст, необязательно" },
+          mode: { type: "string", enum: ["append", "replace"] },
+          title: { type: "string", description: "Новое название, необязательно" },
+        },
+        required: ["document_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_tables",
+      description: "Найти ТАБЛИЦЫ (Excel-подобные, во вкладке «Таблицы») по названию или тексту ячеек. Пусто — последние.",
+      parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_table",
+      description: "Прочитать ячейки таблицы по ID: лист и диапазон (A1:F40) необязательны.",
+      parameters: { type: "object", properties: { table_id: { type: "string" }, sheet: { type: "string" }, range: { type: "string", description: "Например A1:F40" } }, required: ["table_id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_table_cells",
+      description: "Записать значения или формулы в ячейки таблицы: объект вида {\"A1\": \"Итого\", \"B2\": \"=SUM(B3:B9)\"}; или добавить строки в конец (rows — массив массивов).",
+      parameters: {
+        type: "object",
+        properties: {
+          table_id: { type: "string" },
+          sheet: { type: "string" },
+          cells: { type: "object", description: "Адрес ячейки → значение" },
+          rows: { type: "array", items: { type: "array", items: { type: "string" } }, description: "Строки для добавления в конец" },
+        },
+        required: ["table_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_tabs",
+      description: "Список вкладок встроенного браузера MBOX у владельца (MBOX Desktop): ключ вкладки, адрес, заголовок. Работает, только пока MBOX открыт у владельца.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_snapshot",
+      description: "Прочитать страницу, открытую во вкладке браузера: адрес, заголовок, выделенный текст, заголовки, видимый текст, поля форм и кнопки/ссылки с номерами (f12, b7) для browser_fill и browser_click. Без tab — вкладка, которую владелец видит сейчас.",
+      parameters: { type: "object", properties: { tab: { type: "string", description: "Ключ вкладки web:… из browser_tabs, необязательно" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_navigate",
+      description: "Открыть адрес в браузере владельца (в текущей вкладке или новой, если вкладок нет).",
+      parameters: { type: "object", properties: { url: { type: "string" }, tab: { type: "string" } }, required: ["url"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_click",
+      description: "Нажать кнопку или ссылку по номеру из browser_snapshot (b7). Человек видит подсветку.",
+      parameters: { type: "object", properties: { ref: { type: "string" }, tab: { type: "string" } }, required: ["ref"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_fill",
+      description: "Заполнить поля формы: fields — массив {ref, value} (ref из browser_snapshot) или {label, value} по видимой подписи. Человек видит заполнение. Платежи и отправку форм не подтверждай без прямого «да» человека.",
+      parameters: {
+        type: "object",
+        properties: {
+          fields: { type: "array", items: { type: "object", properties: { ref: { type: "string" }, label: { type: "string" }, value: { type: "string" } } } },
+          tab: { type: "string" },
+        },
+        required: ["fields"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_scroll",
+      description: "Прокрутить страницу: to = down | up | top | bottom, либо к элементу по ref.",
+      parameters: { type: "object", properties: { to: { type: "string" }, ref: { type: "string" }, tab: { type: "string" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "integration_list",
+      description: "Внешние API, подключённые в MBOX (Topvisor, Яндекс Вебмастер, Яндекс Метрика и добавленные владельцем): что заполнено, адрес, подсказка по путям. Ключей не показывает. Вызывай перед integration_call, если не уверен, подключен ли сервис.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "integration_call",
+      description: "Вызвать внешний API через MBOX: ключ подставляется автоматически. service — код из integration_list (topvisor, yandex_webmaster, yandex_metrica, …). Для Topvisor path — имя метода API v2 (например get/projects_2/projects), параметры — в body. Для остальных — method GET/POST…, path относительно адреса API, параметры адреса в query. Только чтение, пока человек явно не попросил изменить данные во внешнем сервисе.",
+      parameters: {
+        type: "object",
+        properties: {
+          service: { type: "string" },
+          path: { type: "string", description: "Путь относительно адреса API, без ?параметров" },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          query: { type: "object", description: "Параметры адреса" },
+          body: { type: "object", description: "Тело запроса (JSON)" },
+          max_chars: { type: "number", description: "Сколько символов ответа вернуть, до 60000" },
+        },
+        required: ["service", "path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_search",
+      description: "Найти письма в Gmail владельца: от кого, тема, дата, фрагмент, непрочитанное. query — как в поиске Gmail (is:unread, from:ivan@x.ru, subject:счёт, newer_than:7d, has:attachment). Пусто — последние письма.",
+      parameters: { type: "object", properties: { query: { type: "string" }, max: { type: "number", description: "Сколько писем, до 25" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_read",
+      description: "Прочитать письмо Gmail целиком по id из gmail_search: отправитель, получатели, тема, текст, вложения.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_draft",
+      description: "Создать ЧЕРНОВИК письма в Gmail владельца (ничего не отправляется). Для ответа передай reply_to_id — письмо встанет в ту же цепочку. Предпочитай черновик отправке: человек просмотрит и отправит сам.",
+      parameters: { type: "object", properties: { to: { type: "string" }, cc: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, reply_to_id: { type: "string" } }, required: ["to", "body"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_send",
+      description: "ОТПРАВИТЬ письмо из Gmail владельца. Необратимо и уходит наружу: вызывай только если человек прямо попросил отправить и текст с адресатом он уже видел или продиктовал; иначе сделай gmail_draft.",
+      parameters: { type: "object", properties: { to: { type: "string" }, cc: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, reply_to_id: { type: "string" } }, required: ["to", "body"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_list",
+      description: "Список файлов и папок в хранилище S3 (Yandex Object Storage). У проекта своя папка projects/<id>/, картинки заметок — notes/<id>/. Пустой prefix — корень; prefix заканчивается на «/».",
+      parameters: { type: "object", properties: { prefix: { type: "string" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_read",
+      description: "Прочитать файл из хранилища S3 как текст: txt, md, json, csv, html, код, а также .docx и .xlsx. Картинки и pdf не читаются — дай ссылку (storage_link).",
+      parameters: { type: "object", properties: { key: { type: "string" }, max_chars: { type: "number" } }, required: ["key"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_write",
+      description: "Создать текстовый файл в хранилище S3 (projects/<id>/имя.md и т.п.). Существующий файл не заменяет, пока человек не разрешил (overwrite=true). Только по просьбе человека.",
+      parameters: { type: "object", properties: { key: { type: "string" }, text: { type: "string" }, overwrite: { type: "boolean" } }, required: ["key", "text"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_link",
+      description: "Временная ссылка (на час) на файл из хранилища S3 — скачать или открыть файл любого формата.",
+      parameters: { type: "object", properties: { key: { type: "string" } }, required: ["key"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_search",
+      description: "Найти файлы на Google Диске владельца: документы (kind=docs), таблицы (kind=sheets) или любые (any) по названию и тексту. Возвращает id, название, дату, ссылку. Это ЕГО документы Google, а не документы MBOX (те — search_documents).",
+      parameters: { type: "object", properties: { query: { type: "string" }, kind: { type: "string", enum: ["docs", "sheets", "any"] }, max: { type: "number" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_read",
+      description: "Прочитать документ Google целиком (простой текст) по id из gdoc_search или из адреса docs.google.com/document/d/<id>.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_append",
+      description: "Дописать текст в конец документа Google владельца. Правка настоящая и сразу видна в Google; не используй без просьбы человека.",
+      parameters: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } }, required: ["id", "text"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_replace",
+      description: "Заменить в документе Google все вхождения точного текста find на replace (с учётом регистра).",
+      parameters: { type: "object", properties: { id: { type: "string" }, find: { type: "string" }, replace: { type: "string" } }, required: ["id", "find", "replace"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_create",
+      description: "Создать новый документ Google на Диске владельца с названием и начальным текстом; возвращает ссылку.",
+      parameters: { type: "object", properties: { title: { type: "string" }, text: { type: "string" } }, required: ["title"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gdoc_import",
+      description: "Перенести документ Google в MBOX новым документом (заголовки, списки, жирный сохраняются) — чтобы работать с ним в MBOX и делиться правами MBOX.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_type",
+      description: "Напечатать текст в поле настоящими нажатиями клавиш (ref из browser_snapshot или x,y). Для поиска, чатов и редакторов, где browser_fill не срабатывает. submit=true — нажать Enter после. Пароли, коды из СМС и данные карт не вводи — попроси человека (browser_ask_help).",
+      parameters: { type: "object", properties: { text: { type: "string" }, ref: { type: "string" }, clear: { type: "boolean" }, submit: { type: "boolean" }, tab: { type: "string" } }, required: ["text"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_press",
+      description: "Нажать клавиши или сочетания в браузере: Enter, Tab, Escape, ArrowDown, Control+A…",
+      parameters: { type: "object", properties: { keys: { type: "array", items: { type: "string" } }, tab: { type: "string" } }, required: ["keys"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_wait",
+      description: "Дождаться страницы: text — появится, gone_text — исчезнет, url_contains, load — страница загрузилась (до 20 секунд). После клика, который грузит страницу.",
+      parameters: { type: "object", properties: { text: { type: "string" }, gone_text: { type: "string" }, url_contains: { type: "string" }, load: { type: "boolean" }, ms: { type: "number" }, tab: { type: "string" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_extract",
+      description: "Достать данные со страницы: kind = links | tables | lists | text. Чище и дешевле, чем читать весь снимок.",
+      parameters: { type: "object", properties: { kind: { type: "string", enum: ["links", "tables", "lists", "text"] }, ref: { type: "string" }, tab: { type: "string" } }, required: ["kind"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_ask_help",
+      description: "Застрял (капча, вход, код из СМС, непонятная форма, необратимый выбор)? Попроси человека о помощи: над страницей появится панель «Агент просит помощи», человек делает нужное руками и жмёт «Готово, продолжай». Вызов ждёт ответа до 40 секунд. Проси сразу, не повторяй попытки пять раз.",
+      parameters: { type: "object", properties: { reason: { type: "string", description: "Одна строка: что мешает" }, need: { type: "string", description: "Что именно сделать человеку" }, tab: { type: "string" } }, required: ["reason"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_wait_help",
+      description: "Продолжить ждать ответа человека на просьбу browser_ask_help (id из ответа «ещё жду»), до 40 секунд за раз.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1546,6 +1872,36 @@ export const TOOL_GROUPS = {
     // группы notes не было, Джарвис брал search_memory и правил похоже названную запись памяти (#318).
     match: /(заметк|заметок|заметке|заметку|заметки|запиш[иу] себе|блокнот)/,
     tools: ["search_notes", "read_note", "create_note", "update_note"],
+  },
+  mail: {
+    label: "почта владельца в Gmail: найти и прочитать письма, подготовить черновик, отправить (только по прямой просьбе)",
+    match: /(почт|письм|gmail|имейл|email|e-mail|inbox|входящ|ответь (ему|ей|им)|отправь (письмо|ему|ей)|рассылк)/,
+    tools: ["gmail_search", "gmail_read", "gmail_draft", "gmail_send"],
+  },
+  storage: {
+    label: "файлы в хранилище S3 (бакет проектов): список, прочитать текст/docx/xlsx, создать текстовый файл, ссылка на скачивание",
+    match: /(s3|хранилищ|бакет|bucket|object storage|объектн)/,
+    tools: ["storage_list", "storage_read", "storage_write", "storage_link"],
+  },
+  google_docs: {
+    label: "документы и таблицы Google на Диске владельца: найти, прочитать, дописать, заменить текст, создать, перенести в MBOX",
+    match: /(google\s*(docs|doc|док|таблиц|sheet|диск|drive)|гугл\s*(докс|док|таблиц|диск)|гугл-?док|docs\.google|google-?док|на (гугл|google) диске)/,
+    tools: ["gdoc_search", "gdoc_read", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import"],
+  },
+  integrations: {
+    label: "внешние API с ключами владельца: Topvisor (позиции, проекты, аудит), Яндекс Вебмастер и Метрика, любые добавленные API",
+    match: /(topvisor|топвизор|позици|вебмастер|метрик|api|апи|интеграци|ключевы[ех] (слов|фраз)|seo|сео|трафик|индексац|посетител)/,
+    tools: ["integration_list", "integration_call"],
+  },
+  browser: {
+    label: "встроенный браузер владельца в MBOX Desktop: список вкладок, прочитать страницу, открыть адрес, нажать, заполнить форму, прокрутить",
+    match: /(браузер|вкладк|страниц[ауеы]? в|открой (сайт|страниц|ссылк)|на сайте|кликни|нажми на|заполни (форм|поле|анкет)|форм[уа] на|прокрути)/,
+    tools: ["browser_tabs", "browser_snapshot", "browser_navigate", "browser_click", "browser_fill", "browser_scroll", "browser_type", "browser_press", "browser_wait", "browser_extract", "browser_ask_help", "browser_wait_help"],
+  },
+  docs: {
+    label: "документы (листы A4) и таблицы (Excel-подобные) в MBOX: найти, прочитать, создать, дописать, править ячейки",
+    match: /(документ|докум|таблиц|ячейк|лист[аеу]? |абзац|в тексте|что в (нём|нем|этом)|что написано|прочитай|переведи|исправь текст|отредактируй|допиши|сократи)/,
+    tools: ["search_documents", "read_document", "create_document", "update_document", "search_tables", "read_table", "write_table_cells"],
   },
   memory: {
     label: "уход за памятью: правка и удаление записей, уборка старых логов, связи и история записей",
@@ -2798,6 +3154,203 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     return `обновлена запись памяти «${title}» (#${id})`;
   }
 
+  if (name === "integration_list" || name === "integration_call") {
+    if (!integrations) return "интеграции недоступны в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "внешние API с ключами доступны только владельцу MBOX";
+    if (name === "integration_list") {
+      const rows = await integrations.list(String(viewer.userId));
+      return rows.map((row) => `${row.service} — ${row.label}: ${row.configured ? "подключён" : "ключи не заполнены"}; адрес ${row.base_url}${row.hint ? `\n   ${row.hint}` : ""}${row.kind === "builtin" ? `\n   по умолчанию: ${row.fields.filter((field) => !field.secret && field.value).map((field) => `${field.label} = ${field.value}`).join(", ") || "—"}` : ""}`).join("\n");
+    }
+    const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars }, String(viewer.userId));
+    if (result.ok === false && (!result.status || result.error === "api_error")) return `API: ${result.message || result.error}`;
+    return `HTTP ${result.status}${result.ok ? "" : " (ошибка)"}\n${typeof result.data === "string" ? result.data : JSON.stringify(result.data)}${result.truncated ? `\n[ответ обрезан: ${result.total_chars} символов; ${result.hint}]` : ""}`;
+  }
+
+  if (name.startsWith("gmail_")) {
+    if (!gmail) return "почта недоступна в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "почта подключена только у владельца MBOX";
+    try {
+      if (name === "gmail_search") {
+        const result = await gmail.search(String(viewer.userId), { q: args.query, max: args.max });
+        return result.messages.length ? result.messages.map((item) => `${item.unread ? "● " : ""}id ${item.id} · ${item.date} · ${item.from}\n   ${item.subject} — ${item.snippet.slice(0, 140)}`).join("\n") : "писем не нашлось";
+      }
+      if (name === "gmail_read") {
+        const mail = await gmail.read(String(viewer.userId), String(args.id || ""));
+        return `От: ${mail.from}\nКому: ${mail.to}${mail.cc ? `\nКопия: ${mail.cc}` : ""}\nДата: ${mail.date}\nТема: ${mail.subject}${mail.attachments.length ? `\nВложения: ${mail.attachments.map((file) => `${file.filename} (${file.size} Б)`).join(", ")}` : ""}\n\n${mail.body}`;
+      }
+      const input = { to: args.to, cc: args.cc, subject: args.subject, body: args.body, reply_to_id: args.reply_to_id };
+      if (name === "gmail_draft") { const draft = await gmail.draft(String(viewer.userId), input); return `черновик создан (id ${draft.draft_id}) — он лежит в Gmail в «Черновиках», ничего не отправлено`; }
+      const sent = await gmail.send(String(viewer.userId), input);
+      return `письмо отправлено (id ${sent.id})`;
+    } catch (error) {
+      return `Gmail: ${error.message}`;
+    }
+  }
+
+  if (name.startsWith("storage_")) {
+    if (!storage) return "хранилище S3 недоступно в этом режиме";
+    try {
+      const viewerScope = viewer?.userId ? viewer : { all: true, projectIds: [] };
+      const check = async (key) => (await storage.canUse(viewerScope, key)) ? null : "нет доступа к этой папке — только папки проектов, где человек участвует";
+      if (name === "storage_list") {
+        const prefix = String(args.prefix || "");
+        if (!prefix && !viewerScope.all) return (await storage.roots(viewerScope)).map((root) => `📁 ${root}`).join("\n") || "папок проектов нет";
+        if (prefix) { const denied = await check(storage.cleanKey(prefix)); if (denied) return denied; }
+        const data = await storage.list(prefix);
+        const lines = [...data.folders.map((folder) => `📁 ${folder}`), ...data.objects.map((item) => `${item.key} · ${item.size} Б`)];
+        return lines.join("\n") || "пусто";
+      }
+      const key = storage.cleanKey(args.key);
+      const denied = await check(key);
+      if (denied) return denied;
+      if (name === "storage_read") {
+        const data = await storage.read(key, Number(args.max_chars) || 30000);
+        if (data.kind === "missing") return "файла нет";
+        if (data.kind === "image" || data.kind === "binary") return `${data.kind === "image" ? "картинка" : "двоичный файл"} ${data.size} Б — текстом не прочитать, дай ссылку через storage_link`;
+        return `${data.key} (${data.kind}, ${data.size} Б)${data.truncated ? ` — обрезано, всего ${data.total_chars ?? "?"} знаков` : ""}\n\n${data.text}`;
+      }
+      if (name === "storage_write") { const result = await storage.write(key, String(args.text ?? ""), args.overwrite === true); return `записано: ${result.key} (${result.size} Б)`; }
+      return await storage.link(key);
+    } catch (error) {
+      return `Хранилище: ${error.message}`;
+    }
+  }
+
+  if (name.startsWith("gdoc_")) {
+    if (!gdocs) return "Google Документы недоступны в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "Google подключён только у владельца MBOX";
+    const uid = String(viewer.userId);
+    try {
+      if (name === "gdoc_search") {
+        const result = await gdocs.search(uid, { q: args.query, kind: args.kind, max: args.max });
+        return result.files.length ? result.files.map((file) => `id ${file.id} · ${file.name} · ${file.type} · изменён ${String(file.modified).slice(0, 10)}\n   ${file.url}`).join("\n") : "ничего не нашлось";
+      }
+      if (name === "gdoc_read") { const doc = await gdocs.read(uid, String(args.id || "")); return `«${doc.title}»\n${doc.url}\n\n${doc.text}`; }
+      if (name === "gdoc_append") { await gdocs.append(uid, String(args.id || ""), String(args.text || "")); return "текст дописан в конец документа Google"; }
+      if (name === "gdoc_replace") { const result = await gdocs.replace(uid, String(args.id || ""), String(args.find || ""), String(args.replace ?? "")); return `заменено вхождений: ${result.replaced}`; }
+      if (name === "gdoc_create") { const created = await gdocs.create(uid, String(args.title || ""), String(args.text || "")); return `создан документ Google «${created.title}»: ${created.url}`; }
+      const imported = await gdocs.import(uid, String(args.id || ""));
+      try { openTab?.(uid, { kind: "tab", key: `doc:${imported.id}`, title: imported.title, note: "Документ перенесён из Google", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+      return `документ Google перенесён в MBOX как «${imported.title}» (#${imported.id})`;
+    } catch (error) {
+      return `Google: ${error.message}`;
+    }
+  }
+
+  // Встроенный браузер владельца: тот же путь, что у MCP browser_* (окно MBOX Desktop выполняет действие с подсветкой).
+  if (name.startsWith("browser_")) {
+    if (!browserOp) return "браузер недоступен в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "браузером MBOX управляет только владелец";
+    if (name === "browser_ask_help" || name === "browser_wait_help") {
+      if (!browserHelp) return "просьба о помощи недоступна в этом режиме";
+      const view = name === "browser_ask_help"
+        ? await (async () => { const created = browserHelp.ask(String(viewer.userId), { reason: args.reason, need: args.need, tab: args.tab }); return browserHelp.wait(created.id, 40); })()
+        : await browserHelp.wait(String(args.id || ""), 40);
+      if (view.status === "done") return `человек ответил: готово${view.message ? `. Комментарий: ${view.message}` : ""}. Сделай свежий browser_snapshot и продолжай.`;
+      if (view.status === "stopped") return `человек просит остановиться${view.message ? `: ${view.message}` : ""}. Не продолжай, расскажи что сделано и что осталось.`;
+      if (view.status === "pending") return `человек ещё не ответил (запрос ${view.id}). Вызови browser_wait_help с этим id или сообщи человеку в чате, что ждёшь его.`;
+      return view.message || `статус: ${view.status}`;
+    }
+    const action = name.slice("browser_".length);
+    const payload = {
+      tab: String(args.tab || ""),
+      note: { snapshot: "читаю страницу", navigate: "открываю страницу", click: "нажимаю", fill: "заполняю форму", scroll: "прокручиваю", tabs: "смотрю вкладки", type: "печатаю", press: "нажимаю клавиши", wait: "жду страницу", extract: "собираю данные" }[action] || "",
+      args: action === "navigate" ? { url: String(args.url || "") } : action === "click" ? { ref: String(args.ref || ""), x: args.x, y: args.y } : action === "fill" ? { fields: Array.isArray(args.fields) ? args.fields : [] } : action === "scroll" ? { to: args.to, ref: args.ref } : action === "type" ? { text: String(args.text ?? ""), ref: String(args.ref || ""), clear: args.clear !== false, submit: Boolean(args.submit) } : action === "press" ? { keys: Array.isArray(args.keys) ? args.keys : [] } : action === "wait" ? { text: args.text, gone_text: args.gone_text, url_contains: args.url_contains, load: Boolean(args.load), ms: args.ms } : action === "extract" ? { kind: String(args.kind || "text"), ref: String(args.ref || "") } : {},
+    };
+    const result = await browserOp(String(viewer.userId), action, payload);
+    if (result?.ok === false) return `браузер: ${result.message || result.error || "не получилось"}`;
+    return JSON.stringify(result).slice(0, 14000);
+  }
+
+  // Документы и таблицы: те же права, что у людей (владелец, проект, «все»), та же запись, что у MCP.
+  if (name === "search_documents") {
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+    const scoped = documentScope(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const q = String(args.query || "").trim();
+    const rows = (await client.query(
+      `SELECT id::text, title, left(regexp_replace(text_content, '\\s+', ' ', 'g'), 140) AS snippet FROM documents
+       WHERE (${scoped.sql}) AND ($${scoped.values.length + 1} = '' OR title ILIKE '%' || $${scoped.values.length + 1} || '%' OR text_content ILIKE '%' || $${scoped.values.length + 1} || '%')
+       ORDER BY updated_at DESC LIMIT ${limit}`,
+      [...scoped.values, q],
+    )).rows;
+    return rows.length ? rows.map((row) => `документ #${row.id} «${row.title}» — ${row.snippet}`).join("\n") : "документов не нашлось";
+  }
+
+  if (name === "read_document" || name === "update_document") {
+    const id = String(args.document_id || "").trim().replace(/^#/, "");
+    if (!/^\d+$/.test(id)) return "нужен числовой ID документа — возьми его из открытого документа или search_documents";
+    const scoped = documentScope(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const doc = (await client.query(`SELECT id::text, title, content, text_content, owner_user_id, access_mode FROM documents WHERE id = $${scoped.values.length + 1} AND (${scoped.sql})`, [...scoped.values, id])).rows[0];
+    if (!doc) return `документ #${id} не нашёлся`;
+    if (name === "update_document" && viewer?.userId && doc.owner_user_id !== String(viewer.userId)) {
+      const share = (await client.query("SELECT role FROM document_shares WHERE document_id = $1 AND user_id = $2", [id, String(viewer.userId)])).rows[0];
+      if (share ? share.role !== "edit" : doc.access_mode === "view") return `документ #${id} открыт этому человеку только для просмотра — править его нельзя`;
+    }
+    if (name === "read_document") return `документ #${id} «${doc.title}»\n\n${String(doc.text_content || "").slice(0, 30000) || "(пусто)"}`;
+    const hasText = args.markdown !== undefined;
+    const title = args.title !== undefined ? String(args.title).trim().slice(0, 200) || doc.title : doc.title;
+    if (!hasText && title === doc.title) return "нечего менять: не передан ни текст, ни название";
+    let content = null;
+    let text = null;
+    if (hasText) {
+      const base = JSON.parse(doc.content || "null");
+      const append = args.mode !== "replace" && base?.body;
+      const snapshot = append ? appendMarkdown(base, String(args.markdown)) : markdownToSnapshot(base?.id || `mbox-doc-${id}`, title, String(args.markdown));
+      if (!append && base?.documentStyle) snapshot.documentStyle = base.documentStyle;
+      content = JSON.stringify(snapshot);
+      text = snapshotToMarkdown(snapshot);
+    }
+    await client.query("UPDATE documents SET title = $1, content = COALESCE($2, content), text_content = COALESCE($3, text_content), updated_at = now() WHERE id = $4", [title, content, text, id]);
+    broadcastRealtime("entity_changed", { entity: "documents", action: "update", actor: JARVIS_NAME, detail: `«${title}»`, id });
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `doc:${id}`, title, note: "Документ изменён", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+    return `документ #${id} «${title}» обновлён`;
+  }
+
+  if (name === "create_document") {
+    const title = String(args.title || "Новый документ").trim().slice(0, 200) || "Новый документ";
+    const snapshot = markdownToSnapshot(`mbox-doc-${Date.now().toString(36)}`, title, String(args.markdown || ""));
+    const row = (await client.query(
+      `INSERT INTO documents(title, content, text_content, author, owner_user_id, access_level) VALUES ($1, $2, $3, $4, $5, 'private') RETURNING id::text`,
+      [title, JSON.stringify(snapshot), snapshotToMarkdown(snapshot), JARVIS_NAME, viewer?.userId || null],
+    )).rows[0];
+    broadcastRealtime("entity_changed", { entity: "documents", action: "create", actor: JARVIS_NAME, detail: `«${title}»`, id: row.id, notification: `Агент ${JARVIS_NAME} создал документ «${title}»` });
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `doc:${row.id}`, title, note: "Документ создан", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+    return `создан документ «${title}» (#${row.id})`;
+  }
+
+  if (name === "search_tables") {
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+    const scoped = tableScopeWhere(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const q = String(args.query || "").trim();
+    const rows = (await client.query(
+      `SELECT id::text, title FROM tables WHERE (${scoped.sql}) AND ($${scoped.values.length + 1} = '' OR title ILIKE '%' || $${scoped.values.length + 1} || '%' OR text_content ILIKE '%' || $${scoped.values.length + 1} || '%')
+       ORDER BY updated_at DESC LIMIT ${limit}`,
+      [...scoped.values, q],
+    )).rows;
+    return rows.length ? rows.map((row) => `таблица #${row.id} «${row.title}»`).join("\n") : "таблиц не нашлось";
+  }
+
+  if (name === "read_table" || name === "write_table_cells") {
+    const id = String(args.table_id || "").trim().replace(/^#/, "");
+    if (!/^\d+$/.test(id)) return "нужен числовой ID таблицы — возьми его из открытой таблицы или search_tables";
+    const scoped = tableScopeWhere(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const table = (await client.query(`SELECT id::text, title, content FROM tables WHERE id = $${scoped.values.length + 1} AND (${scoped.sql})`, [...scoped.values, id])).rows[0];
+    if (!table) return `таблица #${id} не нашлась`;
+    const book = await loadWorkbook(table.content);
+    if (name === "read_table") {
+      const result = readTable(book, { sheet: args.sheet, range: args.range });
+      return `таблица #${id} «${table.title}», лист «${result.sheet}»\n${(result.rows || []).map((row) => `${row.row}: ${row.cells.join(" | ")}`).join("\n") || "(пусто)"}`.slice(0, 20000);
+    }
+    const change = args.cells && typeof args.cells === "object" ? writeCells(book, { sheet: args.sheet, cells: args.cells }) : Array.isArray(args.rows) && args.rows.length ? appendRows(book, { sheet: args.sheet, rows: args.rows }) : null;
+    if (!change) return "нечего записывать: передай cells или rows";
+    const content = await workbookToBase64(book);
+    await client.query("UPDATE tables SET content = $1, updated_at = now() WHERE id = $2", [content, id]);
+    indexTableText(client.query.bind(client), id, content);
+    broadcastRealtime("entity_changed", { entity: "tables", action: "update", actor: JARVIS_NAME, detail: `«${table.title}»`, id });
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `table:${id}`, title: table.title, note: "Таблица изменена", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+    return `таблица #${id} «${table.title}» обновлена`;
+  }
+
   // Заметки. Раньше их инструментов не было вовсе, и на просьбу «допиши в заметку» Джарвис находил
   // похоже названную ЗАПИСЬ ПАМЯТИ, правил её и рапортовал об успехе — человек смотрел в заметку и
   // ничего там не видел (todo #318: заметка #6 осталась нетронутой, текст ушёл в память #117).
@@ -3186,11 +3739,11 @@ export async function replyAsJarvis(item) {
       // Чипы над полем ввода: что открыто у человека. «Поправь тут» относится к этому — не ищи по всей базе.
       + (Array.isArray(item.props?.context) && item.props.context.length
         ? ` Сейчас у пользователя открыто: ${item.props.context.slice(0, 6).map((entry) => {
-          const kinds = { note: "заметка", todo: "задача", memory: "запись памяти", file: "локальный файл", diff: "изменения файла", storage: "файл в хранилище", web: "страница", project: "проект", skill: "навык" };
+          const kinds = { doc: "документ (читай через read_document)", table: "таблица (читай через read_table)", note: "заметка", todo: "задача", memory: "запись памяти", file: "локальный файл", diff: "изменения файла", storage: "файл в хранилище", web: "страница", project: "проект", skill: "навык" };
           const id = /^\d+$/.test(String(entry?.id || "")) ? ` #${entry.id}` : "";
           const detail = entry?.detail ? ` (${String(entry.detail).slice(0, 200)})` : "";
           return `${kinds[entry?.kind] || "вкладка"}${id} «${String(entry?.title || "").slice(0, 120)}»${detail}`;
-        }).join("; ")}. Если вопрос не называет объект явно — он про открытое.`
+        }).join("; ")}. Если вопрос не называет объект явно — он про открытое. Номера у заметок, документов и таблиц свои: #50 у документа не связан с заметкой #50.`
         : "");
     // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — если человек в прошлом сообщении назвал
     // стек или ссылку, а в этом попросил "создай проект", Джарвис не мог их связать. Подтягиваем

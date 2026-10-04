@@ -10,6 +10,17 @@ export type JarvisDeps = {
   recordMemoryAction: (input: { memoryId?: unknown; actor?: string; action?: string; note?: string; metadata?: unknown }) => Promise<unknown>;
   /** Открыть вкладку в окнах пользователя (без userId — владельца): созданное агентом появляется на глазах. */
   openTab?: (userId: string | null, event: Record<string, unknown>) => number;
+  /** Действие во встроенном браузере пользователя (MBOX Desktop); только для владельца. */
+  /** Gmail владельца (server/gmail.mjs). */
+  gmail?: { search: (userId: string, input: Record<string, unknown>) => Promise<Row>; read: (userId: string, id: string) => Promise<Row>; draft: (userId: string, input: Record<string, unknown>) => Promise<Row>; send: (userId: string, input: Record<string, unknown>) => Promise<Row> };
+  /** Внешние API с ключами владельца (server/integrations.mjs). */
+  integrations?: { list: (userId?: string) => Promise<Row[]>; call: (service: string, input: Record<string, unknown>, userId?: string) => Promise<Row> };
+  /** Документы Google владельца (server/google-docs.mjs). */
+  storage?: { canUse: (viewer: Row, key: string) => Promise<boolean>; roots: (viewer: Row) => Promise<string[]>; list: (prefix: string) => Promise<Row>; read: (key: string, maxChars?: number) => Promise<Row>; write: (key: string, text: string, overwrite?: boolean) => Promise<Row>; link: (key: string) => Promise<string>; cleanKey: (key: unknown) => string };
+  gdocs?: { search: (userId: string, input: Record<string, unknown>) => Promise<Row>; read: (userId: string, id: string) => Promise<Row>; append: (userId: string, id: string, text: string) => Promise<Row>; replace: (userId: string, id: string, find: string, replace: string) => Promise<Row>; create: (userId: string, title: string, text: string) => Promise<Row>; import: (userId: string, id: string) => Promise<Row> };
+  /** Просьба о помощи человеку в браузере (server/browser-agent.mjs). */
+  browserHelp?: { ask: (userId: string, input: Record<string, unknown>) => Row; wait: (id: string, seconds?: number) => Promise<Row> };
+  browserOp?: (userId: string, action: string, input: { tab?: string; args?: Record<string, unknown>; note?: string }) => Promise<Record<string, any>>;
 };
 
 export type JarvisTool = { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } };

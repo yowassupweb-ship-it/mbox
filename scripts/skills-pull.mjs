@@ -21,7 +21,7 @@ if (!baseUrl || !process.env.MBOX_PASSWORD) {
 const login = await fetch(`${baseUrl}/api/mbox/auth/login`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ username: process.env.MBOX_USERNAME || "Admin", password: process.env.MBOX_PASSWORD }),
+  body: JSON.stringify({ username: process.env.MBOX_USERNAME || "", password: process.env.MBOX_PASSWORD }),
 });
 if (!login.ok) throw new Error(`вход в MBOX: HTTP ${login.status}`);
 const cookie = login.headers.get("set-cookie")?.split(";")[0] || "";

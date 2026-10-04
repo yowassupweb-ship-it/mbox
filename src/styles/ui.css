@@ -175,6 +175,7 @@
   font-weight: var(--weight-medium);
 }
 
+.meta-chip:has(> svg) { display: inline-flex; align-items: center; gap: var(--space-1); width: fit-content; border-radius: var(--radius-pill); }
 .meta-chip.tone-ok { color: var(--state-ok-soft); }
 .meta-chip.tone-live { color: var(--state-live); }
 .meta-chip.tone-warn { color: var(--state-warn); }

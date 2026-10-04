@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, ChevronDown, ChevronUp, Copy, Download, Eraser, ExternalLink, FileDown, FolderOpen, Globe, History, Import, KeyRound, MoreHorizontal, Pause, Play, Printer, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
+import { fetchJson } from "../../lib/api";
+import { ArrowLeft, ArrowRight, Bookmark, LifeBuoy, Square, ChevronDown, ChevronUp, Copy, Download, Eraser, ExternalLink, FileDown, FolderOpen, Globe, History, Import, KeyRound, MoreHorizontal, Pause, Play, Printer, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import type { TabsApi } from "./tabs";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { askConfirm, showNotice } from "../../ui/askText";
@@ -40,6 +42,8 @@ type BrowserBridge = {
   hide: (key: string) => Promise<unknown>;
   close: (key: string) => Promise<unknown>;
   capture?: (key: string) => Promise<string>;
+  /** Пауза, продолжение и остановка агента в вкладке (MBOX Desktop 0.1.58+). */
+  agentControl?: (key: string, command: "pause" | "resume" | "stop" | "clear") => Promise<unknown>;
   favicon?: (url: string) => Promise<string>;
   setSearchEngine?: (id: string) => Promise<string>;
   clearCache?: () => Promise<{ ok: boolean }>;
@@ -83,11 +87,28 @@ const AGENT_ACTION_LABEL: Record<string, string> = {
   snapshot: "читает страницу",
   fill: "заполняет поля",
   click: "нажимает",
+  double_click: "нажимает дважды",
+  right_click: "открывает меню",
+  hover: "наводит курсор",
+  move_cursor: "показывает курсором",
+  drag: "перетаскивает",
+  type: "печатает",
+  press: "нажимает клавиши",
+  wait: "ждёт страницу",
   highlight: "показывает",
   navigate: "открывает страницу",
+  back: "возвращается назад",
+  forward: "идёт вперёд",
+  reload: "обновляет страницу",
+  new_tab: "открывает вкладку",
   scroll: "прокручивает",
   screenshot: "смотрит на экран",
+  extract: "собирает данные",
+  find_text: "ищет на странице",
+  blockers: "проверяет препятствия",
 };
+
+type BrowserHelp = { id: string; agent: string; reason: string; need: string; tab: string; url?: string };
 export const browserTabUrl = (key: string) => {
   const url = key.slice(4);
   return url.startsWith("blank-") ? "" : url;
@@ -263,8 +284,34 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     const timer = window.setTimeout(() => setAgentNote(null), 6000);
     return () => window.clearTimeout(timer);
   }, [agentNote]);
+  const [agentState, setAgentState] = useState({ paused: false, stopped: false });
+  const [help, setHelp] = useState<BrowserHelp | null>(null);
+  const [helpNote, setHelpNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [settings, updateSettings] = useBrowserSettings();
+
+  // Просьба агента о помощи: приходит по вебсокету; открытая страница после перезагрузки забирает ещё не закрытые.
+  const helpMatches = useCallback((item: BrowserHelp) => !item.tab || item.tab === tabKey, [tabKey]);
+  useEffect(() => {
+    const onHelp = (event: Event) => { const item = (event as CustomEvent<BrowserHelp>).detail; if (item && helpMatches(item)) { setHelp(item); setHelpNote(""); } };
+    const onResolved = (event: Event) => { const item = (event as CustomEvent<BrowserHelp>).detail; setHelp((current) => (current && item && current.id === item.id ? null : current)); };
+    window.addEventListener("mbox:browser-help", onHelp);
+    window.addEventListener("mbox:browser-help-resolved", onResolved);
+    void fetchJson<{ helps: BrowserHelp[] }>("/api/mbox/browser/help").then((result) => { const mine = result.helps.find(helpMatches); if (mine) setHelp(mine); }).catch(() => undefined);
+    return () => { window.removeEventListener("mbox:browser-help", onHelp); window.removeEventListener("mbox:browser-help-resolved", onResolved); };
+  }, [helpMatches]);
+
+  async function answerHelp(action: "done" | "stop") {
+    if (!help) return;
+    const current = help;
+    setHelp(null);
+    try {
+      await fetchJson(`/api/mbox/browser/help/${current.id}/resolve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, message: helpNote }) });
+      await bridge?.agentControl?.(tabKey, action === "stop" ? "stop" : "resume");
+    } catch { setHelp(current); }
+  }
+
+  const controlAgent = (command: "pause" | "resume" | "stop") => void bridge?.agentControl?.(tabKey, command);
   useEffect(() => { void bridge?.setSearchEngine?.(settings.search); }, [bridge, settings.search]);
 
   useEffect(() => { if (bridge) void bridge.bookmarks().then(setBookmarks); }, [bridge]);
@@ -318,6 +365,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
         else if (payload.action === "find") openFind();
         else if (payload.action === "find-close") closeFind();
         else if (payload.action === "bookmark") void toggleBookmark();
+        return;
+      }
+      if (payload.type === "agent-state") {
+        const statePayload = payload as { key?: string; paused?: boolean; stopped?: boolean };
+        if (statePayload.key === tabKey) setAgentState({ paused: Boolean(statePayload.paused), stopped: Boolean(statePayload.stopped) });
         return;
       }
       if (payload.type === "agent") {
@@ -507,11 +559,10 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     setToolsOpen(false);
     setHistoryOpen(false);
     setFolderOpen(null);
-    // Меню стоит внутри области браузера (у рабочего места contain: layout — fixed там считается от области,
-    // а не от окна), поэтому координаты кнопки переводим в координаты области.
+    // Меню рисуется порталом в корень рабочего места (как WbMenu): внутри области браузера его обрезала бы
+    // соседняя панель чата, а у панелей contain: layout, из-за чего fixed считался бы от области, а не от окна.
     const point = pointerPoint(x, y, { width: 320, height: Math.min(window.innerHeight * 0.6, 440) });
-    const root = rootRef.current?.getBoundingClientRect();
-    setFolderOpen({ name, x: point.x - (root?.left ?? 0), y: point.y - (root?.top ?? 0) });
+    setFolderOpen({ name, x: point.x, y: point.y });
   }
 
   async function toggleBookmark() {
@@ -646,7 +697,20 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
             <Star size={15} fill={saved ? "currentColor" : "none"} />
           </button>
         </form>
-        {agentNote && <span className="wb-browser-agent" role="status"><Sparkles size={13} aria-hidden="true" />{agentNote.actor}: {agentNote.text}</span>}
+        {(agentNote || agentState.paused || agentState.stopped) && (
+          <span className={`wb-browser-agent${agentState.paused || agentState.stopped ? " is-held" : ""}`} role="status">
+            <Sparkles size={13} aria-hidden="true" />
+            <span className="wb-browser-agent-text">{agentState.stopped ? "Агент остановлен" : agentState.paused ? "Агент на паузе" : `${agentNote?.actor}: ${agentNote?.text}`}</span>
+            {bridge.agentControl && (
+              <span className="wb-browser-agent-controls">
+                {agentState.paused || agentState.stopped
+                  ? <button type="button" onClick={() => controlAgent("resume")} title="Продолжить работу агента" aria-label="Продолжить работу агента"><Play size={12} /></button>
+                  : <button type="button" onClick={() => controlAgent("pause")} title="Пауза: агент ждёт, пока вы работаете на странице" aria-label="Поставить агента на паузу"><Pause size={12} /></button>}
+                {!agentState.stopped && <button type="button" onClick={() => controlAgent("stop")} title="Остановить агента в этой вкладке" aria-label="Остановить агента"><Square size={11} /></button>}
+              </span>
+            )}
+          </span>
+        )}
         <div className="wb-browser-actions">
           <button type="button" className={bookmarksOpen ? "is-on" : undefined} onClick={() => { const next = !bookmarksOpen; closePanels(); setBookmarksOpen(next); }} title="Закладки" aria-label="Закладки" aria-expanded={bookmarksOpen}>
             <Bookmark size={16} />
@@ -762,7 +826,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
         <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
-      {folderOpen && (
+      {folderOpen && createPortal(
         <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
           <div className="wb-browser-pop-head"><FolderIcon size={16} open /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
           <div className="wb-browser-pop-list">
@@ -800,7 +864,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
             })}
             {!folderItems.length && <div className="wb-browser-pop-empty">Папка пуста</div>}
           </div>
-        </div>
+        </div>,
+        document.querySelector(".wb") ?? document.body,
       )}
 
       {bookmarksOpen && (
@@ -985,6 +1050,19 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
         </div>
       )}
       {state?.error && <div className="wb-banner is-error" role="alert">{state.error}</div>}
+      {help && (
+        <div className="wb-browser-help" role="alert">
+          <LifeBuoy size={18} aria-hidden="true" />
+          <div className="wb-browser-help-text">
+            <strong>{help.agent} просит помощи</strong>
+            <span>{help.reason}</span>
+            {help.need && <small>{help.need}</small>}
+          </div>
+          <input value={helpNote} onChange={(event) => setHelpNote(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void answerHelp("done"); }} placeholder="Что сделали или что дальше (необязательно)" aria-label="Комментарий агенту" />
+          <button type="button" className="wb-browser-help-done" onClick={() => void answerHelp("done")}>Готово, продолжай</button>
+          <button type="button" className="wb-browser-help-stop" onClick={() => void answerHelp("stop")}>Остановить агента</button>
+        </div>
+      )}
       {/* Пустое место под страницу: её рисует поверх главный процесс по этим координатам. */}
       <div ref={stageRef} className="wb-browser-stage" data-scroll-memory="off">
         {isBlank && !state?.auth && <BrowserStartPage engine={engineLabel} bookmarks={bookmarks} history={bridge.history} onNavigate={navigate} />}

@@ -23,8 +23,8 @@ const IS_WIN = process.platform === "win32";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIR = path.join(os.homedir(), ".mbox", "agent");
 const AGENTS = {
-  claude: { label: "Claude Code", watcher: "claude-inbox-watcher.mjs", cli: "claude", prefix: "Claude", install: "npm install -g @anthropic-ai/claude-code   (потом один раз запустите `claude` и войдите в аккаунт)" },
-  codex: { label: "ChatGPT (Codex CLI)", watcher: "codex-chat-watcher.mjs", cli: "codex", prefix: "ChatGPT", install: "npm install -g @openai/codex   (потом один раз запустите `codex` и войдите в аккаунт)" },
+  claude: { label: "Claude Code", watcher: "claude-inbox-watcher.mjs", cli: "claude", prefix: "Claude", install: "npm install -g @anthropic-ai/claude-code   (вход в аккаунт — кнопкой в чате MBOX)" },
+  codex: { label: "ChatGPT (Codex CLI)", watcher: "codex-chat-watcher.mjs", cli: "codex", prefix: "ChatGPT", install: "npm install -g @openai/codex   (вход в аккаунт — кнопкой в чате MBOX)" },
 };
 
 const out = (message = "") => console.log(message);
@@ -162,6 +162,8 @@ async function serverPrefs(config) {
 }
 
 async function supervise(dir) {
+  // Подключаем лениво: установщик запускается из одного файла, остальной набор приезжает уже после него.
+  const { checkCli, startLogin, logoutCli } = await import("./cli-auth.mjs");
   const existing = runningPid(dir);
   if (existing && existing !== process.pid) { out(`Уже запущен (pid ${existing}).`); return; }
   fs.writeFileSync(pidPath(dir), String(process.pid));
@@ -170,6 +172,9 @@ async function supervise(dir) {
   const children = new Map();
   const backoff = new Map();
   const cliPresent = new Map();
+  // Что известно про вход в CLI: служба присылает это в MBOX, а интерфейс показывает кнопку «Войти».
+  const cliState = new Map();
+  const logins = new Map();
   let lastPrefs = {};
   say(`MBOX Agent: старт, pid ${process.pid}`);
 
@@ -199,6 +204,7 @@ async function supervise(dir) {
         if (!cli.ok) say(`${info.label}: команда ${info.cli} не найдена — пропускаю (установите: ${info.install})`);
       }
       if (!cli.ok) continue;
+      if (cliState.get(family)?.logged_in === false) continue; // ждём вход: без него наблюдатель только падал бы на каждом сообщении
       const workdir = config.workdir || path.join(os.homedir(), "MBOX-agent");
       fs.mkdirSync(workdir, { recursive: true });
       const name = config.names?.[family] || `${info.prefix}-${config.user}`.replace(/\s+/g, "-");
@@ -228,6 +234,55 @@ async function supervise(dir) {
       say(`${info.label}: запущен как ${name} (pid ${next.pid})`);
     }
   };
+
+  // Раз в 5 секунд: отдаём в MBOX состояние входа и забираем запросы «войти/выйти» из интерфейса.
+  let lastCheck = 0;
+  const cliTick = async () => {
+    const config = readConfig(dir);
+    if (!config) return;
+    const stale = Date.now() - lastCheck > 60_000;
+    for (const family of Object.keys(AGENTS)) {
+      if (logins.has(family)) continue;
+      if (stale || !cliState.has(family)) {
+        const result = await checkCli(family);
+        cliState.set(family, { ...(cliState.get(family) || {}), ...result });
+      }
+    }
+    if (stale) lastCheck = Date.now();
+    const report = Object.fromEntries([...cliState].map(([family, state]) => [family, state]));
+    let answer;
+    try { answer = await (await api(config, "/api/mbox/account/agents/cli", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(report) })).json(); } catch { return; }
+    // Итог входа отдан интерфейсу — дальше он не нужен.
+    for (const [family, state] of cliState) if (state.login && ["done", "failed"].includes(state.login.state)) cliState.set(family, { ...state, login: null });
+    for (const [family, action] of Object.entries(answer.requests || {})) {
+      if (!AGENTS[family]) continue;
+      if (action === "login" && !logins.has(family)) {
+        say(`${AGENTS[family].label}: запрошен вход, открываю браузер`);
+        cliState.set(family, { ...(cliState.get(family) || {}), login: { state: "running", url: "", message: "" } });
+        const handle = startLogin(family, (update) => {
+          const previous = cliState.get(family) || {};
+          if (update.state === "done" || update.state === "failed") {
+            logins.delete(family);
+            cliState.set(family, { ...previous, login: update, ...(update.state === "done" ? { logged_in: true, account: update.message || previous.account || "" } : {}) });
+            say(`${AGENTS[family].label}: вход ${update.state === "done" ? "выполнен" : "не выполнен"}`);
+          } else cliState.set(family, { ...previous, login: update });
+        });
+        logins.set(family, handle);
+      } else if (action === "logout") {
+        logins.get(family)?.cancel();
+        const result = await logoutCli(family);
+        cliState.set(family, { ...(cliState.get(family) || {}), ...result, login: null });
+        say(`${AGENTS[family].label}: выход из аккаунта`);
+      }
+    }
+  };
+
+  void (async () => {
+    for (;;) {
+      try { await cliTick(); } catch (error) { say(`сбой проверки входа: ${error.message}`); }
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+  })();
 
   for (;;) {
     try { await tick(); } catch (error) { say(`сбой цикла: ${error.message}`); }
@@ -307,7 +362,11 @@ async function status(args) {
     const local = config.agents?.[family]?.enabled !== false;
     const remote = prefs?.[family]?.enabled !== false;
     const cli = hasCli(info.cli);
-    out(`  ${info.label}: ${local && remote ? "включён" : "выключен"}${!local ? " (здесь)" : ""}${!remote ? " (в настройках MBOX)" : ""}; CLI ${cli ? "найден" : "не найден"}`);
+    let login = "";
+    if (cli) {
+      try { const { checkCli } = await import("./cli-auth.mjs"); const state = await checkCli(family); login = state.logged_in === true ? "; вход выполнен" : state.logged_in === false ? `; НЕ выполнен вход — откройте чат в MBOX и нажмите «Войти», либо запустите ${info.cli} в терминале` : ""; } catch { /* набор ещё не скачан */ }
+    }
+    out(`  ${info.label}: ${local && remote ? "включён" : "выключен"}${!local ? " (здесь)" : ""}${!remote ? " (в настройках MBOX)" : ""}; CLI ${cli ? "найден" : "не найден"}${login}`);
   }
   out(`Журнал: ${path.join(dir, "agent.log")}`);
 }

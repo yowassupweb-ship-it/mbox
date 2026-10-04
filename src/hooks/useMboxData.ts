@@ -64,7 +64,12 @@ function urlFor(key: Key, qs: string) {
   }
 }
 
-export function useMboxData(query: string, onAuthExpired?: () => void) {
+// У участника этих разделов нет (организации и секреты — только владельцу): не стучимся и не получаем 403 на каждом обновлении.
+const OWNER_ONLY_KEYS = new Set<Key>(["companies", "secrets"]);
+
+export function useMboxData(query: string, onAuthExpired?: () => void, isMember = false) {
+  const memberRef = useRef(isMember);
+  memberRef.current = isMember;
   const [memories, setMemories] = useState<Memory[]>([]);
   // Отдельно от memories.length/memory_bytes-суммы — те всегда упираются в LIMIT 300 ответа,
   // а тут настоящие числа по всем подходящим записям (см. count(*) OVER() в ручке).
@@ -132,8 +137,9 @@ export function useMboxData(query: string, onAuthExpired?: () => void) {
       state.timer = window.setTimeout(() => void run(), wait);
       return;
     }
-    const keys = [...state.pending];
+    const keys = [...state.pending].filter((key) => !(memberRef.current && OWNER_ONLY_KEYS.has(key)));
     state.pending.clear();
+    if (!keys.length) return;
     state.running = true;
     state.lastStart = Date.now();
     const qs = state.qs;

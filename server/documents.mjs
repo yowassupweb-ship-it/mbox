@@ -27,12 +27,21 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS owner_user_id TEXT;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'private';
 UPDATE documents SET owner_user_id = (SELECT id::text FROM users WHERE role = 'owner' ORDER BY id LIMIT 1)
  WHERE owner_user_id IS NULL;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'edit';
+CREATE TABLE IF NOT EXISTS document_shares (
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('view', 'edit')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (document_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_document_shares_user ON document_shares(user_id);
 CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(pinned DESC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_user_id);
 `;
 
 // В списке содержимого нет: снимок документа весит сотни килобайт, а списку нужны название, дата и фрагмент.
-const LIST_COLUMNS = `id::text, title, pinned, project_id::text, author, owner_user_id, access_level, created_at::text, updated_at::text,
+const LIST_COLUMNS = `id::text, title, pinned, project_id::text, author, owner_user_id, access_level, access_mode, created_at::text, updated_at::text,
   octet_length(content) AS size_bytes, left(regexp_replace(text_content, '\\s+', ' ', 'g'), 160) AS snippet`;
 const FULL_COLUMNS = `${LIST_COLUMNS}, content`;
 const ACCESS_LEVELS = ["private", "project", "all"];
@@ -50,7 +59,8 @@ export function scopeWhere(scope, alias = "documents") {
   const projectIds = Array.isArray(scope?.projectIds) ? scope.projectIds : [];
   if (scope?.userId) {
     return {
-      sql: `(${alias}.owner_user_id = $1 OR ${alias}.access_level = 'all' OR (${alias}.access_level = 'project' AND ($2::boolean OR ${alias}.project_id = ANY($3::bigint[]))))`,
+      sql: `(${alias}.owner_user_id = $1 OR ${alias}.access_level = 'all' OR (${alias}.access_level = 'project' AND ($2::boolean OR ${alias}.project_id = ANY($3::bigint[])))
+        OR EXISTS (SELECT 1 FROM document_shares ds WHERE ds.document_id = ${alias}.id AND ds.user_id = $1))`,
       values: [String(scope.userId), Boolean(scope.all), projectIds],
     };
   }
@@ -67,6 +77,19 @@ async function owns(query, documentId, scope) {
   if (!scope?.userId) return Boolean(scope?.all);
   const row = (await query("SELECT owner_user_id FROM documents WHERE id = $1", [documentId])).rows[0];
   return Boolean(row) && row.owner_user_id === String(scope.userId);
+}
+
+/**
+ * Права на правку: владелец; человек, которому документ выдан поимённо (его роль решает); остальные, кто видит
+ * документ по уровню доступа, — по режиму документа (edit | view). Внутренние вызовы без пользователя правят всё.
+ */
+async function permissionsFor(query, row, scope) {
+  if (!scope?.userId) return { is_owner: Boolean(scope?.all), can_edit: true, role: "owner" };
+  const uid = String(scope.userId);
+  if (row.owner_user_id === uid) return { is_owner: true, can_edit: true, role: "owner" };
+  const share = (await query("SELECT role FROM document_shares WHERE document_id = $1 AND user_id = $2", [row.id, uid])).rows[0];
+  if (share) return { is_owner: false, can_edit: share.role === "edit", role: share.role };
+  return { is_owner: false, can_edit: row.access_mode !== "view", role: row.access_mode === "view" ? "view" : "edit" };
 }
 
 /** content приходит снимком-объектом или JSON-строкой; на выходе строка, из которой выведен и текст для поиска. */
@@ -168,6 +191,39 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
       return true;
     }
 
+    const sharesMatch = url.pathname.match(/^\/api\/mbox\/documents\/(\d+)\/shares$/);
+    if (sharesMatch) {
+      if (!(await owns(query, sharesMatch[1], scope))) { sendJson(res, 403, { error: "only_owner_shares" }); return true; }
+      if (req.method === "GET") {
+        const rows = (await query(
+          `SELECT ds.user_id, ds.role, u.username FROM document_shares ds LEFT JOIN users u ON u.id::text = ds.user_id WHERE ds.document_id = $1 ORDER BY lower(u.username)`,
+          [sharesMatch[1]],
+        )).rows;
+        sendJson(res, 200, { shares: rows });
+        return true;
+      }
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        const userId = String(body.user_id || "");
+        if (!/^\d+$/.test(userId)) { sendJson(res, 400, { error: "user_required" }); return true; }
+        if (body.role === null || body.role === "none") {
+          await query("DELETE FROM document_shares WHERE document_id = $1 AND user_id = $2", [sharesMatch[1], userId]);
+        } else {
+          const role = body.role === "edit" ? "edit" : "view";
+          if (!(await query("SELECT 1 FROM users WHERE id = $1", [userId])).rows[0]) { sendJson(res, 404, { error: "user_not_found" }); return true; }
+          await query(
+            `INSERT INTO document_shares(document_id, user_id, role) VALUES ($1, $2, $3)
+             ON CONFLICT (document_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+            [sharesMatch[1], userId, role],
+          );
+        }
+        broadcast?.("entity_changed", { entity: "documents", action: "share", actor: String(actor || ""), id: sharesMatch[1], silent: true });
+        sendJson(res, 200, { ok: true });
+        return true;
+      }
+      return false;
+    }
+
     const match = url.pathname.match(/^\/api\/mbox\/documents\/(\d+)(\/docx)?$/);
     if (!match) return false;
     const scoped = scopeWhere(scope);
@@ -186,8 +242,11 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
       return true;
     }
 
+    const permissions = await permissionsFor(query, existing, scope);
+
     if (req.method === "GET") {
-      const { text_content: markdown, ...document } = existing;
+      const { text_content: markdown, ...rawDocument } = existing;
+      const document = { ...rawDocument, ...permissions };
       // format=markdown — для агентов: Markdown вместо снимка, который им читать незачем.
       if (url.searchParams.get("format") === "markdown") {
         const { content: _content, ...light } = document;
@@ -198,10 +257,12 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
       return true;
     }
 
+    if ((req.method === "PATCH" || req.method === "DELETE") && !permissions.can_edit) { sendJson(res, 403, { error: "read_only" }); return true; }
+
     if (req.method === "PATCH") {
       const body = await readBody(req);
       if (has(body, "project_id") && !hasProjectAccess(scope, body.project_id)) { sendJson(res, 403, { error: "project_access_denied" }); return true; }
-      if ((has(body, "access_level") || has(body, "project_id")) && !(await owns(query, match[1], scope))) { sendJson(res, 403, { error: "only_owner_changes_access" }); return true; }
+      if ((has(body, "access_level") || has(body, "project_id") || has(body, "access_mode")) && !(await owns(query, match[1], scope))) { sendJson(res, 403, { error: "only_owner_changes_access" }); return true; }
       if (has(body, "content") && body.base_updated_at && String(body.base_updated_at) !== existing.updated_at) {
         sendJson(res, 409, { error: "conflict", updated_at: existing.updated_at });
         return true;
@@ -226,6 +287,7 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
           pinned = COALESCE($4, pinned),
           project_id = CASE WHEN $8::boolean THEN $5 ELSE project_id END,
           access_level = COALESCE($6, access_level),
+          access_mode = COALESCE($9, access_mode),
           updated_at = now()
          WHERE id = $7
          RETURNING ${FULL_COLUMNS}`,
@@ -238,6 +300,7 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
           has(body, "access_level") ? accessLevel(body.access_level) : null,
           match[1],
           hasProject,
+          has(body, "access_mode") ? (body.access_mode === "view" ? "view" : "edit") : null,
         ],
       );
       notify("update", `«${result.rows[0].title}»`, result.rows[0].id);

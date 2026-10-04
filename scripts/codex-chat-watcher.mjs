@@ -19,9 +19,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const config = loadConfig();
 const baseUrl = requireValue(config.MBOX_URL, "MBOX_URL");
-const username = config.MBOX_USERNAME || "Admin";
+const username = config.MBOX_USERNAME || "";
 const accessToken = String(config.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
+if (!accessToken) requireValue(username, "MBOX_USERNAME");
 const agentName = config.MBOX_AGENT_NAME || "ChatGPT";
 const agentKind = config.MBOX_AGENT_KIND || "local_watcher";
 const project = config.MBOX_PROJECT || "MBOX";
@@ -532,7 +533,7 @@ async function handleMention(item) {
         ...(threadOf(item) ? { thread: threadOf(item) } : {}),
         tools_used: outcome.toolsUsed,
         trace: outcome.trace,
-        steps: outcome.steps,
+        steps: outcome.steps.filter((step) => !(step.kind === "text" && step.text && answer.startsWith(step.text.replace(/\.\.\.$/, "")))),
         work: outcome.stats,
         model: outcome.model,
         effort: outcome.effort,
@@ -730,6 +731,8 @@ async function runCodexTurn(item, resumeId) {
   const wantedEffort = pickEffort(item.props?.effort) || pickEffort(codexEffort);
   if (wantedModel) args.push("-m", wantedModel);
   if (wantedEffort) args.push("-c", `model_reasoning_effort="${wantedEffort}"`);
+  // Без краткого пересказа рассуждений CLI их не отдаёт, и цепочка в чате оставалась пустой, пока Codex думает.
+  args.push("-c", 'model_reasoning_summary="auto"', "-c", "hide_agent_reasoning=false");
   if (resumeId) args.push(resumeId);
   args.push(prompt);
 
@@ -807,6 +810,22 @@ function spawnCodex(command, args, options, inboxId = "") {
   });
 }
 
+/** Текст рассуждения из любой версии Codex CLI: строка, массив частей или вложенный объект. */
+function reasoningText(item) {
+  const parts = [];
+  const take = (value) => {
+    if (!value) return;
+    if (typeof value === "string") { parts.push(value); return; }
+    if (Array.isArray(value)) { value.forEach(take); return; }
+    if (typeof value === "object") { take(value.text ?? value.summary_text ?? value.content ?? value.summary); }
+  };
+  take(item.text);
+  if (!parts.length) take(item.summary);
+  if (!parts.length) take(item.content);
+  if (!parts.length) take(item.reasoning);
+  return parts.join("\n\n").replace(/\*\*/g, "").trim();
+}
+
 function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "", pendingTools = new Map()) {
   const trimmed = String(line || "").trim();
   if (!trimmed || !trimmed.startsWith("{")) return;
@@ -815,6 +834,13 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "", pendin
     event = JSON.parse(trimmed);
   } catch {
     return;
+  }
+  // Прежний формат `codex exec --json`: событие лежит в поле msg.
+  if (!event.type && event.msg?.type) event = event.msg;
+  if (event.type === "agent_reasoning" || event.type === "agent_reasoning_raw_content") {
+    event = { type: "item.completed", item: { type: "reasoning", text: event.text } };
+  } else if (event.type === "agent_message" && event.message && !event.item) {
+    event = { type: "item.completed", item: { type: "agent_message", text: event.message } };
   }
   if (event.type === "thread.started" && event.thread_id) {
     state.sessionId = String(event.thread_id);
@@ -865,16 +891,21 @@ function handleCodexLine(line, state, startedAt, pushPhase, inboxId = "", pendin
     if (item.type === "agent_message" && item.text) {
       state.text = String(item.text || "").trim();
       pushPhase("Пишет");
+      // Реплика между шагами — часть цепочки, как у Claude: в чате она появляется сразу, не дожидаясь конца хода.
+      // Последняя из них — сам ответ, её из сохранённой цепочки убирает проверка перед записью ответа.
+      const index = state.steps.length;
+      const step = { kind: "text", text: clip(state.text, MAX_STEP_TEXT) };
+      if (addStep(state, step)) streamStep(inboxId, index, step);
       return;
     }
     if (item.type === "reasoning") {
-      const text = String(item.text || item.summary || "").replace(/\*\*/g, "").trim();
+      const text = reasoningText(item);
       pushPhase("Думает");
       if (text) {
         const index = state.steps.length;
         const step = { kind: "text", text: clip(text, MAX_STEP_TEXT) };
         if (addStep(state, step)) streamStep(inboxId, index, step);
-      }
+      } else console.log(`${logPrefix} рассуждение без текста: поля ${Object.keys(item).join(", ")}`);
       return;
     }
     const tool = codexToolName(item);

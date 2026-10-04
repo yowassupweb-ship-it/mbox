@@ -4,7 +4,7 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 const origin = process.env.MBOX_QA_ORIGIN || "http://127.0.0.1:5173";
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const password = process.env.MBOX_PASSWORD || "";
 
 if (!password) throw new Error("MBOX_PASSWORD is required");

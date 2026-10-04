@@ -1,6 +1,7 @@
 import "./env.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,15 +25,19 @@ import { createPresenceHub } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
-import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
+import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
-import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
+import { ensureStorageSchema, handleStorageApi, storageForAgent, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
+import { allowedSkills, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
-import { handleBrowserAgentApi } from "./browser-agent.mjs";
+import { createHelp, handleBrowserAgentApi, handleBrowserHelpApi, runBrowserOp, waitHelp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
+import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
+import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
+import { callIntegration, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,6 +56,26 @@ configureJarvis({
     for (const client of realtimeClients) if (client.mboxOwner) delivered += sendOpenTab(new Set([client]), client.mboxUserId, event);
     return delivered;
   },
+  storage: (() => {
+    const agentStorage = storageForAgent(query, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key");
+    const accessOf = (viewer) => storageAccessFor({ all: Boolean(viewer.all), projectIds: viewer.projectIds || [] }, { id: viewer.userId || 0 });
+    return {
+      ...agentStorage,
+      canUse: async (viewer, key) => {
+        const { access } = await accessOf(viewer);
+        return !access || access.canUse(key);
+      },
+      roots: async (viewer) => (await accessOf(viewer)).access?.roots.map((root) => root.prefix) || [],
+    };
+  })(),
+  gmail: { search: (userId, input) => gmailSearch(query, userId, input), read: (userId, id) => gmailRead(query, userId, id), draft: (userId, input) => gmailDraft(query, userId, input), send: (userId, input) => gmailSend(query, userId, input) },
+  gdocs: { search: (userId, input) => gdocSearch(query, userId, input), read: (userId, id) => gdocRead(query, userId, id), append: (userId, id, text) => gdocAppend(query, userId, id, text), replace: (userId, id, find, replace) => gdocReplace(query, userId, id, find, replace), create: (userId, title, text) => gdocCreate(query, userId, title, text), import: (userId, id) => gdocImport(query, userId, id, { ownerUserId: userId }) },
+  integrations: { list: (userId) => listIntegrations(query, userId), call: (id, input, userId) => callIntegration(query, id, input, { userId }) },
+  browserHelp: {
+    ask: (userId, input) => createHelp({ clients: realtimeClients, userId, agent: "Джарвис", reason: input.reason, need: input.need, tab: input.tab, url: input.url, query, broadcast: broadcastRealtime }),
+    wait: (id, seconds) => waitHelp(id, seconds),
+  },
+  browserOp: (userId, action, input = {}) => runBrowserOp({ clients: realtimeClients, userId, action, tab: input.tab, args: input.args, actor: "Джарвис", note: input.note }),
 });
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
 
@@ -932,6 +957,24 @@ async function query(sql, values = []) {
   }
 }
 
+async function liveServerMetrics() {
+  const total = os.totalmem();
+  const stat = await fs.promises.statfs("/");
+  const diskTotal = stat.blocks * stat.bsize;
+  const diskUsed = diskTotal - stat.bavail * stat.bsize;
+  const [load] = os.loadavg();
+  return {
+    hostname: os.hostname(),
+    load_1: Number(load.toFixed(2)),
+    cpu_percent: Math.min(100, (load / Math.max(os.cpus().length, 1)) * 100),
+    memory_used_mb: Math.round((total - os.freemem()) / 1048576),
+    memory_total_mb: Math.round(total / 1048576),
+    disk_used_mb: Math.round(diskUsed / 1048576),
+    disk_total_mb: Math.round(diskTotal / 1048576),
+    captured_at: new Date().toISOString(),
+  };
+}
+
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }) {
   if (!memoryId || !action) return null;
   const result = await query(
@@ -1040,80 +1083,15 @@ function publicOrigin(req) {
   return `${proto}://${host}`;
 }
 
-function inviteHash(token) {
-  return createHash("sha256").update(String(token || "")).digest("hex");
-}
-
 function looksLikePasswordHash(value) {
   return /^(pbkdf2_sha256|bcrypt|scrypt|argon2|sha256|sha512)\$/i.test(String(value || ""));
-}
-
-async function inviteByToken(token) {
-  if (!/^mbox_invite_[A-Za-z0-9_-]{32,}$/.test(String(token || ""))) return null;
-  const result = await query(
-    `SELECT i.id::text, i.project_ids::text[] AS project_ids, i.uses_remaining, i.expires_at::text,
-            u.username AS created_by,
-            COALESCE(jsonb_agg(jsonb_build_object('id', p.id::text, 'name', p.name) ORDER BY p.name)
-              FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects
-     FROM account_invites i
-     JOIN users u ON u.id = i.created_by
-     LEFT JOIN projects p ON p.id = ANY(i.project_ids)
-     WHERE i.token_hash = $1
-       AND i.uses_remaining > 0
-       AND i.expires_at > now()
-     GROUP BY i.id, u.username`,
-    [inviteHash(token)],
-  );
-  return result.rows[0] || null;
 }
 
 async function createSessionForUser(req, res, userId) {
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')", [userId, tokenHash]);
+  await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at, user_agent, ip) VALUES ($1, $2, now() + interval '30 days', $3, $4)", [userId, tokenHash, String(req.headers["user-agent"] || "").slice(0, 300), clientAddress(req).slice(0, 80)]);
   res.setHeader("set-cookie", sessionCookie(req, encodeURIComponent(token), 2592000));
-}
-
-async function handlePublicInviteApi(req, res, url) {
-  const match = url.pathname.match(/^\/api\/mbox\/invites\/(mbox_invite_[A-Za-z0-9_-]+)$/);
-  if (!match) return false;
-  const invite = await inviteByToken(match[1]);
-  if (!invite) { sendJson(res, 404, { error: "invite_not_found" }); return true; }
-  if (req.method === "GET") {
-    sendJson(res, 200, { invite: { created_by: invite.created_by, expires_at: invite.expires_at, projects: invite.projects } });
-    return true;
-  }
-  if (req.method !== "POST") return false;
-  const body = await readBody(req);
-  const username = String(body.username || "").trim();
-  const password = String(body.password || "");
-  const email = String(body.email || `${username.toLowerCase()}@mbox.local`).trim();
-  if (username.length < 2 || password.length < 8) {
-    sendJson(res, 400, { error: "username_and_password_required" });
-    return true;
-  }
-  const created = await query(
-    `INSERT INTO users(email, username, password_hash, role)
-     VALUES ($1, $2, crypt($3, gen_salt('bf')), 'member')
-     RETURNING id::text, email, username, role`,
-    [email, username, password],
-  ).catch((error) => ({ error }));
-  if (created.error) {
-    sendJson(res, 409, { error: "account_already_exists" });
-    return true;
-  }
-  const userId = created.rows[0].id;
-  for (const projectId of invite.project_ids || []) {
-    await query(
-      `INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor')
-       ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
-      [projectId, userId],
-    );
-  }
-  await query("UPDATE account_invites SET uses_remaining = uses_remaining - 1, last_used_at = now() WHERE id = $1", [invite.id]);
-  await createSessionForUser(req, res, userId);
-  sendJson(res, 201, { user: created.rows[0] });
-  return true;
 }
 
 /** Папки хранилища по проектам: projects/<id>/ у каждого проекта, участнику — только его (см. server/storage.mjs). */
@@ -1181,7 +1159,6 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/documents"
     || pathname === "/api/mbox/spotlight"
-    || pathname === "/api/mbox/invites"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
     // Связи памяти и источники данных — с фильтром по проектам участника в самих обработчиках.
@@ -1189,14 +1166,15 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/data-sources"
     || /^\/api\/mbox\/browser\/(bookmarks|history|cookies)(?:\/.*)?$/.test(pathname)
     // Хранилище: участнику — только папки его проектов (проверка внутри handleStorageApi).
-    || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object)$/.test(pathname)
+    || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object|read|write)$/.test(pathname)
     || pathname === "/api/mbox/agent/inbox"
     || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
     || pathname === "/api/mbox/notes/import-docx"
     || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?|docx|import-docx))?$/.test(pathname)
     || /^\/api\/mbox\/tables\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|cells|rows))?$/.test(pathname)
     || pathname === "/api/mbox/documents/import-docx"
-    || /^\/api\/mbox\/documents\/\d+(?:\/docx)?$/.test(pathname)
+    || /^\/api\/mbox\/documents\/\d+(?:\/(?:docx|shares))?$/.test(pathname)
+    || pathname === "/api/mbox/directory"
     || /^\/api\/mbox\/agent\/inbox\/\d+(?:\/(?:phase|cancel|answer))?$/.test(pathname)
     || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
@@ -1241,8 +1219,8 @@ async function handleApiWithContext(req, res, url) {
     const user = await query(
       `SELECT id::text, username, role
        FROM users
-       WHERE username = $1 AND password_hash = crypt($2, password_hash)`,
-      [body.username, body.password],
+       WHERE lower(username) = lower($1) AND password_hash = crypt($2, password_hash)`,
+      [body.username.trim(), body.password],
     );
     if (!user.rows[0]) {
       noteLoginFailure(failureKey);
@@ -1252,7 +1230,7 @@ async function handleApiWithContext(req, res, url) {
 
     const token = randomBytes(32).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
-    await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')", [user.rows[0].id, tokenHash]);
+    await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at, user_agent, ip) VALUES ($1, $2, now() + interval '30 days', $3, $4)", [user.rows[0].id, tokenHash, String(req.headers["user-agent"] || "").slice(0, 300), clientAddress(req).slice(0, 80)]);
     await query(
       `DELETE FROM auth_sessions
        WHERE expires_at < now()
@@ -1276,33 +1254,16 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { user: withChatDefaults(await currentUser(req)) });
   }
 
-  if (await handlePublicInviteApi(req, res, url)) return;
+  if (url.pathname === "/api/mbox/oauth/google/callback" && req.method === "GET") { await handleGoogleCallback({ res, url, query }); return; }
+  if (await handlePublicInvite({ req, res, url, query, readBody, sendJson, startSession: createSessionForUser })) return;
 
   const user = await requireUser(req, res);
   if (!user) return;
   const scope = await projectScope(user);
 
-  if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user })) return;
+  if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user, publicOrigin })) return;
 
   if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
-
-  if (url.pathname === "/api/mbox/invites" && req.method === "POST") {
-    const body = await readBody(req);
-    const requested = Array.isArray(body.project_ids) ? body.project_ids.map(String).filter((id) => /^\d+$/.test(id)) : [];
-    const available = scope.all
-      ? (await query("SELECT id::text FROM projects ORDER BY name")).rows.map((row) => row.id)
-      : scope.projectIds;
-    const projectIds = [...new Set((requested.length ? requested : available).filter((id) => available.includes(id)))];
-    if (!projectIds.length) return sendJson(res, 400, { error: "no_projects_available" });
-    const token = `mbox_invite_${randomBytes(32).toString("base64url")}`;
-    const result = await query(
-      `INSERT INTO account_invites(token_hash, created_by, project_ids, uses_remaining, expires_at)
-       VALUES ($1, $2, $3::bigint[], 20, now() + interval '7 days')
-       RETURNING id::text, expires_at::text`,
-      [inviteHash(token), user.id, projectIds],
-    );
-    return sendJson(res, 201, { invite: { ...result.rows[0], url: `${publicOrigin(req)}/invite/${token}`, project_ids: projectIds } });
-  }
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
@@ -1325,9 +1286,13 @@ async function handleApiWithContext(req, res, url) {
   // Закладки, история и куки встроенного браузера — на сервере, чтобы сессия была сквозной
   // между машинами (см. server/browser-state.mjs).
   // Агент во встроенном браузере владельца (см. server/browser-agent.mjs, MCP browser_*).
+  if (await handleBrowserHelpApi({ req, res, url, readBody, sendJson, owner: isOwner(user), user, actor: actorFromReq(req), clients: realtimeClients, query, broadcast: broadcastRealtime })) return;
   if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user, owner: isOwner(user), actor: actorFromReq(req), clients: realtimeClients })) return;
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
+  if (await handleGmailApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, origin: publicOrigin(req) })) return;
+  if (await handleGoogleDocsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, broadcast: broadcastRealtime })) return;
+  if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), userId: user.id })) return;
   if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: scope.all })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
@@ -1381,8 +1346,11 @@ async function handleApiWithContext(req, res, url) {
 
   // Пакеты навыков: skills/ в репозитории плюс правки агентов из базы (server/skill-overrides.mjs).
   // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill/edit_skill_file.
+  const skillAllowed = await allowedSkills(query, user);
+  if (await handleSkillAccessApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), skillsRoot: path.join(root, "skills") })) return;
   if (await handleSkillPackagesApi({
     req, res, url, query, skillsRoot: path.join(root, "skills"), actor: actorFromReq(req), sendJson, readBody,
+    access: { allowed: skillAllowed, canWrite: isOwner(user) },
     onChange: (change) => {
       broadcastRealtime("skill_file_changed", change);
       recordActivityMemory({
@@ -1419,14 +1387,15 @@ async function handleApiWithContext(req, res, url) {
         last_model: row?.last_model || null,
       };
     };
-    const catalog = [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG];
+    const skillAllowedList = await allowedSkills(query, user);
+    const catalog = [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG].filter((skill) => isCatalogSkillAllowed(skillAllowedList, skill.id));
     const skills = catalog.map((skill) => ({ ...skill, ...withUsage(skill.id) }));
     const modes = Object.entries(SERVICE_MODES).map(([id, name]) => ({ id, name, ...withUsage(id) }));
     // Навык, который кто-то залогировал, но забыл описать в каталоге — иначе он молча пропал бы из UI.
-    const unknown = usage.rows
+    const unknown = (skillAllowedList === null ? usage.rows : [])
       .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
       .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
-    return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
+    return sendJson(res, 200, { skills: [...skills, ...unknown], modes: skillAllowedList === null ? modes : [] });
   }
 
   // Какие модели и «усилия» доступны чату: список собирает jarvis.mjs по наличию ключей —
@@ -2640,7 +2609,14 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/server") {
     const result = await query("SELECT hostname, load_1, cpu_percent, memory_used_mb, memory_total_mb, disk_used_mb, disk_total_mb, docker_containers, captured_at::text FROM server_metrics ORDER BY captured_at DESC LIMIT 1");
-    return sendJson(res, 200, { metrics: result.rows[0] || null });
+    const snapshot = result.rows[0] || null;
+    // Сборщик на хосте (scripts/server_metrics_collector.sh) мог остановиться: тогда отдаём то, что видит само приложение,
+    // и помечаем это, чтобы цифры не выдавались за снимок хоста. Контейнеров приложение не видит — берём из последнего снимка.
+    if (!snapshot || Date.now() - Date.parse(snapshot.captured_at) > 2 * 60 * 1000) {
+      const live = await liveServerMetrics().catch(() => null);
+      if (live) return sendJson(res, 200, { metrics: { ...live, docker_containers: snapshot?.docker_containers || [], containers_captured_at: snapshot?.captured_at || null, source: "app" } });
+    }
+    return sendJson(res, 200, { metrics: snapshot ? { ...snapshot, source: "host" } : null });
   }
 
   if (url.pathname === "/api/mbox/history") {
@@ -3471,8 +3447,11 @@ ensureTablesSchema(query).catch((error) => console.error(`tables schema: ${error
 ensureDocumentsSchema(query).catch((error) => console.error(`documents schema: ${error.message}`));
 ensureChatThreadsSchema(query).catch((error) => console.error(`chat threads schema: ${error.message}`));
 ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
-ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));
+ensureGmailSchema(query).catch((error) => console.error(`gmail schema: ${error.message}`));
+ensureIntegrationsSchema(query).catch((error) => console.error(`integrations schema: ${error.message}`));
+ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
+ensureSkillAccessSchema(query).catch((error) => console.error(`skill access schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
 

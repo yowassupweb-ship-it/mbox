@@ -6,7 +6,7 @@ import { NodePositionConvertToCursor } from "@univerjs/docs-ui";
 import { IRenderManagerService } from "@univerjs/engine-render";
 import UniverPresetDocsCoreRuRU from "@univerjs/preset-docs-core/locales/ru-RU";
 import "@univerjs/preset-docs-core/lib/index.css";
-import { mboxUniverTheme, useDocumentTheme } from "./univerTheme";
+import { styleDocSurface, mboxUniverTheme, useDocumentTheme } from "./univerTheme";
 import type { Peer, PresenceState } from "./presence";
 
 type Props = {
@@ -69,6 +69,7 @@ export function DocEditor({ snapshot, loadKey, onChange, visible, readOnly = fal
     univerAPI.toggleDarkMode(theme !== "light");
     univerAPI.setTheme(mboxUniverTheme(theme));
     const document = univerAPI.createDocument(structuredClone(snapshotRef.current));
+    styleDocSurface(univer, document.getId(), snapshotRef.current.documentStyle?.documentFlavor === 2);
     if (readOnly) void document.getPermission().setReadOnly();
 
 

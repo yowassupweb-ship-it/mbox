@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { Copy, FolderOpen, Maximize, Minus, Plus, RefreshCw, Scan } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { Copy, FolderOpen, Maximize, Minus, Pencil, Plus, RefreshCw, Scan } from "lucide-react";
+import { bytesToBase64 } from "./officeFormat";
 import { formatBytes, formatDateTime } from "../../lib/format";
 import { gitStatusOf, onWorkspaceChange, rootName, workspaceBridge, type ImageRead } from "./localWorkspace";
 import { gitLetter } from "./LocalFolders";
 import { useRemembered } from "./uiMemory";
+
+const ImageEditor = lazy(() => import("./ImageEditor").then((module) => ({ default: module.ImageEditor })));
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 16;
@@ -45,6 +48,7 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
   const [stage, setStage] = useState({ width: 0, height: 0 });
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     if (!bridge?.readImage) return;
@@ -193,6 +197,25 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
   // Пустая область вместо текста: пока картинка читается, раскладка вкладки не прыгает.
   if (!image) return <div className={`wb-image-doc is-loading is-${view.background}`}>{slow && <div className="wb-doc-missing">Открываю {path}…</div>}</div>;
 
+  const editable = Boolean(bridge.writeData) && /^image\/(png|jpeg|webp)$/.test(image.mime) && !image.tooLarge;
+  if (editing && editable) {
+    return (
+      <Suspense fallback={<div className="wb-doc-missing">Открываю редактор…</div>}>
+        <ImageEditor
+          src={image.dataUrl}
+          name={path.split("/").pop() || path}
+          mime={image.mime}
+          onClose={() => setEditing(false)}
+          onSave={async (blob) => {
+            const base64 = bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
+            await bridge.writeData!(rootKey, path, base64, image.mtime);
+            await load();
+          }}
+        />
+      </Suspense>
+    );
+  }
+
   const letter = gitLetter(gitStatusOf(rootKey, path));
   const shownWidth = natural ? Math.round(natural.width * zoom) : 0;
   const shownHeight = natural ? Math.round(natural.height * zoom) : 0;
@@ -216,6 +239,7 @@ export function LocalImageDocument({ rootKey, path }: { rootKey: string; path: s
               </button>
             ))}
           </div>
+          {editable && <button type="button" onClick={() => setEditing(true)} title="Править: обрезка, рисование, текст"><Pencil size={13} /> Править</button>}
           <button type="button" onClick={() => void copyImage()} title="Копировать картинку"><Copy size={13} />{copied ? " Скопировано" : ""}</button>
           <button type="button" onClick={() => void load()} title="Перечитать с диска"><RefreshCw size={13} /></button>
           <button type="button" onClick={() => void bridge.reveal(rootKey, path)} title="Показать в проводнике Windows"><FolderOpen size={13} /></button>

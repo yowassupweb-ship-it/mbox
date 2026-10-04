@@ -23,12 +23,9 @@
 .panel,
 .metric-card,
 .sync-panel {
-  border: 1px solid rgba(20, 26, 36, .78);
-  background: color-mix(in srgb, var(--text-main) 54%, transparent);
-  box-shadow:
-    10px 12px 24px rgba(113, 126, 150, .14),
-    inset 1px 1px 0 color-mix(in srgb, var(--text-main) 92%, transparent);
-  backdrop-filter: blur(22px) saturate(160%);
+  border: var(--border-width) solid var(--border-color);
+  background: var(--container-bg);
+  box-shadow: var(--container-inset);
 }
 
 .dark .brand-rail,
@@ -129,11 +126,11 @@
 .editor-preview input,
 .editor-preview textarea,
 .compact-control select {
-  border: 1px solid color-mix(in srgb, var(--text-main) 14%, transparent);
+  border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--text-main) 46%, transparent);
+  background: var(--element-bg);
   color: inherit;
-  box-shadow: inset 2px 2px 5px rgba(137, 151, 175, .10);
+  box-shadow: none;
 }
 
 .dark .nav-item,

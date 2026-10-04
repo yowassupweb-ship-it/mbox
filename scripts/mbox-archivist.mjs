@@ -15,7 +15,7 @@
  */
 
 const baseUrl = process.env.MBOX_URL;
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const password = process.env.MBOX_PASSWORD;
 // MBOX_AGENT_NAME — имя КЛИЕНТА, который ходит в MBOX (респондер Codex, респондер Claude,
 // MCP-сервер), и её нередко ставят глобально на всю машину. Джарвис живёт внутри сервера и

@@ -27,6 +27,7 @@
       "launch.js",
       "main.js",
       "browser.js",
+      "agent-kit.js",
       "browser-downloads.js",
       "browser-menu.js",
       "browser-tab-preload.js",
@@ -55,6 +56,7 @@
           "codex-chat-watcher.mjs",
           "claude-inbox-watcher.mjs",
           "chat-threads.mjs",
+          "cli-auth.mjs",
           "inbox-wake.mjs",
           "model-catalog.mjs",
           "sync-skills.mjs"

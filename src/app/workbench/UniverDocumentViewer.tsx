@@ -3,6 +3,7 @@ import { createUniver, DocumentFlavor, getDocsEmptySnapshot, LocaleType, mergeLo
 import { UniverDocsCorePreset } from "@univerjs/preset-docs-core";
 import UniverPresetDocsCoreRuRU from "@univerjs/preset-docs-core/locales/ru-RU";
 import "@univerjs/preset-docs-core/lib/index.css";
+import { styleDocSurface } from "./univerTheme";
 
 export function UniverDocumentViewer({ html, title }: { html: string; title: string }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -29,7 +30,8 @@ export function UniverDocumentViewer({ html, title }: { html: string; title: str
     });
     snapshot.body = builder.getData().body;
     snapshot.disabled = true;
-    univerAPI.createDocument(snapshot);
+    const created = univerAPI.createDocument(snapshot);
+    styleDocSurface(univer, created.getId(), false);
     return () => {
       univer.dispose();
       host.replaceChildren();

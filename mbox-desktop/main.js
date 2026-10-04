@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, clipboard, session, safeStorage } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const localUi = require("./localUi");
 const serverState = require("./server-state");
@@ -12,11 +12,18 @@ const path = require("path");
 const isDev = !app.isPackaged;
 const repoRoot = resolveRepoRoot();
 const packagedScriptRoot = path.join(process.resourcesPath || "", "scripts");
-const mboxUrl = (process.env.MBOX_URL || "https://mbox.shar-os.ru").replace(/\/+$/, "");
+const DEFAULT_MBOX_URL = "https://mbox.shar-os.ru";
+// Сервер, к которому подключено приложение: MBOX_URL > выбор на экране входа («Другой сервер») > основной.
+const serverFile = () => path.join(app.getPath("userData"), "server.json");
+function savedServerUrl() {
+  try { return String(JSON.parse(fs.readFileSync(serverFile(), "utf8")).url || ""); } catch { return ""; }
+}
+const mboxUrl = (process.env.MBOX_URL || savedServerUrl() || DEFAULT_MBOX_URL).replace(/\/+$/, "");
 // В HMR-режиме заголовок — явный индикатор, что открыто именно локальное окно, а не установленная версия.
 const isLocalDevWindow = isDev && /^https?:\/\/(127\.0\.0\.1|localhost)(?::\d+)?$/i.test(mboxUrl);
 const responderEnv = loadResponderEnv();
-const updateFeedUrl = `${mboxUrl}/downloads/`;
+// Обновления приложения всегда с основного сервера: у чужого MBOX папки downloads нет.
+const updateFeedUrl = `${DEFAULT_MBOX_URL}/downloads/`;
 const iconPath = path.join(__dirname, "resources", "mbox.png");
 const processPatterns = {
   Codex: "codex-chat-watcher.mjs",
@@ -77,6 +84,9 @@ app.whenReady().then(async () => {
   // отвечал кодом, которого в приложении уже нет, а вывод никуда не попадал. Ключи убираем молча.
   await removeResponderRunKeys();
   if (process.env.MBOX_DESKTOP_SKIP_AGENT_AUTOSTART !== "1") {
+    desktopCredentials = readCredentials();
+    applyCredentialsToEnv(desktopCredentials);
+    await ensureDesktopCredentials().then(applyCredentialsToEnv).catch(() => {});
     await startResponders({ reveal: false, takeover: true }).catch((error) => log(`autostart responders failed: ${error.message}`));
   }
 });
@@ -112,7 +122,6 @@ function resolveRepoRoot() {
 function loadResponderEnv() {
   const env = {
     MBOX_URL: mboxUrl,
-    MBOX_USERNAME: "Admin",
     ...readDotEnv(path.join(repoRoot, ".env.local")),
     ...readCodexMboxEnv(),
     ...process.env
@@ -438,6 +447,12 @@ async function startResponders(options = { takeover: true }) {
   return results;
 }
 
+let nodeChecked = null;
+function nodeAvailable() {
+  if (nodeChecked === null) nodeChecked = require("child_process").spawnSync("node", ["--version"], { shell: true, windowsHide: true, timeout: 10000 }).status === 0;
+  return nodeChecked;
+}
+
 async function startResponder(rawName, { reveal = true, takeover = false } = {}) {
   const name = responderName(rawName);
   if (!name) throw new Error(`Неизвестный агент: ${rawName}`);
@@ -458,13 +473,17 @@ async function startResponder(rawName, { reveal = true, takeover = false } = {})
   const file = wrapperPath(name);
   if (!fs.existsSync(file)) throw new Error(`${name} wrapper not found: ${file}`);
   const workdir = fs.existsSync(path.join(repoRoot, "package.json")) ? repoRoot : path.dirname(path.dirname(file));
+  // На чужом компьютере репозитория MBOX нет: агент работает в обычной папке, а не в каталоге установки приложения.
+  const agentWorkdir = fs.existsSync(path.join(repoRoot, "package.json")) ? repoRoot : path.join(os.homedir(), "MBOX-agent");
+  fs.mkdirSync(agentWorkdir, { recursive: true });
+  if (!nodeAvailable()) throw new Error("Не найден Node.js: он нужен наблюдателям агентов. Установите Node 20+ с https://nodejs.org и перезапустите MBOX.");
   const env = {
     ...process.env,
     ...responderEnv,
     MBOX_AGENT_NAME: name,
     MBOX_PROJECT: responderEnv.MBOX_PROJECT || process.env.MBOX_PROJECT || "MBOX",
-    CODEX_WATCH_WORKDIR: responderEnv.CODEX_WATCH_WORKDIR || repoRoot,
-    CLAUDE_WATCH_WORKDIR: responderEnv.CLAUDE_WATCH_WORKDIR || repoRoot
+    CODEX_WATCH_WORKDIR: responderEnv.CODEX_WATCH_WORKDIR || agentWorkdir,
+    CLAUDE_WATCH_WORKDIR: responderEnv.CLAUDE_WATCH_WORKDIR || agentWorkdir
   };
   // Дефолтный путь установки — "...\Local\Programs\MBOX Desktop\..." — содержит пробел. shell:true
   // конкатенирует argv в одну строку БЕЗ экранирования (см. предупреждение Node про DEP0190), так что
@@ -752,6 +771,151 @@ async function checkForUpdates(manual) {
   }
 }
 
+// Вход в Claude Code / Codex на этом компьютере: логику (проверка статуса, запуск входа) делит служба mbox-agent, см. scripts/cli-auth.mjs.
+let cliAuthModule = null;
+const cliLogins = new Map();
+const cliLoginState = { claude: null, codex: null };
+async function cliAuth() {
+  if (!cliAuthModule) {
+    const file = [path.join(packagedScriptRoot, "cli-auth.mjs"), path.join(repoRoot, "scripts", "cli-auth.mjs")].find((candidate) => fs.existsSync(candidate));
+    if (!file) throw new Error("cli_auth_missing");
+    cliAuthModule = await import(require("url").pathToFileURL(file).href);
+  }
+  return cliAuthModule;
+}
+const cliFamily = (family) => (family === "claude" || family === "codex" ? family : "");
+ipcMain.handle("mbox-desktop:cli-status", async () => {
+  const module = await cliAuth();
+  const result = {};
+  for (const family of ["claude", "codex"]) result[family] = { ...(await module.checkCli(family)), login: cliLoginState[family] };
+  return result;
+});
+ipcMain.handle("mbox-desktop:cli-login", async (_event, family) => {
+  const name = cliFamily(family);
+  if (!name) return { ok: false };
+  const module = await cliAuth();
+  cliLogins.get(name)?.cancel();
+  cliLoginState[name] = { state: "running", url: "", message: "" };
+  cliLogins.set(name, module.startLogin(name, (update) => {
+    cliLoginState[name] = update;
+    if (update.state === "done" || update.state === "failed") cliLogins.delete(name);
+  }));
+  return { ok: true };
+});
+ipcMain.handle("mbox-desktop:cli-logout", async (_event, family) => {
+  const name = cliFamily(family);
+  if (!name) return { ok: false };
+  const module = await cliAuth();
+  cliLogins.get(name)?.cancel();
+  cliLoginState[name] = null;
+  return { ok: true, ...(await module.logoutCli(name)) };
+});
+// ─── сервер и личный токен ────────────────────────────────────────────────────
+
+const credentialsFile = () => path.join(app.getPath("userData"), "desktop-credentials.json");
+let desktopCredentials = null;
+
+function readCredentials() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(credentialsFile(), "utf8"));
+    const token = raw.encrypted && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(raw.token, "base64")) : raw.encrypted ? "" : raw.token;
+    return token && raw.url === mboxUrl ? { url: raw.url, user: raw.user, user_id: raw.user_id, role: raw.role, token_id: raw.token_id, token } : null;
+  } catch { return null; }
+}
+function writeCredentials(value) {
+  const encrypted = safeStorage.isEncryptionAvailable();
+  const token = encrypted ? safeStorage.encryptString(value.token).toString("base64") : value.token;
+  fs.writeFileSync(credentialsFile(), JSON.stringify({ ...value, token, encrypted }), { mode: 0o600 });
+}
+function clearCredentials() {
+  desktopCredentials = null;
+  try { fs.rmSync(credentialsFile(), { force: true }); } catch { /* уже нет */ }
+}
+
+/** Запрос к MBOX от имени вошедшего в окне пользователя: cookie подставит сессия Electron. */
+async function mboxCall(pathname, init = {}) {
+  const response = await session.defaultSession.fetch(`${mboxUrl}${pathname}`, { ...init, headers: { "content-type": "application/json", ...(init.headers || {}) } });
+  const body = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, body };
+}
+
+/**
+ * После входа в окне приложение само заводит личный токен, и наблюдатели Claude/Codex работают под этим аккаунтом —
+ * ни логина, ни пароля вручную. Токен лежит под safeStorage, его можно отозвать в «Настройки → Команда».
+ */
+async function ensureDesktopCredentials() {
+  let me;
+  try { me = await mboxCall("/api/mbox/auth/me"); } catch { return null; }
+  const user = me.body?.user;
+  if (!me.ok || !user) return null;
+  const stored = readCredentials();
+  if (stored && String(stored.user_id) === String(user.id)) {
+    // Токен мог быть отозван в настройках — тогда выпускаем новый.
+    const check = await session.defaultSession.fetch(`${mboxUrl}/api/mbox/auth/me`, { headers: { authorization: `Bearer ${stored.token}`, cookie: "" }, credentials: "omit" }).catch(() => null);
+    const valid = check && check.ok ? Boolean((await check.json().catch(() => ({}))).user) : check ? false : true;
+    if (valid) { desktopCredentials = stored; return stored; }
+  }
+  const created = await mboxCall("/api/mbox/account/tokens", { method: "POST", body: JSON.stringify({ label: `MBOX Desktop · ${os.hostname()}` }) });
+  if (!created.ok || !created.body?.token) { log(`desktop token not created: ${created.status}`); return null; }
+  const value = { url: mboxUrl, user: user.username, user_id: String(user.id), role: user.role, token_id: created.body.credential?.id || "", token: created.body.token };
+  writeCredentials(value);
+  desktopCredentials = value;
+  log(`desktop token created for ${user.username}`);
+  return value;
+}
+
+function applyCredentialsToEnv(credentials) {
+  if (!credentials) return;
+  Object.assign(responderEnv, { MBOX_URL: mboxUrl, MBOX_USERNAME: credentials.user, MBOX_TOKEN: credentials.token, MBOX_PASSWORD: "" });
+}
+
+async function onSessionChanged() {
+  const credentials = await ensureDesktopCredentials();
+  if (!credentials) return { ok: false };
+  const changed = responderEnv.MBOX_TOKEN !== credentials.token;
+  applyCredentialsToEnv(credentials);
+  // Наблюдатели были запущены под другими данными (или без них) — перезапускаем под этим аккаунтом.
+  if (changed) { await stopResponders(); await startResponders({ reveal: false, takeover: true }).catch((error) => log(`restart responders failed: ${error.message}`)); }
+  return { ok: true, user: credentials.user };
+}
+
+async function onSignedOut() {
+  const stored = desktopCredentials || readCredentials();
+  if (stored?.token_id) await mboxCall(`/api/mbox/account/tokens/${stored.token_id}`, { method: "DELETE" }).catch(() => {});
+  clearCredentials();
+  for (const key of ["MBOX_USERNAME", "MBOX_TOKEN", "MBOX_PASSWORD"]) delete responderEnv[key];
+  await stopResponders();
+  return { ok: true };
+}
+
+function normalizeServerUrl(raw) {
+  let value = String(raw || "").trim();
+  if (!value) return "";
+  if (!/^https?:\/\//i.test(value)) value = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(value) ? `http://${value}` : `https://${value}`;
+  try {
+    const url = new URL(value);
+    const privateHost = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(url.hostname) || url.hostname.endsWith(".local");
+    if (url.protocol === "http:" && !privateHost) return "";
+    return url.origin;
+  } catch { return ""; }
+}
+
+ipcMain.handle("mbox-desktop:session-changed", async () => onSessionChanged());
+ipcMain.handle("mbox-desktop:signed-out", async () => onSignedOut());
+ipcMain.handle("mbox-desktop:set-server", async (_event, raw) => {
+  const reset = !String(raw || "").trim();
+  const url = reset ? DEFAULT_MBOX_URL : normalizeServerUrl(raw);
+  if (!url) return { ok: false, error: "Адрес указан неверно. Пример: mbox.example.com или http://192.168.1.20:3000 (http — только для локальной сети)." };
+  if (!reset) {
+    const probe = await session.defaultSession.fetch(`${url}/api/mbox/auth/me`).then((response) => response.json().catch(() => null)).catch(() => null);
+    if (!probe || !Object.prototype.hasOwnProperty.call(probe, "user")) return { ok: false, error: "По этому адресу MBOX не отвечает. Проверьте адрес и что сервер запущен." };
+  }
+  try { if (reset) fs.rmSync(serverFile(), { force: true }); else fs.writeFileSync(serverFile(), JSON.stringify({ url })); } catch (error) { return { ok: false, error: `Не удалось сохранить: ${error.message}` }; }
+  clearCredentials();
+  setTimeout(() => { app.relaunch(); app.exit(0); }, 300);
+  return { ok: true, url };
+});
+
 ipcMain.handle("mbox-desktop:status", async () => processStatus());
 ipcMain.handle("mbox-desktop:start", async (_event, name) => {
   if (name === "All") await startResponders();
@@ -835,6 +999,7 @@ ipcMain.handle("mbox-desktop:browser-download-action", async (event, id, action)
 ipcMain.handle("mbox-desktop:browser-downloads-clear", async (event) => { assertBrowserHost(event); return browser.downloads.clearFinished(); });
 ipcMain.handle("mbox-desktop:browser-downloads-folder", async (event) => { assertBrowserHost(event); return browser.downloads.openFolder(); });
 // Действие агента во вкладке браузера (server/browser-agent.mjs → страница MBOX → сюда).
+ipcMain.handle("mbox-desktop:browser-agent-control", async (event, key, command) => { assertBrowserHost(event); return browser.setAgentControl(String(key || ""), String(command || "")); });
 ipcMain.handle("mbox-desktop:browser-agent", async (event, key, action, args, actor, note) => {
   assertBrowserHost(event);
   return browser.agentAction(String(key || ""), String(action || ""), args && typeof args === "object" ? args : {}, String(actor || "Агент"), String(note || ""));

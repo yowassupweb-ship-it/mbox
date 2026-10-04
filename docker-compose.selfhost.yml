@@ -1,0 +1,65 @@
+# Свой MBOX на своём компьютере или сервере: база, приложение и (по желанию) HTTPS с доменом.
+#   node scripts/selfhost-setup.mjs        — спросит пару вещей, создаст .env.selfhost и запустит всё
+# Вручную: docker compose --env-file .env.selfhost -f docker-compose.selfhost.yml up -d --build
+# С доменом и HTTPS добавьте --profile tls (нужны открытые порты 80 и 443).
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mbox
+      POSTGRES_USER: mbox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?запустите node scripts/selfhost-setup.mjs}
+    volumes:
+      - mbox_pgdata:/var/lib/postgresql/data
+      # Схема применяется один раз, при создании пустой базы.
+      - ./schema/mbox_postgres.sql:/docker-entrypoint-initdb.d/001_mbox_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mbox -d mbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.mbox
+    container_name: mbox-ui
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://mbox:${POSTGRES_PASSWORD}@postgres:5432/mbox
+      MBOX_SECRET_KEY: ${MBOX_SECRET_KEY:?запустите node scripts/selfhost-setup.mjs}
+      MBOX_ADMIN_USERNAME: ${MBOX_ADMIN_USERNAME:-}
+      MBOX_ADMIN_PASSWORD: ${MBOX_ADMIN_PASSWORD:-}
+      MBOX_PORT: "3000"
+      MBOX_HOST: "0.0.0.0"
+      MBOX_AGENT_SCOPE: agents
+      # Ключи моделей Джарвиса необязательны: без них Джарвис просто не включается, всё остальное работает.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    ports:
+      - "${MBOX_PUBLISH:-127.0.0.1:3000}:3000"
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    restart: unless-stopped
+    environment:
+      MBOX_DOMAIN: ${MBOX_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - mbox_caddy_data:/data
+      - mbox_caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  mbox_pgdata:
+  mbox_caddy_data:
+  mbox_caddy_config:

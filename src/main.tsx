@@ -13,7 +13,9 @@ import {
   History,
   KeyRound,
   LockKeyhole,
+  Plug,
   Plus,
+  Sparkles,
   Server,
   ShieldCheck,
   Sun,
@@ -27,10 +29,18 @@ import { AgentAvatar } from "./components/AgentAvatar";
 import { RUN_STALE_MS, agentFamily, effectiveStatus, isAgentWorking, isLeaseLive, liveRunOf } from "./lib/agents";
 import { fetchJson, saveEntity } from "./lib/api";
 import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
-import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
+import { agentStatusLabels, auditIsNoise, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
 import { filterTree, formatProps, parseProps, projectToTree, rollupBytes, sortTodos } from "./lib/tree";
 import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
+import { notifyDesktopSignedIn, notifyDesktopSignedOut } from "./lib/desktopAccount";
+import { InviteScreen } from "./pages/InviteScreen";
+import { IntegrationsBoard } from "./features/integrations/IntegrationsBoard";
+import { SessionsPanel } from "./features/accounts/SessionsPanel";
+import { SkillAccessBoard } from "./features/skills/SkillAccessBoard";
+import { InviteManager } from "./features/accounts/InviteManager";
+import { PasswordPanel } from "./features/accounts/PasswordPanel";
+import { accountErrorText } from "./features/accounts/accountErrors";
 import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
 import { TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
@@ -86,6 +96,11 @@ function App() {
       .finally(() => setAuthChecked(true));
   }, []);
 
+  const signedInUser = me.user?.id;
+  useEffect(() => { if (signedInUser) notifyDesktopSignedIn(); }, [signedInUser]);
+
+  const inviteToken = window.location.pathname.match(/^\/invite\/(mbox_invite_[A-Za-z0-9_-]+)\/?$/)?.[1];
+  if (inviteToken && !me.user) return <InviteScreen token={inviteToken} onJoined={setMe} />;
   if (!authChecked) return <ShellLoading />;
   if (!me.user) return <LoginScreen onLogin={setMe} />;
   return <Workspace user={me.user} onLogout={() => setMe({ user: null })} theme={theme} onThemeChange={setTheme} />;
@@ -93,10 +108,10 @@ function App() {
 function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
   // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
-  const data = useMboxData("", onLogout);
+  const data = useMboxData("", onLogout, user.role !== "owner");
   const realtime = useRealtime(data.reload);
   const agentNotices = useMemo(
-    () => [...realtime.notices, ...data.auditEvents.slice(0, 12).map(auditNotice)].slice(0, 12),
+    () => [...realtime.notices, ...data.auditEvents.filter((event) => !auditIsNoise(event)).slice(0, 12).map(auditNotice)].slice(0, 12),
     [realtime.notices, data.auditEvents],
   );
   // Текст и цвет пилюли раньше считались двумя независимыми useMemo с разными приоритетами:
@@ -206,6 +221,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
               data.reload();
             }}
             onLogout={async () => {
+              await notifyDesktopSignedOut();
               await fetch("/api/mbox/auth/logout", { method: "POST" });
               onLogout();
             }}
@@ -218,10 +234,12 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
             <SettingsBoard
               theme={theme}
               onThemeChange={onThemeChange}
-              server={<ServerBoard pulse={realtime.pulse} />}
+              server={user.role === "owner" ? <ServerBoard pulse={realtime.pulse} /> : undefined}
               access={<AccessBoard user={user} onLogout={onLogout} />}
               team={<TeamBoard user={user} projects={data.projects} />}
-              passwords={<PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} />}
+              skills={user.role === "owner" ? <SkillAccessBoard /> : undefined}
+              integrations={user.role === "owner" ? <IntegrationsBoard /> : undefined}
+              passwords={user.role === "owner" ? <PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} /> : undefined}
               logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
             />
           ),
@@ -561,15 +579,17 @@ function consoleTime(iso: string): string {
   return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-type SettingsTab = "appearance" | "server" | "access" | "team" | "passwords" | "logs";
+type SettingsTab = "appearance" | "server" | "access" | "team" | "skills" | "integrations" | "passwords" | "logs";
 
-function SettingsBoard({ server, access, team, passwords, logs, theme, onThemeChange }: { server: ReactNode; access: ReactNode; team: ReactNode; passwords: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+function SettingsBoard({ server, access, team, integrations, skills, passwords, logs, theme, onThemeChange }: { server?: ReactNode; access: ReactNode; team: ReactNode; integrations?: ReactNode; skills?: ReactNode; passwords?: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   const [tab, setTab] = useState<SettingsTab>("appearance");
   const content: Record<SettingsTab, ReactNode> = {
     appearance: <AppearanceSettings theme={theme} onChange={onThemeChange} />,
     server,
     access,
     team,
+    skills,
+    integrations,
     passwords,
     logs,
   };
@@ -579,18 +599,32 @@ function SettingsBoard({ server, access, team, passwords, logs, theme, onThemeCh
         <button role="tab" aria-selected={tab === "appearance"} className={tab === "appearance" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("appearance")}>
           <Contrast size={16} /> Интерфейс
         </button>
-        <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
-          <Server size={16} /> Сервер
-        </button>
+        {server && (
+          <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
+            <Server size={16} /> Сервер
+          </button>
+        )}
         <button role="tab" aria-selected={tab === "access"} className={tab === "access" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("access")}>
-          <ShieldCheck size={16} /> Доступ
+          <ShieldCheck size={16} /> Аккаунт
         </button>
         <button role="tab" aria-selected={tab === "team"} className={tab === "team" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("team")}>
           <GitBranch size={16} /> Команда
         </button>
-        <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
-          <LockKeyhole size={16} /> Пароли
-        </button>
+        {skills && (
+          <button role="tab" aria-selected={tab === "skills"} className={tab === "skills" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("skills")}>
+            <Sparkles size={16} /> Доступ к навыкам
+          </button>
+        )}
+        {integrations && (
+          <button role="tab" aria-selected={tab === "integrations"} className={tab === "integrations" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("integrations")}>
+            <Plug size={16} /> Интеграции
+          </button>
+        )}
+        {passwords && (
+          <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
+            <LockKeyhole size={16} /> Секреты
+          </button>
+        )}
         <button role="tab" aria-selected={tab === "logs"} className={tab === "logs" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("logs")}>
           <History size={16} /> Логи
         </button>
@@ -750,8 +784,11 @@ function ServerBoard({ pulse }: { pulse: number }) {
     <div className="content-grid server-grid">
       <Panel title="Сервер" icon={Server}>
         {/* Сборщик метрик на хосте может молча остановиться — старые цифры не должны выглядеть текущими. */}
-        {Date.now() - Date.parse(metrics.captured_at) > 10 * 60 * 1000 && (
-          <p className="error-text">Метрики устарели: последний снимок {formatDateTime(metrics.captured_at)}. На сервере не работает scripts/server_metrics_collector.sh.</p>
+        {metrics.source === "app" && (
+          <p className="error-text">Сборщик на хосте остановился{metrics.containers_captured_at ? ` (последний снимок ${formatDateTime(metrics.containers_captured_at)})` : ""}: цифры ниже — от самого приложения, список контейнеров устарел. Запустите scripts/server_metrics_collector.sh на сервере.</p>
+        )}
+        {Number(metrics.disk_total_mb) > 0 && Number(metrics.disk_used_mb) / Number(metrics.disk_total_mb) > 0.9 && (
+          <p className="error-text">Диск заполнен на {Math.round((Number(metrics.disk_used_mb) / Number(metrics.disk_total_mb)) * 100)}% — освободите место, иначе база и сборки перестанут записываться.</p>
         )}
         <div className="entity-list">
           <EntityLine title="Хост" value={metrics.hostname} />
@@ -852,18 +889,20 @@ function TodoForm({ projects, onSaved }: { projects: Project[]; onSaved: () => v
 }
 function AccessBoard({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
   return (
-    <div className="content-grid settings-grid">
-      <Panel title="Аккаунт" icon={ShieldCheck}>
+    <div className="content-grid settings-single-grid">
+      <Panel title="Профиль" icon={ShieldCheck}>
         <div className="entity-list">
-          <EntityLine title="Пользователь" value={`${user.username} · ${user.role}`} />
-          <EntityLine title="Новые аккаунты" value={user.role === "owner" ? "создаёт владелец" : "управляет владелец"} />
-          <EntityLine title="Права" value="private / agents / public" />
-          <button className="primary-action" onClick={async () => {
+          <EntityLine title="Логин" value={user.username} />
+          <EntityLine title="Роль" value={user.role === "owner" ? "владелец: все проекты, навыки и настройки" : "участник: проекты, навыки и документы, к которым вам дали доступ"} />
+          <button className="ghost-action" onClick={async () => {
+            await notifyDesktopSignedOut();
             await fetch("/api/mbox/auth/logout", { method: "POST" });
             onLogout();
           }}>Выйти</button>
         </div>
       </Panel>
+      <PasswordPanel />
+      <SessionsPanel onSignedOut={onLogout} />
     </div>
   );
 }
@@ -872,7 +911,7 @@ function TeamBoard({ user, projects }: { user: { username: string; role: string 
   return (
     <div className="content-grid settings-single-grid">
       {user.role === "owner"
-        ? <AccountManager projects={projects} />
+        ? <><InviteManager projects={projects} /><AccountManager projects={projects} /></>
         : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
       <AgentsOnThisComputer username={user.username} />
     </div>
@@ -950,7 +989,7 @@ function PasswordsBoard({ secrets, projects, onSaved }: { secrets: SecretSummary
 
   return (
     <div className="content-grid settings-single-grid">
-      <Panel title="Пароли" icon={LockKeyhole}>
+      <Panel title="Секреты для агентов" icon={LockKeyhole}>
         <div className="entity-list">
           <button className="primary-action add-secret-action" onClick={() => {
             setFormOpen((value) => !value);
@@ -1023,6 +1062,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newJarvis, setNewJarvis] = useState(false);
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [draftProjects, setDraftProjects] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState("");
@@ -1044,12 +1084,12 @@ function AccountManager({ projects }: { projects: Project[] }) {
       await fetchJson("/api/mbox/admin/users", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, email, password, project_ids: projectIds }),
+        body: JSON.stringify({ username, email, password, project_ids: projectIds, jarvis_enabled: newJarvis }),
       });
-      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]);
+      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]); setNewJarvis(false);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось создать аккаунт");
+      setError(accountErrorText(cause, "Не удалось создать аккаунт"));
     } finally {
       setBusy("");
     }
@@ -1091,7 +1131,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
   }
 
   return (
-    <Panel title="Команда и общие проекты" icon={KeyRound}>
+    <Panel title="Аккаунты команды" icon={KeyRound}>
       <div className="account-manager">
         <form className="account-create" onSubmit={createAccount}>
           <div className="account-create-fields">
@@ -1100,6 +1140,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
             <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль, минимум 8 знаков" type="password" minLength={8} autoComplete="new-password" required />
           </div>
           <ProjectAccessPicker projects={projects} selected={projectIds} onChange={setProjectIds} />
+          <label className="account-jarvis"><input type="checkbox" checked={newJarvis} onChange={(event) => setNewJarvis(event.target.checked)} />Дать доступ к Джарвису</label>
           <button className="primary-action" disabled={busy === "new"} type="submit"><Plus size={16} />{busy === "new" ? "Создаю…" : "Создать аккаунт"}</button>
         </form>
         {error && <div className="account-error" role="alert">{error}</div>}

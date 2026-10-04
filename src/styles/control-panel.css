@@ -1350,3 +1350,53 @@
 .agent-pref-platforms button.is-active { background: var(--accent-fill); color: var(--on-accent); }
 @media (prefers-reduced-motion: reduce) { .agent-pref-row input[type="checkbox"], .agent-pref-row input[type="checkbox"]::after { transition: none; } }
 .account-row.agent-pref-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+
+.invite-number { display: grid; gap: var(--space-1); color: var(--text-muted); font-size: var(--text-xs); }
+.account-create-fields .password-field { min-width: 0; height: 38px; }
+
+/* Интеграции: внешние API с ключами */
+.integration-form { display: grid; gap: var(--space-3); }
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-3); }
+.integration-wide { grid-column: 1 / -1; }
+.integration-hint { margin: 0; max-width: 72ch; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.integration-docs { display: inline-flex; align-items: center; gap: var(--space-1); width: fit-content; color: var(--accent-color); font-size: var(--text-xs); text-decoration: none; }
+.integration-docs:hover { text-decoration: underline; }
+.integration-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.integration-result { font-size: var(--text-sm); }
+.integration-result.is-ok { color: var(--state-ok-soft); }
+.integration-result.is-bad { color: var(--state-danger); }
+.integration-form select,
+.integration-form input:not([type="checkbox"]) { min-width: 0; height: 36px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-main); font-size: var(--text-sm); }
+.integration-form .password-field { height: 36px; }
+.integration-form .password-field input { height: auto; padding: 0 var(--space-3); border: 0; background: transparent; }
+.integration-steps { display: grid; gap: var(--space-1); margin: 0; padding-left: var(--space-5); color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.integration-steps a { color: var(--accent-color); }
+.integration-copy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.integration-copy code { min-width: 0; overflow-wrap: anywhere; padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); background: var(--code-bg); color: var(--code-text); font-family: var(--font-mono); font-size: var(--text-xs); }
+.integration-mails { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.integration-mails li { display: grid; gap: 2px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--element-bg); }
+.integration-mails li.is-unread strong { font-weight: var(--weight-bold); }
+.integration-mails span,
+.integration-mails small { color: var(--text-muted); font-size: var(--text-xs); }
+.integration-mails small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Сессии аккаунта */
+.session-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: var(--border-width) solid var(--border-color); }
+.session-row > svg { color: var(--text-muted); }
+.session-row strong { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.session-row .meta-chip { margin-left: 0; }
+
+/* Кнопки действий в формах и списках настроек — по размеру подписи, а не на всю ширину сетки. */
+:is(.manual-form, .entity-list, .secret-form) > :is(.primary-action, .ghost-action, .danger-action) { justify-self: start; }
+
+/* Матрица доступа к навыкам */
+.skill-matrix { display: grid; overflow-x: auto; font-size: var(--text-sm); }
+.skill-matrix-head,
+.skill-matrix-row { display: grid; grid-template-columns: minmax(220px, 1fr) 72px repeat(var(--skill-cols, 0), minmax(84px, 120px)); align-items: center; gap: var(--space-2); min-width: min-content; padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-color); }
+.skill-matrix-head { color: var(--text-muted); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+.skill-matrix-head span:not(:first-child) { overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.skill-matrix-name { display: grid; gap: 2px; min-width: 0; }
+.skill-matrix-name small { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.skill-matrix-check { display: grid; place-items: center; min-height: 32px; }
+.skill-matrix-check input { width: 16px; height: 16px; accent-color: var(--accent-color); }
+.skill-matrix-check input:disabled { opacity: .5; }

@@ -3,6 +3,7 @@ import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, 
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
+import { CliAuthBanner } from "./CliAuthBanner";
 import { agentFamily, effectiveStatus, liveRunOf, CLOUD_AGENTS, agentDisplayName, isCloudAgent } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
@@ -1964,6 +1965,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             </nav>
           )}
           <div className="console-main">
+          <CliAuthBanner families={(() => { const key = peer ? agentFamily(peer)?.key : ""; return key === "claude" || key === "codex" ? [key] : key === "jarvis" ? [] : ["claude", "codex"]; })()} />
           {placeThreads(<div className="console-threads">
             <button
               type="button"
@@ -2062,7 +2064,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <strong className="agent-name">{peer ? `Чат с ${peer}` : "Общий чат"}{cloudChat && <Cloud className="agent-cloud-mark" size={14} strokeWidth={2.2} aria-label="в облаке" />}</strong>
                 <p>{peer
                   ? `Сообщения уходят только ${peer}${cloudChat ? " в облаке — он работает на сервере MBOX и отвечает при выключенном компьютере" : " на этом компьютере"}, @ писать не нужно. Каждый чат — отдельная сессия: агент помнит только этот разговор.`
-                  : "Отвечает Джарвис. Позвать другого агента — @Имя, команды — /help."}</p>
+                  : jarvisEnabled
+                    ? "Отвечает Джарвис. Позвать другого агента — @Имя, команды — /help."
+                    : "Джарвис вам не подключён — пишите своему агенту: Claude или ChatGPT во вкладках."}</p>
               </div>
             )}
             {lines.length > visibleLines.length && (

@@ -226,6 +226,9 @@ export type ServerMetrics = {
   disk_total_mb: number;
   docker_containers: Array<Record<string, string>>;
   captured_at: string;
+  /** host — снимок сборщика на хосте; app — сборщик остановлен, цифры от самого приложения. */
+  source?: "host" | "app";
+  containers_captured_at?: string | null;
 };
 
 export type GroqUsageByModel = {

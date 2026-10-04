@@ -7,7 +7,7 @@
  * Список путей берётся из `git ls-files` (только версионируемые файлы, .gitignore уже
  * учтён репозиторием). Запускать из корня репозитория, который нужно опубликовать.
  *
- * env: MBOX_URL, MBOX_USERNAME (по умолчанию Admin), MBOX_PASSWORD, MBOX_AGENT_NAME
+ * env: MBOX_URL, MBOX_USERNAME (обязателен без MBOX_TOKEN), MBOX_PASSWORD, MBOX_AGENT_NAME
  * Запуск: node scripts/publish-repo-structure.mjs [имя проекта в MBOX]
  *         (по умолчанию — имя из package.json текущего репозитория)
  */
@@ -16,7 +16,7 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const baseUrl = process.env.MBOX_URL;
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const password = process.env.MBOX_PASSWORD;
 const agentName = process.env.MBOX_AGENT_NAME || "local-agent";
 

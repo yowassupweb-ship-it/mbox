@@ -10,6 +10,8 @@ import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { notifyStorageChanged } from "./storageApi";
 
+const StorageImage = lazy(() => import("./StorageImage"));
+const PdfViewer = lazy(() => import("./PdfViewer"));
 const UniverDocumentViewer = lazy(() => import("./UniverDocumentViewer").then((module) => ({ default: module.UniverDocumentViewer })));
 
 /** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
@@ -54,6 +56,7 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
   const [selected, setSelected] = useState<StorageObject | null>(null);
   const [previewText, setPreviewText] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
+  const [pdfVersion, setPdfVersion] = useState(0);
   const [previewError, setPreviewError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -227,8 +230,35 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
 
   function renderPreview(object: StorageObject) {
     const source = `/api/mbox/storage/file?key=${encodeURIComponent(object.key)}`;
-    if (/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i.test(object.key)) return <img className="wb-storage-preview-image" src={source} alt={object.key.split("/").pop() || object.key} />;
-    if (/\.pdf$/i.test(object.key)) return <iframe className="wb-storage-preview-frame" title={object.key} src={source} />;
+    if (/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i.test(object.key)) {
+      const name = object.key.split("/").pop() || object.key;
+      return (
+        <Suspense fallback={<OctopusSpinner />}>
+          <StorageImage
+            src={source}
+            name={name}
+            version={pdfVersion}
+            onSave={/\.(png|jpe?g|webp)$/i.test(object.key) ? async (blob) => { await uploadToStorage(object.key, blob); notifyStorageChanged("tree"); setPdfVersion((value) => value + 1); } : undefined}
+            onDownload={() => void downloadFile(object.key)}
+          />
+        </Suspense>
+      );
+    }
+    if (/\.pdf$/i.test(object.key)) {
+      const name = object.key.split("/").pop() || object.key;
+      return (
+        <Suspense fallback={<OctopusSpinner />}>
+          <PdfViewer
+            source={{ url: source }}
+            version={`${object.key}:${pdfVersion}`}
+            name={name}
+            memoryKey={`s3:${object.key}`}
+            onSave={async (bytes) => { await uploadToStorage(object.key, new Blob([bytes as BlobPart], { type: "application/pdf" })); notifyStorageChanged("tree"); setPdfVersion((value) => value + 1); }}
+            onDownload={() => void downloadFile(object.key)}
+          />
+        </Suspense>
+      );
+    }
     if (/\.(mp4|webm|mov)$/i.test(object.key)) return <video className="wb-storage-preview-media" src={source} controls />;
     if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(object.key)) return <audio className="wb-storage-preview-audio" src={source} controls />;
     if (/\.docx$/i.test(object.key) && object.size <= 20 * 1024 * 1024) return previewError ? <div className="wb-doc-missing">{previewError}</div> : previewHtml ? <Suspense fallback={<OctopusSpinner />}><UniverDocumentViewer html={previewHtml} title={object.key.split("/").pop() || object.key} /></Suspense> : <OctopusSpinner />;

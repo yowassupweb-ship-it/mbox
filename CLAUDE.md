@@ -112,8 +112,8 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    только ключ папки + относительный путь; запись в `.git` и исполняемые файлы (.exe/.cmd/.ps1…) отклоняется
    в `mbox-desktop/main.js`. Без запущенного приложения операции с файлами недоступны (`workspace_offline`).
 14. **Заметки и хранилище S3.** `server/notes.mjs` (таблица `notes`, `/api/mbox/notes`) и `server/storage.mjs`
-   (`storage_settings`, `/api/mbox/storage/*`) — общие модули прод/dev, таблицы создаются при старте, доступ только
-   владельцу. S3 — Yandex Object Storage с подписью SigV4 на `node:crypto` без SDK (сверена с эталонами AWS);
+   (`storage_settings`, `/api/mbox/storage/*`) — общие модули прод/dev, таблицы создаются при старте, доступ владельцу и
+   участникам (участникам — только папки их проектов, см. п. 19). S3 — Yandex Object Storage с подписью SigV4 на `node:crypto` без SDK (сверена с эталонами AWS);
    секрет ключа шифруется `pgp_sym_encrypt` тем же `MBOX_SECRET_KEY`. Загрузка идёт потоком через сервер
    (`POST /storage/upload?key=`, до 512 МБ), скачивание — временной подписанной ссылкой.
 15. **MBOX Desktop несёт интерфейс в себе (с 0.1.12).** Окно грузит `mbox://app/` из `mbox-desktop/ui`
@@ -189,6 +189,66 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    настройках MBOX: `users.agent_prefs` (`GET/PUT /api/mbox/account/agents`, «Настройки → Команда → Агенты на этом компьютере»); служба
    опрашивает это раз в 10 с. Интерфейс (`src/lib/agentPrefs.ts`) прячет выключенного агента из чата, а MBOX Desktop (`mbox-desktop/main.js`,
    `agents-config.json`) останавливает его и не поднимает при старте. `Dockerfile.mbox` копирует `scripts/` — без этого набор не отдастся.
+
+26. **Приглашения, вход и вход в CLI.** Друзья попадают в MBOX только по ссылке `/invite/<токен>` (`server/accounts.mjs`:
+   `handlePublicInvite`, `/admin/invites`; страница `src/pages/InviteScreen.tsx`, управление — «Настройки → Команда → Приглашения»).
+   В приглашении выбираются проекты, число использований, срок и флаг Джарвиса (`account_invites.jarvis_enabled`, по умолчанию выключен);
+   место занимается атомарно, отзыв — `revoked_at`. Логин нечувствителен к регистру (`lower(username)`), дефолтного «Admin» нигде нет:
+   скрипты и наблюдатели требуют `MBOX_TOKEN` либо `MBOX_USERNAME` + `MBOX_PASSWORD`. Смена пароля — `POST /account/password`
+   (закрывает остальные сессии), `GET /account/security` сообщает, что у аккаунта всё ещё пароль из сида.
+   Вход в локальные Claude Code / Codex: `scripts/cli-auth.mjs` (`claude auth status|login`, `codex login status|login`), состояние
+   присылает служба `mbox-agent` (`PUT /account/agents/cli`, каждые 5 с, она же забирает запрос «войти/выйти»; хранится в `users.agent_cli`),
+   в MBOX Desktop то же через мост `cliStatus/cliLogin/cliLogout`. Кнопка — `CliAuthBanner` над чатом. Без входа служба не поднимает наблюдателя.
+   Dev-API в `vite.config.ts` этих ручек не повторяет.
+
+27. **Свой MBOX и Desktop у коллег.** `node scripts/selfhost-setup.mjs` + `docker-compose.selfhost.yml` поднимают базу и приложение
+   (инструкция — `docs/self-host.md`); владельца создаёт `ensureInitialOwner` из `MBOX_ADMIN_USERNAME/PASSWORD`, пока у сидового владельца
+   пароль по умолчанию. Сид «Admin» создаётся только если в базе нет ни одного владельца. MBOX Desktop: после входа главный процесс сам
+   выпускает личный токен (`ensureDesktopCredentials`, хранится под `safeStorage`, отзывается при выходе) и запускает наблюдателей под этим
+   аккаунтом; сервер выбирается на экране входа («другой сервер», `server.json` в userData, `MBOX_URL` главнее), обновления приложения — всегда
+   с основного сервера. Наблюдателям Desktop по-прежнему нужен системный Node.js; MCP-инструменты MBOX у них есть только при полном наборе
+   (`mbox-agent install`), в Desktop у чужого ПК их зависимостей нет.
+
+28. **Документы: права и общий доступ.** `documents.access_mode` (`edit|view` для тех, кто видит документ по уровню доступа) и
+   `document_shares` (поимённо, `view|edit`). Права считает `permissionsFor` в `server/documents.mjs`: GET отдаёт `is_owner`/`can_edit`/`role`,
+   PATCH/DELETE без права правки — 403 `read_only`; доступ меняет и выдаёт только владелец (`/documents/:id/shares`, справочник людей —
+   `/api/mbox/directory`). Редактор читателя — `readOnly`. Джарвис правит документы теми же правилами (`update_document`).
+   Джарвис умеет документы и таблицы (`search/read/create/update_document`, `search_tables/read_table/write_table_cells`) и браузер владельца
+   (`browser_*` через `runBrowserOp`, группа `browser`). Совместное редактирование — по-прежнему снимками с присутствием коллег; настоящего OT/CRDT нет.
+   Просмотр и правка файлов: `PdfViewer.tsx` (pdf.js legacy), `ImageEditor.tsx`, `StorageImage.tsx` — см. §10.14 доктрины.
+
+29. **Интеграции (внешние API с ключами).** `server/integrations.mjs`, «Настройки → Интеграции» (только владелец). Готовые: `topvisor`,
+   `yandex_webmaster`, `yandex_metrica` — ключи берутся из тех же настроек, что и у SEO-мастера (`seo_settings`) или из переменных окружения
+   (`TOPVISOR_API_KEY`, `TOPVISOR_USER_ID`, `YANDEX_WEBMASTER_TOKEN`, `YANDEX_METRICA_TOKEN`…); любое своё API — таблица `integrations`
+   (адрес только https и не внутренний, способ входа bearer/oauth/header/basic/query, ключ под `pgp_sym_encrypt`). Агенты и Джарвис ходят через
+   MBOX: MCP `integration_list` / `integration_call`, инструменты Джарвиса с теми же именами (группа `integrations`); путь — только относительный,
+   без `..`, ответ режется до 60 000 знаков. Topvisor отвечает HTTP 200 и при неверном ключе — ошибку ищем в `errors` тела.
+
+30. **Gmail.** Во встроенном браузере Google не пускает во вход («браузер или приложение небезопасны») — и подделкой браузера это не лечится, так что
+   почта подключена по официальному OAuth (`server/gmail.mjs`): владелец вносит Client ID/секрет «Веб-приложения» Google Cloud в «Настройки → Интеграции →
+   Gmail», нажимает «Подключить» — согласие идёт в обычном браузере, адрес возврата `/api/mbox/oauth/google/callback` (единственный GET без сессии;
+   подлинность — одноразовый `oauth_states.state`, 10 минут). Постоянный токен и секрет клиента — `oauth_connections` под `pgp_sym_encrypt`. Агентам:
+   MCP `gmail_search/read/draft/send`, Джарвису — те же (группа `mail`); отправка только по прямой просьбе, по умолчанию — черновик. Экран согласия Google
+   должен быть «В производство», иначе токен живёт 7 дней.
+   Тот же вход открывает Документы, Таблицы и Диск владельца (`server/google-docs.mjs`, права `GOOGLE_SCOPES.docs`; старое подключение только к почте
+   надо переподключить): MCP/Джарвис `gdoc_search/read/append/replace/create/import`, сервисы `google_drive|google_docs|google_sheets` в `integration_call`.
+   Редактор Google Документов внутри MBOX показать нельзя (Google запрещает встраивание и вход во встроенном браузере) — «Открыть в Google» уходит в системный браузер.
+   Не путать с `read_google_doc` и др. (сервисный аккаунт агента, `docs/gdocs-mcp.md`).
+
+31. **Агент в браузере: курсор, настоящий ввод, просьба о помощи.** Набор функций внутри страницы — `mbox-desktop/agent-kit.js` (курсор с подписью и кругом
+   клика, `locate`, `blockers` — капча/вход/код/защита от ботов/cookie/paywall, `extract`, `findText`, `checkWait`), действия в `mbox-desktop/browser.js`
+   (`agentAction`): настоящие события мыши и клавиатуры через `sendInputEvent`/`insertText` (click/double/right/hover/drag/type/press/wait/back/forward/reload/
+   new_tab/move_cursor; пароли, карты и коды агент не печатает — `sensitive_field`). Человек управляет агентом из вкладки: пауза/продолжить/стоп
+   (`setAgentControl`, ответы `paused_by_human`/`stopped_by_human`). Агент застрял → MCP `browser_ask_help` (Джарвис — тоже): над страницей панель «Агент просит
+   помощи» с комментарием, элемент в `agent_inbox` (`item_type=help`) и уведомление; агент ждёт ответа длинными запросами до 40 с (`browser_wait_help`);
+   состояние просьб — в памяти процесса (`server/browser-agent.mjs`, `/api/mbox/browser/help*`, только владелец). Новый файл десктопа обязан быть в `files`
+   `mbox-desktop/package.json`, иначе в сборке модуля нет. Версия MBOX Desktop с `agentControl` в мосту — 0.1.58+.
+
+32. **Агенты и хранилище S3.** Облачные и локальные агенты работают с S3 через MCP `storage_list|read|write|mkdir|link|delete` (ручки
+   `/api/mbox/storage/read` и `/write` в `server/storage.mjs`, остальное — прежние `objects|folder|link|object`), Джарвис — через группу `storage`
+   (`storage_list|read|write|link`, `storageForAgent` в процессе, права — `storageAccessFor`). Читаются txt/md/json/csv/код, .docx (mammoth),
+   .xlsx (`extractText`) и картинки до 5 МБ; pdf и прочее — только ссылкой. Запись — текст/base64 до 25 МБ, `overwrite=false` по умолчанию.
+   Участник видит и пишет только `projects/<его id>/` и доступные заметки; настройки бакета и ключи агентам не отдаются.
 
 ## Работа агента с MBOX
 
