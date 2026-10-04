@@ -4,6 +4,7 @@ import { CheckCircle2, CircleAlert, ExternalLink, Plug, Plus, Trash2 } from "luc
 import { fetchJson } from "../../lib/api";
 import { Panel, PasswordInput } from "../../ui";
 import { askConfirm } from "../../ui/askText";
+import { GmailCard } from "./GmailCard";
 
 type Field = { key: string; label: string; secret: boolean; optional: boolean; filled: boolean; source: string; value: string };
 type Integration = {
@@ -128,6 +129,7 @@ export function IntegrationsBoard() {
         <p className="integration-hint">Впишите ключи один раз — агенты (Claude, ChatGPT) и Джарвис смогут обращаться к этим сервисам через MBOX сами. Сами ключи хранятся на сервере в зашифрованном виде и агентам не показываются. По умолчанию агентам велено только читать данные, не менять их во внешних сервисах.</p>
         {error && <p className="account-error" role="alert">{error}</p>}
       </Panel>
+      <GmailCard />
       {items.map((item) => <IntegrationCard key={item.service} item={item} authTypes={authTypes} onChanged={setItems} />)}
       <Panel title="Своё API" icon={Plus}>
         {adding ? (

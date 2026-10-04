@@ -34,6 +34,7 @@ import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { handleBrowserAgentApi, runBrowserOp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
+import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
 import { callIntegration, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
 
@@ -53,6 +54,7 @@ configureJarvis({
     for (const client of realtimeClients) if (client.mboxOwner) delivered += sendOpenTab(new Set([client]), client.mboxUserId, event);
     return delivered;
   },
+  gmail: { search: (userId, input) => gmailSearch(query, userId, input), read: (userId, id) => gmailRead(query, userId, id), draft: (userId, input) => gmailDraft(query, userId, input), send: (userId, input) => gmailSend(query, userId, input) },
   integrations: { list: (...args) => listIntegrations(query, ...args), call: (id, input) => callIntegration(query, id, input) },
   browserOp: (userId, action, input = {}) => runBrowserOp({ clients: realtimeClients, userId, action, tab: input.tab, args: input.args, actor: "Джарвис", note: input.note }),
 });
@@ -1233,6 +1235,7 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { user: withChatDefaults(await currentUser(req)) });
   }
 
+  if (url.pathname === "/api/mbox/oauth/google/callback" && req.method === "GET") { await handleGoogleCallback({ res, url, query }); return; }
   if (await handlePublicInvite({ req, res, url, query, readBody, sendJson, startSession: createSessionForUser })) return;
 
   const user = await requireUser(req, res);
@@ -1267,6 +1270,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user, owner: isOwner(user), actor: actorFromReq(req), clients: realtimeClients })) return;
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
+  if (await handleGmailApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, origin: publicOrigin(req) })) return;
   if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req) })) return;
   if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: scope.all })) return;
 
@@ -3418,6 +3422,7 @@ ensureTablesSchema(query).catch((error) => console.error(`tables schema: ${error
 ensureDocumentsSchema(query).catch((error) => console.error(`documents schema: ${error.message}`));
 ensureChatThreadsSchema(query).catch((error) => console.error(`chat threads schema: ${error.message}`));
 ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
+ensureGmailSchema(query).catch((error) => console.error(`gmail schema: ${error.message}`));
 ensureIntegrationsSchema(query).catch((error) => console.error(`integrations schema: ${error.message}`));
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));

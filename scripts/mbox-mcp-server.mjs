@@ -2085,6 +2085,72 @@ server.registerTool(
   },
 );
 
+// ─── Gmail владельца (server/gmail.mjs): вход в Google делается один раз в «Настройки → Интеграции → Gmail» ─────────────────
+
+async function gmailFetch(path, init) {
+  try { return await mboxFetch(path, init); } catch (error) {
+    const raw = String(error?.message || error);
+    const body = raw.match(/^MBOX \d+: ([\s\S]*)$/)?.[1];
+    try { throw new Error(JSON.parse(body).error); } catch (inner) { throw inner instanceof SyntaxError ? new Error(raw) : inner; }
+  }
+}
+
+server.registerTool(
+  "gmail_search",
+  {
+    title: "Search the owner's Gmail",
+    description: "Search the owner's Gmail with Gmail query syntax (is:unread, from:x@y.ru, subject:invoice, newer_than:7d, has:attachment). Returns id, from, subject, date, snippet. Empty query = latest mail. If Gmail is not connected, tell the owner to connect it in MBOX → Settings → Integrations → Gmail.",
+    inputSchema: { query: z.string().default(""), max: z.number().optional() },
+  },
+  async ({ query, max }) => {
+    try {
+      const result = await gmailFetch(`/api/mbox/gmail/search?q=${encodeURIComponent(query)}&max=${max || 10}`);
+      return textResult(result.messages.length ? result.messages.map((item) => `${item.unread ? "* " : ""}id ${item.id} | ${item.date} | ${item.from}\n   ${item.subject} - ${item.snippet.slice(0, 160)}`).join("\n") : "no messages");
+    } catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+server.registerTool(
+  "gmail_read",
+  {
+    title: "Read a Gmail message",
+    description: "Read one message by id from gmail_search: headers, plain-text body (HTML stripped), attachment names.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try {
+      const mail = await gmailFetch(`/api/mbox/gmail/message?id=${encodeURIComponent(id)}`);
+      return textResult(`From: ${mail.from}\nTo: ${mail.to}${mail.cc ? `\nCc: ${mail.cc}` : ""}\nDate: ${mail.date}\nSubject: ${mail.subject}${mail.attachments.length ? `\nAttachments: ${mail.attachments.map((file) => `${file.filename} (${file.size} B)`).join(", ")}` : ""}\n\n${mail.body}`);
+    } catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+server.registerTool(
+  "gmail_draft",
+  {
+    title: "Create a Gmail draft",
+    description: "Create a DRAFT in the owner's Gmail (nothing is sent). Pass reply_to_id to keep it in the same thread. Prefer this over gmail_send: the owner reviews and sends it.",
+    inputSchema: { to: z.string(), subject: z.string().default(""), body: z.string(), cc: z.string().optional(), reply_to_id: z.string().optional() },
+  },
+  async (input) => {
+    try { const draft = await gmailFetch("/api/mbox/gmail/draft", { method: "POST", body: JSON.stringify(input) }); return textResult(`Draft created (id ${draft.draft_id}). It is in Gmail Drafts; nothing was sent.`); }
+    catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
+server.registerTool(
+  "gmail_send",
+  {
+    title: "Send a Gmail message",
+    description: "SEND an email from the owner's Gmail. Irreversible and leaves the building: call it only when the owner explicitly asked to send and has seen or dictated the recipient and text. Otherwise use gmail_draft.",
+    inputSchema: { to: z.string(), subject: z.string().default(""), body: z.string(), cc: z.string().optional(), reply_to_id: z.string().optional() },
+  },
+  async (input) => {
+    try { const sent = await gmailFetch("/api/mbox/gmail/send", { method: "POST", body: JSON.stringify(input) }); return textResult(`Sent (id ${sent.id}).`); }
+    catch (error) { return textResult(`Gmail: ${error.message}`); }
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

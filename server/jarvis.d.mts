@@ -11,6 +11,8 @@ export type JarvisDeps = {
   /** Открыть вкладку в окнах пользователя (без userId — владельца): созданное агентом появляется на глазах. */
   openTab?: (userId: string | null, event: Record<string, unknown>) => number;
   /** Действие во встроенном браузере пользователя (MBOX Desktop); только для владельца. */
+  /** Gmail владельца (server/gmail.mjs). */
+  gmail?: { search: (userId: string, input: Record<string, unknown>) => Promise<Row>; read: (userId: string, id: string) => Promise<Row>; draft: (userId: string, input: Record<string, unknown>) => Promise<Row>; send: (userId: string, input: Record<string, unknown>) => Promise<Row> };
   /** Внешние API с ключами владельца (server/integrations.mjs). */
   integrations?: { list: () => Promise<Row[]>; call: (service: string, input: Record<string, unknown>) => Promise<Row> };
   browserOp?: (userId: string, action: string, input: { tab?: string; args?: Record<string, unknown>; note?: string }) => Promise<Record<string, any>>;

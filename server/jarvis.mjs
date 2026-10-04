@@ -18,9 +18,10 @@ let recordMemoryAction;
 let openTab;
 let browserOp;
 let integrations;
+let gmail;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -615,7 +616,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
-  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill",
+  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "gmail_draft", "gmail_send",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1499,6 +1500,38 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "gmail_search",
+      description: "Найти письма в Gmail владельца: от кого, тема, дата, фрагмент, непрочитанное. query — как в поиске Gmail (is:unread, from:ivan@x.ru, subject:счёт, newer_than:7d, has:attachment). Пусто — последние письма.",
+      parameters: { type: "object", properties: { query: { type: "string" }, max: { type: "number", description: "Сколько писем, до 25" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_read",
+      description: "Прочитать письмо Gmail целиком по id из gmail_search: отправитель, получатели, тема, текст, вложения.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_draft",
+      description: "Создать ЧЕРНОВИК письма в Gmail владельца (ничего не отправляется). Для ответа передай reply_to_id — письмо встанет в ту же цепочку. Предпочитай черновик отправке: человек просмотрит и отправит сам.",
+      parameters: { type: "object", properties: { to: { type: "string" }, cc: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, reply_to_id: { type: "string" } }, required: ["to", "body"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gmail_send",
+      description: "ОТПРАВИТЬ письмо из Gmail владельца. Необратимо и уходит наружу: вызывай только если человек прямо попросил отправить и текст с адресатом он уже видел или продиктовал; иначе сделай gmail_draft.",
+      parameters: { type: "object", properties: { to: { type: "string" }, cc: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, reply_to_id: { type: "string" } }, required: ["to", "body"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1708,6 +1741,11 @@ export const TOOL_GROUPS = {
     // группы notes не было, Джарвис брал search_memory и правил похоже названную запись памяти (#318).
     match: /(заметк|заметок|заметке|заметку|заметки|запиш[иу] себе|блокнот)/,
     tools: ["search_notes", "read_note", "create_note", "update_note"],
+  },
+  mail: {
+    label: "почта владельца в Gmail: найти и прочитать письма, подготовить черновик, отправить (только по прямой просьбе)",
+    match: /(почт|письм|gmail|имейл|email|e-mail|inbox|входящ|ответь (ему|ей|им)|отправь (письмо|ему|ей)|рассылк)/,
+    tools: ["gmail_search", "gmail_read", "gmail_draft", "gmail_send"],
   },
   integrations: {
     label: "внешние API с ключами владельца: Topvisor (позиции, проекты, аудит), Яндекс Вебмастер и Метрика, любые добавленные API",
@@ -2985,6 +3023,27 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars });
     if (result.ok === false && (!result.status || result.error === "api_error")) return `API: ${result.message || result.error}`;
     return `HTTP ${result.status}${result.ok ? "" : " (ошибка)"}\n${typeof result.data === "string" ? result.data : JSON.stringify(result.data)}${result.truncated ? `\n[ответ обрезан: ${result.total_chars} символов; ${result.hint}]` : ""}`;
+  }
+
+  if (name.startsWith("gmail_")) {
+    if (!gmail) return "почта недоступна в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "почта подключена только у владельца MBOX";
+    try {
+      if (name === "gmail_search") {
+        const result = await gmail.search(String(viewer.userId), { q: args.query, max: args.max });
+        return result.messages.length ? result.messages.map((item) => `${item.unread ? "● " : ""}id ${item.id} · ${item.date} · ${item.from}\n   ${item.subject} — ${item.snippet.slice(0, 140)}`).join("\n") : "писем не нашлось";
+      }
+      if (name === "gmail_read") {
+        const mail = await gmail.read(String(viewer.userId), String(args.id || ""));
+        return `От: ${mail.from}\nКому: ${mail.to}${mail.cc ? `\nКопия: ${mail.cc}` : ""}\nДата: ${mail.date}\nТема: ${mail.subject}${mail.attachments.length ? `\nВложения: ${mail.attachments.map((file) => `${file.filename} (${file.size} Б)`).join(", ")}` : ""}\n\n${mail.body}`;
+      }
+      const input = { to: args.to, cc: args.cc, subject: args.subject, body: args.body, reply_to_id: args.reply_to_id };
+      if (name === "gmail_draft") { const draft = await gmail.draft(String(viewer.userId), input); return `черновик создан (id ${draft.draft_id}) — он лежит в Gmail в «Черновиках», ничего не отправлено`; }
+      const sent = await gmail.send(String(viewer.userId), input);
+      return `письмо отправлено (id ${sent.id})`;
+    } catch (error) {
+      return `Gmail: ${error.message}`;
+    }
   }
 
   // Встроенный браузер владельца: тот же путь, что у MCP browser_* (окно MBOX Desktop выполняет действие с подсветкой).
