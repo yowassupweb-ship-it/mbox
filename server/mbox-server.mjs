@@ -33,6 +33,7 @@ import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { handleBrowserAgentApi } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
+import { handleVkTourBot } from "./vk-tour-bot.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -3375,6 +3376,7 @@ const httpServer = http.createServer(async (req, res) => {
     });
   }
   try {
+    if (await handleVkTourBot({ req, res, url, query, readBody })) return;
     if (url.pathname.startsWith("/api/mbox/")) return await handleApi(req, res, url);
     // Заметка по ссылке (/n/<токен>) — без входа в MBOX, доступ определяет только токен.
     if (url.pathname.startsWith("/api/share/")) {

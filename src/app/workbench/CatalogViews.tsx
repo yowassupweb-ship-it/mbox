@@ -117,6 +117,7 @@ function tileColor(name: string) {
 
 /** Значки инструментов из набора MBOX (public/assets/icons/tools) — важнее картинки из каталога сервера. */
 const TOOL_IMAGES: Record<string, string> = {
+  "vk-tour-bot": "/assets/icons/tools/vk-tour-bot.png",
   "tour-feed": "/assets/icons/tools/tour-feed.png",
   "wordstat-api": "/assets/icons/tools/wordstat-api.png",
   "topvisor-api": "/assets/icons/tools/topvisor-api.png",

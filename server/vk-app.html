@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Туры</title>
+<style>
+  :root { color-scheme: light dark; --bg: #ebedf0; --card: #fff; --text: #000; --muted: #818c99; --accent: #2688eb; --accent-text: #fff; --secondary: #f2f3f5; --secondary-text: #2688eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0a0a0a; --card: #19191a; --text: #e1e3e6; --muted: #76787a; --accent: #529ef4; --secondary: #2c2d2e; --secondary-text: #e1e3e6; } }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 12px 12px calc(24px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--card); border-radius: 12px; overflow: hidden; }
+  .cover { display: block; width: 100%; aspect-ratio: 1200 / 630; object-fit: cover; background: var(--secondary); }
+  .body { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 6px; }
+  h2 { margin: 0; font-size: 17px; font-weight: 700; }
+  .row { margin: 0; }
+  .label { color: var(--muted); }
+  .price { font-weight: 600; }
+  .button { display: block; box-sizing: border-box; width: 100%; padding: 11px 16px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
+  .button.secondary { background: var(--secondary); color: var(--secondary-text); }
+  .button[disabled] { opacity: 0.6; cursor: default; }
+  .body .button { margin-top: 8px; }
+  .panel { background: var(--card); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
+  .panel p { margin: 0; color: var(--muted); }
+  .spinner { margin: 48px auto; width: 28px; height: 28px; border: 3px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main id="app"><div class="spinner"></div></main>
+<script src="https://unpkg.com/@vkontakte/vk-bridge@3.0.2/dist/browser.min.js"></script>
+<script>
+  (function () {
+    var bridge = window.vkBridge;
+    if (bridge) bridge.send("VKWebAppInit").catch(function () {});
+    var app = document.getElementById("app");
+    var tours = decodeURIComponent(location.hash.replace(/^#/, "")).replace(/^tours?[=:]/i, "");
+    var subscriptionUrl = "https://vk.ru/app5898182_-53145183#s=3819494";
+
+    function el(tag, attrs, children) {
+      var node = document.createElement(tag);
+      Object.keys(attrs || {}).forEach(function (key) {
+        if (key === "text") node.textContent = attrs[key];
+        else node.setAttribute(key, attrs[key]);
+      });
+      (children || []).forEach(function (child) { if (child) node.appendChild(child); });
+      return node;
+    }
+
+    function link(label, url, secondary) {
+      return el("a", { class: secondary ? "button secondary" : "button", href: url, target: "_blank", rel: "noopener", text: label });
+    }
+
+    function row(label, value, className) {
+      var p = el("p", { class: "row" + (className ? " " + className : "") });
+      p.appendChild(el("span", { class: "label", text: label + ": " }));
+      p.appendChild(document.createTextNode(value));
+      return p;
+    }
+
+    function renderCard(tour) {
+      return el("article", { class: "card" }, [
+        tour.cover ? el("img", { class: "cover", src: tour.cover, alt: "", loading: "lazy" }) : null,
+        el("div", { class: "body" }, [
+          el("h2", { text: tour.title }),
+          row("Маршрут", tour.route),
+          row("Продолжительность", tour.duration),
+          row("Стоимость", tour.price, "price"),
+          link("Перейти", tour.url)
+        ])
+      ]);
+    }
+
+    function renderEmpty() {
+      app.textContent = "";
+      app.appendChild(el("section", { class: "panel" }, [
+        el("p", { text: "Туров из этой подборки сейчас нет в продаже. Подпишитесь на рассылку — там появляются новые." }),
+        link("Подписаться на рассылку", subscriptionUrl)
+      ]));
+    }
+
+    fetch("/vk/app/tours?tours=" + encodeURIComponent(tours))
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        if (data.subscriptionUrl) subscriptionUrl = data.subscriptionUrl;
+        if (!data.tours || !data.tours.length) return renderEmpty();
+        app.textContent = "";
+        data.tours.forEach(function (tour) { app.appendChild(renderCard(tour)); });
+        app.appendChild(link("Подписаться на рассылку", subscriptionUrl, true));
+      })
+      .catch(function () {
+        app.textContent = "";
+        app.appendChild(el("section", { class: "panel" }, [
+          el("p", { text: "Не получилось загрузить туры. Проверьте интернет и откройте ссылку ещё раз." })
+        ]));
+      });
+  })();
+</script>
+</body>
+</html>

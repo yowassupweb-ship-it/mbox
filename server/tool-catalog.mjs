@@ -2,6 +2,19 @@
 // в одной был «Сформировать фид», в другой — Browserbase). Правится только здесь.
 export const TOOL_CATALOG = [
   {
+    id: "vk-tour-bot",
+    name: "VK-бот туров",
+    kind: "бот сообщества",
+    group: "Коммуникации",
+    status: "готов к подключению ключей VK",
+    path: "C:\\Users\\a.nikolyuk\\Desktop\\Mbox\\memora\\memora-graph",
+    docs: "https://vk.ru/app5898182_-53145183#s=3819494",
+    icon: "/assets/icons/tools/vk-tour-bot.png",
+    summary: "Отвечает в сообщениях сообщества карточкой одного тура или подборкой по ключам из фида и предлагает подписаться на рассылку VK. Лиды и переписку в MBOX не сохраняет.",
+    capabilities: ["Callback API", "один или несколько туров", "карточки из фида", "подписка VK", "без хранения лидов"],
+    commands: [],
+  },
+  {
     id: "tour-feed",
     name: "Сформировать фид",
     kind: "фид туров",

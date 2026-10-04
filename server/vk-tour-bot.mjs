@@ -1,0 +1,331 @@
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+
+const DEFAULT_GROUP_ID = "223347696";
+const DEFAULT_GROUP_NAME = "club223347696";
+const DEFAULT_SUBSCRIPTION_URL = "https://vk.ru/app5898182_-53145183#s=3819494";
+const DEFAULT_TOUR_URL = "https://vs-travel.ru/tour?id=";
+const MAX_TOURS = 9;
+
+function plain(res, status, body) {
+  res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+  res.end(body);
+}
+
+function parsePayload(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return null;
+  }
+}
+
+function splitKeys(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(/[,+;|\s]+/);
+  return values.map((item) => String(item).trim()).filter((item) => /^[A-Za-z0-9_-]{1,80}$/.test(item));
+}
+
+export function buildTourDialogUrl(keys, source = "post", groupName = DEFAULT_GROUP_NAME) {
+  const normalized = [...new Set(splitKeys(keys))].slice(0, MAX_TOURS);
+  if (!normalized.length) throw new Error("tour_keys_required");
+  const ref = `${normalized.length === 1 ? "tour" : "tours"}:${normalized.join(",")}`;
+  const query = new URLSearchParams({ ref });
+  if (source) query.set("ref_source", String(source).slice(0, 80));
+  return `https://vk.me/${groupName}?${query}`;
+}
+
+export function extractTourKeys(event) {
+  const object = event?.object || {};
+  const message = object.message || object;
+  const payload = parsePayload(message.payload || object.payload);
+  const sources = [
+    payload?.tour_keys,
+    payload?.tour_key,
+    payload?.tours,
+    payload?.tour,
+    message.start_payload,
+    message.ref,
+    object.ref,
+    event.ref,
+  ];
+  const keys = [];
+  for (const source of sources) {
+    if (source == null) continue;
+    const normalized = String(Array.isArray(source) ? source.join(",") : source).replace(/^(?:vk_)?tours?(?:_key)?[:=_-]/i, "");
+    keys.push(...splitKeys(normalized));
+  }
+  const text = String(message.text || "").trim();
+  const textMatch = text.match(/^(?:(?:покажи|тур(?:ы)?|tour(?:s)?|tour_key)\s*[:=#-]?\s*)?([0-9]+(?:\s*[,;+]\s*[0-9]+)*)$/i);
+  if (textMatch) keys.push(...splitKeys(textMatch[1]));
+  return [...new Set(keys)].slice(0, MAX_TOURS);
+}
+
+function daysBetween(start, end) {
+  if (!start || !end) return 1;
+  const from = new Date(`${start}T00:00:00Z`);
+  const to = new Date(`${end}T00:00:00Z`);
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime())) return 1;
+  return Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
+}
+
+function dayLabel(value) {
+  const mod10 = value % 10;
+  const mod100 = value % 100;
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "дня";
+  return "дней";
+}
+
+function money(value) {
+  return new Intl.NumberFormat("ru-RU").format(Number(value) || 0);
+}
+
+export function makeTourCard(row, tourBaseUrl = DEFAULT_TOUR_URL) {
+  const days = daysBetween(row.date_start, row.date_end);
+  return {
+    key: String(row.tour_id),
+    title: String(row.tour_name || "Тур"),
+    route: String(row.route_name || "Маршрут уточняется"),
+    days,
+    duration: `${days} ${dayLabel(days)}`,
+    price: Number(row.price_from) || 0,
+    priceText: `от ${money(row.price_from)} ₽`,
+    url: `${tourBaseUrl}${encodeURIComponent(String(row.tour_id))}`,
+    text: [
+      String(row.tour_name || "Тур"),
+      `Маршрут: ${row.route_name || "Маршрут уточняется"}`,
+      `Продолжительность: ${days} ${dayLabel(days)}`,
+      `Стоимость: от ${money(row.price_from)} ₽`,
+    ].join("\n"),
+  };
+}
+
+export async function loadTours(query, keys, tourBaseUrl = DEFAULT_TOUR_URL) {
+  if (!keys.length) return [];
+  const result = await query(
+    `SELECT DISTINCT ON (tour_id)
+            tour_id, tour_name, route_name, date_start::text, date_end::text, price_from
+       FROM tour_sheets
+      WHERE tour_id = ANY($1::text[])
+        AND (date_end IS NULL OR date_end >= CURRENT_DATE)
+        AND free_places > 0
+      ORDER BY tour_id, date_start ASC NULLS LAST, price_from ASC`,
+    [keys],
+  );
+  const order = new Map(keys.map((key, index) => [key, index]));
+  return result.rows.map((row) => makeTourCard(row, tourBaseUrl)).sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999));
+}
+
+export function buildBotReply(cards, subscriptionUrl = DEFAULT_SUBSCRIPTION_URL, keys = null) {
+  if (!cards.length) {
+    const lead = keys && !keys.length
+      ? "Пришлите номер тура, например: 512. Номер есть в ссылке на тур и в постах сообщества."
+      : "Не нашёл доступный тур по этому ключу.";
+    return {
+      message: `${lead} Подпишитесь на рассылку ВКонтакте — там появляются новые туры.`,
+      keyboard: {
+        inline: true,
+        buttons: [[{ action: { type: "open_link", link: subscriptionUrl, label: "Подписаться" } }]],
+      },
+    };
+  }
+  const buttons = cards.map((card) => ({
+    action: { type: "open_link", link: card.url, label: cards.length === 1 ? "Перейти" : `Перейти: ${card.title}`.slice(0, 40) },
+  }));
+  buttons.push({ action: { type: "open_link", link: subscriptionUrl, label: "Подписаться на рассылку" } });
+  const rows = [];
+  for (let index = 0; index < buttons.length; index += 2) rows.push(buttons.slice(index, index + 2));
+  const separator = "\n\n———\n\n";
+  const bold = [];
+  let offset = 0;
+  for (const card of cards) {
+    bold.push({ type: "bold", offset, length: card.title.length });
+    offset += card.text.length + separator.length;
+  }
+  return {
+    message: `${cards.map((card) => card.text).join(separator)}\n\nПодпишитесь на рассылку ВКонтакте, чтобы не пропускать новые туры.`,
+    keyboard: { inline: true, buttons: rows },
+    format: { version: 1, items: bold },
+  };
+}
+
+function randomId(event) {
+  const source = String(event?.event_id || event?.object?.message?.conversation_message_id || Date.now());
+  return createHash("sha256").update(source).digest().readUInt32BE(0) & 0x7fffffff;
+}
+
+async function vkApi(fetchImpl, method, params) {
+  const response = await fetchImpl(`https://api.vk.com/method/${method}`, { method: "POST", body: new URLSearchParams(params) });
+  const result = await response.json();
+  if (!response.ok || result.error) throw new Error(result.error?.error_msg || `VK API ${response.status}`);
+  return result.response;
+}
+
+export async function sendVkMessage({ fetchImpl = fetch, token, apiVersion, peerId, event, reply }) {
+  const params = {
+    access_token: token,
+    v: apiVersion,
+    peer_id: String(peerId),
+    random_id: String(randomId(event)),
+    message: reply.message,
+    keyboard: JSON.stringify(reply.keyboard),
+    dont_parse_links: "1",
+  };
+  if (reply.attachments?.length) params.attachment = reply.attachments.join(",");
+  if (reply.format?.items?.length) params.format_data = JSON.stringify(reply.format);
+  return vkApi(fetchImpl, "messages.send", params);
+}
+
+export function extractCoverUrl(html, pageUrl) {
+  const match = String(html || "").match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+    || String(html || "").match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (!match) return "";
+  try {
+    return new URL(match[1], pageUrl).href;
+  } catch {
+    return "";
+  }
+}
+
+const photoCache = new Map();
+const coverCache = new Map();
+
+export async function tourCover(fetchImpl, card) {
+  if (coverCache.has(card.key)) return coverCache.get(card.key);
+  const page = await fetchImpl(card.url);
+  const coverUrl = page.ok ? extractCoverUrl(await page.text(), card.url) : "";
+  if (coverUrl) coverCache.set(card.key, coverUrl);
+  return coverUrl;
+}
+
+async function uploadTourPhoto({ fetchImpl, config, peerId, card }) {
+  if (photoCache.has(card.key)) return photoCache.get(card.key);
+  const coverUrl = await tourCover(fetchImpl, card);
+  if (!coverUrl) return "";
+  const image = await fetchImpl(coverUrl);
+  if (!image.ok) return "";
+  const auth = { access_token: config.token, v: config.apiVersion };
+  const server = await vkApi(fetchImpl, "photos.getMessagesUploadServer", { ...auth, peer_id: String(peerId) });
+  const form = new FormData();
+  form.append("photo", new Blob([await image.arrayBuffer()], { type: image.headers.get("content-type") || "image/jpeg" }), `tour-${card.key}.jpg`);
+  const uploaded = await (await fetchImpl(server.upload_url, { method: "POST", body: form })).json();
+  if (!uploaded.photo || uploaded.photo === "[]") return "";
+  const [photo] = await vkApi(fetchImpl, "photos.saveMessagesPhoto", { ...auth, photo: uploaded.photo, server: String(uploaded.server), hash: uploaded.hash });
+  const attachment = `photo${photo.owner_id}_${photo.id}${photo.access_key ? `_${photo.access_key}` : ""}`;
+  photoCache.set(card.key, attachment);
+  return attachment;
+}
+
+export async function tourPhotos({ fetchImpl = fetch, config, peerId, cards, logger = console }) {
+  const results = await Promise.all(cards.map((card) => uploadTourPhoto({ fetchImpl, config, peerId, card }).catch((error) => {
+    logger.warn(`VK bot: no photo for tour ${card.key}: ${error.message}`);
+    return "";
+  })));
+  return results.filter(Boolean);
+}
+
+export async function processVkEvent({ event, query, fetchImpl = fetch, config, logger = console }) {
+  if (event?.type !== "message_new") return { ignored: true };
+  const message = event.object?.message || event.object || {};
+  const peerId = message.peer_id || message.from_id;
+  if (!peerId) return { ignored: true };
+  const keys = extractTourKeys(event);
+  const cards = await sendTours({ fetchImpl, query, config, peerId, keys, event, logger });
+  return { peerId: String(peerId), keys, cards };
+}
+
+async function sendTours({ fetchImpl, query, config, peerId, keys, event, logger }) {
+  const cards = await loadTours(query, keys, config.tourBaseUrl);
+  const reply = buildBotReply(cards, config.subscriptionUrl, keys);
+  if (cards.length && config.photos !== false) reply.attachments = await tourPhotos({ fetchImpl, config, peerId, cards, logger });
+  await sendVkMessage({ fetchImpl, token: config.token, apiVersion: config.apiVersion, peerId, event, reply });
+  return cards;
+}
+
+function json(res, status, body) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify(body));
+}
+
+export function appKeys(value) {
+  return [...new Set(splitKeys(String(value || "").replace(/^(?:tours?[:=])/i, "")))].slice(0, MAX_TOURS);
+}
+
+export async function handleAppTours({ keysParam, query, config, fetchImpl = fetch, logger = console }) {
+  const keys = appKeys(keysParam);
+  const cards = await loadTours(query, keys, config.tourBaseUrl);
+  const tours = await Promise.all(cards.map(async (card) => ({
+    key: card.key,
+    title: card.title,
+    route: card.route,
+    duration: card.duration,
+    price: card.priceText,
+    url: card.url,
+    cover: await tourCover(fetchImpl, card).catch((error) => {
+      logger.warn(`VK bot: no cover for tour ${card.key}: ${error.message}`);
+      return "";
+    }),
+  })));
+  return { groupId: Number(config.groupId), subscriptionUrl: config.subscriptionUrl, tours };
+}
+
+export function vkTourBotConfig(env = process.env) {
+  return {
+    groupId: String(env.VK_BOT_GROUP_ID || DEFAULT_GROUP_ID),
+    subscriptionUrl: String(env.VK_BOT_SUBSCRIPTION_URL || env.VK_BOT_COMMUNITY_URL || DEFAULT_SUBSCRIPTION_URL),
+    tourBaseUrl: String(env.VK_BOT_TOUR_URL || DEFAULT_TOUR_URL),
+    token: String(env.VK_BOT_TOKEN || ""),
+    secret: String(env.VK_BOT_SECRET || ""),
+    confirmationCode: String(env.VK_BOT_CONFIRMATION_CODE || ""),
+    apiVersion: String(env.VK_BOT_API_VERSION || "5.199"),
+  };
+}
+
+const APP_PAGE = new URL("./vk-app.html", import.meta.url);
+
+export async function handleVkTourBot({ req, res, url, query, readBody, env = process.env, fetchImpl = fetch, logger = console }) {
+  if (["/vk/app", "/vk/app/"].includes(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(req.method === "HEAD" ? undefined : fs.readFileSync(APP_PAGE));
+    return true;
+  }
+  if (url.pathname === "/vk/app/tours" && req.method === "GET") {
+    json(res, 200, await handleAppTours({ keysParam: url.searchParams.get("tours"), query, config: vkTourBotConfig(env), fetchImpl, logger }));
+    return true;
+  }
+  if (!["/vk/callback", "/api/vk/callback"].includes(url.pathname)) return false;
+  if (req.method !== "POST") {
+    plain(res, 405, "method not allowed");
+    return true;
+  }
+  const config = vkTourBotConfig(env);
+  const event = await readBody(req);
+  if (event.group_id && String(event.group_id) !== config.groupId) {
+    plain(res, 403, "forbidden");
+    return true;
+  }
+  if (event.type === "confirmation") {
+    if (!config.confirmationCode) {
+      plain(res, 503, "vk confirmation is not configured");
+      return true;
+    }
+    plain(res, 200, config.confirmationCode);
+    return true;
+  }
+  if (!config.secret || !config.token) {
+    logger.error("VK bot: callback received, but bot credentials are not configured");
+    plain(res, 503, "vk bot is not configured");
+    return true;
+  }
+  if (String(event.secret || "") !== config.secret) {
+    logger.warn(`VK bot: rejected ${String(event.type || "unknown")} callback (secret mismatch)`);
+    plain(res, 403, "forbidden");
+    return true;
+  }
+  logger.info(`VK bot: accepted ${String(event.type || "unknown")} callback`);
+  plain(res, 200, "ok");
+  void processVkEvent({ event, query, fetchImpl, config, logger }).catch((error) => logger.error(`VK bot: ${error.message}`));
+  return true;
+}
