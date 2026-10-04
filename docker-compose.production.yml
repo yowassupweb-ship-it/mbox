@@ -24,16 +24,16 @@ services:
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       CLOUDFLARE_MODEL: ${CLOUDFLARE_MODEL:-@cf/meta/llama-3.1-8b-instruct}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-    volumes:
-      # Установщики обновляются отдельно от Docker-образа: образ не должен содержать ~100 МБ .exe,
-      # а HTTP-серверу нужен доступ к ним для autoUpdater.
-      - ./public/downloads:/app/public/downloads:ro
       VK_BOT_GROUP_ID: ${VK_BOT_GROUP_ID:-223347696}
       VK_BOT_SUBSCRIPTION_URL: ${VK_BOT_SUBSCRIPTION_URL:-https://vk.ru/app5898182_-53145183#s=3819494}
       VK_BOT_TOKEN: ${VK_BOT_TOKEN:-}
       VK_BOT_SECRET: ${VK_BOT_SECRET:-}
       VK_BOT_CONFIRMATION_CODE: ${VK_BOT_CONFIRMATION_CODE:-}
       VK_BOT_API_VERSION: ${VK_BOT_API_VERSION:-5.199}
+    volumes:
+      # Установщики обновляются отдельно от Docker-образа: образ не должен содержать ~100 МБ .exe,
+      # а HTTP-серверу нужен доступ к ним для autoUpdater.
+      - ./public/downloads:/app/public/downloads:ro
     networks:
       - mbox-net
 
