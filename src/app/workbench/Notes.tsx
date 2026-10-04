@@ -138,6 +138,7 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
   const [query, setQuery] = useState(notesStore.query);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [context, setContext] = useState<{ note: Note; x: number; y: number } | null>(null);
   const canCreate = defaultProjectId !== undefined;
 
   useEffect(() => {
@@ -155,6 +156,49 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
   async function togglePin(note: Note) {
     const { note: updated } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${note.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ pinned: !note.pinned }) });
     patchListed(updated);
+  }
+
+  async function patchNote(note: Note, patch: Partial<Note>) {
+    const { note: updated } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${note.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
+    patchListed(updated);
+  }
+
+  async function renameNote(note: Note) {
+    const title = await askText({ title: "Название заметки", value: note.title || "", confirmLabel: "Переименовать" });
+    const next = title?.trim();
+    if (next && next !== note.title) await patchNote(note, { title: next });
+  }
+
+  async function duplicateNote(note: Note) {
+    const { note: full } = await fetchJson<{ note: Note }>(`/api/mbox/notes/${note.id}`);
+    const { note: copy } = await fetchJson<{ note: Note }>("/api/mbox/notes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: `${note.title || "Заметка"} (копия)`, content: full.content ?? "", tabs: full.tabs, project_id: note.project_id, color: note.color, theme: note.theme }),
+    });
+    notesStore.list.unshift({ ...copy, snippet: note.snippet });
+    notesStore.listeners.forEach((listener) => listener());
+    tabs.open(`note:${copy.id}`, true);
+    onOpen?.();
+  }
+
+  async function removeNote(note: Note) {
+    if (!(await askConfirm({ title: `Удалить заметку «${note.title || "без названия"}»?`, message: "Её история версий тоже удалится.", confirmLabel: "Удалить", danger: true }))) return;
+    await fetchJson(`/api/mbox/notes/${note.id}`, { method: "DELETE" });
+    notesStore.list = notesStore.list.filter((item) => item.id !== note.id);
+    notesStore.listeners.forEach((listener) => listener());
+    tabs.close(`note:${note.id}`);
+  }
+
+  async function downloadNoteWord(note: Note) {
+    const response = await fetch(`/api/mbox/notes/${note.id}/docx`);
+    if (!response.ok) return;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(note.title || `note-${note.id}`).replace(/[\\/:*?"<>|]+/g, " ").trim() || "note"}.docx`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   const pinned = notesStore.list.filter((note) => note.pinned);
@@ -180,7 +224,7 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
   function renderItem(note: Note) {
     const key = `note:${note.id}`;
     return (
-      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => { tabs.open(key); onOpen?.(); }} onDoubleClick={() => { tabs.open(key, true); onOpen?.(); }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") { tabs.open(key, true); onOpen?.(); } }}>
+      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => { tabs.open(key); onOpen?.(); }} onDoubleClick={() => { tabs.open(key, true); onOpen?.(); }} onContextMenu={(event) => { event.preventDefault(); setContext({ note, x: event.clientX, y: event.clientY }); }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") { tabs.open(key, true); onOpen?.(); } if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setContext({ note, x: rect.left + 24, y: rect.bottom }); } }}>
         <div className="wb-note-item-title">{note.title || "Пустая заметка"}</div>
         {snippetOf(note) && <div className="wb-note-item-snippet">{snippetOf(note)}</div>}
         <div className="wb-note-item-meta">{formatSince(note.updated_at)}</div>
@@ -216,6 +260,28 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
             <p>Не удалось загрузить заметки.</p>
             <button type="button" onClick={() => void refreshNotes()}><RefreshCw size={13} /> Повторить</button>
           </div>
+        )}
+        {context && (
+          <WbMenu x={context.x} y={context.y} onClose={() => setContext(null)}>
+            <div className="wb-note-menu">
+              <button type="button" role="menuitem" onClick={() => { tabs.open(`note:${context.note.id}`, true); onOpen?.(); setContext(null); }}><span><FileText size={14} />Открыть</span></button>
+              <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void patchNote(note, { pinned: !note.pinned }); }}><span>{context.note.pinned ? <PinOff size={14} /> : <Pin size={14} />}{context.note.pinned ? "Открепить" : "Закрепить сверху"}</span></button>
+              <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void renameNote(note); }}><span><Pencil size={14} />Переименовать</span></button>
+              <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void duplicateNote(note); }}><span><Copy size={14} />Дублировать</span></button>
+              <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void downloadNoteWord(note); }}><span><FileText size={14} />Скачать в Word</span></button>
+              <div className="wb-menu-sep" role="separator" />
+              <div className="wb-note-menu-label">Метка</div>
+              <div className="wb-note-swatches" role="group" aria-label="Цвет метки">
+                {NOTE_COLORS.map((item) => (
+                  <button key={item.value} type="button" role="menuitemradio" aria-checked={(context.note.color || "default") === item.value} aria-label={item.label} title={item.label} className={`wb-note-swatch is-${item.value}${(context.note.color || "default") === item.value ? " is-on" : ""}`} onClick={() => { const note = context.note; setContext(null); void patchNote(note, { color: item.value }); }}>
+                    {item.value === "default" && <X size={11} aria-hidden="true" />}
+                  </button>
+                ))}
+              </div>
+              <div className="wb-menu-sep" role="separator" />
+              <button type="button" role="menuitem" className="is-danger" onClick={() => { const note = context.note; setContext(null); void removeNote(note); }}><span><Trash2 size={14} />Удалить заметку</span></button>
+            </div>
+          </WbMenu>
         )}
         {!notesStore.loading && !notesStore.failed && !notesStore.list.length && (
           <div className="wb-session-empty">
