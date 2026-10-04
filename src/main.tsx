@@ -13,6 +13,7 @@ import {
   History,
   KeyRound,
   LockKeyhole,
+  Plug,
   Plus,
   Server,
   ShieldCheck,
@@ -33,6 +34,7 @@ import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
 import { notifyDesktopSignedIn, notifyDesktopSignedOut } from "./lib/desktopAccount";
 import { InviteScreen } from "./pages/InviteScreen";
+import { IntegrationsBoard } from "./features/integrations/IntegrationsBoard";
 import { InviteManager } from "./features/accounts/InviteManager";
 import { PasswordPanel } from "./features/accounts/PasswordPanel";
 import { accountErrorText } from "./features/accounts/accountErrors";
@@ -232,6 +234,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
               server={<ServerBoard pulse={realtime.pulse} />}
               access={<AccessBoard user={user} onLogout={onLogout} />}
               team={<TeamBoard user={user} projects={data.projects} />}
+              integrations={user.role === "owner" ? <IntegrationsBoard /> : undefined}
               passwords={<PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} />}
               logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
             />
@@ -572,15 +575,16 @@ function consoleTime(iso: string): string {
   return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-type SettingsTab = "appearance" | "server" | "access" | "team" | "passwords" | "logs";
+type SettingsTab = "appearance" | "server" | "access" | "team" | "integrations" | "passwords" | "logs";
 
-function SettingsBoard({ server, access, team, passwords, logs, theme, onThemeChange }: { server: ReactNode; access: ReactNode; team: ReactNode; passwords: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+function SettingsBoard({ server, access, team, integrations, passwords, logs, theme, onThemeChange }: { server: ReactNode; access: ReactNode; team: ReactNode; integrations?: ReactNode; passwords: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   const [tab, setTab] = useState<SettingsTab>("appearance");
   const content: Record<SettingsTab, ReactNode> = {
     appearance: <AppearanceSettings theme={theme} onChange={onThemeChange} />,
     server,
     access,
     team,
+    integrations,
     passwords,
     logs,
   };
@@ -599,6 +603,11 @@ function SettingsBoard({ server, access, team, passwords, logs, theme, onThemeCh
         <button role="tab" aria-selected={tab === "team"} className={tab === "team" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("team")}>
           <GitBranch size={16} /> Команда
         </button>
+        {integrations && (
+          <button role="tab" aria-selected={tab === "integrations"} className={tab === "integrations" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("integrations")}>
+            <Plug size={16} /> Интеграции
+          </button>
+        )}
         <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
           <LockKeyhole size={16} /> Пароли
         </button>

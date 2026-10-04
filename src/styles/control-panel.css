@@ -1353,3 +1353,19 @@
 
 .invite-number { display: grid; gap: var(--space-1); color: var(--text-muted); font-size: var(--text-xs); }
 .account-create-fields .password-field { min-width: 0; height: 38px; }
+
+/* Интеграции: внешние API с ключами */
+.integration-form { display: grid; gap: var(--space-3); }
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-3); }
+.integration-wide { grid-column: 1 / -1; }
+.integration-hint { margin: 0; max-width: 72ch; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.integration-docs { display: inline-flex; align-items: center; gap: var(--space-1); width: fit-content; color: var(--accent-color); font-size: var(--text-xs); text-decoration: none; }
+.integration-docs:hover { text-decoration: underline; }
+.integration-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.integration-result { font-size: var(--text-sm); }
+.integration-result.is-ok { color: var(--state-ok-soft); }
+.integration-result.is-bad { color: var(--state-danger); }
+.integration-form select,
+.integration-form input:not([type="checkbox"]) { min-width: 0; height: 36px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-main); font-size: var(--text-sm); }
+.integration-form .password-field { height: 36px; }
+.integration-form .password-field input { height: auto; padding: 0 var(--space-3); border: 0; background: transparent; }

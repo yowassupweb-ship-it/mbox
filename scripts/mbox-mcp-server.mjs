@@ -2039,6 +2039,52 @@ server.registerTool(
   },
 );
 
+// ─── Внешние API с ключами владельца (server/integrations.mjs) ─────────────────────────────────────────────────────────
+// Ключи лежат на сервере MBOX и агенту не показываются: вызов идёт через MBOX, ключ подставляется там.
+
+server.registerTool(
+  "integration_list",
+  {
+    title: "List connected external APIs",
+    description: "External APIs the owner connected in MBOX (Topvisor, Yandex Webmaster, Yandex Metrica and any custom API): service code, whether keys are filled, base URL, usage hint. Keys are never shown. Call this before integration_call when unsure which services exist. If a service is not configured, tell the owner to add the keys in MBOX → Settings → Integrations.",
+    inputSchema: {},
+  },
+  async () => {
+    const { integrations } = await mboxFetch("/api/mbox/integrations");
+    return textResult(integrations.map((item) => `${item.service} — ${item.label}: ${item.configured ? "connected" : "NOT configured"}; base ${item.base_url}${item.hint ? `\n   ${item.hint}` : ""}${item.docs ? `\n   docs: ${item.docs}` : ""}${item.kind === "builtin" ? `\n   defaults: ${item.fields.filter((field) => !field.secret && field.value).map((field) => `${field.label}=${field.value}`).join(", ") || "-"}` : ""}`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "integration_call",
+  {
+    title: "Call an external API through MBOX",
+    description: [
+      "Call an external API with the owner's stored key (MBOX adds the auth header; you never see the key). service = code from integration_list: topvisor, yandex_webmaster, yandex_metrica or a custom one.",
+      "Topvisor API v2: path is the method name, e.g. get/projects_2/projects, get/keywords_2/keywords, get/positions_2/history; send parameters as JSON in body (method POST). Other services: method GET/POST/PUT/PATCH/DELETE, path relative to the base URL (no query string), URL parameters in query.",
+      "Read-only by default: do not change data in an external service (create/delete projects, keywords, goals) unless the owner explicitly asked. Large answers are truncated — narrow with limit/filters or raise max_chars (max 60000).",
+    ].join("\n"),
+    inputSchema: {
+      service: z.string().describe("Service code from integration_list"),
+      path: z.string().describe("Path relative to the API base URL, no query string"),
+      method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).optional(),
+      query: z.record(z.any()).optional().describe("URL query parameters"),
+      body: z.any().optional().describe("JSON request body"),
+      max_chars: z.number().optional(),
+    },
+  },
+  async ({ service, ...input }) => {
+    try {
+      const result = await mboxFetch(`/api/mbox/integrations/${encodeURIComponent(service)}/call`, { method: "POST", body: JSON.stringify(input) });
+      if (result.ok === false && (!result.status || result.error === "api_error")) return textResult(`API error: ${result.message || result.error}`);
+      const data = typeof result.data === "string" ? result.data : JSON.stringify(result.data);
+      return textResult(`HTTP ${result.status}${result.ok ? "" : " (error)"}\n${data}${result.truncated ? `\n[truncated: ${result.total_chars} chars. ${result.hint}]` : ""}`);
+    } catch (error) {
+      return textResult(`Integration call failed: ${String(error?.message || error)}`);
+    }
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

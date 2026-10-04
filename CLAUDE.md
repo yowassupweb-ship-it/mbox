@@ -217,6 +217,13 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    (`browser_*` через `runBrowserOp`, группа `browser`). Совместное редактирование — по-прежнему снимками с присутствием коллег; настоящего OT/CRDT нет.
    Просмотр и правка файлов: `PdfViewer.tsx` (pdf.js legacy), `ImageEditor.tsx`, `StorageImage.tsx` — см. §10.14 доктрины.
 
+29. **Интеграции (внешние API с ключами).** `server/integrations.mjs`, «Настройки → Интеграции» (только владелец). Готовые: `topvisor`,
+   `yandex_webmaster`, `yandex_metrica` — ключи берутся из тех же настроек, что и у SEO-мастера (`seo_settings`) или из переменных окружения
+   (`TOPVISOR_API_KEY`, `TOPVISOR_USER_ID`, `YANDEX_WEBMASTER_TOKEN`, `YANDEX_METRICA_TOKEN`…); любое своё API — таблица `integrations`
+   (адрес только https и не внутренний, способ входа bearer/oauth/header/basic/query, ключ под `pgp_sym_encrypt`). Агенты и Джарвис ходят через
+   MBOX: MCP `integration_list` / `integration_call`, инструменты Джарвиса с теми же именами (группа `integrations`); путь — только относительный,
+   без `..`, ответ режется до 60 000 знаков. Topvisor отвечает HTTP 200 и при неверном ключе — ошибку ищем в `errors` тела.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

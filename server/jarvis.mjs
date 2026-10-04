@@ -17,9 +17,10 @@ let rankMemories;
 let recordMemoryAction;
 let openTab;
 let browserOp;
+let integrations;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -1471,6 +1472,33 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "integration_list",
+      description: "Внешние API, подключённые в MBOX (Topvisor, Яндекс Вебмастер, Яндекс Метрика и добавленные владельцем): что заполнено, адрес, подсказка по путям. Ключей не показывает. Вызывай перед integration_call, если не уверен, подключен ли сервис.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "integration_call",
+      description: "Вызвать внешний API через MBOX: ключ подставляется автоматически. service — код из integration_list (topvisor, yandex_webmaster, yandex_metrica, …). Для Topvisor path — имя метода API v2 (например get/projects_2/projects), параметры — в body. Для остальных — method GET/POST…, path относительно адреса API, параметры адреса в query. Только чтение, пока человек явно не попросил изменить данные во внешнем сервисе.",
+      parameters: {
+        type: "object",
+        properties: {
+          service: { type: "string" },
+          path: { type: "string", description: "Путь относительно адреса API, без ?параметров" },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          query: { type: "object", description: "Параметры адреса" },
+          body: { type: "object", description: "Тело запроса (JSON)" },
+          max_chars: { type: "number", description: "Сколько символов ответа вернуть, до 60000" },
+        },
+        required: ["service", "path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1680,6 +1708,11 @@ export const TOOL_GROUPS = {
     // группы notes не было, Джарвис брал search_memory и правил похоже названную запись памяти (#318).
     match: /(заметк|заметок|заметке|заметку|заметки|запиш[иу] себе|блокнот)/,
     tools: ["search_notes", "read_note", "create_note", "update_note"],
+  },
+  integrations: {
+    label: "внешние API с ключами владельца: Topvisor (позиции, проекты, аудит), Яндекс Вебмастер и Метрика, любые добавленные API",
+    match: /(topvisor|топвизор|позици|вебмастер|метрик|api|апи|интеграци|ключевы[ех] (слов|фраз)|seo|сео|трафик|индексац|посетител)/,
+    tools: ["integration_list", "integration_call"],
   },
   browser: {
     label: "встроенный браузер владельца в MBOX Desktop: список вкладок, прочитать страницу, открыть адрес, нажать, заполнить форму, прокрутить",
@@ -2940,6 +2973,18 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     );
     await recordMemoryAction({ memoryId: id, actor: JARVIS_NAME, action: "update", note: "memory updated via Jarvis tool" });
     return `обновлена запись памяти «${title}» (#${id})`;
+  }
+
+  if (name === "integration_list" || name === "integration_call") {
+    if (!integrations) return "интеграции недоступны в этом режиме";
+    if (!viewer?.userId || !viewer.all) return "внешние API с ключами доступны только владельцу MBOX";
+    if (name === "integration_list") {
+      const rows = await integrations.list();
+      return rows.map((row) => `${row.service} — ${row.label}: ${row.configured ? "подключён" : "ключи не заполнены"}; адрес ${row.base_url}${row.hint ? `\n   ${row.hint}` : ""}${row.kind === "builtin" ? `\n   по умолчанию: ${row.fields.filter((field) => !field.secret && field.value).map((field) => `${field.label} = ${field.value}`).join(", ") || "—"}` : ""}`).join("\n");
+    }
+    const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars });
+    if (result.ok === false && (!result.status || result.error === "api_error")) return `API: ${result.message || result.error}`;
+    return `HTTP ${result.status}${result.ok ? "" : " (ошибка)"}\n${typeof result.data === "string" ? result.data : JSON.stringify(result.data)}${result.truncated ? `\n[ответ обрезан: ${result.total_chars} символов; ${result.hint}]` : ""}`;
   }
 
   // Встроенный браузер владельца: тот же путь, что у MCP browser_* (окно MBOX Desktop выполняет действие с подсветкой).
