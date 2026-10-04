@@ -1383,7 +1383,11 @@
 /* Сессии аккаунта */
 .session-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: var(--border-width) solid var(--border-color); }
 .session-row > svg { color: var(--text-muted); }
-.session-row .meta-chip { margin-left: var(--space-2); }
+.session-row strong { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.session-row .meta-chip { margin-left: 0; }
+
+/* Кнопки действий в формах и списках настроек — по размеру подписи, а не на всю ширину сетки. */
+:is(.manual-form, .entity-list, .secret-form) > :is(.primary-action, .ghost-action, .danger-action) { justify-self: start; }
 
 /* Матрица доступа к навыкам */
 .skill-matrix { display: grid; overflow-x: auto; font-size: var(--text-sm); }

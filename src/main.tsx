@@ -29,7 +29,7 @@ import { AgentAvatar } from "./components/AgentAvatar";
 import { RUN_STALE_MS, agentFamily, effectiveStatus, isAgentWorking, isLeaseLive, liveRunOf } from "./lib/agents";
 import { fetchJson, saveEntity } from "./lib/api";
 import { formatBytes, formatDateTime, formatSince, plural } from "./lib/format";
-import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
+import { agentStatusLabels, auditIsNoise, auditNotice, projectName, todoPriorityLabel, todoPriorityLabels, todoStatusHint, todoStatusLabel, todoStatusLabels } from "./lib/labels";
 import { filterTree, formatProps, parseProps, projectToTree, rollupBytes, sortTodos } from "./lib/tree";
 import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
@@ -108,10 +108,10 @@ function App() {
 function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
   // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
-  const data = useMboxData("", onLogout);
+  const data = useMboxData("", onLogout, user.role !== "owner");
   const realtime = useRealtime(data.reload);
   const agentNotices = useMemo(
-    () => [...realtime.notices, ...data.auditEvents.slice(0, 12).map(auditNotice)].slice(0, 12),
+    () => [...realtime.notices, ...data.auditEvents.filter((event) => !auditIsNoise(event)).slice(0, 12).map(auditNotice)].slice(0, 12),
     [realtime.notices, data.auditEvents],
   );
   // Текст и цвет пилюли раньше считались двумя независимыми useMemo с разными приоритетами:
@@ -234,12 +234,12 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
             <SettingsBoard
               theme={theme}
               onThemeChange={onThemeChange}
-              server={<ServerBoard pulse={realtime.pulse} />}
+              server={user.role === "owner" ? <ServerBoard pulse={realtime.pulse} /> : undefined}
               access={<AccessBoard user={user} onLogout={onLogout} />}
               team={<TeamBoard user={user} projects={data.projects} />}
               skills={user.role === "owner" ? <SkillAccessBoard /> : undefined}
               integrations={user.role === "owner" ? <IntegrationsBoard /> : undefined}
-              passwords={<PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} />}
+              passwords={user.role === "owner" ? <PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} /> : undefined}
               logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
             />
           ),
@@ -581,7 +581,7 @@ function consoleTime(iso: string): string {
 
 type SettingsTab = "appearance" | "server" | "access" | "team" | "skills" | "integrations" | "passwords" | "logs";
 
-function SettingsBoard({ server, access, team, integrations, skills, passwords, logs, theme, onThemeChange }: { server: ReactNode; access: ReactNode; team: ReactNode; integrations?: ReactNode; skills?: ReactNode; passwords: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
+function SettingsBoard({ server, access, team, integrations, skills, passwords, logs, theme, onThemeChange }: { server?: ReactNode; access: ReactNode; team: ReactNode; integrations?: ReactNode; skills?: ReactNode; passwords?: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   const [tab, setTab] = useState<SettingsTab>("appearance");
   const content: Record<SettingsTab, ReactNode> = {
     appearance: <AppearanceSettings theme={theme} onChange={onThemeChange} />,
@@ -599,9 +599,11 @@ function SettingsBoard({ server, access, team, integrations, skills, passwords, 
         <button role="tab" aria-selected={tab === "appearance"} className={tab === "appearance" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("appearance")}>
           <Contrast size={16} /> Интерфейс
         </button>
-        <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
-          <Server size={16} /> Сервер
-        </button>
+        {server && (
+          <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
+            <Server size={16} /> Сервер
+          </button>
+        )}
         <button role="tab" aria-selected={tab === "access"} className={tab === "access" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("access")}>
           <ShieldCheck size={16} /> Аккаунт
         </button>
@@ -610,7 +612,7 @@ function SettingsBoard({ server, access, team, integrations, skills, passwords, 
         </button>
         {skills && (
           <button role="tab" aria-selected={tab === "skills"} className={tab === "skills" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("skills")}>
-            <Sparkles size={16} /> Навыки
+            <Sparkles size={16} /> Доступ к навыкам
           </button>
         )}
         {integrations && (
@@ -618,9 +620,11 @@ function SettingsBoard({ server, access, team, integrations, skills, passwords, 
             <Plug size={16} /> Интеграции
           </button>
         )}
-        <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
-          <LockKeyhole size={16} /> Пароли
-        </button>
+        {passwords && (
+          <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
+            <LockKeyhole size={16} /> Секреты
+          </button>
+        )}
         <button role="tab" aria-selected={tab === "logs"} className={tab === "logs" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("logs")}>
           <History size={16} /> Логи
         </button>
@@ -890,7 +894,7 @@ function AccessBoard({ user, onLogout }: { user: { username: string; role: strin
         <div className="entity-list">
           <EntityLine title="Логин" value={user.username} />
           <EntityLine title="Роль" value={user.role === "owner" ? "владелец: все проекты, навыки и настройки" : "участник: проекты, навыки и документы, к которым вам дали доступ"} />
-          <button className="primary-action" onClick={async () => {
+          <button className="ghost-action" onClick={async () => {
             await notifyDesktopSignedOut();
             await fetch("/api/mbox/auth/logout", { method: "POST" });
             onLogout();
@@ -985,7 +989,7 @@ function PasswordsBoard({ secrets, projects, onSaved }: { secrets: SecretSummary
 
   return (
     <div className="content-grid settings-single-grid">
-      <Panel title="Пароли" icon={LockKeyhole}>
+      <Panel title="Секреты для агентов" icon={LockKeyhole}>
         <div className="entity-list">
           <button className="primary-action add-secret-action" onClick={() => {
             setFormOpen((value) => !value);

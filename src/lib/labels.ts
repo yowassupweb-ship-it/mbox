@@ -61,6 +61,7 @@ export function edgeTypeLabel(value: string) {
 
 export const auditActionLabels: Record<string, string> = {
   create: "добавил",
+  insert: "добавил",
   update: "отредактировал",
   delete: "удалил",
   claim: "взял в работу",
@@ -76,12 +77,19 @@ export function todoPriorityLabel(value: string) {
   return todoPriorityLabels[value] ?? value;
 }
 
+// Служебные таблицы пишут свои строки следом за каждым действием — в ленте они только шумят.
+const AUDIT_NOISE = new Set(["memory_actions", "memory_links", "auth_sessions", "agent_presence", "chat_threads"]);
+
+export function auditIsNoise(event: AuditEvent) {
+  return AUDIT_NOISE.has(event.entity_type);
+}
+
 export function auditNotice(event: AuditEvent) {
   const verb = auditActionLabels[event.action] || event.action;
   const detail = event.summary || event.entity_type;
   return {
     id: `audit-${event.id}`,
-    text: `Агент ${event.actor} ${verb} ${detail}`,
+    text: `${event.actor} ${verb} ${detail}`,
     at: formatClock(event.created_at),
   };
 }

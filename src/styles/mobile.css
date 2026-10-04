@@ -280,3 +280,8 @@
   .wb-storage-list td:nth-child(2),
   .wb-storage-list td:nth-child(3) { display: none; }
 }
+
+@media (max-width: 720px) {
+  .settings-tabs { display: flex; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .settings-tabs .settings-tab { flex: none; }
+}

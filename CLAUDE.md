@@ -112,8 +112,8 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    только ключ папки + относительный путь; запись в `.git` и исполняемые файлы (.exe/.cmd/.ps1…) отклоняется
    в `mbox-desktop/main.js`. Без запущенного приложения операции с файлами недоступны (`workspace_offline`).
 14. **Заметки и хранилище S3.** `server/notes.mjs` (таблица `notes`, `/api/mbox/notes`) и `server/storage.mjs`
-   (`storage_settings`, `/api/mbox/storage/*`) — общие модули прод/dev, таблицы создаются при старте, доступ только
-   владельцу. S3 — Yandex Object Storage с подписью SigV4 на `node:crypto` без SDK (сверена с эталонами AWS);
+   (`storage_settings`, `/api/mbox/storage/*`) — общие модули прод/dev, таблицы создаются при старте, доступ владельцу и
+   участникам (участникам — только папки их проектов, см. п. 19). S3 — Yandex Object Storage с подписью SigV4 на `node:crypto` без SDK (сверена с эталонами AWS);
    секрет ключа шифруется `pgp_sym_encrypt` тем же `MBOX_SECRET_KEY`. Загрузка идёт потоком через сервер
    (`POST /storage/upload?key=`, до 512 МБ), скачивание — временной подписанной ссылкой.
 15. **MBOX Desktop несёт интерфейс в себе (с 0.1.12).** Окно грузит `mbox://app/` из `mbox-desktop/ui`

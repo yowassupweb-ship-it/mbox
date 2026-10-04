@@ -492,6 +492,11 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       const key = cleanKey(url.searchParams.get("key"));
       // Корневую папку проекта участник не удаляет — только её содержимое.
       if (member && access.roots.some((root) => root.prefix === key)) return denied();
+      // Агент не сносит папку проекта целиком (projects/<id>/) и корневые префиксы: такое — только руками в интерфейсе.
+      if (req.headers["x-mbox-agent"] && key.endsWith("/") && key.split("/").filter(Boolean).length < 3) {
+        sendJson(res, 403, { error: "Папку проекта целиком агент удалить не может — удалите её вручную в «Хранилище S3» или назовите вложенную папку" });
+        return true;
+      }
       const keys = [];
       if (key.endsWith("/")) {
         // «Папка» в S3 — только общий префикс: удаляем всё под ним.
@@ -526,7 +531,8 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       return true;
     }
   } catch (error) {
-    sendJson(res, 502, { error: error instanceof Error ? error.message : String(error) });
+    const message = error instanceof Error ? error.message : String(error);
+    sendJson(res, 502, { error: message === "fetch failed" ? "Не удалось связаться с хранилищем — проверьте адрес эндпоинта и сеть сервера" : message });
     return true;
   }
   return false;
