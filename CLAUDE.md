@@ -235,6 +235,15 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    Редактор Google Документов внутри MBOX показать нельзя (Google запрещает встраивание и вход во встроенном браузере) — «Открыть в Google» уходит в системный браузер.
    Не путать с `read_google_doc` и др. (сервисный аккаунт агента, `docs/gdocs-mcp.md`).
 
+31. **Агент в браузере: курсор, настоящий ввод, просьба о помощи.** Набор функций внутри страницы — `mbox-desktop/agent-kit.js` (курсор с подписью и кругом
+   клика, `locate`, `blockers` — капча/вход/код/защита от ботов/cookie/paywall, `extract`, `findText`, `checkWait`), действия в `mbox-desktop/browser.js`
+   (`agentAction`): настоящие события мыши и клавиатуры через `sendInputEvent`/`insertText` (click/double/right/hover/drag/type/press/wait/back/forward/reload/
+   new_tab/move_cursor; пароли, карты и коды агент не печатает — `sensitive_field`). Человек управляет агентом из вкладки: пауза/продолжить/стоп
+   (`setAgentControl`, ответы `paused_by_human`/`stopped_by_human`). Агент застрял → MCP `browser_ask_help` (Джарвис — тоже): над страницей панель «Агент просит
+   помощи» с комментарием, элемент в `agent_inbox` (`item_type=help`) и уведомление; агент ждёт ответа длинными запросами до 40 с (`browser_wait_help`);
+   состояние просьб — в памяти процесса (`server/browser-agent.mjs`, `/api/mbox/browser/help*`, только владелец). Новый файл десктопа обязан быть в `files`
+   `mbox-desktop/package.json`, иначе в сборке модуля нет. Версия MBOX Desktop с `agentControl` в мосту — 0.1.58+.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

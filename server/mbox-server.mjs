@@ -33,7 +33,7 @@ import { allowedSkills, ensureSkillAccessSchema, handleSkillAccessApi, isCatalog
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
-import { handleBrowserAgentApi, runBrowserOp } from "./browser-agent.mjs";
+import { createHelp, handleBrowserAgentApi, handleBrowserHelpApi, runBrowserOp, waitHelp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
 import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
 import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
@@ -59,6 +59,10 @@ configureJarvis({
   gmail: { search: (userId, input) => gmailSearch(query, userId, input), read: (userId, id) => gmailRead(query, userId, id), draft: (userId, input) => gmailDraft(query, userId, input), send: (userId, input) => gmailSend(query, userId, input) },
   gdocs: { search: (userId, input) => gdocSearch(query, userId, input), read: (userId, id) => gdocRead(query, userId, id), append: (userId, id, text) => gdocAppend(query, userId, id, text), replace: (userId, id, find, replace) => gdocReplace(query, userId, id, find, replace), create: (userId, title, text) => gdocCreate(query, userId, title, text), import: (userId, id) => gdocImport(query, userId, id, { ownerUserId: userId }) },
   integrations: { list: (userId) => listIntegrations(query, userId), call: (id, input, userId) => callIntegration(query, id, input, { userId }) },
+  browserHelp: {
+    ask: (userId, input) => createHelp({ clients: realtimeClients, userId, agent: "Джарвис", reason: input.reason, need: input.need, tab: input.tab, url: input.url, query, broadcast: broadcastRealtime }),
+    wait: (id, seconds) => waitHelp(id, seconds),
+  },
   browserOp: (userId, action, input = {}) => runBrowserOp({ clients: realtimeClients, userId, action, tab: input.tab, args: input.args, actor: "Джарвис", note: input.note }),
 });
 // Таблицы локальных папок создаются сами (IF NOT EXISTS): боевая база не обновляется init-скриптом.
@@ -1270,6 +1274,7 @@ async function handleApiWithContext(req, res, url) {
   // Закладки, история и куки встроенного браузера — на сервере, чтобы сессия была сквозной
   // между машинами (см. server/browser-state.mjs).
   // Агент во встроенном браузере владельца (см. server/browser-agent.mjs, MCP browser_*).
+  if (await handleBrowserHelpApi({ req, res, url, readBody, sendJson, owner: isOwner(user), user, actor: actorFromReq(req), clients: realtimeClients, query, broadcast: broadcastRealtime })) return;
   if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user, owner: isOwner(user), actor: actorFromReq(req), clients: realtimeClients })) return;
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;

@@ -27,6 +27,7 @@
       "launch.js",
       "main.js",
       "browser.js",
+      "agent-kit.js",
       "browser-downloads.js",
       "browser-menu.js",
       "browser-tab-preload.js",

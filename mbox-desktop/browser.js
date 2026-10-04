@@ -578,176 +578,7 @@ async function fillPassword(key, username) {
 
 let lastShownKey = "";
 
-/** Набор функций агента внутри страницы. Ставится один раз на документ; повторная установка ничего не ломает. */
-const AGENT_KIT = String.raw`(() => {
-  if (window.__mboxAgent) return true;
-  const style = document.createElement("style");
-  style.textContent = [
-    ".__mbox-hl{outline:2px solid #0a84ff !important;outline-offset:2px !important;box-shadow:0 0 0 6px rgba(10,132,255,.22) !important;border-radius:4px;transition:outline-color .3s,box-shadow .3s}",
-    ".__mbox-hl.__mbox-done{outline-color:#30d158 !important;box-shadow:0 0 0 6px rgba(48,209,88,.2) !important}",
-    ".__mbox-badge{position:absolute;z-index:2147483647;max-width:320px;padding:3px 8px;border-radius:6px;background:#0a84ff;color:#fff;font:600 12px/1.35 -apple-system,'Segoe UI',Inter,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;white-space:normal}",
-    ".__mbox-badge.__mbox-done{background:#248a3d}",
-  ].join("");
-  (document.head || document.documentElement).appendChild(style);
-  let seq = 0;
-  const badges = new Set();
-  const visible = (el) => {
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return false;
-    const s = getComputedStyle(el);
-    return s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) > 0.05;
-  };
-  const clean = (text, max = 120) => String(text || "").replace(/\s+/g, " ").trim().slice(0, max);
-  const labelOf = (el) => {
-    const by = el.getAttribute("aria-labelledby");
-    if (by) { const t = by.split(/\s+/).map((id) => document.getElementById(id)?.innerText || "").join(" "); if (clean(t)) return clean(t); }
-    if (el.getAttribute("aria-label")) return clean(el.getAttribute("aria-label"));
-    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l && clean(l.innerText)) return clean(l.innerText); }
-    const wrap = el.closest("label"); if (wrap && clean(wrap.innerText)) return clean(wrap.innerText);
-    if (el.placeholder) return clean(el.placeholder);
-    if (el.title) return clean(el.title);
-    let prev = el.previousElementSibling;
-    for (let i = 0; i < 3 && prev; i += 1, prev = prev.previousElementSibling) if (clean(prev.innerText)) return clean(prev.innerText, 80);
-    // Текст родителя — подпись, только если он короткий: иначе полю доставалась в подпись вся форма.
-    const parentText = clean(el.parentElement?.innerText, 200);
-    return (parentText.length <= 60 ? parentText : "") || clean(el.name || el.id);
-  };
-  const refOf = (el, prefix) => {
-    if (!el.dataset.mboxRef) el.dataset.mboxRef = prefix + (++seq);
-    return el.dataset.mboxRef;
-  };
-  const find = (ref) => document.querySelector('[data-mbox-ref="' + CSS.escape(String(ref)) + '"]');
-  const byLabel = (label) => {
-    const want = clean(label).toLowerCase();
-    if (!want) return null;
-    const fields = [...document.querySelectorAll("input,textarea,select,[contenteditable=''],[contenteditable='true'],[role='textbox'],[role='combobox']")].filter(visible);
-    return fields.find((el) => labelOf(el).toLowerCase() === want) || fields.find((el) => labelOf(el).toLowerCase().includes(want)) || fields.find((el) => clean(el.name).toLowerCase() === want) || null;
-  };
-  const clearMarks = () => {
-    document.querySelectorAll(".__mbox-hl").forEach((el) => el.classList.remove("__mbox-hl", "__mbox-done"));
-    badges.forEach((b) => b.remove()); badges.clear();
-  };
-  const mark = (el, text, done) => {
-    el.classList.add("__mbox-hl");
-    el.classList.toggle("__mbox-done", Boolean(done));
-    if (!text) return;
-    const r = el.getBoundingClientRect();
-    const badge = document.createElement("div");
-    badge.className = "__mbox-badge" + (done ? " __mbox-done" : "");
-    badge.textContent = text;
-    badge.style.left = Math.max(4, r.left + scrollX) + "px";
-    badge.style.top = Math.max(4, r.top + scrollY - 26) + "px";
-    document.body.appendChild(badge);
-    badges.add(badge);
-  };
-  const later = (ms, fn) => setTimeout(fn, ms);
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const fieldValue = (el) => {
-    if (el.type === "password") return el.value ? "(заполнен, скрыт)" : "";
-    if (el.type === "checkbox" || el.type === "radio") return el.checked;
-    if (el.isContentEditable) return clean(el.innerText, 500);
-    if (el.tagName === "SELECT") return el.selectedOptions?.[0] ? clean(el.selectedOptions[0].text) : "";
-    return String(el.value ?? "").slice(0, 500);
-  };
-  const setValue = (el, value) => {
-    el.focus();
-    if (el.tagName === "SELECT") {
-      const want = String(value).toLowerCase();
-      const option = [...el.options].find((o) => o.value.toLowerCase() === want) || [...el.options].find((o) => clean(o.text).toLowerCase() === want) || [...el.options].find((o) => clean(o.text).toLowerCase().includes(want));
-      if (!option) return "нет такого варианта";
-      el.value = option.value;
-    } else if (el.type === "checkbox" || el.type === "radio") {
-      const on = value === true || /^(1|true|да|yes|on)$/i.test(String(value));
-      if (el.checked !== on) el.click();
-      return "";
-    } else if (el.isContentEditable) {
-      el.textContent = String(value);
-    } else {
-      const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, String(value));
-    }
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.blur();
-    return "";
-  };
-  window.__mboxAgent = {
-    snapshot(maxText) {
-      const fields = [];
-      for (const el of document.querySelectorAll("input,textarea,select,[contenteditable=''],[contenteditable='true'],[role='textbox'],[role='combobox'],[role='checkbox']")) {
-        if (fields.length >= 150 || !visible(el)) continue;
-        if (el.tagName === "INPUT" && ["hidden", "submit", "button", "image", "reset", "file"].includes(el.type)) continue;
-        const item = { ref: refOf(el, "f"), label: labelOf(el), kind: el.tagName === "SELECT" ? "select" : el.isContentEditable ? "editable" : (el.type || el.tagName.toLowerCase()), value: fieldValue(el) };
-        if (el.name) item.name = el.name;
-        if (el.required || el.getAttribute("aria-required") === "true") item.required = true;
-        if (el.disabled || el.readOnly) item.disabled = true;
-        if (el.tagName === "SELECT") item.options = [...el.options].slice(0, 40).map((o) => clean(o.text, 60));
-        fields.push(item);
-      }
-      const actions = [];
-      for (const el of document.querySelectorAll("button,a[href],input[type=submit],input[type=button],[role=button],[role=link],[role=tab],[role=menuitem]")) {
-        if (actions.length >= 120 || !visible(el)) continue;
-        const text = clean(el.innerText || el.value || el.getAttribute("aria-label") || el.title, 80);
-        if (!text) continue;
-        const item = { ref: refOf(el, "b"), text, kind: el.tagName === "A" ? "link" : "button" };
-        if (el.tagName === "A") item.href = el.href.slice(0, 200);
-        actions.push(item);
-      }
-      const headings = [...document.querySelectorAll("h1,h2,h3")].filter(visible).slice(0, 30).map((h) => clean(h.innerText, 100)).filter(Boolean);
-      const text = clean(document.body?.innerText || "", Number(maxText) || 6000);
-      return { url: location.href, title: document.title, selection: clean(String(getSelection() || ""), 2000), headings, fields, actions, text, frames: document.querySelectorAll("iframe").length };
-    },
-    async fill(items, actor, note) {
-      clearMarks();
-      const results = [];
-      for (const item of items) {
-        const el = (item.ref && find(item.ref)) || (item.label && byLabel(item.label));
-        if (!el) { results.push({ ref: item.ref, label: item.label, ok: false, error: "поле не найдено — обновите снимок" }); continue; }
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-        await sleep(180);
-        const name = labelOf(el) || item.ref;
-        mark(el, actor + ": " + (note || "заполняет") + " · " + name);
-        await sleep(260);
-        const error = el.type === "file" ? "файл агент не выбирает" : setValue(el, item.value);
-        badges.forEach((b) => b.remove()); badges.clear();
-        mark(el, "", !error);
-        results.push({ ref: refOf(el, "f"), label: name, ok: !error, ...(error ? { error } : {}), value: fieldValue(el) });
-      }
-      later(6000, clearMarks);
-      return results;
-    },
-    async click(ref, actor, note) {
-      const el = find(ref);
-      if (!el) return { ok: false, error: "элемент не найден — обновите снимок" };
-      clearMarks();
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-      await sleep(200);
-      mark(el, actor + ": " + (note || "нажимает") + " · " + clean(el.innerText || el.value || el.getAttribute("aria-label"), 60));
-      await sleep(450);
-      el.click();
-      later(2500, clearMarks);
-      return { ok: true };
-    },
-    highlight(refs, actor, note, ms) {
-      clearMarks();
-      const found = refs.map(find).filter(Boolean);
-      found[0]?.scrollIntoView({ block: "center", behavior: "smooth" });
-      found.forEach((el, index) => mark(el, index === 0 ? actor + (note ? ": " + note : "") : ""));
-      if (ms !== 0) later(Number(ms) || 8000, clearMarks);
-      return { ok: true, found: found.length, missing: refs.length - found.length };
-    },
-    clear() { clearMarks(); return { ok: true }; },
-    scroll(ref, to) {
-      if (ref) { const el = find(ref); if (!el) return { ok: false, error: "элемент не найден" }; el.scrollIntoView({ block: "center", behavior: "smooth" }); return { ok: true }; }
-      const height = innerHeight * 0.85;
-      if (to === "top") scrollTo({ top: 0, behavior: "smooth" });
-      else if (to === "bottom") scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-      else scrollBy({ top: to === "up" ? -height : height, behavior: "smooth" });
-      return { ok: true };
-    },
-  };
-  return true;
-})()`;
+const AGENT_KIT = require("./agent-kit");
 
 function agentTab(key) {
   const wanted = key && tabs.get(key) ? key : [...visibleKeys].find((item) => tabs.has(item)) || (tabs.has(lastShownKey) ? lastShownKey : "");
@@ -759,10 +590,125 @@ async function inPage(contents, call) {
   return contents.executeJavaScript(`(async () => window.__mboxAgent.${call})()`, true);
 }
 
+// ─── Управление агентом человеком: пауза, продолжить, стоп ───────────────────────────────────────────────────────────
+// Пока вкладка на паузе, действия агента, меняющие страницу, ждут (до 20 с) и затем возвращают paused_by_human; «Стоп» отвечает
+// stopped_by_human, пока человек сам не снимет остановку. Чтение (снимок, вкладки) работает всегда.
+const agentControl = new Map();
+const controlOf = (key) => { if (!agentControl.has(key)) agentControl.set(key, { paused: false, stopped: false }); return agentControl.get(key); };
+const READ_ONLY_ACTIONS = new Set(["tabs", "snapshot", "screenshot", "find_text", "extract", "blockers", "status"]);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function setAgentControl(key, command) {
+  const state = controlOf(key);
+  if (command === "pause") state.paused = true;
+  else if (command === "resume") { state.paused = false; state.stopped = false; }
+  else if (command === "stop") { state.stopped = true; state.paused = false; }
+  else if (command === "clear") { state.paused = false; state.stopped = false; }
+  emit?.({ type: "agent-state", key, paused: state.paused, stopped: state.stopped });
+  return { ok: true, paused: state.paused, stopped: state.stopped };
+}
+
+async function gate(key) {
+  const state = controlOf(key);
+  if (state.stopped) return { ok: false, error: "stopped_by_human", message: "Человек остановил агента в этой вкладке. Не продолжай действия: напиши в чате, что остановлен, и спроси, что делать дальше." };
+  if (state.paused) {
+    const until = Date.now() + 20_000;
+    while (controlOf(key).paused && !controlOf(key).stopped && Date.now() < until) await sleep(250);
+    if (controlOf(key).stopped) return { ok: false, error: "stopped_by_human", message: "Человек остановил агента в этой вкладке." };
+    if (controlOf(key).paused) return { ok: false, error: "paused_by_human", message: "Человек поставил агента на паузу. Подожди и повтори действие через несколько секунд; если пауза затянулась — спроси в чате." };
+  }
+  return null;
+}
+
+// ─── Настоящий ввод: события мыши и клавиатуры, неотличимые от человеческих (синтетический el.click() многие сайты игнорируют) ───
+
+const KEY_NAMES = { arrowdown: "Down", arrowup: "Up", arrowleft: "Left", arrowright: "Right", esc: "Escape", return: "Enter", del: "Delete", pgup: "PageUp", pgdn: "PageDown", pageup: "PageUp", pagedown: "PageDown", space: "Space", spacebar: "Space", ctrl: "Control", cmd: "Meta", option: "Alt" };
+const MODIFIERS = new Set(["control", "shift", "alt", "meta"]);
+
+function parseKey(spec) {
+  const parts = String(spec || "").split("+").map((item) => item.trim()).filter(Boolean);
+  const modifiers = [];
+  let key = "";
+  for (const part of parts) {
+    const lower = (KEY_NAMES[part.toLowerCase()] || part).toLowerCase();
+    if (MODIFIERS.has(lower) && parts.length > 1 && part !== parts[parts.length - 1]) modifiers.push(lower);
+    else key = KEY_NAMES[part.toLowerCase()] || (part.length === 1 ? part : part[0].toUpperCase() + part.slice(1));
+  }
+  return { modifiers, key };
+}
+
+async function pressKey(contents, spec) {
+  const { modifiers, key } = parseKey(spec);
+  if (!key) return false;
+  contents.focus();
+  contents.sendInputEvent({ type: "keyDown", keyCode: key, modifiers });
+  if (key.length === 1 && !modifiers.some((item) => item === "control" || item === "meta" || item === "alt")) contents.sendInputEvent({ type: "char", keyCode: key, modifiers });
+  await sleep(25);
+  contents.sendInputEvent({ type: "keyUp", keyCode: key, modifiers });
+  return true;
+}
+
+function mouse(contents, type, x, y, extra = {}) {
+  const zoom = contents.getZoomFactor?.() || 1;
+  contents.sendInputEvent({ type, x: Math.round(x * zoom), y: Math.round(y * zoom), ...extra });
+}
+
+async function pointOf(contents, args, who, key) {
+  if (args.ref) {
+    const spot = await inPage(contents, `locate(${JSON.stringify(String(args.ref))})`);
+    if (!spot?.ok) return spot;
+    if (spot.disabled) return { ok: false, error: "disabled", message: `Элемент недоступен (${spot.label}).` };
+    if (spot.covered && !args.force) return { ok: false, error: "covered", message: `Элемент перекрыт: ${spot.coveredBy}. Закройте баннер или окно поверх него (или добавьте force=true).`, label: spot.label };
+    return spot;
+  }
+  if (Number.isFinite(Number(args.x)) && Number.isFinite(Number(args.y))) {
+    const info = await inPage(contents, `pointInfo(${Number(args.x)}, ${Number(args.y)})`);
+    return { ok: true, x: Number(args.x), y: Number(args.y), label: info?.label || "точка", ref: info?.ref };
+  }
+  return { ok: false, error: "target_required", message: "Нужен ref из browser_snapshot либо координаты x и y." };
+}
+
+async function pointerAction(contents, args, who, kind) {
+  const spot = await pointOf(contents, args, who);
+  if (!spot.ok) return spot;
+  await inPage(contents, `cursor(${spot.x}, ${spot.y}, ${who}, ${kind !== "hover"})`);
+  contents.focus?.();
+  if (kind === "hover") { mouse(contents, "mouseMove", spot.x, spot.y); await sleep(200); return { ok: true, hovered: spot.label }; }
+  const button = kind === "right_click" ? "right" : "left";
+  mouse(contents, "mouseMove", spot.x, spot.y);
+  await sleep(40);
+  mouse(contents, "mouseDown", spot.x, spot.y, { button, clickCount: 1 });
+  mouse(contents, "mouseUp", spot.x, spot.y, { button, clickCount: 1 });
+  if (kind === "double_click") {
+    await sleep(60);
+    mouse(contents, "mouseDown", spot.x, spot.y, { button, clickCount: 2 });
+    mouse(contents, "mouseUp", spot.x, spot.y, { button, clickCount: 2 });
+  }
+  await sleep(350);
+  return { ok: true, clicked: spot.label, url: contents.getURL() };
+}
+
+async function waitFor(contents, args) {
+  const limit = Math.min(Math.max(Number(args.ms) || 10_000, 500), 20_000);
+  const spec = { text: args.text, gone_text: args.gone_text, ref: args.ref, gone: Boolean(args.gone), selector: args.selector };
+  const started = Date.now();
+  while (Date.now() - started < limit) {
+    const urlOk = !args.url_contains || contents.getURL().includes(String(args.url_contains));
+    const loadOk = !args.load || !contents.isLoading();
+    let pageOk = true;
+    if (spec.text || spec.gone_text || spec.ref || spec.selector) {
+      try { pageOk = Boolean(await inPage(contents, `checkWait(${JSON.stringify(spec)})`)); } catch { pageOk = false; }
+    }
+    if (urlOk && loadOk && pageOk) return { ok: true, waited_ms: Date.now() - started, url: contents.getURL() };
+    await sleep(250);
+  }
+  return { ok: false, error: "timeout", message: `Не дождался за ${Math.round(limit / 1000)} с. Сделайте browser_snapshot и посмотрите, что на странице; если застряли — browser_ask_help.`, url: contents.getURL() };
+}
+
 /** Действие агента во вкладке. key пустой — вкладка, которую человек видит сейчас. */
 async function agentAction(key, action, args = {}, actor = "Агент", note = "") {
   if (action === "tabs") {
-    return { ok: true, active: agentTab("")?.key || "", tabs: [...tabs.keys()].map((item) => ({ ...stateOf(item), visible: tabs.get(item).visible })) };
+    return { ok: true, active: agentTab("")?.key || "", tabs: [...tabs.keys()].map((item) => ({ ...stateOf(item), visible: tabs.get(item).visible, agent: { ...controlOf(item) } })) };
   }
   // Без вкладки браузера navigate тоже вернёт no_tab: новую вкладку открывает страница MBOX (browserAgent.ts).
   const target = agentTab(key);
@@ -770,28 +716,111 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
   const contents = target.tab.view.webContents;
   const who = JSON.stringify(String(actor || "Агент").slice(0, 40));
   const say = JSON.stringify(String(note || "").slice(0, 160));
+  if (action === "status") return { ok: true, key: target.key, url: contents.getURL(), loading: contents.isLoading(), agent: { ...controlOf(target.key) } };
+  if (!READ_ONLY_ACTIONS.has(action)) {
+    const blocked = await gate(target.key);
+    if (blocked) return { key: target.key, ...blocked };
+  }
   emit({ type: "agent", key: target.key, actor: String(actor || "Агент"), action, note: String(note || "") });
   try {
     if (action === "navigate") {
       open(target.key, args.url);
       return { ok: true, key: target.key, url: normalizeUrl(args.url) };
     }
+    if (action === "back" || action === "forward" || action === "reload") {
+      const history = contents.navigationHistory;
+      if (action === "reload") contents.reload();
+      else if (action === "back") { if (history ? history.canGoBack() : contents.canGoBack()) (history || contents).goBack(); else return { ok: false, error: "no_history" }; }
+      else if (history ? history.canGoForward() : contents.canGoForward()) (history || contents).goForward(); else return { ok: false, error: "no_history" };
+      return { ok: true, key: target.key };
+    }
+    if (action === "new_tab") {
+      if (!/^https?:\/\//i.test(String(args.url || ""))) return { ok: false, error: "bad_url" };
+      emit({ type: "open", url: String(args.url), from: target.key });
+      return { ok: true, hint: "Новая вкладка откроется в MBOX; через пару секунд browser_tabs покажет её ключ." };
+    }
     if (action === "snapshot") {
       if (contents.isLoading()) await new Promise((resolve) => { contents.once("did-stop-loading", resolve); setTimeout(resolve, 8000); });
       return { ok: true, key: target.key, ...(await inPage(contents, `snapshot(${Number(args.max_text) || 6000})`)) };
     }
+    if (action === "blockers") return { ok: true, key: target.key, blockers: await inPage(contents, "blockers()") };
+    if (action === "extract") return { key: target.key, ...(await inPage(contents, `extract(${JSON.stringify(String(args.kind || "text"))}, ${JSON.stringify(String(args.ref || ""))}, ${Number(args.max) || 100})`)) };
+    if (action === "find_text") return { key: target.key, ...(await inPage(contents, `findText(${JSON.stringify(String(args.query || ""))}, ${Number(args.max) || 15})`)) };
     if (action === "fill") {
       const items = (Array.isArray(args.fields) ? args.fields : []).slice(0, 80).map((item) => ({ ref: item?.ref ? String(item.ref) : "", label: item?.label ? String(item.label) : "", value: item?.value ?? "" }));
       if (!items.length) return { ok: false, error: "fields_required" };
       return { ok: true, key: target.key, results: await inPage(contents, `fill(${JSON.stringify(items)}, ${who}, ${say})`) };
     }
-    if (action === "click") return { key: target.key, ...(await inPage(contents, `click(${JSON.stringify(String(args.ref || ""))}, ${who}, ${say})`)) };
+    if (action === "click" || action === "double_click" || action === "right_click" || action === "hover") {
+      // Настоящий клик по умолчанию; trusted=false — старый способ (el.click() внутри страницы) для сайтов, где мышь не нужна.
+      if (action === "click" && args.trusted === false && args.ref) return { key: target.key, ...(await inPage(contents, `click(${JSON.stringify(String(args.ref))}, ${who}, ${say})`)) };
+      return { key: target.key, ...(await pointerAction(contents, args, who, action)) };
+    }
+    if (action === "move_cursor") {
+      const spot = await pointOf(contents, args, who);
+      if (!spot.ok) return spot;
+      await inPage(contents, `cursor(${spot.x}, ${spot.y}, ${who}, false)`);
+      mouse(contents, "mouseMove", spot.x, spot.y);
+      return { ok: true, key: target.key, at: { x: spot.x, y: spot.y }, over: spot.label };
+    }
+    if (action === "drag") {
+      const from = await pointOf(contents, args.from || {}, who);
+      if (!from.ok) return from;
+      const to = await pointOf(contents, args.to || {}, who);
+      if (!to.ok) return to;
+      await inPage(contents, `cursor(${from.x}, ${from.y}, ${who}, true)`);
+      contents.focus?.();
+      mouse(contents, "mouseMove", from.x, from.y);
+      mouse(contents, "mouseDown", from.x, from.y, { button: "left", clickCount: 1 });
+      const steps = 14;
+      for (let step = 1; step <= steps; step += 1) {
+        const x = from.x + ((to.x - from.x) * step) / steps;
+        const y = from.y + ((to.y - from.y) * step) / steps;
+        mouse(contents, "mouseMove", x, y, { button: "left" });
+        if (step === 1 || step === steps) await inPage(contents, `cursor(${x}, ${y}, ${who}, false)`);
+        await sleep(25);
+      }
+      mouse(contents, "mouseUp", to.x, to.y, { button: "left", clickCount: 1 });
+      return { ok: true, key: target.key, from: from.label, to: to.label };
+    }
+    if (action === "type") {
+      const text = String(args.text ?? "");
+      if (args.ref || Number.isFinite(Number(args.x))) {
+        const clicked = await pointerAction(contents, args, who, "click");
+        if (!clicked.ok) return clicked;
+        if (args.clear !== false) { await pressKey(contents, process.platform === "darwin" ? "Meta+A" : "Control+A"); await sleep(40); }
+      }
+      contents.focus?.();
+      // Пароли, номера карт и коды подтверждения агент не печатает: это делает человек (browser_ask_help).
+      const sensitive = await contents.executeJavaScript(`(() => { const el = document.activeElement; if (!el) return ""; const ac = String(el.getAttribute("autocomplete") || "").toLowerCase(); return el.type === "password" ? "пароль" : /cc-|one-time-code/.test(ac) ? "платёжные данные или код подтверждения" : ""; })()`, true).catch(() => "");
+      if (sensitive) return { ok: false, error: "sensitive_field", message: `Это поле для чувствительных данных (${sensitive}). Их вводит человек: вызови browser_ask_help.` };
+      if (args.slow) {
+        for (const char of [...text].slice(0, 400)) { contents.insertText(char); await sleep(25 + Math.random() * 45); }
+      } else contents.insertText(text);
+      if (args.submit) { await sleep(120); await pressKey(contents, "Enter"); }
+      await sleep(150);
+      return { ok: true, key: target.key, typed: text.length };
+    }
+    if (action === "press") {
+      const list = (Array.isArray(args.keys) ? args.keys : [args.key || args.keys]).filter(Boolean).slice(0, 20);
+      for (const spec of list) { if (!(await pressKey(contents, spec))) return { ok: false, error: "bad_key", key: spec }; await sleep(70); }
+      return { ok: true, key: target.key, pressed: list };
+    }
+    if (action === "wait") return { key: target.key, ...(await waitFor(contents, args)) };
     if (action === "highlight") {
       if (args.clear) return { key: target.key, ...(await inPage(contents, "clear()")) };
       const refs = (Array.isArray(args.refs) ? args.refs : [args.ref]).filter(Boolean).map(String).slice(0, 40);
       return { key: target.key, ...(await inPage(contents, `highlight(${JSON.stringify(refs)}, ${who}, ${say}, ${Number(args.ms ?? 8000)})`)) };
     }
-    if (action === "scroll") return { key: target.key, ...(await inPage(contents, `scroll(${JSON.stringify(String(args.ref || ""))}, ${JSON.stringify(String(args.to || "down"))})`)) };
+    if (action === "scroll") {
+      if (Number.isFinite(Number(args.amount)) && !args.ref) {
+        const size = contents.getSize ? contents.getSize() : { width: 800, height: 600 };
+        mouse(contents, "mouseWheel", size.width / 2, size.height / 2, { deltaY: -Number(args.amount), canScroll: true });
+        await sleep(250);
+        return { key: target.key, ok: true, ...(await inPage(contents, "state()")) };
+      }
+      return { key: target.key, ...(await inPage(contents, `scroll(${JSON.stringify(String(args.ref || ""))}, ${JSON.stringify(String(args.to || "down"))})`)) };
+    }
     if (action === "screenshot") {
       if (!target.tab.visible) return { ok: false, error: "tab_hidden", message: "Вкладка сейчас не на экране — снимок был бы пустым." };
       const image = await contents.capturePage();
@@ -831,4 +860,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { tabs.clear(); window = null; });
 }
 
-module.exports = { attach, downloads, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, setSearchEngine, clearCache, state: stateOf, PARTITION };
+module.exports = { attach, downloads, setAgentControl, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, setSearchEngine, clearCache, state: stateOf, PARTITION };

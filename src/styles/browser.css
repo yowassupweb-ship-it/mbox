@@ -441,3 +441,34 @@
   .wb-browser-find input { flex: 1 1 auto; }
   .wb-browser-find-count { min-width: 0; }
 }
+
+/* Управление агентом во вкладке: пауза, продолжить, стоп — рядом с подписью «Агент: что делает». */
+.wb-browser-agent.is-held { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
+.wb-browser-agent-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-browser-agent-controls { display: inline-flex; align-items: center; gap: 2px; margin-left: var(--space-1); }
+.wb-browser-agent-controls button { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; }
+.wb-browser-agent-controls button:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
+.wb-browser-agent-controls button:focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent); }
+
+/* Агент просит помощи (капча, вход, код из SMS…): панель над страницей, чтобы страницу можно было трогать. */
+.wb-browser-help {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid color-mix(in srgb, var(--state-warn) 40%, var(--border-color));
+  background: color-mix(in srgb, var(--state-warn) 14%, var(--container-bg));
+  color: var(--text-main);
+  font-size: var(--text-sm);
+}
+.wb-browser-help > svg { flex: none; color: var(--state-warn); }
+.wb-browser-help-text { display: grid; flex: 1 1 260px; min-width: 0; gap: 1px; }
+.wb-browser-help-text strong { font-weight: var(--weight-semibold); }
+.wb-browser-help-text small { color: var(--text-2); font-size: var(--text-xs); }
+.wb-browser-help input { flex: 1 1 200px; min-width: 0; height: 28px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-main); font-size: var(--text-sm); }
+.wb-browser-help button { flex: none; min-height: 28px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.wb-browser-help button:hover { background: var(--surface-hover); }
+.wb-browser-help .wb-browser-help-done { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-semibold); }
+.wb-browser-help .wb-browser-help-done:hover { background: var(--accent-fill-hover); }
+.wb-browser-help :is(button, input):focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent); }

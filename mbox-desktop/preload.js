@@ -86,6 +86,7 @@ const desktopApi = {
     downloadAction: (id, action) => ipcRenderer.invoke("mbox-desktop:browser-download-action", id, action),
     clearDownloads: () => ipcRenderer.invoke("mbox-desktop:browser-downloads-clear"),
     openDownloadsFolder: () => ipcRenderer.invoke("mbox-desktop:browser-downloads-folder"),
+    agentControl: (key, command) => ipcRenderer.invoke("mbox-desktop:browser-agent-control", key, command),
     agent: (key, action, args, actor, note) => ipcRenderer.invoke("mbox-desktop:browser-agent", key, action, args, actor, note),
     bookmarks: () => ipcRenderer.invoke("mbox-desktop:browser-bookmarks"),
     history: (search, limit) => ipcRenderer.invoke("mbox-desktop:browser-history", search, limit),

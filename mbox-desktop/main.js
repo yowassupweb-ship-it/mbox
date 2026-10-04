@@ -999,6 +999,7 @@ ipcMain.handle("mbox-desktop:browser-download-action", async (event, id, action)
 ipcMain.handle("mbox-desktop:browser-downloads-clear", async (event) => { assertBrowserHost(event); return browser.downloads.clearFinished(); });
 ipcMain.handle("mbox-desktop:browser-downloads-folder", async (event) => { assertBrowserHost(event); return browser.downloads.openFolder(); });
 // Действие агента во вкладке браузера (server/browser-agent.mjs → страница MBOX → сюда).
+ipcMain.handle("mbox-desktop:browser-agent-control", async (event, key, command) => { assertBrowserHost(event); return browser.setAgentControl(String(key || ""), String(command || "")); });
 ipcMain.handle("mbox-desktop:browser-agent", async (event, key, action, args, actor, note) => {
   assertBrowserHost(event);
   return browser.agentAction(String(key || ""), String(action || ""), args && typeof args === "object" ? args : {}, String(actor || "Агент"), String(note || ""));

@@ -17,6 +17,8 @@ export type JarvisDeps = {
   integrations?: { list: (userId?: string) => Promise<Row[]>; call: (service: string, input: Record<string, unknown>, userId?: string) => Promise<Row> };
   /** Документы Google владельца (server/google-docs.mjs). */
   gdocs?: { search: (userId: string, input: Record<string, unknown>) => Promise<Row>; read: (userId: string, id: string) => Promise<Row>; append: (userId: string, id: string, text: string) => Promise<Row>; replace: (userId: string, id: string, find: string, replace: string) => Promise<Row>; create: (userId: string, title: string, text: string) => Promise<Row>; import: (userId: string, id: string) => Promise<Row> };
+  /** Просьба о помощи человеку в браузере (server/browser-agent.mjs). */
+  browserHelp?: { ask: (userId: string, input: Record<string, unknown>) => Row; wait: (id: string, seconds?: number) => Promise<Row> };
   browserOp?: (userId: string, action: string, input: { tab?: string; args?: Record<string, unknown>; note?: string }) => Promise<Record<string, any>>;
 };
 

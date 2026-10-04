@@ -105,7 +105,7 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
 
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string; silent?: boolean };
+          const message = JSON.parse(event.data) as { type?: string; entity?: string; notification?: string; actor?: string; detail?: string; agent?: string; silent?: boolean; help?: unknown };
           if (message.type === "presence" || message.type === "presence_agent") {
             window.dispatchEvent(new CustomEvent(PRESENCE_EVENT, { detail: message }));
             return;
@@ -138,6 +138,11 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
           // Агент действует во встроенном браузере (server/browser-agent.mjs → app/workbench/browserAgent.ts).
           if (message.type === "browser_op") {
             window.dispatchEvent(new CustomEvent("mbox:browser-op", { detail: message }));
+            return;
+          }
+          // Агент застрял и просит помощи в браузере / человек ответил (server/browser-agent.mjs → BrowserDocument.tsx).
+          if (message.type === "browser_help" || message.type === "browser_help_resolved") {
+            window.dispatchEvent(new CustomEvent(message.type === "browser_help" ? "mbox:browser-help" : "mbox:browser-help-resolved", { detail: message.help }));
             return;
           }
           // Агент поправил файл навыка (MCP edit_skill_file) — открытые вкладки навыка перечитывают его.

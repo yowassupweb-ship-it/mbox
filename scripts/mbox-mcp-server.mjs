@@ -1957,7 +1957,7 @@ server.registerTool(
     title: "Read the page open in the owner's MBOX browser",
     description: [
       "Read the page the owner has open in the MBOX browser: url, title, the text the owner selected, headings, visible text (clipped), every visible form field with a ref (f12), label, kind, current value, options for selects, and clickable buttons/links with refs (b7).",
-      "Use refs with browser_fill / browser_click / browser_highlight. Refs live until the page reloads — take a new snapshot after navigation.",
+      "Use refs with browser_fill / browser_click / browser_type / browser_highlight. Refs live until the page reloads — take a new snapshot after navigation. The result includes scroll/viewport and `blockers` (captcha, login wall, 2FA, bot protection, cookie banner, paywall): if one blocks you, call browser_ask_help instead of retrying.",
       "Password values are never returned. Frames (iframes) are not read.",
     ].join("\n"),
     inputSchema: { tab: BROWSER_TAB, max_text: z.number().default(6000).describe("How many characters of page text to return") },
@@ -1987,11 +1987,197 @@ server.registerTool(
 server.registerTool(
   "browser_click",
   {
-    title: "Click a button or link on the owner's page, visibly",
-    description: "Click an element by ref from browser_snapshot; it is highlighted with your caption first. Do not click submit/send/buy/delete buttons unless the owner explicitly asked for exactly that.",
-    inputSchema: { ref: z.string(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+    title: "Click on the owner's page with a visible cursor",
+    description: [
+      "Click with a real, trusted mouse click while a visible cursor labelled with your name glides to the element and a ripple shows the click — the owner watches it happen.",
+      "Target: ref from browser_snapshot, OR page coordinates x,y (CSS pixels of the visible viewport; use browser_screenshot to read them). double=true for a double click, right=true for a context menu.",
+      "If the element is covered by a banner/dialog the call fails with covered — close that first (or force=true). trusted=false falls back to a plain DOM click for pages that ignore mouse events.",
+      "Do not click submit/send/buy/pay/delete buttons unless the owner explicitly asked for exactly that.",
+    ].join("\n"),
+    inputSchema: { ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), double: z.boolean().default(false), right: z.boolean().default(false), force: z.boolean().default(false), trusted: z.boolean().default(true), tab: BROWSER_TAB, note: BROWSER_NOTE },
   },
-  async ({ ref, tab, note }) => browserText(await browserOp("click", { ref }, tab, note)),
+  async ({ ref, x, y, double, right, force, trusted, tab, note }) => browserText(await browserOp(double ? "double_click" : right ? "right_click" : "click", { ref, x, y, force, trusted }, tab, note)),
+);
+
+server.registerTool(
+  "browser_type",
+  {
+    title: "Type into a field like a person",
+    description: [
+      "Type text with real keystrokes into a field (ref from browser_snapshot, or coordinates x,y; without a target it types into whatever is focused). The cursor clicks the field first; clear=true (default) selects the old text so it is replaced.",
+      "Use this instead of browser_fill for rich editors, search boxes with suggestions, chat inputs and Google Docs-like canvases where setting a value does not register. slow=true types character by character. submit=true presses Enter afterwards.",
+      "Never type passwords, card numbers or one-time codes — ask the owner (browser_ask_help).",
+    ].join("\n"),
+    inputSchema: { text: z.string(), ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), clear: z.boolean().default(true), submit: z.boolean().default(false), slow: z.boolean().default(false), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ text, ref, x, y, clear, submit, slow, tab, note }) => browserText(await browserOp("type", { text, ref, x, y, clear, submit, slow }, tab, note)),
+);
+
+server.registerTool(
+  "browser_press",
+  {
+    title: "Press keys on the owner's page",
+    description: "Press one or more keys/shortcuts: Enter, Tab, Escape, Backspace, Delete, ArrowDown, PageDown, Home, End, Control+A, Control+Enter, Shift+Tab, F5 … Keys go to the focused element.",
+    inputSchema: { keys: z.array(z.string()).min(1), tab: BROWSER_TAB },
+  },
+  async ({ keys, tab }) => browserText(await browserOp("press", { keys }, tab, "нажимает клавиши")),
+);
+
+server.registerTool(
+  "browser_hover",
+  {
+    title: "Hover the cursor over an element",
+    description: "Move the visible cursor over an element (ref) or point (x,y) without clicking — opens hover menus and tooltips.",
+    inputSchema: { ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), tab: BROWSER_TAB },
+  },
+  async ({ ref, x, y, tab }) => browserText(await browserOp("hover", { ref, x, y }, tab, "наводит курсор")),
+);
+
+server.registerTool(
+  "browser_cursor",
+  {
+    title: "Move the visible cursor (to point at something)",
+    description: "Glide the labelled cursor to an element or point and leave it there — to show the owner where you are looking, without clicking.",
+    inputSchema: { ref: z.string().default(""), x: z.number().optional(), y: z.number().optional(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ ref, x, y, tab, note }) => browserText(await browserOp("move_cursor", { ref, x, y }, tab, note)),
+);
+
+server.registerTool(
+  "browser_drag",
+  {
+    title: "Drag and drop with the cursor",
+    description: "Press on the source (ref or x,y), drag to the target (ref or x,y) and release — sliders, sortable lists, kanban cards, file drop zones.",
+    inputSchema: { from_ref: z.string().default(""), from_x: z.number().optional(), from_y: z.number().optional(), to_ref: z.string().default(""), to_x: z.number().optional(), to_y: z.number().optional(), tab: BROWSER_TAB, note: BROWSER_NOTE },
+  },
+  async ({ from_ref, from_x, from_y, to_ref, to_x, to_y, tab, note }) => browserText(await browserOp("drag", { from: { ref: from_ref, x: from_x, y: from_y }, to: { ref: to_ref, x: to_x, y: to_y } }, tab, note)),
+);
+
+server.registerTool(
+  "browser_wait",
+  {
+    title: "Wait for the page",
+    description: "Wait (up to 20 s) until text appears (text) / disappears (gone_text), an element ref becomes visible (or gone=true), a CSS selector shows up, the URL contains url_contains, or the page finished loading (load=true). Use after clicks that navigate or load content, instead of guessing delays. On timeout take a browser_snapshot — and if you are stuck, browser_ask_help.",
+    inputSchema: { text: z.string().optional(), gone_text: z.string().optional(), ref: z.string().optional(), gone: z.boolean().default(false), selector: z.string().optional(), url_contains: z.string().optional(), load: z.boolean().default(false), ms: z.number().default(10000), tab: BROWSER_TAB },
+  },
+  async ({ tab, ...args }) => browserText(await browserOp("wait", args, tab, "ждёт страницу")),
+);
+
+server.registerTool(
+  "browser_nav",
+  {
+    title: "Back / forward / reload",
+    description: "Go back or forward in the tab's history, or reload the page.",
+    inputSchema: { to: z.enum(["back", "forward", "reload"]), tab: BROWSER_TAB },
+  },
+  async ({ to, tab }) => browserText(await browserOp(to, {}, tab)),
+);
+
+server.registerTool(
+  "browser_new_tab",
+  {
+    title: "Open a URL in a new browser tab",
+    description: "Open a URL in a NEW browser tab in MBOX (the current one stays). Call browser_tabs a moment later to get its key.",
+    inputSchema: { url: z.string(), tab: BROWSER_TAB },
+  },
+  async ({ url, tab }) => browserText(await browserOp("new_tab", { url }, tab)),
+);
+
+server.registerTool(
+  "browser_extract",
+  {
+    title: "Pull structured data off the page",
+    description: "Extract data without reading the whole snapshot: kind = links (text+href), tables (rows of cells), lists (items), text (of an element ref, or the whole page). Cheaper and cleaner than parsing browser_snapshot text.",
+    inputSchema: { kind: z.enum(["links", "tables", "lists", "text"]), ref: z.string().default(""), max: z.number().default(100), tab: BROWSER_TAB },
+  },
+  async ({ kind, ref, max, tab }) => browserText(await browserOp("extract", { kind, ref, max }, tab, "собирает данные")),
+);
+
+server.registerTool(
+  "browser_find",
+  {
+    title: "Find text on the page",
+    description: "Find visible elements containing a text; returns refs you can click/highlight even when they are not buttons or links.",
+    inputSchema: { query: z.string(), tab: BROWSER_TAB },
+  },
+  async ({ query, tab }) => browserText(await browserOp("find_text", { query }, tab, "ищет на странице")),
+);
+
+server.registerTool(
+  "browser_blockers",
+  {
+    title: "Check what blocks the page",
+    description: "Detect captchas, login walls, 2FA code prompts, bot-protection stops, cookie banners and paywalls on the current page (browser_snapshot includes the same list). If it says captcha/login/two_factor/blocked — do not try to get around it: call browser_ask_help.",
+    inputSchema: { tab: BROWSER_TAB },
+  },
+  async ({ tab }) => browserText(await browserOp("blockers", {}, tab)),
+);
+
+server.registerTool(
+  "browser_status",
+  {
+    title: "Is the human holding you?",
+    description: "Whether the owner paused or stopped you in this tab (paused_by_human / stopped_by_human), plus the current URL and loading state. Check it if actions keep failing with paused/stopped.",
+    inputSchema: { tab: BROWSER_TAB },
+  },
+  async ({ tab }) => browserText(await browserOp("status", {}, tab)),
+);
+
+// ─── Совместная работа: застрял — попроси помощи и жди ─────────────────────────────────────────────────────────────────
+
+const helpText = (view) => {
+  if (!view) return "Help request not found.";
+  if (view.status === "done") return `The owner says DONE.${view.message ? ` Comment: ${view.message}` : ""} Take a fresh browser_snapshot and continue.`;
+  if (view.status === "stopped") return `The owner asked you to STOP.${view.message ? ` Comment: ${view.message}` : ""} Do not continue the task; report in chat what you did and what is left.`;
+  if (view.status === "cancelled") return "The request was cancelled.";
+  if (view.status === "unknown") return view.message;
+  return `Still waiting for the owner (request ${view.id}). Call browser_wait_help with this id again, or work on something else meanwhile.`;
+};
+
+server.registerTool(
+  "browser_ask_help",
+  {
+    title: "Ask the owner for help and wait",
+    description: [
+      "Use when you are stuck: captcha, login, one-time code, a form you do not understand, a page that does not respond, an irreversible choice that is not yours. A bar «Агент просит помощи» appears above the page (and a notification / inbox item), the owner fixes it by hand on the live page and presses «Готово, продолжай» — or «Остановить».",
+      "reason = one line (what blocks you); need = what exactly the owner should do. The call waits up to 40 s for the answer; if it returns «still waiting», call browser_wait_help with the id (you may do so repeatedly). After «DONE» take a fresh browser_snapshot — the page changed.",
+      "Ask EARLY: a captcha or login wall is not something to retry five times. Do not ask for things you can do yourself.",
+    ].join("\n"),
+    inputSchema: { reason: z.string(), need: z.string().default(""), tab: BROWSER_TAB },
+  },
+  async ({ reason, need, tab }) => {
+    try {
+      const created = await mboxFetch("/api/mbox/browser/help", { method: "POST", body: JSON.stringify({ reason, need, tab }) });
+      const view = await mboxFetch(`/api/mbox/browser/help/${created.id}?wait=40`);
+      return textResult(`${helpText(view)}${view.status === "pending" ? "" : ""}`);
+    } catch (error) { return textResult(`Could not ask for help: ${String(error?.message || error)}`); }
+  },
+);
+
+server.registerTool(
+  "browser_wait_help",
+  {
+    title: "Keep waiting for the owner's answer",
+    description: "Wait up to 40 s more for the owner to answer a browser_ask_help request (id from its «still waiting» reply).",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { return textResult(helpText(await mboxFetch(`/api/mbox/browser/help/${encodeURIComponent(id)}?wait=40`))); }
+    catch (error) { return textResult(`Wait failed: ${String(error?.message || error)}`); }
+  },
+);
+
+server.registerTool(
+  "browser_cancel_help",
+  {
+    title: "Withdraw a help request",
+    description: "Take back a help request you no longer need (you solved it, or changed plan). Removes the bar and the inbox item.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    try { await mboxFetch(`/api/mbox/browser/help/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({ action: "cancel" }) }); return textResult("Request withdrawn."); }
+    catch (error) { return textResult(`Cancel failed: ${String(error?.message || error)}`); }
+  },
 );
 
 server.registerTool(

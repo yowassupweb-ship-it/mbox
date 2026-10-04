@@ -20,9 +20,10 @@ let browserOp;
 let integrations;
 let gmail;
 let gdocs;
+let browserHelp;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail, gdocs } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail, gdocs, browserHelp } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -617,7 +618,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
-  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "gmail_draft", "gmail_send", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import",
+  "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "browser_type", "browser_press", "gmail_draft", "gmail_send", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1581,6 +1582,54 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "browser_type",
+      description: "Напечатать текст в поле настоящими нажатиями клавиш (ref из browser_snapshot или x,y). Для поиска, чатов и редакторов, где browser_fill не срабатывает. submit=true — нажать Enter после. Пароли, коды из СМС и данные карт не вводи — попроси человека (browser_ask_help).",
+      parameters: { type: "object", properties: { text: { type: "string" }, ref: { type: "string" }, clear: { type: "boolean" }, submit: { type: "boolean" }, tab: { type: "string" } }, required: ["text"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_press",
+      description: "Нажать клавиши или сочетания в браузере: Enter, Tab, Escape, ArrowDown, Control+A…",
+      parameters: { type: "object", properties: { keys: { type: "array", items: { type: "string" } }, tab: { type: "string" } }, required: ["keys"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_wait",
+      description: "Дождаться страницы: text — появится, gone_text — исчезнет, url_contains, load — страница загрузилась (до 20 секунд). После клика, который грузит страницу.",
+      parameters: { type: "object", properties: { text: { type: "string" }, gone_text: { type: "string" }, url_contains: { type: "string" }, load: { type: "boolean" }, ms: { type: "number" }, tab: { type: "string" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_extract",
+      description: "Достать данные со страницы: kind = links | tables | lists | text. Чище и дешевле, чем читать весь снимок.",
+      parameters: { type: "object", properties: { kind: { type: "string", enum: ["links", "tables", "lists", "text"] }, ref: { type: "string" }, tab: { type: "string" } }, required: ["kind"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_ask_help",
+      description: "Застрял (капча, вход, код из СМС, непонятная форма, необратимый выбор)? Попроси человека о помощи: над страницей появится панель «Агент просит помощи», человек делает нужное руками и жмёт «Готово, продолжай». Вызов ждёт ответа до 40 секунд. Проси сразу, не повторяй попытки пять раз.",
+      parameters: { type: "object", properties: { reason: { type: "string", description: "Одна строка: что мешает" }, need: { type: "string", description: "Что именно сделать человеку" }, tab: { type: "string" } }, required: ["reason"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_wait_help",
+      description: "Продолжить ждать ответа человека на просьбу browser_ask_help (id из ответа «ещё жду»), до 40 секунд за раз.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1809,7 +1858,7 @@ export const TOOL_GROUPS = {
   browser: {
     label: "встроенный браузер владельца в MBOX Desktop: список вкладок, прочитать страницу, открыть адрес, нажать, заполнить форму, прокрутить",
     match: /(браузер|вкладк|страниц[ауеы]? в|открой (сайт|страниц|ссылк)|на сайте|кликни|нажми на|заполни (форм|поле|анкет)|форм[уа] на|прокрути)/,
-    tools: ["browser_tabs", "browser_snapshot", "browser_navigate", "browser_click", "browser_fill", "browser_scroll"],
+    tools: ["browser_tabs", "browser_snapshot", "browser_navigate", "browser_click", "browser_fill", "browser_scroll", "browser_type", "browser_press", "browser_wait", "browser_extract", "browser_ask_help", "browser_wait_help"],
   },
   docs: {
     label: "документы (листы A4) и таблицы (Excel-подобные) в MBOX: найти, прочитать, создать, дописать, править ячейки",
@@ -3125,11 +3174,21 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
   if (name.startsWith("browser_")) {
     if (!browserOp) return "браузер недоступен в этом режиме";
     if (!viewer?.userId || !viewer.all) return "браузером MBOX управляет только владелец";
+    if (name === "browser_ask_help" || name === "browser_wait_help") {
+      if (!browserHelp) return "просьба о помощи недоступна в этом режиме";
+      const view = name === "browser_ask_help"
+        ? await (async () => { const created = browserHelp.ask(String(viewer.userId), { reason: args.reason, need: args.need, tab: args.tab }); return browserHelp.wait(created.id, 40); })()
+        : await browserHelp.wait(String(args.id || ""), 40);
+      if (view.status === "done") return `человек ответил: готово${view.message ? `. Комментарий: ${view.message}` : ""}. Сделай свежий browser_snapshot и продолжай.`;
+      if (view.status === "stopped") return `человек просит остановиться${view.message ? `: ${view.message}` : ""}. Не продолжай, расскажи что сделано и что осталось.`;
+      if (view.status === "pending") return `человек ещё не ответил (запрос ${view.id}). Вызови browser_wait_help с этим id или сообщи человеку в чате, что ждёшь его.`;
+      return view.message || `статус: ${view.status}`;
+    }
     const action = name.slice("browser_".length);
     const payload = {
       tab: String(args.tab || ""),
-      note: { snapshot: "читаю страницу", navigate: "открываю страницу", click: "нажимаю", fill: "заполняю форму", scroll: "прокручиваю", tabs: "смотрю вкладки" }[action] || "",
-      args: action === "navigate" ? { url: String(args.url || "") } : action === "click" ? { ref: String(args.ref || "") } : action === "fill" ? { fields: Array.isArray(args.fields) ? args.fields : [] } : action === "scroll" ? { to: args.to, ref: args.ref } : {},
+      note: { snapshot: "читаю страницу", navigate: "открываю страницу", click: "нажимаю", fill: "заполняю форму", scroll: "прокручиваю", tabs: "смотрю вкладки", type: "печатаю", press: "нажимаю клавиши", wait: "жду страницу", extract: "собираю данные" }[action] || "",
+      args: action === "navigate" ? { url: String(args.url || "") } : action === "click" ? { ref: String(args.ref || ""), x: args.x, y: args.y } : action === "fill" ? { fields: Array.isArray(args.fields) ? args.fields : [] } : action === "scroll" ? { to: args.to, ref: args.ref } : action === "type" ? { text: String(args.text ?? ""), ref: String(args.ref || ""), clear: args.clear !== false, submit: Boolean(args.submit) } : action === "press" ? { keys: Array.isArray(args.keys) ? args.keys : [] } : action === "wait" ? { text: args.text, gone_text: args.gone_text, url_contains: args.url_contains, load: Boolean(args.load), ms: args.ms } : action === "extract" ? { kind: String(args.kind || "text"), ref: String(args.ref || "") } : {},
     };
     const result = await browserOp(String(viewer.userId), action, payload);
     if (result?.ok === false) return `браузер: ${result.message || result.error || "не получилось"}`;
