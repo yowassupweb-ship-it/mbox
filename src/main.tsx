@@ -31,6 +31,10 @@ import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPri
 import { filterTree, formatProps, parseProps, projectToTree, rollupBytes, sortTodos } from "./lib/tree";
 import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
+import { InviteScreen } from "./pages/InviteScreen";
+import { InviteManager } from "./features/accounts/InviteManager";
+import { PasswordPanel } from "./features/accounts/PasswordPanel";
+import { accountErrorText } from "./features/accounts/accountErrors";
 import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
 import { TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
@@ -86,6 +90,8 @@ function App() {
       .finally(() => setAuthChecked(true));
   }, []);
 
+  const inviteToken = window.location.pathname.match(/^\/invite\/(mbox_invite_[A-Za-z0-9_-]+)\/?$/)?.[1];
+  if (inviteToken && !me.user) return <InviteScreen token={inviteToken} onJoined={setMe} />;
   if (!authChecked) return <ShellLoading />;
   if (!me.user) return <LoginScreen onLogin={setMe} />;
   return <Workspace user={me.user} onLogout={() => setMe({ user: null })} theme={theme} onThemeChange={setTheme} />;
@@ -872,8 +878,9 @@ function TeamBoard({ user, projects }: { user: { username: string; role: string 
   return (
     <div className="content-grid settings-single-grid">
       {user.role === "owner"
-        ? <AccountManager projects={projects} />
+        ? <><InviteManager projects={projects} /><AccountManager projects={projects} /></>
         : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
+      <PasswordPanel />
       <AgentsOnThisComputer username={user.username} />
     </div>
   );
@@ -1023,6 +1030,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newJarvis, setNewJarvis] = useState(false);
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [draftProjects, setDraftProjects] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState("");
@@ -1044,12 +1052,12 @@ function AccountManager({ projects }: { projects: Project[] }) {
       await fetchJson("/api/mbox/admin/users", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, email, password, project_ids: projectIds }),
+        body: JSON.stringify({ username, email, password, project_ids: projectIds, jarvis_enabled: newJarvis }),
       });
-      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]);
+      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]); setNewJarvis(false);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось создать аккаунт");
+      setError(accountErrorText(cause, "Не удалось создать аккаунт"));
     } finally {
       setBusy("");
     }
@@ -1091,7 +1099,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
   }
 
   return (
-    <Panel title="Команда и общие проекты" icon={KeyRound}>
+    <Panel title="Аккаунты команды" icon={KeyRound}>
       <div className="account-manager">
         <form className="account-create" onSubmit={createAccount}>
           <div className="account-create-fields">
@@ -1100,6 +1108,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
             <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль, минимум 8 знаков" type="password" minLength={8} autoComplete="new-password" required />
           </div>
           <ProjectAccessPicker projects={projects} selected={projectIds} onChange={setProjectIds} />
+          <label className="account-jarvis"><input type="checkbox" checked={newJarvis} onChange={(event) => setNewJarvis(event.target.checked)} />Дать доступ к Джарвису</label>
           <button className="primary-action" disabled={busy === "new"} type="submit"><Plus size={16} />{busy === "new" ? "Создаю…" : "Создать аккаунт"}</button>
         </form>
         {error && <div className="account-error" role="alert">{error}</div>}

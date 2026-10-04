@@ -10,9 +10,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const config = loadConfig();
 const baseUrl = requireValue(config.MBOX_URL, "MBOX_URL");
-const username = config.MBOX_USERNAME || "Admin";
+const username = config.MBOX_USERNAME || "";
 const accessToken = String(config.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(config.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
+if (!accessToken) requireValue(username, "MBOX_USERNAME");
 const agentName = config.MBOX_AGENT_NAME || "ChatGPT";
 const project = config.MBOX_PROJECT || "MBOX";
 const pollMs = Number(config.MBOX_WATCH_POLL_MS || 5000);

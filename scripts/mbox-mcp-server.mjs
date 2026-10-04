@@ -3,9 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const baseUrl = process.env.MBOX_URL;
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const accessToken = String(process.env.MBOX_TOKEN || "").trim();
 const password = process.env.MBOX_PASSWORD;
+if (!accessToken && !username) throw new Error("MBOX: укажите MBOX_TOKEN или MBOX_USERNAME и MBOX_PASSWORD");
 // Имя агента обязательно. Молчаливый дефолт «MBOX Agent» плодил призраков: сессия без переменной
 // окружения заводила отдельного агента, и в ростере появлялись лишние имена рядом с настоящими.
 const agentName = process.env.MBOX_AGENT_NAME;

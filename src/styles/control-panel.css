@@ -1350,3 +1350,6 @@
 .agent-pref-platforms button.is-active { background: var(--accent-fill); color: var(--on-accent); }
 @media (prefers-reduced-motion: reduce) { .agent-pref-row input[type="checkbox"], .agent-pref-row input[type="checkbox"]::after { transition: none; } }
 .account-row.agent-pref-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+
+.invite-number { display: grid; gap: var(--space-1); color: var(--text-muted); font-size: var(--text-xs); }
+.account-create-fields .password-field { min-width: 0; height: 38px; }

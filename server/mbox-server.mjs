@@ -24,7 +24,7 @@ import { createPresenceHub } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
-import { ensureAccountsSchema, handleAccountsApi } from "./accounts.mjs";
+import { ensureAccountsSchema, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
@@ -1040,31 +1040,8 @@ function publicOrigin(req) {
   return `${proto}://${host}`;
 }
 
-function inviteHash(token) {
-  return createHash("sha256").update(String(token || "")).digest("hex");
-}
-
 function looksLikePasswordHash(value) {
   return /^(pbkdf2_sha256|bcrypt|scrypt|argon2|sha256|sha512)\$/i.test(String(value || ""));
-}
-
-async function inviteByToken(token) {
-  if (!/^mbox_invite_[A-Za-z0-9_-]{32,}$/.test(String(token || ""))) return null;
-  const result = await query(
-    `SELECT i.id::text, i.project_ids::text[] AS project_ids, i.uses_remaining, i.expires_at::text,
-            u.username AS created_by,
-            COALESCE(jsonb_agg(jsonb_build_object('id', p.id::text, 'name', p.name) ORDER BY p.name)
-              FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects
-     FROM account_invites i
-     JOIN users u ON u.id = i.created_by
-     LEFT JOIN projects p ON p.id = ANY(i.project_ids)
-     WHERE i.token_hash = $1
-       AND i.uses_remaining > 0
-       AND i.expires_at > now()
-     GROUP BY i.id, u.username`,
-    [inviteHash(token)],
-  );
-  return result.rows[0] || null;
 }
 
 async function createSessionForUser(req, res, userId) {
@@ -1072,48 +1049,6 @@ async function createSessionForUser(req, res, userId) {
   const tokenHash = createHash("sha256").update(token).digest("hex");
   await query("INSERT INTO auth_sessions(user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')", [userId, tokenHash]);
   res.setHeader("set-cookie", sessionCookie(req, encodeURIComponent(token), 2592000));
-}
-
-async function handlePublicInviteApi(req, res, url) {
-  const match = url.pathname.match(/^\/api\/mbox\/invites\/(mbox_invite_[A-Za-z0-9_-]+)$/);
-  if (!match) return false;
-  const invite = await inviteByToken(match[1]);
-  if (!invite) { sendJson(res, 404, { error: "invite_not_found" }); return true; }
-  if (req.method === "GET") {
-    sendJson(res, 200, { invite: { created_by: invite.created_by, expires_at: invite.expires_at, projects: invite.projects } });
-    return true;
-  }
-  if (req.method !== "POST") return false;
-  const body = await readBody(req);
-  const username = String(body.username || "").trim();
-  const password = String(body.password || "");
-  const email = String(body.email || `${username.toLowerCase()}@mbox.local`).trim();
-  if (username.length < 2 || password.length < 8) {
-    sendJson(res, 400, { error: "username_and_password_required" });
-    return true;
-  }
-  const created = await query(
-    `INSERT INTO users(email, username, password_hash, role)
-     VALUES ($1, $2, crypt($3, gen_salt('bf')), 'member')
-     RETURNING id::text, email, username, role`,
-    [email, username, password],
-  ).catch((error) => ({ error }));
-  if (created.error) {
-    sendJson(res, 409, { error: "account_already_exists" });
-    return true;
-  }
-  const userId = created.rows[0].id;
-  for (const projectId of invite.project_ids || []) {
-    await query(
-      `INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor')
-       ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
-      [projectId, userId],
-    );
-  }
-  await query("UPDATE account_invites SET uses_remaining = uses_remaining - 1, last_used_at = now() WHERE id = $1", [invite.id]);
-  await createSessionForUser(req, res, userId);
-  sendJson(res, 201, { user: created.rows[0] });
-  return true;
 }
 
 /** Папки хранилища по проектам: projects/<id>/ у каждого проекта, участнику — только его (см. server/storage.mjs). */
@@ -1181,7 +1116,6 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/documents"
     || pathname === "/api/mbox/spotlight"
-    || pathname === "/api/mbox/invites"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
     // Связи памяти и источники данных — с фильтром по проектам участника в самих обработчиках.
@@ -1241,8 +1175,8 @@ async function handleApiWithContext(req, res, url) {
     const user = await query(
       `SELECT id::text, username, role
        FROM users
-       WHERE username = $1 AND password_hash = crypt($2, password_hash)`,
-      [body.username, body.password],
+       WHERE lower(username) = lower($1) AND password_hash = crypt($2, password_hash)`,
+      [body.username.trim(), body.password],
     );
     if (!user.rows[0]) {
       noteLoginFailure(failureKey);
@@ -1276,33 +1210,15 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { user: withChatDefaults(await currentUser(req)) });
   }
 
-  if (await handlePublicInviteApi(req, res, url)) return;
+  if (await handlePublicInvite({ req, res, url, query, readBody, sendJson, startSession: createSessionForUser })) return;
 
   const user = await requireUser(req, res);
   if (!user) return;
   const scope = await projectScope(user);
 
-  if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user })) return;
+  if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user, publicOrigin })) return;
 
   if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
-
-  if (url.pathname === "/api/mbox/invites" && req.method === "POST") {
-    const body = await readBody(req);
-    const requested = Array.isArray(body.project_ids) ? body.project_ids.map(String).filter((id) => /^\d+$/.test(id)) : [];
-    const available = scope.all
-      ? (await query("SELECT id::text FROM projects ORDER BY name")).rows.map((row) => row.id)
-      : scope.projectIds;
-    const projectIds = [...new Set((requested.length ? requested : available).filter((id) => available.includes(id)))];
-    if (!projectIds.length) return sendJson(res, 400, { error: "no_projects_available" });
-    const token = `mbox_invite_${randomBytes(32).toString("base64url")}`;
-    const result = await query(
-      `INSERT INTO account_invites(token_hash, created_by, project_ids, uses_remaining, expires_at)
-       VALUES ($1, $2, $3::bigint[], 20, now() + interval '7 days')
-       RETURNING id::text, expires_at::text`,
-      [inviteHash(token), user.id, projectIds],
-    );
-    return sendJson(res, 201, { invite: { ...result.rows[0], url: `${publicOrigin(req)}/invite/${token}`, project_ids: projectIds } });
-  }
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;

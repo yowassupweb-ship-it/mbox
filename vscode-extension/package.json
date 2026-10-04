@@ -49,7 +49,7 @@
         },
         "mbox.username": {
           "type": "string",
-          "default": "Admin",
+          "default": "",
           "description": "Имя пользователя для входа в MBOX."
         },
         "mbox.agentName": {

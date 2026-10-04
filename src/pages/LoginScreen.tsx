@@ -5,8 +5,14 @@ import type { Me } from "../types";
 import { Button, ErrorText, PasswordInput } from "../ui";
 import { WORKING_FRAMES } from "../components/AgentAvatar";
 
+const LAST_USER_KEY = "mbox.lastUsername";
+
+function readLastUsername() {
+  try { return window.localStorage.getItem(LAST_USER_KEY) || ""; } catch { return ""; }
+}
+
 export function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
-  const [username, setUsername] = useState("Admin");
+  const [username, setUsername] = useState(readLastUsername);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -21,6 +27,7 @@ export function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
+      try { window.localStorage.setItem(LAST_USER_KEY, username.trim()); } catch { /* приватный режим */ }
       onLogin(me);
     } catch (cause) {
       // 401 — это про пароль, 429 — сервер притормозил перебор, всё остальное — про сервер.
@@ -45,14 +52,15 @@ export function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
         </header>
         <label className="login-field">
           <span>Логин</span>
-          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoCapitalize="off" spellCheck={false} required />
+          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoCapitalize="off" spellCheck={false} autoFocus={!username} required />
         </label>
         <div className="login-field">
           <span id="login-password-label">Пароль</span>
-          <PasswordInput value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" aria-labelledby="login-password-label" required autoFocus />
+          <PasswordInput value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" aria-labelledby="login-password-label" required autoFocus={Boolean(username)} />
         </div>
         {error && <ErrorText>{error}</ErrorText>}
-        <Button className="login-action" type="submit" disabled={busy || !password}>{busy ? "Проверяю…" : "Войти"}</Button>
+        <Button className="login-action" type="submit" disabled={busy || !username.trim() || !password}>{busy ? "Проверяю…" : "Войти"}</Button>
+        <p className="login-hint">Нет аккаунта? Попросите у владельца ссылку-приглашение.</p>
       </form>
     </main>
   );

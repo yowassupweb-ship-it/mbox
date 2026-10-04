@@ -36,7 +36,7 @@ class MboxClient {
     const cfg = vscode.workspace.getConfiguration("mbox");
     return {
       url: String(cfg.get("url") || "").replace(/\/+$/, ""),
-      username: String(cfg.get("username") || "Admin"),
+      username: String(cfg.get("username") || ""),
       agentName: String(cfg.get("agentName") || "VS Code"),
       project: String(cfg.get("project") || "MBOX"),
       repoPath: String(cfg.get("repoPath") || ""),

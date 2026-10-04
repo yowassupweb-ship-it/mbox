@@ -7,7 +7,7 @@
  * Запуск: node scripts/cleanup-empty-posts.mjs
  */
 const baseUrl = process.env.MBOX_URL || "https://mbox.shar-os.ru";
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const password = process.env.MBOX_PASSWORD;
 
 let cookie = "";

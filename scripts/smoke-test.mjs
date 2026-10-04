@@ -5,7 +5,7 @@
 // (или npm run smoke-test). MBOX_URL/MBOX_USERNAME/MBOX_PASSWORD — как у остальных скриптов.
 
 const baseUrl = process.env.MBOX_URL || "https://mbox.shar-os.ru";
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const password = process.env.MBOX_PASSWORD;
 
 if (!password) {

@@ -112,7 +112,6 @@ function resolveRepoRoot() {
 function loadResponderEnv() {
   const env = {
     MBOX_URL: mboxUrl,
-    MBOX_USERNAME: "Admin",
     ...readDotEnv(path.join(repoRoot, ".env.local")),
     ...readCodexMboxEnv(),
     ...process.env
@@ -752,6 +751,45 @@ async function checkForUpdates(manual) {
   }
 }
 
+// Вход в Claude Code / Codex на этом компьютере: логику (проверка статуса, запуск входа) делит служба mbox-agent, см. scripts/cli-auth.mjs.
+let cliAuthModule = null;
+const cliLogins = new Map();
+const cliLoginState = { claude: null, codex: null };
+async function cliAuth() {
+  if (!cliAuthModule) {
+    const file = [path.join(packagedScriptRoot, "cli-auth.mjs"), path.join(repoRoot, "scripts", "cli-auth.mjs")].find((candidate) => fs.existsSync(candidate));
+    if (!file) throw new Error("cli_auth_missing");
+    cliAuthModule = await import(require("url").pathToFileURL(file).href);
+  }
+  return cliAuthModule;
+}
+const cliFamily = (family) => (family === "claude" || family === "codex" ? family : "");
+ipcMain.handle("mbox-desktop:cli-status", async () => {
+  const module = await cliAuth();
+  const result = {};
+  for (const family of ["claude", "codex"]) result[family] = { ...(await module.checkCli(family)), login: cliLoginState[family] };
+  return result;
+});
+ipcMain.handle("mbox-desktop:cli-login", async (_event, family) => {
+  const name = cliFamily(family);
+  if (!name) return { ok: false };
+  const module = await cliAuth();
+  cliLogins.get(name)?.cancel();
+  cliLoginState[name] = { state: "running", url: "", message: "" };
+  cliLogins.set(name, module.startLogin(name, (update) => {
+    cliLoginState[name] = update;
+    if (update.state === "done" || update.state === "failed") cliLogins.delete(name);
+  }));
+  return { ok: true };
+});
+ipcMain.handle("mbox-desktop:cli-logout", async (_event, family) => {
+  const name = cliFamily(family);
+  if (!name) return { ok: false };
+  const module = await cliAuth();
+  cliLogins.get(name)?.cancel();
+  cliLoginState[name] = null;
+  return { ok: true, ...(await module.logoutCli(name)) };
+});
 ipcMain.handle("mbox-desktop:status", async () => processStatus());
 ipcMain.handle("mbox-desktop:start", async (_event, name) => {
   if (name === "All") await startResponders();

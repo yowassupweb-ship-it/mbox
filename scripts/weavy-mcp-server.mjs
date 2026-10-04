@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const MBOX_URL = process.env.MBOX_URL;
-const MBOX_USERNAME = process.env.MBOX_USERNAME || "Admin";
+const MBOX_USERNAME = process.env.MBOX_USERNAME || "";
 const MBOX_PASSWORD = process.env.MBOX_PASSWORD;
 const MBOX_AGENT_NAME = process.env.MBOX_AGENT_NAME || "ChatGPT";
 const WEAVY_SECRET_PROJECT = process.env.WEAVY_SECRET_PROJECT || "MBOX";

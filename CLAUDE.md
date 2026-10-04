@@ -190,6 +190,17 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    опрашивает это раз в 10 с. Интерфейс (`src/lib/agentPrefs.ts`) прячет выключенного агента из чата, а MBOX Desktop (`mbox-desktop/main.js`,
    `agents-config.json`) останавливает его и не поднимает при старте. `Dockerfile.mbox` копирует `scripts/` — без этого набор не отдастся.
 
+26. **Приглашения, вход и вход в CLI.** Друзья попадают в MBOX только по ссылке `/invite/<токен>` (`server/accounts.mjs`:
+   `handlePublicInvite`, `/admin/invites`; страница `src/pages/InviteScreen.tsx`, управление — «Настройки → Команда → Приглашения»).
+   В приглашении выбираются проекты, число использований, срок и флаг Джарвиса (`account_invites.jarvis_enabled`, по умолчанию выключен);
+   место занимается атомарно, отзыв — `revoked_at`. Логин нечувствителен к регистру (`lower(username)`), дефолтного «Admin» нигде нет:
+   скрипты и наблюдатели требуют `MBOX_TOKEN` либо `MBOX_USERNAME` + `MBOX_PASSWORD`. Смена пароля — `POST /account/password`
+   (закрывает остальные сессии), `GET /account/security` сообщает, что у аккаунта всё ещё пароль из сида.
+   Вход в локальные Claude Code / Codex: `scripts/cli-auth.mjs` (`claude auth status|login`, `codex login status|login`), состояние
+   присылает служба `mbox-agent` (`PUT /account/agents/cli`, каждые 5 с, она же забирает запрос «войти/выйти»; хранится в `users.agent_cli`),
+   в MBOX Desktop то же через мост `cliStatus/cliLogin/cliLogout`. Кнопка — `CliAuthBanner` над чатом. Без входа служба не поднимает наблюдателя.
+   Dev-API в `vite.config.ts` этих ручек не повторяет.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

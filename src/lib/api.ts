@@ -5,10 +5,27 @@ export class AuthError extends Error {
   }
 }
 
+/** Ошибка ответа сервера; `code` — поле `error` из тела (например `account_already_exists`). Сообщение прежнее: `request_failed:<статус>`. */
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string) {
+    super(`request_failed:${status}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export const apiErrorCode = (cause: unknown) => (cause instanceof ApiError ? cause.code : "");
+
 export async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
   if (res.status === 401) throw new AuthError();
-  if (!res.ok) throw new Error(`request_failed:${res.status}`);
+  if (!res.ok) {
+    const code = await res.json().then((body) => String(body?.error || ""), () => "");
+    throw new ApiError(res.status, code);
+  }
   return (await res.json()) as T;
 }
 

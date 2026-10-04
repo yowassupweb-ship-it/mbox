@@ -3,6 +3,7 @@ import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, 
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
+import { CliAuthBanner } from "./CliAuthBanner";
 import { agentFamily, effectiveStatus, liveRunOf, CLOUD_AGENTS, agentDisplayName, isCloudAgent } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
 import { formatSince, plural } from "../../lib/format";
@@ -1964,6 +1965,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             </nav>
           )}
           <div className="console-main">
+          <CliAuthBanner families={(() => { const key = peer ? agentFamily(peer)?.key : ""; return key === "claude" || key === "codex" ? [key] : key === "jarvis" ? [] : ["claude", "codex"]; })()} />
           {placeThreads(<div className="console-threads">
             <button
               type="button"

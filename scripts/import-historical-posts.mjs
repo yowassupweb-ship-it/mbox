@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 
 const baseUrl = process.env.MBOX_URL || "https://mbox.shar-os.ru";
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const password = process.env.MBOX_PASSWORD;
 const FOLDER_ID = "21";
 const PROJECT_ID = "4";

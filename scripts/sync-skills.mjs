@@ -5,7 +5,7 @@
 //
 //   node scripts/sync-skills.mjs [--source auto|server|repo] [--dry-run] [--targets <папка>[,<папка>]]
 //
-// server — MBOX_URL и MBOX_PASSWORD (MBOX_USERNAME, по умолчанию Admin), как у наблюдателей и MCP;
+// server — MBOX_URL и MBOX_PASSWORD (MBOX_USERNAME обязателен, если нет MBOX_TOKEN), как у наблюдателей и MCP;
 // repo — папка skills/ рядом со scripts/ (разработка до деплоя); auto — сервер, при недоступности — репозиторий.
 import fs from "node:fs";
 import os from "node:os";
@@ -49,7 +49,7 @@ async function fetchServerPackages() {
   const login = await fetch(`${baseUrl}/api/mbox/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: process.env.MBOX_USERNAME || "Admin", password: process.env.MBOX_PASSWORD }),
+    body: JSON.stringify({ username: process.env.MBOX_USERNAME || "", password: process.env.MBOX_PASSWORD }),
   });
   if (!login.ok) throw new Error(`вход в MBOX: HTTP ${login.status}`);
   const cookie = login.headers.get("set-cookie")?.split(";")[0] || "";

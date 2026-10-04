@@ -32,9 +32,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const baseUrl = requireValue(process.env.MBOX_URL, "MBOX_URL");
-const username = process.env.MBOX_USERNAME || "Admin";
+const username = process.env.MBOX_USERNAME || "";
 const accessToken = String(process.env.MBOX_TOKEN || "").trim();
 const password = accessToken ? "" : requireValue(process.env.MBOX_PASSWORD, "MBOX_PASSWORD or MBOX_TOKEN");
+if (!accessToken) requireValue(username, "MBOX_USERNAME");
 const agentName = process.env.MBOX_AGENT_NAME || "Claude";
 // cloud_agent — тот же наблюдатель на сервере MBOX (ClaudeCloud); в списке агентов он отличается от локального.
 const agentKind = process.env.MBOX_AGENT_KIND || "local_watcher";
