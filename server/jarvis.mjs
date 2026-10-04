@@ -2899,8 +2899,12 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     const id = String(args.document_id || "").trim().replace(/^#/, "");
     if (!/^\d+$/.test(id)) return "нужен числовой ID документа — возьми его из открытого документа или search_documents";
     const scoped = documentScope(viewer?.userId ? viewer : { all: true, projectIds: [] });
-    const doc = (await client.query(`SELECT id::text, title, content, text_content FROM documents WHERE id = $${scoped.values.length + 1} AND (${scoped.sql})`, [...scoped.values, id])).rows[0];
+    const doc = (await client.query(`SELECT id::text, title, content, text_content, owner_user_id, access_mode FROM documents WHERE id = $${scoped.values.length + 1} AND (${scoped.sql})`, [...scoped.values, id])).rows[0];
     if (!doc) return `документ #${id} не нашёлся`;
+    if (name === "update_document" && viewer?.userId && doc.owner_user_id !== String(viewer.userId)) {
+      const share = (await client.query("SELECT role FROM document_shares WHERE document_id = $1 AND user_id = $2", [id, String(viewer.userId)])).rows[0];
+      if (share ? share.role !== "edit" : doc.access_mode === "view") return `документ #${id} открыт этому человеку только для просмотра — править его нельзя`;
+    }
     if (name === "read_document") return `документ #${id} «${doc.title}»\n\n${String(doc.text_content || "").slice(0, 30000) || "(пусто)"}`;
     const hasText = args.markdown !== undefined;
     const title = args.title !== undefined ? String(args.title).trim().slice(0, 200) || doc.title : doc.title;

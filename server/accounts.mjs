@@ -333,6 +333,12 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { ok: true } : { error: "not_found" });
     return true;
   }
+  // Справочник людей MBOX: нужен, чтобы выдать документ поимённо. Только логины, без почты и прав.
+  if (url.pathname === "/api/mbox/directory" && req.method === "GET") {
+    const rows = (await query("SELECT id::text, username FROM users ORDER BY lower(username)")).rows;
+    sendJson(res, 200, { users: rows.map((row) => ({ ...row, self: row.id === String(user.id) })) });
+    return true;
+  }
   if (url.pathname === "/api/mbox/account/password" && req.method === "POST") {
     const body = await readBody(req);
     const current = String(body.current_password || "");

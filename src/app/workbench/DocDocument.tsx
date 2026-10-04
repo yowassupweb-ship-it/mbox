@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Download, FolderClosed, Globe2, Lock, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2, Upload, Users } from "lucide-react";
+import { AlertCircle, Check, Download, Eye, FileText, Globe2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Printer, RefreshCw, Share2, Trash2, Upload, Users } from "lucide-react";
 import type { IDocumentData } from "@univerjs/presets";
 import type { MboxData } from "../../hooks/useMboxData";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
@@ -12,15 +12,17 @@ import { WbMenu } from "./WbMenu";
 import type { TabsApi } from "./tabs";
 import { docsStore, emitDocs, importDocx, patchDoc, type DocRecord } from "./docsStore";
 import { usePresence } from "./presence";
+import { DocShare } from "./DocShare";
+import { documentHtml, downloadText, printDocument, safeFileName } from "./docExport";
 import { PresenceAvatars } from "./PresenceAvatars";
 
 const DocEditor = lazy(() => import("./UniverDocEditor").then((module) => ({ default: module.DocEditor })));
 
 type Access = "private" | "project" | "all";
-const ACCESS: Array<{ value: Access; label: string; hint: string }> = [
-  { value: "private", label: "Только я", hint: "видите только вы и агенты от вашего имени" },
-  { value: "project", label: "Участники проекта", hint: "видят участники проекта документа" },
-  { value: "all", label: "Все в MBOX", hint: "видят все пользователи MBOX" },
+const ACCESS: Array<{ value: Access; label: string }> = [
+  { value: "private", label: "Только я" },
+  { value: "project", label: "Участники проекта" },
+  { value: "all", label: "Все в MBOX" },
 ];
 
 /** Отпечаток содержимого: текст, разметка и поля страницы. Служебные поля Univer (id абзацев) в него не входят. */
@@ -50,6 +52,8 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
   const [error, setError] = useState("");
   const [state, setState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [exportMenu, setExportMenu] = useState<{ x: number; y: number } | null>(null);
+  const [share, setShare] = useState<{ x: number; y: number } | null>(null);
   const [conflict, setConflict] = useState(false);
   const pendingRef = useRef<IDocumentData | null>(null);
   const savedPrintRef = useRef("");
@@ -57,9 +61,11 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
   const updatedAtRef = useRef("");
   const importRef = useRef<HTMLInputElement | null>(null);
   const presence = usePresence(`doc:${docId}`, visible);
+  const canEditRef = useRef<boolean | undefined>(undefined);
 
   const open = useCallback((loaded: DocRecord, reload: boolean) => {
     const next = parseSnapshot(loaded.content);
+    canEditRef.current = loaded.can_edit;
     setDoc(loaded);
     updatedAtRef.current = loaded.updated_at;
     patchDoc(loaded);
@@ -114,6 +120,7 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
   }, [docId, tabKey, tabs]);
 
   const onChange = useCallback((next: IDocumentData) => {
+    if (canEditRef.current === false) return;
     // Мутации без реальной разницы (фокус, выделение) не должны ни пачкать документ, ни будить сервер.
     if (fingerprint(next) === savedPrintRef.current) return;
     pendingRef.current = next;
@@ -135,6 +142,7 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
     if (!visible) return;
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") { event.preventDefault(); void print(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -228,10 +236,43 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
     }
   }
 
+  async function currentMarkdown() {
+    await save();
+    const { markdown } = await fetchJson<{ markdown: string }>(`/api/mbox/documents/${docId}?format=markdown`);
+    return markdown;
+  }
+
+  async function print() {
+    try { printDocument(doc?.title || "Документ", await currentMarkdown()); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function exportAs(kind: "md" | "html") {
+    try {
+      const markdown = await currentMarkdown();
+      const name = safeFileName(doc?.title || `document-${docId}`);
+      if (kind === "md") downloadText(`${name}.md`, "text/markdown", markdown);
+      else downloadText(`${name}.html`, "text/html", documentHtml(doc?.title || "Документ", markdown));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function importFile(file: File) {
+    if (/\.docx$/i.test(file.name)) { await importWord(file); return; }
+    if (!/\.(md|markdown|txt)$/i.test(file.name)) { setError("Подходят файлы .docx, .md и .txt"); return; }
+    try {
+      const { document: created } = await fetchJson<{ document: DocRecord }>("/api/mbox/documents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: file.name.replace(/\.[^.]+$/, ""), markdown: await file.text(), project_id: doc?.project_id ?? null }),
+      });
+      patchDoc(created);
+      tabs.open(`doc:${created.id}`, true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   if (loading) return <div className="wb-doc-missing" role="status">Открываю документ…</div>;
   if (!doc || !snapshot) return <div className="wb-doc-missing" role="alert">{error || "Документ не найден."}</div>;
 
-  const projectName = data.projects.find((project) => project.id === doc.project_id)?.name;
+  const readOnly = doc.can_edit === false;
   const access = ACCESS.find((item) => item.value === (doc.access_level || "private")) ?? ACCESS[0];
   const AccessIcon = access.value === "all" ? Globe2 : access.value === "project" ? Users : Lock;
 
@@ -240,7 +281,9 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
       toolbar={(
         <>
           <span className="wb-note-status" title={`Изменено ${formatDateTime(doc.updated_at)}`}>
-            {state === "error" ? (
+            {readOnly ? (
+              <span className="wb-note-save"><Eye size={13} aria-hidden="true" /> Только просмотр</span>
+            ) : state === "error" ? (
               <span className="wb-note-save is-error" role="alert"><AlertCircle size={13} aria-hidden="true" /> {error || "Не сохранилось"} — Ctrl+S</span>
             ) : state === "saving" ? (
               <span className="wb-note-save is-busy"><span className="wb-note-spinner" aria-hidden="true" /> Сохраняю…</span>
@@ -253,30 +296,32 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
             <PresenceAvatars people={presence.people} agents={presence.agents} />
           </span>
           <div className="wb-note-tools">
-            <label className="wb-note-popup" title={`Кто видит: ${access.hint}`}>
-              <AccessIcon size={13} aria-hidden="true" />
-              <span>{access.label}</span>
-              <ChevronDown size={12} aria-hidden="true" />
-              <select value={access.value} onChange={(event) => void update({ access_level: event.target.value as Access })} aria-label="Кто видит документ">
-                {ACCESS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>
-            <label className="wb-note-popup" title="Проект документа">
-              <FolderClosed size={13} aria-hidden="true" />
-              <span className={projectName ? undefined : "is-muted"}>{projectName ?? "Без проекта"}</span>
-              <ChevronDown size={12} aria-hidden="true" />
-              <select value={doc.project_id ?? ""} onChange={(event) => void update({ project_id: event.target.value || null })} aria-label="Проект документа">
-                <option value="">Без проекта</option>
-                {data.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-              </select>
-            </label>
+            <button type="button" className={`wb-doc-share${share ? " is-on" : ""}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setShare({ x: rect.right - 340, y: rect.bottom + 4 }); }} aria-haspopup="dialog" aria-expanded={Boolean(share)} title={`Доступ: ${access.label}`}>
+              <AccessIcon size={13} aria-hidden="true" /><span>Поделиться</span><Share2 size={13} aria-hidden="true" />
+            </button>
             <span className="wb-note-divider" aria-hidden="true" />
-            <button type="button" className="wb-note-icon" onClick={() => void downloadWord()} title="Скачать в Word (.docx)" aria-label="Скачать в Word"><Download size={14} /></button>
-            <button type="button" className="wb-note-icon" onClick={() => importRef.current?.click()} title="Открыть Word (.docx) новым документом" aria-label="Открыть Word"><Upload size={14} /></button>
-            <input ref={importRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWord(file); event.target.value = ""; }} />
-            <button type="button" className={`wb-note-icon${menu ? " is-on" : ""}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ x: rect.right - 220, y: rect.bottom + 4 }); }} aria-haspopup="menu" aria-expanded={Boolean(menu)} title="Ещё" aria-label="Ещё действия"><MoreHorizontal size={15} /></button>
+            <button type="button" className="wb-note-icon" onClick={() => void print()} title="Печать (Ctrl+P)" aria-label="Печать"><Printer size={14} /></button>
+            <button type="button" className={`wb-note-icon${exportMenu ? " is-on" : ""}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setExportMenu({ x: rect.right - 220, y: rect.bottom + 4 }); }} aria-haspopup="menu" aria-expanded={Boolean(exportMenu)} title="Скачать как…" aria-label="Скачать как"><Download size={14} /></button>
+            <button type="button" className="wb-note-icon" onClick={() => importRef.current?.click()} title="Импорт: Word, Markdown или текст — откроется новым документом" aria-label="Импорт"><Upload size={14} /></button>
+            <input ref={importRef} type="file" accept=".docx,.md,.markdown,.txt" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.target.value = ""; }} />
+            {!readOnly && <button type="button" className={`wb-note-icon${menu ? " is-on" : ""}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ x: rect.right - 220, y: rect.bottom + 4 }); }} aria-haspopup="menu" aria-expanded={Boolean(menu)} title="Ещё" aria-label="Ещё действия"><MoreHorizontal size={15} /></button>}
           </div>
-          {menu && (
+          {share && (
+            <WbMenu x={share.x} y={share.y} onClose={() => setShare(null)}>
+              <DocShare doc={doc} projects={data.projects} onUpdate={update} onClose={() => setShare(null)} />
+            </WbMenu>
+          )}
+          {exportMenu && (
+            <WbMenu x={exportMenu.x} y={exportMenu.y} onClose={() => setExportMenu(null)}>
+              <div className="wb-note-menu">
+                <button type="button" role="menuitem" onClick={() => { setExportMenu(null); void downloadWord(); }}><span><FileText size={14} />Word (.docx)</span></button>
+                <button type="button" role="menuitem" onClick={() => { setExportMenu(null); void print(); }}><span><Printer size={14} />PDF — в окне печати</span></button>
+                <button type="button" role="menuitem" onClick={() => { setExportMenu(null); void exportAs("md"); }}><span><FileText size={14} />Markdown (.md)</span></button>
+                <button type="button" role="menuitem" onClick={() => { setExportMenu(null); void exportAs("html"); }}><span><FileText size={14} />Веб-страница (.html)</span></button>
+              </div>
+            </WbMenu>
+          )}
+          {menu && !readOnly && (
             <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
               <div className="wb-note-menu">
                 <button type="button" role="menuitem" onClick={() => { setMenu(null); void update({ pinned: !doc.pinned }); }}>
@@ -284,8 +329,8 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
                 </button>
                 <button type="button" role="menuitem" onClick={() => { setMenu(null); void rename(); }}><span><Pencil size={14} />Переименовать</span></button>
                 <button type="button" role="menuitem" onClick={() => { setMenu(null); void load(true); }}><span><RefreshCw size={14} />Перечитать с сервера</span></button>
-                <div className="wb-menu-sep" role="separator" />
-                <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenu(null); void remove(); }}><span><Trash2 size={14} />Удалить документ</span></button>
+                {doc.is_owner && <div className="wb-menu-sep" role="separator" />}
+                {doc.is_owner && <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenu(null); void remove(); }}><span><Trash2 size={14} />Удалить документ</span></button>}
               </div>
             </WbMenu>
           )}
@@ -300,7 +345,7 @@ export function DocDocument({ docId, data, tabs, tabKey, visible, onDirty }: {
         </div>
       )}
       <Suspense fallback={<OctopusSpinner />}>
-        <DocEditor snapshot={snapshot} loadKey={loadKey} onChange={onChange} visible={visible} peers={presence.peers} onSelect={presence.update} />
+        <DocEditor snapshot={snapshot} loadKey={`${loadKey}:${readOnly ? "ro" : "rw"}`} onChange={onChange} visible={visible} readOnly={readOnly} peers={presence.peers} onSelect={presence.update} />
       </Suspense>
     </DocShell>
   );

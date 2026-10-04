@@ -9,6 +9,12 @@ export type DocRecord = {
   author: string;
   owner_user_id?: string | null;
   access_level?: "private" | "project" | "all";
+  /** Что могут остальные, кто видит документ по уровню доступа. */
+  access_mode?: "edit" | "view";
+  /** Права текущего человека (их считает сервер): владелец, можно ли править. */
+  is_owner?: boolean;
+  can_edit?: boolean;
+  role?: "owner" | "edit" | "view";
   created_at: string;
   updated_at: string;
   size_bytes: number;

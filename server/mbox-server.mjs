@@ -1130,7 +1130,8 @@ function memberRouteAllowed(pathname) {
     || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?|docx|import-docx))?$/.test(pathname)
     || /^\/api\/mbox\/tables\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|cells|rows))?$/.test(pathname)
     || pathname === "/api/mbox/documents/import-docx"
-    || /^\/api\/mbox\/documents\/\d+(?:\/docx)?$/.test(pathname)
+    || /^\/api\/mbox\/documents\/\d+(?:\/(?:docx|shares))?$/.test(pathname)
+    || pathname === "/api/mbox/directory"
     || /^\/api\/mbox\/agent\/inbox\/\d+(?:\/(?:phase|cancel|answer))?$/.test(pathname)
     || /^\/api\/mbox\/(projects|memories|folders|artifacts|todos|agent\/inbox|agent\/runs)\/\d+(?:\/trail)?$/.test(pathname);
 }
