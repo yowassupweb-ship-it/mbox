@@ -10,6 +10,7 @@ import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { notifyStorageChanged } from "./storageApi";
 
+const StorageImage = lazy(() => import("./StorageImage"));
 const PdfViewer = lazy(() => import("./PdfViewer"));
 const UniverDocumentViewer = lazy(() => import("./UniverDocumentViewer").then((module) => ({ default: module.UniverDocumentViewer })));
 
@@ -229,7 +230,20 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
 
   function renderPreview(object: StorageObject) {
     const source = `/api/mbox/storage/file?key=${encodeURIComponent(object.key)}`;
-    if (/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i.test(object.key)) return <img className="wb-storage-preview-image" src={source} alt={object.key.split("/").pop() || object.key} />;
+    if (/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i.test(object.key)) {
+      const name = object.key.split("/").pop() || object.key;
+      return (
+        <Suspense fallback={<OctopusSpinner />}>
+          <StorageImage
+            src={source}
+            name={name}
+            version={pdfVersion}
+            onSave={/\.(png|jpe?g|webp)$/i.test(object.key) ? async (blob) => { await uploadToStorage(object.key, blob); notifyStorageChanged("tree"); setPdfVersion((value) => value + 1); } : undefined}
+            onDownload={() => void downloadFile(object.key)}
+          />
+        </Suspense>
+      );
+    }
     if (/\.pdf$/i.test(object.key)) {
       const name = object.key.split("/").pop() || object.key;
       return (
