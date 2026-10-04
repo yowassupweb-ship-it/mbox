@@ -24,7 +24,7 @@ import { createPresenceHub } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
-import { ensureAccountsSchema, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
+import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
@@ -3387,7 +3387,7 @@ ensureTablesSchema(query).catch((error) => console.error(`tables schema: ${error
 ensureDocumentsSchema(query).catch((error) => console.error(`documents schema: ${error.message}`));
 ensureChatThreadsSchema(query).catch((error) => console.error(`chat threads schema: ${error.message}`));
 ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
-ensureAccountsSchema(query).catch((error) => console.error(`accounts schema: ${error.message}`));
+ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));

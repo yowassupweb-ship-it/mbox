@@ -4,6 +4,7 @@ import { fetchJson } from "../lib/api";
 import type { Me } from "../types";
 import { Button, ErrorText, PasswordInput } from "../ui";
 import { WORKING_FRAMES } from "../components/AgentAvatar";
+import { changeDesktopServer, desktopServer, isDesktopApp } from "../lib/desktopAccount";
 
 const LAST_USER_KEY = "mbox.lastUsername";
 
@@ -16,6 +17,19 @@ export function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [serverOpen, setServerOpen] = useState(false);
+  const [serverUrl, setServerUrl] = useState("");
+  const [serverError, setServerError] = useState("");
+  const desktop = isDesktopApp();
+
+  async function switchServer(event: FormEvent) {
+    event.preventDefault();
+    setServerError("");
+    setBusy(true);
+    const result = await changeDesktopServer(serverUrl);
+    setBusy(false);
+    if (!result.ok) setServerError(result.error || "Не удалось подключиться");
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -60,6 +74,20 @@ export function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
         </div>
         {error && <ErrorText>{error}</ErrorText>}
         <Button className="login-action" type="submit" disabled={busy || !username.trim() || !password}>{busy ? "Проверяю…" : "Войти"}</Button>
+        {desktop && (
+          <div className="login-server">
+            <button type="button" className="login-link" onClick={() => setServerOpen(!serverOpen)} aria-expanded={serverOpen}>
+              {serverOpen ? "Скрыть" : `Сервер: ${desktopServer().replace(/^https?:\/\//, "") || "основной"} · другой сервер`}
+            </button>
+            {serverOpen && (
+              <div className="login-server-form">
+                <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="mbox.example.com или http://192.168.1.20:3000" autoCapitalize="off" spellCheck={false} aria-label="Адрес сервера MBOX" />
+                {serverError && <ErrorText>{serverError}</ErrorText>}
+                <Button type="button" onClick={(event) => void switchServer(event)} disabled={busy}>{serverUrl.trim() ? "Подключиться" : "Вернуть основной сервер"}</Button>
+              </div>
+            )}
+          </div>
+        )}
         <p className="login-hint">Нет аккаунта? Попросите у владельца ссылку-приглашение.</p>
       </form>
     </main>

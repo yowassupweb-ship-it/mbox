@@ -805,7 +805,7 @@ CREATE TABLE IF NOT EXISTS seo_settings (
 
 INSERT INTO users(email, username, password_hash, role)
 SELECT 'admin@mbox.local', 'Admin', crypt('change-me-before-use', gen_salt('bf')), 'owner'
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'Admin');
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'owner');
 
 INSERT INTO folders(name, entity_type, access_level)
 SELECT 'Private', 'agent_scope', 'private'

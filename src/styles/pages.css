@@ -2672,3 +2672,7 @@ time {
 .invite-facts { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; color: var(--text-2); font-size: var(--text-sm); }
 .invite-facts li { display: flex; align-items: flex-start; gap: var(--space-2); }
 .invite-facts svg { flex: none; margin-top: 3px; }
+.login-server { display: grid; gap: var(--space-2); justify-items: center; }
+.login-server .login-link { padding: 0; border: 0; background: none; cursor: pointer; font-size: var(--text-xs); color: var(--text-muted); }
+.login-server .login-link:hover { color: var(--accent-color); }
+.login-server-form { display: grid; gap: var(--space-2); width: 100%; }

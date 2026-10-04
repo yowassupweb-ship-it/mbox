@@ -31,6 +31,7 @@ import { agentStatusLabels, auditNotice, projectName, todoPriorityLabel, todoPri
 import { filterTree, formatProps, parseProps, projectToTree, rollupBytes, sortTodos } from "./lib/tree";
 import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
+import { notifyDesktopSignedIn, notifyDesktopSignedOut } from "./lib/desktopAccount";
 import { InviteScreen } from "./pages/InviteScreen";
 import { InviteManager } from "./features/accounts/InviteManager";
 import { PasswordPanel } from "./features/accounts/PasswordPanel";
@@ -89,6 +90,9 @@ function App() {
       .catch(() => setMe({ user: null }))
       .finally(() => setAuthChecked(true));
   }, []);
+
+  const signedInUser = me.user?.id;
+  useEffect(() => { if (signedInUser) notifyDesktopSignedIn(); }, [signedInUser]);
 
   const inviteToken = window.location.pathname.match(/^\/invite\/(mbox_invite_[A-Za-z0-9_-]+)\/?$/)?.[1];
   if (inviteToken && !me.user) return <InviteScreen token={inviteToken} onJoined={setMe} />;
@@ -212,6 +216,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
               data.reload();
             }}
             onLogout={async () => {
+              await notifyDesktopSignedOut();
               await fetch("/api/mbox/auth/logout", { method: "POST" });
               onLogout();
             }}
@@ -865,6 +870,7 @@ function AccessBoard({ user, onLogout }: { user: { username: string; role: strin
           <EntityLine title="Новые аккаунты" value={user.role === "owner" ? "создаёт владелец" : "управляет владелец"} />
           <EntityLine title="Права" value="private / agents / public" />
           <button className="primary-action" onClick={async () => {
+            await notifyDesktopSignedOut();
             await fetch("/api/mbox/auth/logout", { method: "POST" });
             onLogout();
           }}>Выйти</button>

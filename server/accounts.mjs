@@ -70,6 +70,22 @@ export async function ensureAccountsSchema(query) {
   await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(lower(username))").catch(() => {});
 }
 
+/**
+ * Свежая установка (в том числе у друга на своём сервере): владелец из сида имеет пароль по умолчанию. Если заданы
+ * MBOX_ADMIN_USERNAME и MBOX_ADMIN_PASSWORD, превращаем его в настоящего владельца. Уже сменённый пароль не трогаем.
+ */
+export async function ensureInitialOwner(query, env = process.env) {
+  const username = String(env.MBOX_ADMIN_USERNAME || "").trim();
+  const password = String(env.MBOX_ADMIN_PASSWORD || "");
+  if (credentialsError(username, password)) return false;
+  const seeded = await query("SELECT id::text FROM users WHERE role = 'owner' AND password_hash = crypt($1, password_hash) ORDER BY id LIMIT 1", [DEFAULT_OWNER_PASSWORD]);
+  if (!seeded.rows[0]) return false;
+  const email = String(env.MBOX_ADMIN_EMAIL || "").trim() || `${username.toLowerCase().replace(/\s+/g, ".")}@mbox.local`;
+  await query("UPDATE users SET username = $2, email = $3, password_hash = crypt($4, gen_salt('bf')) WHERE id = $1", [seeded.rows[0].id, username, email, password]);
+  console.log(`MBOX: владелец ${username} создан из MBOX_ADMIN_USERNAME`);
+  return true;
+}
+
 const USERNAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._ -]{1,31}$/u;
 const DEFAULT_OWNER_PASSWORD = "change-me-before-use";
 const inviteHash = (token) => createHash("sha256").update(String(token || "")).digest("hex");

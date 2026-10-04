@@ -201,6 +201,14 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    в MBOX Desktop то же через мост `cliStatus/cliLogin/cliLogout`. Кнопка — `CliAuthBanner` над чатом. Без входа служба не поднимает наблюдателя.
    Dev-API в `vite.config.ts` этих ручек не повторяет.
 
+27. **Свой MBOX и Desktop у коллег.** `node scripts/selfhost-setup.mjs` + `docker-compose.selfhost.yml` поднимают базу и приложение
+   (инструкция — `docs/self-host.md`); владельца создаёт `ensureInitialOwner` из `MBOX_ADMIN_USERNAME/PASSWORD`, пока у сидового владельца
+   пароль по умолчанию. Сид «Admin» создаётся только если в базе нет ни одного владельца. MBOX Desktop: после входа главный процесс сам
+   выпускает личный токен (`ensureDesktopCredentials`, хранится под `safeStorage`, отзывается при выходе) и запускает наблюдателей под этим
+   аккаунтом; сервер выбирается на экране входа («другой сервер», `server.json` в userData, `MBOX_URL` главнее), обновления приложения — всегда
+   с основного сервера. Наблюдателям Desktop по-прежнему нужен системный Node.js; MCP-инструменты MBOX у них есть только при полном наборе
+   (`mbox-agent install`), в Desktop у чужого ПК их зависимостей нет.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:
