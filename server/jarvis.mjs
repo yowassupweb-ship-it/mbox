@@ -1,5 +1,9 @@
 import { Client } from "pg";
 import { canAccessNote, createNote, listNotes, recordNoteVersion } from "./notes.mjs";
+import { scopeWhere as documentScope } from "./documents.mjs";
+import { appendMarkdown, markdownToSnapshot, snapshotToMarkdown } from "./doc-snapshot.mjs";
+import { indexTableText, tableScopeWhere } from "./tables.mjs";
+import { appendRows, loadWorkbook, readTable, workbookToBase64, writeCells } from "./table-ops.mjs";
 import { describeWorkspaceError, findWorkspace, listVersions, listWorkspaces, requestWorkspaceOp } from "./workspaces.mjs";
 
 // Джарвис целиком: инструменты, агентный цикл, модели, источники данных. Раньше он жил в трёх копиях
@@ -609,7 +613,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
   "record_memory", "update_memory", "delete_memory",
-  "create_note", "update_note",
+  "create_note", "update_note", "create_document", "update_document", "write_table_cells",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
 ]);
@@ -1337,6 +1341,80 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_documents",
+      description: "Найти ДОКУМЕНТЫ (текстовые листы A4 в редакторе документов) по словам в названии или тексте. Документ — не заметка и не запись памяти. Пусто — последние документы. Номер документа #N не связан с номером заметки #N: смотри на тип.",
+      parameters: { type: "object", properties: { query: { type: "string", description: "Слова для поиска" }, limit: { type: "number", description: "Сколько вернуть, по умолчанию 10" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_document",
+      description: "Прочитать документ целиком по ID (Markdown-вид). Если человек спрашивает «что в документе» и у него открыт документ — это он; ID бери из открытого или из search_documents.",
+      parameters: { type: "object", properties: { document_id: { type: "string", description: "Номер документа (ID)" } }, required: ["document_id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_document",
+      description: "Создать новый документ с названием и текстом (Markdown: заголовки #, списки, **жирный**, таблицы).",
+      parameters: { type: "object", properties: { title: { type: "string" }, markdown: { type: "string", description: "Текст документа, Markdown" } }, required: ["title"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_document",
+      description: "Изменить документ: дописать Markdown в конец (append, по умолчанию) или заменить текст целиком (replace), переименовать. Человек видит правку на глазах и может отменить.",
+      parameters: {
+        type: "object",
+        properties: {
+          document_id: { type: "string" },
+          markdown: { type: "string", description: "Текст, необязательно" },
+          mode: { type: "string", enum: ["append", "replace"] },
+          title: { type: "string", description: "Новое название, необязательно" },
+        },
+        required: ["document_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_tables",
+      description: "Найти ТАБЛИЦЫ (Excel-подобные, во вкладке «Таблицы») по названию или тексту ячеек. Пусто — последние.",
+      parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_table",
+      description: "Прочитать ячейки таблицы по ID: лист и диапазон (A1:F40) необязательны.",
+      parameters: { type: "object", properties: { table_id: { type: "string" }, sheet: { type: "string" }, range: { type: "string", description: "Например A1:F40" } }, required: ["table_id"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_table_cells",
+      description: "Записать значения или формулы в ячейки таблицы: объект вида {\"A1\": \"Итого\", \"B2\": \"=SUM(B3:B9)\"}; или добавить строки в конец (rows — массив массивов).",
+      parameters: {
+        type: "object",
+        properties: {
+          table_id: { type: "string" },
+          sheet: { type: "string" },
+          cells: { type: "object", description: "Адрес ячейки → значение" },
+          rows: { type: "array", items: { type: "array", items: { type: "string" } }, description: "Строки для добавления в конец" },
+        },
+        required: ["table_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "delete_memory",
       description: "Удалить запись памяти насовсем по её ID. Необратимо.",
       parameters: {
@@ -1546,6 +1624,11 @@ export const TOOL_GROUPS = {
     // группы notes не было, Джарвис брал search_memory и правил похоже названную запись памяти (#318).
     match: /(заметк|заметок|заметке|заметку|заметки|запиш[иу] себе|блокнот)/,
     tools: ["search_notes", "read_note", "create_note", "update_note"],
+  },
+  docs: {
+    label: "документы (листы A4) и таблицы (Excel-подобные) в MBOX: найти, прочитать, создать, дописать, править ячейки",
+    match: /(документ|докум|таблиц|ячейк|лист[аеу]? |абзац|в тексте|что в (нём|нем|этом)|что написано|прочитай|переведи|исправь текст|отредактируй|допиши|сократи)/,
+    tools: ["search_documents", "read_document", "create_document", "update_document", "search_tables", "read_table", "write_table_cells"],
   },
   memory: {
     label: "уход за памятью: правка и удаление записей, уборка старых логов, связи и история записей",
@@ -2798,6 +2881,91 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
     return `обновлена запись памяти «${title}» (#${id})`;
   }
 
+  // Документы и таблицы: те же права, что у людей (владелец, проект, «все»), та же запись, что у MCP.
+  if (name === "search_documents") {
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+    const scoped = documentScope(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const q = String(args.query || "").trim();
+    const rows = (await client.query(
+      `SELECT id::text, title, left(regexp_replace(text_content, '\\s+', ' ', 'g'), 140) AS snippet FROM documents
+       WHERE (${scoped.sql}) AND ($${scoped.values.length + 1} = '' OR title ILIKE '%' || $${scoped.values.length + 1} || '%' OR text_content ILIKE '%' || $${scoped.values.length + 1} || '%')
+       ORDER BY updated_at DESC LIMIT ${limit}`,
+      [...scoped.values, q],
+    )).rows;
+    return rows.length ? rows.map((row) => `документ #${row.id} «${row.title}» — ${row.snippet}`).join("\n") : "документов не нашлось";
+  }
+
+  if (name === "read_document" || name === "update_document") {
+    const id = String(args.document_id || "").trim().replace(/^#/, "");
+    if (!/^\d+$/.test(id)) return "нужен числовой ID документа — возьми его из открытого документа или search_documents";
+    const scoped = documentScope(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const doc = (await client.query(`SELECT id::text, title, content, text_content FROM documents WHERE id = $${scoped.values.length + 1} AND (${scoped.sql})`, [...scoped.values, id])).rows[0];
+    if (!doc) return `документ #${id} не нашёлся`;
+    if (name === "read_document") return `документ #${id} «${doc.title}»\n\n${String(doc.text_content || "").slice(0, 30000) || "(пусто)"}`;
+    const hasText = args.markdown !== undefined;
+    const title = args.title !== undefined ? String(args.title).trim().slice(0, 200) || doc.title : doc.title;
+    if (!hasText && title === doc.title) return "нечего менять: не передан ни текст, ни название";
+    let content = null;
+    let text = null;
+    if (hasText) {
+      const base = JSON.parse(doc.content || "null");
+      const append = args.mode !== "replace" && base?.body;
+      const snapshot = append ? appendMarkdown(base, String(args.markdown)) : markdownToSnapshot(base?.id || `mbox-doc-${id}`, title, String(args.markdown));
+      if (!append && base?.documentStyle) snapshot.documentStyle = base.documentStyle;
+      content = JSON.stringify(snapshot);
+      text = snapshotToMarkdown(snapshot);
+    }
+    await client.query("UPDATE documents SET title = $1, content = COALESCE($2, content), text_content = COALESCE($3, text_content), updated_at = now() WHERE id = $4", [title, content, text, id]);
+    broadcastRealtime("entity_changed", { entity: "documents", action: "update", actor: JARVIS_NAME, detail: `«${title}»`, id });
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `doc:${id}`, title, note: "Документ изменён", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+    return `документ #${id} «${title}» обновлён`;
+  }
+
+  if (name === "create_document") {
+    const title = String(args.title || "Новый документ").trim().slice(0, 200) || "Новый документ";
+    const snapshot = markdownToSnapshot(`mbox-doc-${Date.now().toString(36)}`, title, String(args.markdown || ""));
+    const row = (await client.query(
+      `INSERT INTO documents(title, content, text_content, author, owner_user_id, access_level) VALUES ($1, $2, $3, $4, $5, 'private') RETURNING id::text`,
+      [title, JSON.stringify(snapshot), snapshotToMarkdown(snapshot), JARVIS_NAME, viewer?.userId || null],
+    )).rows[0];
+    broadcastRealtime("entity_changed", { entity: "documents", action: "create", actor: JARVIS_NAME, detail: `«${title}»`, id: row.id, notification: `Агент ${JARVIS_NAME} создал документ «${title}»` });
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `doc:${row.id}`, title, note: "Документ создан", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+    return `создан документ «${title}» (#${row.id})`;
+  }
+
+  if (name === "search_tables") {
+    const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+    const scoped = tableScopeWhere(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const q = String(args.query || "").trim();
+    const rows = (await client.query(
+      `SELECT id::text, title FROM tables WHERE (${scoped.sql}) AND ($${scoped.values.length + 1} = '' OR title ILIKE '%' || $${scoped.values.length + 1} || '%' OR text_content ILIKE '%' || $${scoped.values.length + 1} || '%')
+       ORDER BY updated_at DESC LIMIT ${limit}`,
+      [...scoped.values, q],
+    )).rows;
+    return rows.length ? rows.map((row) => `таблица #${row.id} «${row.title}»`).join("\n") : "таблиц не нашлось";
+  }
+
+  if (name === "read_table" || name === "write_table_cells") {
+    const id = String(args.table_id || "").trim().replace(/^#/, "");
+    if (!/^\d+$/.test(id)) return "нужен числовой ID таблицы — возьми его из открытой таблицы или search_tables";
+    const scoped = tableScopeWhere(viewer?.userId ? viewer : { all: true, projectIds: [] });
+    const table = (await client.query(`SELECT id::text, title, content FROM tables WHERE id = $${scoped.values.length + 1} AND (${scoped.sql})`, [...scoped.values, id])).rows[0];
+    if (!table) return `таблица #${id} не нашлась`;
+    const book = await loadWorkbook(table.content);
+    if (name === "read_table") {
+      const result = readTable(book, { sheet: args.sheet, range: args.range });
+      return `таблица #${id} «${table.title}», лист «${result.sheet}»\n${(result.rows || []).map((row) => `${row.row}: ${row.cells.join(" | ")}`).join("\n") || "(пусто)"}`.slice(0, 20000);
+    }
+    const change = args.cells && typeof args.cells === "object" ? writeCells(book, { sheet: args.sheet, cells: args.cells }) : Array.isArray(args.rows) && args.rows.length ? appendRows(book, { sheet: args.sheet, rows: args.rows }) : null;
+    if (!change) return "нечего записывать: передай cells или rows";
+    const content = await workbookToBase64(book);
+    await client.query("UPDATE tables SET content = $1, updated_at = now() WHERE id = $2", [content, id]);
+    indexTableText(client.query.bind(client), id, content);
+    broadcastRealtime("entity_changed", { entity: "tables", action: "update", actor: JARVIS_NAME, detail: `«${table.title}»`, id });
+    try { openTab?.(viewer?.userId || null, { kind: "tab", key: `table:${id}`, title: table.title, note: "Таблица изменена", actor: JARVIS_NAME, reply_to: "" }); } catch { /* окно не обязано быть открыто */ }
+    return `таблица #${id} «${table.title}» обновлена`;
+  }
+
   // Заметки. Раньше их инструментов не было вовсе, и на просьбу «допиши в заметку» Джарвис находил
   // похоже названную ЗАПИСЬ ПАМЯТИ, правил её и рапортовал об успехе — человек смотрел в заметку и
   // ничего там не видел (todo #318: заметка #6 осталась нетронутой, текст ушёл в память #117).
@@ -3186,11 +3354,11 @@ export async function replyAsJarvis(item) {
       // Чипы над полем ввода: что открыто у человека. «Поправь тут» относится к этому — не ищи по всей базе.
       + (Array.isArray(item.props?.context) && item.props.context.length
         ? ` Сейчас у пользователя открыто: ${item.props.context.slice(0, 6).map((entry) => {
-          const kinds = { note: "заметка", todo: "задача", memory: "запись памяти", file: "локальный файл", diff: "изменения файла", storage: "файл в хранилище", web: "страница", project: "проект", skill: "навык" };
+          const kinds = { doc: "документ (читай через read_document)", table: "таблица (читай через read_table)", note: "заметка", todo: "задача", memory: "запись памяти", file: "локальный файл", diff: "изменения файла", storage: "файл в хранилище", web: "страница", project: "проект", skill: "навык" };
           const id = /^\d+$/.test(String(entry?.id || "")) ? ` #${entry.id}` : "";
           const detail = entry?.detail ? ` (${String(entry.detail).slice(0, 200)})` : "";
           return `${kinds[entry?.kind] || "вкладка"}${id} «${String(entry?.title || "").slice(0, 120)}»${detail}`;
-        }).join("; ")}. Если вопрос не называет объект явно — он про открытое.`
+        }).join("; ")}. Если вопрос не называет объект явно — он про открытое. Номера у заметок, документов и таблиц свои: #50 у документа не связан с заметкой #50.`
         : "");
     // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — если человек в прошлом сообщении назвал
     // стек или ссылку, а в этом попросил "создай проект", Джарвис не мог их связать. Подтягиваем

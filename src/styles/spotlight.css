@@ -94,14 +94,11 @@
 .wb-spot-row.is-selected .wb-spot-key { visibility: visible; }
 .wb-spot-row mark { border-radius: var(--radius-2xs); background: color-mix(in srgb, var(--accent-color) 28%, transparent); color: inherit; }
 
-.wb-spot-row.is-selected { background: var(--accent-fill); color: var(--on-accent); }
-.wb-spot-row.is-selected .wb-spot-icon { background: color-mix(in srgb, var(--on-accent) 20%, transparent); color: var(--on-accent); }
-.wb-spot-row.is-selected .wb-spot-sub,
-.wb-spot-row.is-selected .wb-spot-badge { color: color-mix(in srgb, var(--on-accent) 82%, transparent); }
+.wb-spot-row.is-selected { background: var(--surface-selected); color: var(--text-main); }
+.wb-spot-row.is-selected .wb-spot-icon { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--accent-color); }
 .wb-spot-row.is-selected .wb-spot-badge,
-.wb-spot-row.is-selected .wb-spot-key { background: color-mix(in srgb, var(--on-accent) 20%, transparent); color: var(--on-accent); }
-.wb-spot-row.is-selected mark { background: color-mix(in srgb, var(--on-accent) 30%, transparent); }
-.wb-spot-row:active { background: var(--accent-fill-hover); }
+.wb-spot-row.is-selected .wb-spot-key { background: color-mix(in srgb, var(--text-main) 10%, transparent); color: var(--text-2); }
+.wb-spot-row:active { background: color-mix(in srgb, var(--accent-color) 24%, transparent); }
 
 .wb-spot-empty, .wb-spot-note { padding: 28px 16px; color: var(--text-muted); font-size: var(--text-sm); text-align: center; }
 .wb-spot-note { padding: 8px 16px; color: var(--state-warn); font-size: var(--text-xs); }

@@ -118,7 +118,7 @@
 }
 .wb-menu { padding: 5px; }
 .wb-menu button { border-radius: var(--radius-xs); }
-.wb-menu button:hover { background: var(--accent-fill); color: var(--on-accent); }
+.wb-menu button:hover { background: var(--surface-selected); color: var(--text-main); }
 
 /* ─── Чат ─── */
 /* Строка собеседников — те же сегменты, что вкладки панели. */

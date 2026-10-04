@@ -2449,7 +2449,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-browser-tab-item { position: relative; width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: default; transition: background-color var(--duration-fast) var(--ease-standard); }
 .wb-browser-tab-item:hover { background: var(--wb-hover); color: var(--text-main); }
-.wb-browser-tab-item.is-active { background: var(--accent-fill); color: var(--on-accent); }
+.wb-browser-tab-item.is-active { background: var(--wb-selected); color: var(--text-main); }
 .wb-browser-tab-item:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .wb-browser-tab-tile { flex: 0 0 auto; width: var(--space-7); height: var(--space-7); display: grid; place-items: center; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-main) 8%, transparent); }
 .wb-browser-tab-item.is-active .wb-browser-tab-tile { background: color-mix(in srgb, var(--on-accent) 22%, transparent); }
