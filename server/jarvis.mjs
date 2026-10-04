@@ -20,10 +20,11 @@ let browserOp;
 let integrations;
 let gmail;
 let gdocs;
+let storage;
 let browserHelp;
 
 export function configureJarvis(deps) {
-  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail, gdocs, browserHelp } = deps);
+  ({ query, broadcastRealtime, rankMemories, recordMemoryAction, openTab, browserOp, integrations, gmail, gdocs, browserHelp, storage } = deps);
 }
 
 /** Ссылка, которую чат MBOX открывает как локальный файл внутри подключённой папки Desktop. */
@@ -1534,6 +1535,38 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "storage_list",
+      description: "Список файлов и папок в хранилище S3 (Yandex Object Storage). У проекта своя папка projects/<id>/, картинки заметок — notes/<id>/. Пустой prefix — корень; prefix заканчивается на «/».",
+      parameters: { type: "object", properties: { prefix: { type: "string" } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_read",
+      description: "Прочитать файл из хранилища S3 как текст: txt, md, json, csv, html, код, а также .docx и .xlsx. Картинки и pdf не читаются — дай ссылку (storage_link).",
+      parameters: { type: "object", properties: { key: { type: "string" }, max_chars: { type: "number" } }, required: ["key"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_write",
+      description: "Создать текстовый файл в хранилище S3 (projects/<id>/имя.md и т.п.). Существующий файл не заменяет, пока человек не разрешил (overwrite=true). Только по просьбе человека.",
+      parameters: { type: "object", properties: { key: { type: "string" }, text: { type: "string" }, overwrite: { type: "boolean" } }, required: ["key", "text"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "storage_link",
+      description: "Временная ссылка (на час) на файл из хранилища S3 — скачать или открыть файл любого формата.",
+      parameters: { type: "object", properties: { key: { type: "string" } }, required: ["key"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "gdoc_search",
       description: "Найти файлы на Google Диске владельца: документы (kind=docs), таблицы (kind=sheets) или любые (any) по названию и тексту. Возвращает id, название, дату, ссылку. Это ЕГО документы Google, а не документы MBOX (те — search_documents).",
       parameters: { type: "object", properties: { query: { type: "string" }, kind: { type: "string", enum: ["docs", "sheets", "any"] }, max: { type: "number" } }, required: [] },
@@ -1844,6 +1877,11 @@ export const TOOL_GROUPS = {
     label: "почта владельца в Gmail: найти и прочитать письма, подготовить черновик, отправить (только по прямой просьбе)",
     match: /(почт|письм|gmail|имейл|email|e-mail|inbox|входящ|ответь (ему|ей|им)|отправь (письмо|ему|ей)|рассылк)/,
     tools: ["gmail_search", "gmail_read", "gmail_draft", "gmail_send"],
+  },
+  storage: {
+    label: "файлы в хранилище S3 (бакет проектов): список, прочитать текст/docx/xlsx, создать текстовый файл, ссылка на скачивание",
+    match: /(s3|хранилищ|бакет|bucket|object storage|объектн)/,
+    tools: ["storage_list", "storage_read", "storage_write", "storage_link"],
   },
   google_docs: {
     label: "документы и таблицы Google на Диске владельца: найти, прочитать, дописать, заменить текст, создать, перенести в MBOX",
@@ -3146,6 +3184,35 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
       return `письмо отправлено (id ${sent.id})`;
     } catch (error) {
       return `Gmail: ${error.message}`;
+    }
+  }
+
+  if (name.startsWith("storage_")) {
+    if (!storage) return "хранилище S3 недоступно в этом режиме";
+    try {
+      const viewerScope = viewer?.userId ? viewer : { all: true, projectIds: [] };
+      const check = async (key) => (await storage.canUse(viewerScope, key)) ? null : "нет доступа к этой папке — только папки проектов, где человек участвует";
+      if (name === "storage_list") {
+        const prefix = String(args.prefix || "");
+        if (!prefix && !viewerScope.all) return (await storage.roots(viewerScope)).map((root) => `📁 ${root}`).join("\n") || "папок проектов нет";
+        if (prefix) { const denied = await check(storage.cleanKey(prefix)); if (denied) return denied; }
+        const data = await storage.list(prefix);
+        const lines = [...data.folders.map((folder) => `📁 ${folder}`), ...data.objects.map((item) => `${item.key} · ${item.size} Б`)];
+        return lines.join("\n") || "пусто";
+      }
+      const key = storage.cleanKey(args.key);
+      const denied = await check(key);
+      if (denied) return denied;
+      if (name === "storage_read") {
+        const data = await storage.read(key, Number(args.max_chars) || 30000);
+        if (data.kind === "missing") return "файла нет";
+        if (data.kind === "image" || data.kind === "binary") return `${data.kind === "image" ? "картинка" : "двоичный файл"} ${data.size} Б — текстом не прочитать, дай ссылку через storage_link`;
+        return `${data.key} (${data.kind}, ${data.size} Б)${data.truncated ? ` — обрезано, всего ${data.total_chars ?? "?"} знаков` : ""}\n\n${data.text}`;
+      }
+      if (name === "storage_write") { const result = await storage.write(key, String(args.text ?? ""), args.overwrite === true); return `записано: ${result.key} (${result.size} Б)`; }
+      return await storage.link(key);
+    } catch (error) {
+      return `Хранилище: ${error.message}`;
     }
   }
 

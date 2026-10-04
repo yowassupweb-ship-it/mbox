@@ -2422,6 +2422,102 @@ server.registerTool(
   },
 );
 
+const storageError = (error) => textResult(`Storage: ${error instanceof Error ? error.message : String(error)}`);
+const storageUrl = (path, params) => `/api/mbox/storage/${path}?${new URLSearchParams(params)}`;
+
+server.registerTool(
+  "storage_list",
+  {
+    title: "List S3 storage files",
+    description: "List files and folders of the MBOX S3 storage (Yandex Object Storage). One bucket; each project has its own folder projects/<id>/, notes images are in notes/<id>/. Empty prefix lists the root (for a project member — only their projects' folders). Prefix must end with \"/\". Use token from the previous result to page.",
+    inputSchema: { prefix: z.string().default(""), token: z.string().default("") },
+  },
+  async ({ prefix, token }) => {
+    try {
+      const data = await mboxFetch(`/api/mbox/storage/objects?${new URLSearchParams({ prefix, ...(token ? { token } : {}) })}`);
+      const lines = [
+        ...data.folders.map((folder) => `📁 ${folder}${data.labels?.[folder] ? `  (${data.labels[folder]})` : ""}`),
+        ...data.objects.map((item) => `${item.key}  ·  ${item.size} B  ·  ${String(item.last_modified).slice(0, 16)}`),
+      ];
+      return textResult(`${lines.join("\n") || "Empty."}${data.next_token ? `\n\nMore: storage_list token=${data.next_token}` : ""}`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_read",
+  {
+    title: "Read an S3 storage file",
+    description: "Read a file from the MBOX S3 storage. Text formats (txt, md, json, csv, html, code), .docx and .xlsx come back as text; png/jpg/gif/webp as an image you can see. Other formats (pdf, archives, video) are not readable — use storage_link. Long text is cut at max_chars.",
+    inputSchema: { key: z.string(), max_chars: z.number().int().min(1000).max(400000).default(60000) },
+  },
+  async ({ key, max_chars }) => {
+    try {
+      const data = await mboxFetch(storageUrl("read", { key, max_chars: String(max_chars) }));
+      if (data.kind === "image") return { content: [{ type: "image", mimeType: data.content_type, data: data.base64 }, { type: "text", text: `${data.key} · ${data.size} B` }] };
+      if (data.kind === "missing") return textResult(`${key}: file not found.`);
+      if (data.kind === "binary") return textResult(`${data.key} · ${data.size} B · ${data.note || "binary"}`);
+      return textResult(`${data.key} · ${data.kind} · ${data.size} B${data.truncated ? ` · TRUNCATED (${data.total_chars ?? "?"} chars total, showing ${data.text.length})` : ""}\n\n${data.text}`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_write",
+  {
+    title: "Write an S3 storage file",
+    description: "Create or replace a file in the MBOX S3 storage from text (or base64 for binary), up to 25 MB. Write only into the folder of the right project (projects/<id>/…). overwrite=false fails if the file exists — prefer it unless the user asked to replace. Does not edit .docx/.xlsx in place: for those create a new text/CSV file or use MBOX documents/tables.",
+    inputSchema: { key: z.string(), text: z.string().optional(), base64: z.string().optional(), content_type: z.string().default(""), overwrite: z.boolean().default(false) },
+  },
+  async ({ key, text, base64, content_type, overwrite }) => {
+    try {
+      const data = await mboxFetch("/api/mbox/storage/write", { method: "POST", body: JSON.stringify({ key, text, base64, content_type, overwrite }) });
+      return textResult(`Written ${data.key} (${data.size} B).`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_mkdir",
+  {
+    title: "Create an S3 storage folder",
+    description: "Create an (empty) folder in the MBOX S3 storage, e.g. projects/4/reports/.",
+    inputSchema: { prefix: z.string() },
+  },
+  async ({ prefix }) => {
+    try { const data = await mboxFetch("/api/mbox/storage/folder", { method: "POST", body: JSON.stringify({ prefix }) }); return textResult(`Folder ${data.key} created.`); }
+    catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_link",
+  {
+    title: "Temporary link to an S3 file",
+    description: "Signed link to download/open a storage file (any format, any size). Valid 1 hour by default, up to 7 days. Anyone with the link can open the file — give it to the user, don't publish it elsewhere.",
+    inputSchema: { key: z.string(), expires_minutes: z.number().int().min(1).max(10080).default(60), download: z.boolean().default(false) },
+  },
+  async ({ key, expires_minutes, download }) => {
+    try {
+      const data = await mboxFetch(storageUrl("link", { key, expires: String(expires_minutes * 60), ...(download ? { download: "1" } : {}) }));
+      return textResult(`${data.url}\n(valid ${Math.round(data.expires / 60)} min)`);
+    } catch (error) { return storageError(error); }
+  },
+);
+
+server.registerTool(
+  "storage_delete",
+  {
+    title: "Delete from S3 storage",
+    description: "Permanently delete a storage file, or a whole folder (key ending with \"/\" deletes everything under it). Irreversible — only on the user's explicit request, and for folders confirm the exact prefix first.",
+    inputSchema: { key: z.string() },
+  },
+  async ({ key }) => {
+    try { const data = await mboxFetch(storageUrl("object", { key }), { method: "DELETE" }); return textResult(`Deleted objects: ${data.deleted}.`); }
+    catch (error) { return storageError(error); }
+  },
+);
+
 await server.connect(new StdioServerTransport());
 
 await ping("session_start");

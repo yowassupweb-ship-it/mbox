@@ -244,6 +244,12 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    состояние просьб — в памяти процесса (`server/browser-agent.mjs`, `/api/mbox/browser/help*`, только владелец). Новый файл десктопа обязан быть в `files`
    `mbox-desktop/package.json`, иначе в сборке модуля нет. Версия MBOX Desktop с `agentControl` в мосту — 0.1.58+.
 
+32. **Агенты и хранилище S3.** Облачные и локальные агенты работают с S3 через MCP `storage_list|read|write|mkdir|link|delete` (ручки
+   `/api/mbox/storage/read` и `/write` в `server/storage.mjs`, остальное — прежние `objects|folder|link|object`), Джарвис — через группу `storage`
+   (`storage_list|read|write|link`, `storageForAgent` в процессе, права — `storageAccessFor`). Читаются txt/md/json/csv/код, .docx (mammoth),
+   .xlsx (`extractText`) и картинки до 5 МБ; pdf и прочее — только ссылкой. Запись — текст/base64 до 25 МБ, `overwrite=false` по умолчанию.
+   Участник видит и пишет только `projects/<его id>/` и доступные заметки; настройки бакета и ключи агентам не отдаются.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

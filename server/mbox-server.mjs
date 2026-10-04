@@ -27,7 +27,7 @@ import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
-import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./storage.mjs";
+import { ensureStorageSchema, handleStorageApi, storageForAgent, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
 import { allowedSkills, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
@@ -56,6 +56,18 @@ configureJarvis({
     for (const client of realtimeClients) if (client.mboxOwner) delivered += sendOpenTab(new Set([client]), client.mboxUserId, event);
     return delivered;
   },
+  storage: (() => {
+    const agentStorage = storageForAgent(query, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key");
+    const accessOf = (viewer) => storageAccessFor({ all: Boolean(viewer.all), projectIds: viewer.projectIds || [] }, { id: viewer.userId || 0 });
+    return {
+      ...agentStorage,
+      canUse: async (viewer, key) => {
+        const { access } = await accessOf(viewer);
+        return !access || access.canUse(key);
+      },
+      roots: async (viewer) => (await accessOf(viewer)).access?.roots.map((root) => root.prefix) || [],
+    };
+  })(),
   gmail: { search: (userId, input) => gmailSearch(query, userId, input), read: (userId, id) => gmailRead(query, userId, id), draft: (userId, input) => gmailDraft(query, userId, input), send: (userId, input) => gmailSend(query, userId, input) },
   gdocs: { search: (userId, input) => gdocSearch(query, userId, input), read: (userId, id) => gdocRead(query, userId, id), append: (userId, id, text) => gdocAppend(query, userId, id, text), replace: (userId, id, find, replace) => gdocReplace(query, userId, id, find, replace), create: (userId, title, text) => gdocCreate(query, userId, title, text), import: (userId, id) => gdocImport(query, userId, id, { ownerUserId: userId }) },
   integrations: { list: (userId) => listIntegrations(query, userId), call: (id, input, userId) => callIntegration(query, id, input, { userId }) },
@@ -1154,7 +1166,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/data-sources"
     || /^\/api\/mbox\/browser\/(bookmarks|history|cookies)(?:\/.*)?$/.test(pathname)
     // Хранилище: участнику — только папки его проектов (проверка внутри handleStorageApi).
-    || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object)$/.test(pathname)
+    || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object|read|write)$/.test(pathname)
     || pathname === "/api/mbox/agent/inbox"
     || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
     || pathname === "/api/mbox/notes/import-docx"

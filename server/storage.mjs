@@ -217,6 +217,65 @@ async function listObjects(config, prefix, token) {
   return { prefix: prefix || "", folders, objects, next_token: xmlValues(xml, "IsTruncated")[0] === "true" ? unescapeXml(xmlValues(xml, "NextContinuationToken")[0]) : null };
 }
 
+const AGENT_WRITE_LIMIT = 25 * 1024 * 1024;
+const AGENT_READ_LIMIT = 25 * 1024 * 1024;
+const AGENT_IMAGE_LIMIT = 5 * 1024 * 1024;
+const TEXT_EXTENSIONS = new Set(["txt", "md", "markdown", "json", "csv", "tsv", "xml", "html", "htm", "yml", "yaml", "log", "js", "mjs", "ts", "tsx", "css", "sql", "py", "sh", "ini", "toml", "env", "svg"]);
+const IMAGE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+const CONTENT_TYPES = { txt: "text/plain; charset=utf-8", md: "text/markdown; charset=utf-8", json: "application/json", csv: "text/csv; charset=utf-8", html: "text/html; charset=utf-8", xml: "application/xml", pdf: "application/pdf", svg: "image/svg+xml", ...IMAGE_TYPES };
+
+function extensionOf(key) {
+  const name = key.split("/").pop() || "";
+  return name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+}
+
+function guessContentType(key) {
+  return CONTENT_TYPES[extensionOf(key)] || "application/octet-stream";
+}
+
+async function readObjectForAgent(config, key, maxChars) {
+  const response = await s3(config, { method: "GET", key });
+  if (response.status === 404) return { key, kind: "missing", error: "Файла нет" };
+  if (!response.ok) throw new Error(await s3Error(response));
+  const size = Number(response.headers.get("content-length") || 0);
+  const ext = extensionOf(key);
+  const isText = TEXT_EXTENSIONS.has(ext) || String(response.headers.get("content-type") || "").startsWith("text/");
+  const cap = IMAGE_TYPES[ext] ? AGENT_IMAGE_LIMIT : (isText ? Math.max(maxChars * 4, 64 * 1024) : AGENT_READ_LIMIT);
+  if (!isText && size > cap) {
+    await response.body?.cancel();
+    return { key, kind: "binary", size, truncated: true, note: `Файл ${size} байт больше лимита чтения — возьмите ссылку (storage_link).` };
+  }
+  const chunks = [];
+  let total = 0;
+  let cut = false;
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(Buffer.from(value));
+    total += value.length;
+    if (total >= cap) { cut = true; await reader.cancel(); break; }
+  }
+  const bytes = Buffer.concat(chunks);
+  const clip = (text) => text.length > maxChars ? { text: text.slice(0, maxChars), truncated: true, total_chars: text.length } : { text, truncated: false };
+  if (IMAGE_TYPES[ext]) {
+    if (cut) return { key, kind: "binary", size, truncated: true, note: "Картинка больше 5 МБ — возьмите ссылку (storage_link)." };
+    return { key, kind: "image", size: bytes.length, content_type: IMAGE_TYPES[ext], base64: bytes.toString("base64") };
+  }
+  if (isText) return { key, kind: "text", size: size || bytes.length, ...clip(bytes.toString("utf8")), ...(cut && !size ? { truncated: true } : {}) };
+  if (ext === "docx") {
+    const mammoth = (await import("mammoth")).default;
+    const { value } = await mammoth.extractRawText({ buffer: bytes });
+    return { key, kind: "docx", size: bytes.length, ...clip(value) };
+  }
+  if (ext === "xlsx") {
+    const { loadWorkbook, extractText } = await import("./table-ops.mjs");
+    const book = await loadWorkbook(bytes.toString("base64"));
+    return { key, kind: "xlsx", size: bytes.length, ...clip(extractText(book, maxChars + 1)) };
+  }
+  return { key, kind: "binary", size: size || bytes.length, content_type: String(response.headers.get("content-type") || ""), note: "Формат не читается как текст — возьмите ссылку (storage_link)." };
+}
+
 function cleanKey(value) {
   const key = String(value || "").replace(/\\/g, "/").replace(/^\/+/, "");
   if (!key || key.split("/").some((part) => part === "..")) throw new Error("Некорректный путь объекта");
@@ -371,6 +430,46 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
       sendJson(res, response.ok ? 200 : 502, response.ok ? { key } : { error: await s3Error(response) });
       return true;
     }
+    // Для агентов: прочитать объект как текст (txt/md/json/csv, docx, xlsx) или как картинку и записать текст/байты.
+    if (pathname === "/api/mbox/storage/read" && req.method === "GET") {
+      const key = cleanKey(url.searchParams.get("key"));
+      if (key.endsWith("/")) { sendJson(res, 400, { error: "Нужен ключ файла, а не папки" }); return true; }
+      const maxChars = Math.min(Math.max(Number(url.searchParams.get("max_chars") || 60000), 1000), 400000);
+      sendJson(res, 200, await readObjectForAgent(config, key, maxChars));
+      return true;
+    }
+    if (pathname === "/api/mbox/storage/write" && req.method === "POST") {
+      const body = await readBody(req);
+      const key = cleanKey(body.key);
+      if (key.endsWith("/")) { sendJson(res, 400, { error: "Нужно имя файла" }); return true; }
+      if (!(await usable(key))) return denied();
+      const hasText = typeof body.text === "string";
+      const hasBase64 = typeof body.base64 === "string" && body.base64;
+      if (!hasText && !hasBase64) { sendJson(res, 400, { error: "Передайте text или base64" }); return true; }
+      const bytes = hasBase64 ? Buffer.from(body.base64, "base64") : Buffer.from(body.text, "utf8");
+      if (bytes.length > AGENT_WRITE_LIMIT) { sendJson(res, 413, { error: "Файл больше 25 МБ — загрузите его вручную" }); return true; }
+      if (body.overwrite === false) {
+        const head = await s3(config, { method: "HEAD", key });
+        if (head.ok) { sendJson(res, 409, { error: "Файл уже есть — передайте overwrite=true, чтобы заменить" }); return true; }
+      }
+      const response = await s3(config, {
+        method: "PUT",
+        key,
+        headers: { "content-length": String(bytes.length), "content-type": String(body.content_type || guessContentType(key)) },
+        body: bytes,
+      });
+      if (response.ok) onActivity?.({
+        action: "upload",
+        entityId: key,
+        project_id: projectIdFromKey(key),
+        title: `Записан файл ${key.split("/").pop() || key}`,
+        content: `Агент записал в хранилище файл "${key}" (${bytes.length} байт).`,
+        tags: ["storage", "file"],
+        metadata: { key, size: bytes.length, mode: "agent" },
+      });
+      sendJson(res, response.ok ? 200 : 502, response.ok ? { key, size: bytes.length } : { error: await s3Error(response) });
+      return true;
+    }
     // Постоянная ссылка для картинок в заметках: ![](/api/mbox/storage/file?key=…) — каждый раз свежая
     // подписанная ссылка на час, поэтому картинка в тексте не протухает.
     if (pathname === "/api/mbox/storage/file" && req.method === "GET") {
@@ -431,4 +530,41 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
     return true;
   }
   return false;
+}
+
+/**
+ * Хранилище для Джарвиса (в процессе, без HTTP): те же чтение и запись, что у MCP-инструментов storage_*.
+ * Права проверяет вызывающий через canUse(key) — Promise<boolean>; владельцу canUse не нужен.
+ */
+export function storageForAgent(query, secretKey) {
+  const configured = async () => {
+    const config = await loadConfig(query, secretKey);
+    if (!publicConfig(config).configured) throw new Error("Хранилище S3 не настроено");
+    return config;
+  };
+  return {
+    async list(prefix) {
+      return listObjects(await configured(), prefix || "", "");
+    },
+    async read(key, maxChars = 30000) {
+      return readObjectForAgent(await configured(), cleanKey(key), Math.min(Math.max(maxChars, 1000), 100000));
+    },
+    async write(key, text, overwrite = false) {
+      const config = await configured();
+      const clean = cleanKey(key);
+      if (clean.endsWith("/")) throw new Error("Нужно имя файла");
+      const bytes = Buffer.from(String(text ?? ""), "utf8");
+      if (bytes.length > AGENT_WRITE_LIMIT) throw new Error("Файл больше 25 МБ");
+      if (!overwrite && (await s3(config, { method: "HEAD", key: clean })).ok) throw new Error("файл уже есть — спроси человека, заменять ли его");
+      const response = await s3(config, { method: "PUT", key: clean, headers: { "content-length": String(bytes.length), "content-type": guessContentType(clean) }, body: bytes });
+      if (!response.ok) throw new Error(await s3Error(response));
+      return { key: clean, size: bytes.length };
+    },
+    async link(key, expires = 3600) {
+      const config = await configured();
+      return presignUrl({ endpoint: config.endpoint, path: objectPath(config, cleanKey(key)), accessKeyId: config.access_key_id, secretAccessKey: config.secret_access_key, region: config.region, expires });
+    },
+    cleanKey,
+    projectIdFromKey,
+  };
 }
