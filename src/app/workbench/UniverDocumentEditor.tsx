@@ -3,7 +3,7 @@ import { createUniver, DocumentFlavor, getDocsEmptySnapshot, LocaleType, mergeLo
 import { UniverDocsCorePreset } from "@univerjs/preset-docs-core";
 import UniverPresetDocsCoreRuRU from "@univerjs/preset-docs-core/locales/ru-RU";
 import "@univerjs/preset-docs-core/lib/index.css";
-import { hideMarginMarks } from "./univerTheme";
+import { styleDocSurface } from "./univerTheme";
 
 type DocumentSnapshot = Record<string, unknown>;
 
@@ -75,7 +75,7 @@ export function UniverDocumentEditor({ title, text, snapshot, readOnly = false, 
     });
     univerAPI.toggleDarkMode(theme !== "light");
     const document = univerAPI.createDocument(initialSnapshot(title, text, snapshot));
-    hideMarginMarks(univer, document.getId());
+    styleDocSurface(univer, document.getId(), true);
     let ready = false;
     let timer = 0;
     const readyTimer = window.setTimeout(() => { ready = true; }, 250);

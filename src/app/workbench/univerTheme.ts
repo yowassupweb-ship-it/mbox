@@ -57,11 +57,32 @@ export function useDocumentTheme() {
 
 type DocBackground = { setFillColors?: (...colors: Array<string | undefined>) => void; _noMarginMarks?: boolean };
 
+const cssColor = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || undefined;
+
 /**
- * Univer рисует на каждом листе «уголки» по краям полей, как рамку текста в Word. В MBOX они выглядят мусором поверх
- * текста, а настройки для них нет — подменяем цвет уголков на прозрачный в самом слое фона листа.
+ * В тёмном режиме Univer перекрашивает цвета холста фильтром «инверсия + поворот оттенка на 180°». Чтобы на экране вышел
+ * нужный цвет, отдаём ему обратный: поворот на 180° сам себе обратен, поэтому достаточно 255 − (поворот цвета).
  */
-export function hideMarginMarks(univer: unknown, unitId: string) {
+function forDarkCanvas(color: string | undefined) {
+  const match = color?.match(/^#([0-9a-f]{6})$/i);
+  if (!match) return color;
+  const value = parseInt(match[1], 16);
+  const [r, g, b] = [16, 8, 0].map((shift) => (value >> shift) & 255);
+  const rotated = [
+    -0.574 * r + 1.43 * g + 0.144 * b,
+    0.426 * r + 0.43 * g + 0.144 * b,
+    0.426 * r + 1.43 * g - 0.856 * b,
+  ];
+  return `#${rotated.map((channel) => Math.round(255 - Math.min(255, Math.max(0, channel))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * Слой фона листа Univer: убираем «уголки» по краям полей (Word-рамка текста выглядит мусором поверх документа,
+ * настройки для неё нет) и красим полотно под тему. В Графите Univer по умолчанию заливает документ чисто чёрным —
+ * берём цвета карточки и «утопленного» фона интерфейса. Светлая и Чёрная остаются как есть.
+ * modern — документ без листов (всё полотно — один фон), иначе лист на фоне рабочей области.
+ */
+export function styleDocSurface(univer: unknown, unitId: string, modern: boolean) {
   const injector = (univer as { __getInjector: () => { get: <T>(token: unknown) => T } }).__getInjector();
   let tries = 0;
   const apply = () => {
@@ -69,10 +90,19 @@ export function hideMarginMarks(univer: unknown, unitId: string) {
     const background = unit?.components?.get("__Document_Render_Background__");
     if (!background?.setFillColors) { if (tries++ < 60) window.requestAnimationFrame(apply); return; }
     if (background._noMarginMarks) return;
+    const graphite = (document.documentElement.dataset.theme || "graphite") === "graphite";
+    const shownPage = graphite ? cssColor("--container-bg") : undefined;
+    const shownWorkspace = graphite ? (modern ? shownPage : cssColor("--bg-sunken")) : undefined;
+    const page = forDarkCanvas(shownPage);
+    const workspace = forDarkCanvas(shownWorkspace);
     const original = background.setFillColors.bind(background);
-    background.setFillColors = (fill, page, stroke) => original(fill, page, stroke, "transparent");
+    background.setFillColors = (fill, pageFill, stroke) => original(workspace ?? fill, page ?? pageFill, stroke, "transparent");
     background._noMarginMarks = true;
     background.setFillColors(undefined, undefined, undefined);
+    if (shownWorkspace) {
+      const canvas = document.querySelector<HTMLCanvasElement>(`canvas[id*="${unitId}"]`);
+      if (canvas) canvas.style.backgroundColor = shownWorkspace;
+    }
   };
   apply();
 }

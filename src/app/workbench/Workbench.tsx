@@ -1168,7 +1168,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <i className="wb-state-dot" />{status.label}
         </button>
         <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
-          <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} /> {working.length > 0 ? `${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : "Чат"}
+          <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />{working.length > 0 ? ` ${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : ""}
         </button>
         <span className="wb-status-fill" />
         {attentionCount > 0 && (
@@ -1176,9 +1176,6 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
             <AlertTriangle size={12} /> {attentionCount}
           </button>
         )}
-        <button type="button" className="wb-status-item" onClick={openMemorySearch} title="Записей памяти">
-          <Database size={12} /> {data.memoriesTotal.toLocaleString("ru-RU")} {plural(data.memoriesTotal, "запись", "записи", "записей")}
-        </button>
         <button type="button" className="wb-status-item" onClick={() => setSidebarOpen((value) => !value)} title="Боковая панель (Ctrl+B)"><PanelLeft size={12} /></button>
         <button type="button" className="wb-status-item" onClick={() => setPanelOpen((value) => !value)} title="Нижняя панель (Ctrl+J)"><PanelBottom size={12} /></button>
         <button
@@ -1190,7 +1187,6 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <Columns2 size={12} />
         </button>
         <button type="button" className="wb-status-item" onClick={() => dockConsole(consoleDock === "right" ? "bottom" : "right")} title={consoleDock === "right" ? "Чат вниз" : "Чат справа"}><PanelRight size={12} /></button>
-        <span className="wb-status-item is-static">{user.username}</span>
       </footer>
 
       {agentNotice && (

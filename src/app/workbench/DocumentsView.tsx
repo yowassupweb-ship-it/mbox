@@ -10,12 +10,12 @@ import { createDocAndOpen, docsStore, emitDocs, importDocx, patchDoc, refreshDoc
 
 export type SheetsDocsMode = "tables" | "docs";
 
-/** Переключатель «Таблицы | Документы» в шапке боковой панели. Ширина кнопок не зависит от выбора. */
+/** Переключатель «Таблицы | Документы» в шапке боковой панели. Только значки: подпись — в подсказке. */
 export function SheetsDocsSwitch({ mode, onMode }: { mode: SheetsDocsMode; onMode: (mode: SheetsDocsMode) => void }) {
   return (
     <div className="wb-mode-switch" role="radiogroup" aria-label="Раздел">
-      <button type="button" role="radio" aria-checked={mode === "tables"} className={mode === "tables" ? "is-on" : undefined} onClick={() => onMode("tables")}><Table2 size={14} aria-hidden="true" /><span>Таблицы</span></button>
-      <button type="button" role="radio" aria-checked={mode === "docs"} className={mode === "docs" ? "is-on" : undefined} onClick={() => onMode("docs")}><FileText size={14} aria-hidden="true" /><span>Документы</span></button>
+      <button type="button" role="radio" aria-checked={mode === "tables"} className={mode === "tables" ? "is-on" : undefined} onClick={() => onMode("tables")} title="Таблицы" aria-label="Таблицы"><Table2 size={15} aria-hidden="true" /></button>
+      <button type="button" role="radio" aria-checked={mode === "docs"} className={mode === "docs" ? "is-on" : undefined} onClick={() => onMode("docs")} title="Документы" aria-label="Документы"><FileText size={15} aria-hidden="true" /></button>
     </div>
   );
 }

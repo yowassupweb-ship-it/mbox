@@ -90,14 +90,15 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-right: 4px;
-  padding-right: 6px;
-  background: var(--wb-surface);
-  box-shadow: 8px 0 8px -8px rgba(0, 0, 0, 0.35);
+  margin-right: var(--space-1);
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-main) 6%, var(--wb-surface));
+  box-shadow: 0 0 0 var(--space-1) var(--wb-surface);
 }
 .wb-tabs-nav button {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   padding: 0;

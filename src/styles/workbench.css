@@ -4095,12 +4095,12 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 /* ─── Переключатель «Таблицы | Документы» и редактор документов ─── */
 .wb-mode-switch { display: inline-flex; min-width: 0; padding: 2px; border-radius: var(--radius-pill); background: var(--surface-hover); text-transform: none; letter-spacing: 0; }
 .wb-mode-switch button {
+  width: 30px;
   height: 24px;
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-pill);
   background: none;
