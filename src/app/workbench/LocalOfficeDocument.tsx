@@ -10,6 +10,7 @@ import type { TabsApi } from "./tabs";
 import { base64ToArrayBuffer, bytesToBase64, parseDelimited, delimitedContent } from "./officeFormat";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 
+const PdfViewer = lazy(() => import("./PdfViewer"));
 const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
 const UniverDocumentViewer = lazy(() => import("./UniverDocumentViewer").then((module) => ({ default: module.UniverDocumentViewer })));
 
@@ -44,6 +45,7 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
   const kind = kindOf(path);
   const ext = extension(path);
   const [file, setFile] = useState<DataRead | null>(null);
+  const pdfBytes = useMemo(() => (kind === "pdf" && file && !file.tooLarge ? new Uint8Array(base64ToArrayBuffer(file.base64)) : null), [kind, file]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [docxHtml, setDocxHtml] = useState("");
@@ -103,6 +105,14 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
   }), [load, path, rootKey]);
 
 
+  async function savePdf(bytes: Uint8Array) {
+    if (!bridge?.writeData || !file) return;
+    const base64 = bytesToBase64(bytes);
+    const written = await bridge.writeData(rootKey, path, base64, file.mtime);
+    setFile({ ...file, base64, size: written.size, mtime: written.mtime });
+    tabs.pin(tabKey);
+  }
+
   async function save() {
     if (!bridge?.writeData || !book || !file || saving) return;
     setSaving(true);
@@ -160,8 +170,10 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
       {error && <div className="wb-banner is-error" role="alert">{error}</div>}
       {loading ? <div className="wb-doc-missing" role="status" aria-live="polite">Открываю {path}…</div>
         : file?.tooLarge ? <div className="wb-doc-missing">Файл {formatBytes(file.size)} — слишком большой для встроенного просмотра.</div>
-          : kind === "pdf" && file ? (
-            <div className="wb-pdf-view"><iframe title={path} src={`data:${file.mime};base64,${file.base64}`} /></div>
+          : kind === "pdf" && pdfBytes ? (
+            <Suspense fallback={<OctopusSpinner />}>
+              <PdfViewer source={{ bytes: pdfBytes }} version={file?.mtime} name={path.split("/").pop() || path} memoryKey={`${rootKey}:${path}`} onSave={bridge.writeData ? savePdf : undefined} />
+            </Suspense>
           ) : kind === "legacy" ? (
             <div className="wb-doc-missing">Старый формат {ext} открывается установленной программой. Для работы внутри MBOX сохраните файл как {ext === ".doc" ? ".docx" : ".xlsx"}.<button type="button" className="wb-inline-btn" onClick={() => void bridge.openDefault(rootKey, path)}>Открыть файл</button></div>
           ) : kind === "docx" ? (
