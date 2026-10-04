@@ -761,8 +761,11 @@ function ServerBoard({ pulse }: { pulse: number }) {
     <div className="content-grid server-grid">
       <Panel title="Сервер" icon={Server}>
         {/* Сборщик метрик на хосте может молча остановиться — старые цифры не должны выглядеть текущими. */}
-        {Date.now() - Date.parse(metrics.captured_at) > 10 * 60 * 1000 && (
-          <p className="error-text">Метрики устарели: последний снимок {formatDateTime(metrics.captured_at)}. На сервере не работает scripts/server_metrics_collector.sh.</p>
+        {metrics.source === "app" && (
+          <p className="error-text">Сборщик на хосте остановился{metrics.containers_captured_at ? ` (последний снимок ${formatDateTime(metrics.containers_captured_at)})` : ""}: цифры ниже — от самого приложения, список контейнеров устарел. Запустите scripts/server_metrics_collector.sh на сервере.</p>
+        )}
+        {Number(metrics.disk_total_mb) > 0 && Number(metrics.disk_used_mb) / Number(metrics.disk_total_mb) > 0.9 && (
+          <p className="error-text">Диск заполнен на {Math.round((Number(metrics.disk_used_mb) / Number(metrics.disk_total_mb)) * 100)}% — освободите место, иначе база и сборки перестанут записываться.</p>
         )}
         <div className="entity-list">
           <EntityLine title="Хост" value={metrics.hostname} />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Bookmark, ChevronDown, ChevronUp, Copy, Download, Eraser, ExternalLink, FileDown, FolderOpen, Globe, History, Import, KeyRound, MoreHorizontal, Pause, Play, Printer, RotateCw, Search, Sparkles, Star, Trash2, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import type { TabsApi } from "./tabs";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { askConfirm, showNotice } from "../../ui/askText";
@@ -507,11 +508,10 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     setToolsOpen(false);
     setHistoryOpen(false);
     setFolderOpen(null);
-    // Меню стоит внутри области браузера (у рабочего места contain: layout — fixed там считается от области,
-    // а не от окна), поэтому координаты кнопки переводим в координаты области.
+    // Меню рисуется порталом в корень рабочего места (как WbMenu): внутри области браузера его обрезала бы
+    // соседняя панель чата, а у панелей contain: layout, из-за чего fixed считался бы от области, а не от окна.
     const point = pointerPoint(x, y, { width: 320, height: Math.min(window.innerHeight * 0.6, 440) });
-    const root = rootRef.current?.getBoundingClientRect();
-    setFolderOpen({ name, x: point.x - (root?.left ?? 0), y: point.y - (root?.top ?? 0) });
+    setFolderOpen({ name, x: point.x, y: point.y });
   }
 
   async function toggleBookmark() {
@@ -762,7 +762,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
         <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
-      {folderOpen && (
+      {folderOpen && createPortal(
         <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
           <div className="wb-browser-pop-head"><FolderIcon size={16} open /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
           <div className="wb-browser-pop-list">
@@ -800,7 +800,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
             })}
             {!folderItems.length && <div className="wb-browser-pop-empty">Папка пуста</div>}
           </div>
-        </div>
+        </div>,
+        document.querySelector(".wb") ?? document.body,
       )}
 
       {bookmarksOpen && (

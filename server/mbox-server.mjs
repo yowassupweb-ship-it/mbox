@@ -1,6 +1,7 @@
 import "./env.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -930,6 +931,24 @@ async function query(sql, values = []) {
   } finally {
     client.release();
   }
+}
+
+async function liveServerMetrics() {
+  const total = os.totalmem();
+  const stat = await fs.promises.statfs("/");
+  const diskTotal = stat.blocks * stat.bsize;
+  const diskUsed = diskTotal - stat.bavail * stat.bsize;
+  const [load] = os.loadavg();
+  return {
+    hostname: os.hostname(),
+    load_1: Number(load.toFixed(2)),
+    cpu_percent: Math.min(100, (load / Math.max(os.cpus().length, 1)) * 100),
+    memory_used_mb: Math.round((total - os.freemem()) / 1048576),
+    memory_total_mb: Math.round(total / 1048576),
+    disk_used_mb: Math.round(diskUsed / 1048576),
+    disk_total_mb: Math.round(diskTotal / 1048576),
+    captured_at: new Date().toISOString(),
+  };
 }
 
 async function recordMemoryAction({ memoryId, actor = "agent", action, note = "", metadata = {} }) {
@@ -2557,7 +2576,14 @@ async function handleApiWithContext(req, res, url) {
 
   if (url.pathname === "/api/mbox/server") {
     const result = await query("SELECT hostname, load_1, cpu_percent, memory_used_mb, memory_total_mb, disk_used_mb, disk_total_mb, docker_containers, captured_at::text FROM server_metrics ORDER BY captured_at DESC LIMIT 1");
-    return sendJson(res, 200, { metrics: result.rows[0] || null });
+    const snapshot = result.rows[0] || null;
+    // Сборщик на хосте (scripts/server_metrics_collector.sh) мог остановиться: тогда отдаём то, что видит само приложение,
+    // и помечаем это, чтобы цифры не выдавались за снимок хоста. Контейнеров приложение не видит — берём из последнего снимка.
+    if (!snapshot || Date.now() - Date.parse(snapshot.captured_at) > 2 * 60 * 1000) {
+      const live = await liveServerMetrics().catch(() => null);
+      if (live) return sendJson(res, 200, { metrics: { ...live, docker_containers: snapshot?.docker_containers || [], containers_captured_at: snapshot?.captured_at || null, source: "app" } });
+    }
+    return sendJson(res, 200, { metrics: snapshot ? { ...snapshot, source: "host" } : null });
   }
 
   if (url.pathname === "/api/mbox/history") {
