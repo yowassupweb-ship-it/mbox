@@ -259,8 +259,8 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
         </Suspense>
       );
     }
-    if (/\.(mp4|webm|mov)$/i.test(object.key)) return <video className="wb-storage-preview-media" src={source} controls />;
-    if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(object.key)) return <audio className="wb-storage-preview-audio" src={source} controls />;
+    if (/\.(mp4|m4v|webm|mov|mkv|ogv)$/i.test(object.key)) return <video className="wb-storage-preview-media" src={source} controls playsInline preload="metadata" />;
+    if (/\.(mp3|wav|ogg|oga|opus|aac|m4a|flac)$/i.test(object.key)) return <audio className="wb-storage-preview-audio" src={source} controls preload="metadata" />;
     if (/\.docx$/i.test(object.key) && object.size <= 20 * 1024 * 1024) return previewError ? <div className="wb-doc-missing">{previewError}</div> : previewHtml ? <Suspense fallback={<OctopusSpinner />}><UniverDocumentViewer html={previewHtml} title={object.key.split("/").pop() || object.key} /></Suspense> : <OctopusSpinner />;
     if (/\.(txt|md|markdown|json|ya?ml|xml|csv|tsv|log|css|scss|html?|js|jsx|ts|tsx|mjs|cjs|py|sql|sh|ps1)$/i.test(object.key) && object.size <= 2 * 1024 * 1024) return previewError ? <div className="wb-doc-missing">{previewError}</div> : <pre className="wb-storage-preview-text">{previewText || "Загрузка…"}</pre>;
     if (isSheetFile(object.key)) return <div className="wb-doc-missing">Таблица открывается во встроенном редакторе.<button type="button" className="wb-inline-btn" onClick={() => openSheetTab(object.key)}>Открыть таблицу</button></div>;

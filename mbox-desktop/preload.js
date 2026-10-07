@@ -118,6 +118,8 @@ const desktopApi = {
     read: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-read", key, rel),
     readImage: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-read-image", key, rel),
     readData: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-read-data", key, rel),
+    // Адрес для <video>/<audio>: файл отдаёт главный процесс потоком (serveWorkspaceMedia в main.js).
+    mediaUrl: (key, rel) => `mbox-media://ws/${encodeURIComponent(key)}/${String(rel || "").split("/").map(encodeURIComponent).join("/")}`,
     write: (key, rel, content, expectedMtime) => ipcRenderer.invoke("mbox-desktop:ws-write", key, rel, content, expectedMtime),
     writeData: (key, rel, base64, expectedMtime) => ipcRenderer.invoke("mbox-desktop:ws-write-data", key, rel, base64, expectedMtime),
     create: (key, rel, type) => ipcRenderer.invoke("mbox-desktop:ws-create", key, rel, type),

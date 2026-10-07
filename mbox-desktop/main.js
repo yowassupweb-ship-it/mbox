@@ -1,3 +1,4 @@
+const { Readable } = require("stream");
 const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, dialog, clipboard, session, safeStorage } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const localUi = require("./localUi");
@@ -51,7 +52,7 @@ const RESPONDER_WATCHDOG_MS = 60 * 1000;
 
 // Встроенный интерфейс (ui/) вместо загрузки сайта — см. localUi.js. Схему регистрируем до ready.
 const useLocalUi = localUi.localUiAvailable();
-if (useLocalUi) localUi.registerSchemePrivileges();
+localUi.registerSchemePrivileges(useLocalUi);
 
 let mainWindow = null;
 let tray = null;
@@ -76,6 +77,7 @@ app.whenReady().then(async () => {
     localUi.installLocalUi(mboxUrl);
     await localUi.prepareStorageMigration(mboxUrl);
   }
+  session.defaultSession.protocol.handle(localUi.MEDIA_SCHEME, serveWorkspaceMedia);
   createWindow();
   createTray();
   setMenu();
@@ -1839,6 +1841,77 @@ async function readWorkspaceImage(key, rel) {
   if (stat.size > MAX_IMAGE_BYTES) return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, tooLarge: true, dataUrl: "" };
   const buffer = await fs.promises.readFile(target);
   return { path: cleanRel, size: stat.size, mtime: stat.mtimeMs, mime, dataUrl: `data:${mime};base64,${buffer.toString("base64")}` };
+}
+
+// Видео и аудио из рабочих папок: <video src="mbox-media://ws/<ключ папки>/<путь>">. Файл отдаётся
+// потоком с Range — перемотка не читает его целиком (data: URL, как у картинок, для гигабайтных видео
+// не годится). Путь проверяет тот же resolveInRoot: за пределы подключённой папки не выйти, и отдаются
+// только медиаформаты. Что не умеет Chromium (avi, wmv), страница предлагает открыть системным плеером.
+const MEDIA_TYPES = {
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".ogv": "video/ogg",
+  ".avi": "video/x-msvideo",
+  ".wmv": "video/x-ms-wmv",
+  ".mpeg": "video/mpeg",
+  ".mpg": "video/mpeg",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".oga": "audio/ogg",
+  ".opus": "audio/ogg",
+  ".flac": "audio/flac"
+};
+
+function mediaError(status, text, extra = {}) {
+  return new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", ...extra } });
+}
+
+async function serveWorkspaceMedia(request) {
+  const url = new URL(request.url);
+  if (url.host !== "ws") return mediaError(404, "not found");
+  const [, key = "", ...parts] = url.pathname.split("/");
+  let target;
+  try {
+    ({ target } = resolveInRoot(decodeURIComponent(key), parts.map(decodeURIComponent).join("/")));
+  } catch (error) {
+    return mediaError(403, error.message);
+  }
+  const mime = MEDIA_TYPES[path.extname(target).toLowerCase()];
+  if (!mime) return mediaError(415, "Это не видео и не аудио");
+  let stat;
+  try { stat = await fs.promises.stat(target); } catch { return mediaError(404, "Файл не найден"); }
+  if (!stat.isFile()) return mediaError(404, "Это не файл");
+
+  const size = stat.size;
+  let start = 0;
+  let end = size - 1;
+  let status = 200;
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(request.headers.get("range") || "").trim());
+  if (range && (range[1] || range[2])) {
+    if (range[1] === "") start = Math.max(0, size - Number(range[2]));
+    else {
+      start = Number(range[1]);
+      if (range[2]) end = Math.min(Number(range[2]), size - 1);
+    }
+    if (start > end || start >= size) return mediaError(416, "bad range", { "content-range": `bytes */${size}` });
+    status = 206;
+  }
+  const headers = {
+    "content-type": mime,
+    "content-length": String(size ? end - start + 1 : 0),
+    "accept-ranges": "bytes",
+    "cache-control": "no-cache"
+  };
+  if (status === 206) headers["content-range"] = `bytes ${start}-${end}/${size}`;
+  if (request.method === "HEAD" || !size) return new Response(null, { status, headers });
+  const body = Readable.toWeb(fs.createReadStream(target, { start, end }));
+  return new Response(body, { status, headers });
 }
 
 async function readWorkspaceData(key, rel) {

@@ -171,7 +171,9 @@
 .ncal-dayhead[data-today="true"] .ncal-dayhead-num { background: var(--danger-fill); color: var(--on-media); font-weight: var(--weight-semibold); }
 
 .ncal-allday { padding-right: 10px; border-bottom: 1px solid var(--border-color); }
-.ncal-allday-label { display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font-size: var(--text-2xs); color: var(--text-muted); white-space: nowrap; }
+/* «весь день» в одну строку шире колонки времени (60 px, на телефоне 44) и обрезался слева —
+   переносим на две строки, по правому краю, как подписи часов. */
+.ncal-allday-label { display: flex; align-items: center; justify-content: flex-end; min-width: 0; padding: 2px 8px 2px 2px; font-size: var(--text-2xs); line-height: var(--leading-tight); color: var(--text-muted); text-align: right; overflow-wrap: break-word; }
 .ncal-allday-cols { display: grid; grid-template-columns: repeat(var(--days), minmax(0, 1fr)); min-height: 26px; }
 .ncal-allday-col { display: grid; align-content: start; gap: 2px; min-width: 0; padding: 3px 2px; border-left: 1px solid var(--border-color); }
 

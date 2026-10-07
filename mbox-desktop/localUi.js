@@ -44,12 +44,21 @@ function localUiAvailable() {
   return process.env.MBOX_UI !== "remote" && fs.existsSync(path.join(UI_ROOT, "index.html"));
 }
 
-/** Вызывать до app.whenReady: схема должна быть «стандартной», иначе нет localStorage, fetch и относительных путей. */
-function registerSchemePrivileges() {
-  protocol.registerSchemesAsPrivileged([{
+/** Схема локальных видео и аудио (обработчик — serveWorkspaceMedia в main.js). */
+const MEDIA_SCHEME = "mbox-media";
+
+/**
+ * Вызывать до app.whenReady, и только один раз — Electron принимает один список схем.
+ * mbox:// — «стандартная», иначе нет localStorage, fetch и относительных путей; нужна только встроенному UI.
+ * mbox-media:// — всегда: stream даёт <video> перематывать файл Range-запросами, не читая его целиком.
+ */
+function registerSchemePrivileges(withLocalUi) {
+  const schemes = [{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }];
+  if (withLocalUi) schemes.unshift({
     scheme: SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true, codeCache: true }
-  }]);
+  });
+  protocol.registerSchemesAsPrivileged(schemes);
 }
 
 function serveFile(pathname) {
@@ -158,4 +167,4 @@ function takePendingStorage() {
   return entries;
 }
 
-module.exports = { APP_ORIGIN, localUiAvailable, registerSchemePrivileges, installLocalUi, prepareStorageMigration, takePendingStorage, net };
+module.exports = { APP_ORIGIN, MEDIA_SCHEME, localUiAvailable, registerSchemePrivileges, installLocalUi, prepareStorageMigration, takePendingStorage, net };

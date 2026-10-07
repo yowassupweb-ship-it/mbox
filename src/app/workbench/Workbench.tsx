@@ -28,6 +28,7 @@ import { serverOrigin } from "../../lib/serverOrigin";
 import { mboxTabOfUrl } from "../../lib/mboxLinks";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
+import { LocalMediaDocument } from "./LocalMediaDocument";
 import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail, type BrowserState } from "./BrowserDocument";
 import { LocalOfficeDocument } from "./LocalOfficeDocument";
 import { SkillsView, ToolsView } from "./CatalogViews";
@@ -50,7 +51,7 @@ import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument"
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
 import { CommitDocument, GitDiffDocument, LocalFileDocument } from "./LocalFileDocument";
-import { IMAGE_FILE, OFFICE_FILE, setAgentHint, setWorkspaceUser, useLocalWorkspace } from "./localWorkspace";
+import { IMAGE_FILE, MEDIA_FILE, OFFICE_FILE, setAgentHint, setWorkspaceUser, useLocalWorkspace } from "./localWorkspace";
 import { MemoryDocument } from "./MemoryDocument";
 import { SearchView } from "./SearchView";
 import { tabMeta } from "./tabMeta";
@@ -836,6 +837,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "local":
         return IMAGE_FILE.test(rest)
           ? <LocalImageDocument rootKey={first} path={rest} />
+          : MEDIA_FILE.test(rest)
+            ? <LocalMediaDocument rootKey={first} path={rest} />
           : OFFICE_FILE.test(rest)
             ? <LocalOfficeDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />
           : <LocalFileDocument rootKey={first} path={rest} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
