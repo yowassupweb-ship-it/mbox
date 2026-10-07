@@ -1133,7 +1133,8 @@ function mboxDevApi() {
           const ownerOnly = sessionUser.role === "owner";
           const devActor = actor || await resolveRequestActor(req);
           if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: true, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
-          if (await handlePlannerApi({ req, res, url, query: queryPostgres, readBody, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          // Расписание автоматизаций календаря dev не запускает: он смотрит на боевую базу, запуски — дело прода.
+          if (await handlePlannerApi({ req, res, url, query: queryPostgres, readBody, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload), actor: devActor, userName: sessionUser.username })) return;
           if (await handleTablesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
