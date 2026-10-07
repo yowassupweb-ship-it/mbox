@@ -3847,7 +3847,8 @@ export async function replyAsJarvis(item) {
           const kinds = { doc: "документ (читай через read_document)", table: "таблица (читай через read_table)", note: "заметка", todo: "задача", memory: "запись памяти", file: "локальный файл", diff: "изменения файла", storage: "файл в хранилище", web: "страница", project: "проект", skill: "навык" };
           const id = /^\d+$/.test(String(entry?.id || "")) ? ` #${entry.id}` : "";
           const detail = entry?.detail ? ` (${String(entry.detail).slice(0, 200)})` : "";
-          return `${kinds[entry?.kind] || "вкладка"}${id} «${String(entry?.title || "").slice(0, 120)}»${detail}`;
+          const state = entry?.state ? ` — сейчас на странице: ${String(entry.state).replace(/\s+/g, " ").slice(0, 1200)}` : "";
+          return `${kinds[entry?.kind] || "вкладка"}${id} «${String(entry?.title || "").slice(0, 120)}»${detail}${state}`;
         }).join("; ")}. Если вопрос не называет объект явно — он про открытое. Номера у заметок, документов и таблиц свои: #50 у документа не связан с заметкой #50.`
         : "");
     // Раньше каждый ответ видел ТОЛЬКО текущее сообщение — если человек в прошлом сообщении назвал

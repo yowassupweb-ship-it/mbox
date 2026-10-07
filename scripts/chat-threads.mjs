@@ -280,7 +280,13 @@ export function focusLines(item) {
       case "storage": return `- S3 storage object: ${detail} (table open in the MBOX editor)`;
       case "web": return `- web page in the MBOX browser: ${detail}${title ? ` («${title}»)` : ""} — read it with the mbox-prod tool browser_snapshot, act with browser_fill / browser_click / browser_highlight (MBOX browser, not Claude Desktop's)`;
       case "project": return `- MBOX project «${title}»`;
-      case "skill": return `- MBOX skill «${title}»${detail ? `, file ${detail}` : ""}`;
+      case "skill": {
+        // Страница навыка (редактор письма и т. п.) присылает сводку того, что на ней сейчас: сообщение почти
+        // наверняка про это — сначала get_skill (SKILL.md), затем правка файлов навыка, без расспросов «какое письмо».
+        const state = String(entry?.state ?? "").trim().slice(0, 3000);
+        const head = `- MBOX skill «${title}»${detail ? `, file ${detail}` : ""}${id ? ` (skill id: ${id} — read get_skill first and follow it)` : ""}`;
+        return state ? `${head}${String.fromCharCode(10)}  the owner is working in this skill page right now; its current state:${String.fromCharCode(10)}${state.split(String.fromCharCode(10)).map((line) => `  | ${line}`).join(String.fromCharCode(10))}` : head;
+      }
       default: return title ? `- ${clean(entry?.kind) || "tab"}${id ? ` #${id}` : ""}: ${title}${detail ? ` (${detail})` : ""}` : "";
     }
   }).map((line, index) => (line ? line + excerptOf(context[index]) : line)).filter(Boolean);

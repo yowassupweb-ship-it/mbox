@@ -197,9 +197,10 @@
     .comp-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .comp-title .name { min-width: 0; overflow: hidden; font-size: var(--text-xs); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
     .comp-meta small { color: var(--text-muted); font-size: var(--text-2xs); }
-    .comp-add { position: absolute; top: 6px; right: 6px; opacity: 0; box-shadow: var(--shadow-sm); transition: opacity .12s; }
+    .comp-cover { position: absolute; inset: 0 0 auto 0; z-index: 1; height: 104px; }
+    .comp-add { z-index: 2; position: absolute; top: 6px; right: 6px; opacity: 0; box-shadow: var(--shadow-sm); transition: opacity .12s; }
     .comp:hover .comp-add, .comp:focus-within .comp-add { opacity: 1; }
-    .comp .used { position: absolute; top: 6px; left: 6px; }
+    .comp .used { position: absolute; z-index: 2; top: 6px; left: 6px; }
 
     /* Блоки письма */
     .section { border-radius: var(--radius-md); background: var(--element); }
@@ -307,7 +308,6 @@
       <div class="bar-actions">
         <button class="btn ghost" type="button" id="open-parse" title="Разобрать готовое письмо на блоки"><svg class="i"><use href="#i-split"/></svg><span class="label">Разобрать письмо</span></button>
         <button class="btn ghost" type="button" id="open-learn" title="Записать, что улучшить, и отдать агенту"><svg class="i"><use href="#i-grow"/></svg><span class="label">Улучшить навык</span></button>
-        <button class="btn" type="button" id="ask-check" title="Сборка, preflight и исправления — агентом"><svg class="i"><use href="#i-spark"/></svg><span class="label">С агентом</span></button>
         <button class="btn primary" type="button" id="check-now" title="Проверить письмо в Email Checker"><svg class="i"><use href="#i-shield"/></svg><span id="check-label">Проверить</span></button>
       </div>
     </header>
@@ -320,7 +320,7 @@
             <button type="button" id="view-desktop" class="on" title="Как на компьютере (700 px)"><svg class="i sm"><use href="#i-monitor"/></svg>Компьютер</button>
             <button type="button" id="view-mobile" title="Как на телефоне (390 px)"><svg class="i sm"><use href="#i-phone"/></svg>Телефон</button>
           </div>
-          <span class="hint fill">Клик — выбрать блок · двойной клик по тексту — изменить · блок из библиотеки можно перетащить в письмо</span>
+          <span class="fill"></span>
           <button class="btn icon ghost" type="button" id="copy-html" title="Копировать HTML письма"><svg class="i"><use href="#i-code"/></svg></button>
           <button class="btn icon ghost" type="button" id="download-html" title="Скачать HTML"><svg class="i"><use href="#i-download"/></svg></button>
         </div>
@@ -666,6 +666,7 @@
       });
       $('#pane-library').hidden = pane !== 'library';
       $('#pane-blocks').hidden = pane !== 'blocks';
+      publishContext();
       if (pane === 'library') requestAnimationFrame(fitThumbs);
     }
     // Ширина правой панели — перетаскиванием (320–640 px), запоминается.
@@ -803,6 +804,7 @@
       return el;
     }
     function renderSelected() {
+      publishContext();
       const box = $('#selected');
       const body = bodyOf();
       const index = state.selected;
@@ -839,13 +841,6 @@
         fields.append(wrap);
       });
       fields.insertAdjacentHTML('beforeend', '<div class="format" id="format" hidden></div>');
-      fields.insertAdjacentHTML('beforeend', `<details class="ask"><summary class="btn sm ghost" style="width:max-content">${icon('spark', 'sm')}Изменить компонент с агентом</summary><textarea placeholder="Что изменить в ${esc(item.component)}? Правка коснётся всех писем" rows="2"></textarea><button class="btn sm primary" type="button" style="justify-self:start">Отправить агенту</button></details>`);
-      $('.ask button', fields).addEventListener('click', () => {
-        const request = $('.ask textarea', fields).value.trim(); if (!request || !component) return;
-        sendAgent(`Навык email-campaign, компонент ${component.id} «${component.name}» (${component.file}, поля в components/registry.json): ${request}\nПравь edit_skill_file, номер не меняй; новые поля — {{ключ}} в шаблоне и описание в реестре. Проверь: node scripts/letter.mjs build example --no-remote. Запиши в learnings.md («Сделано»), что изменил.`);
-        $('.ask textarea', fields).value = '';
-        $('.ask', fields).open = false;
-      });
       renderFormat();
     }
     $('#add-block').addEventListener('click', (event) => {
@@ -953,7 +948,10 @@
       document.addEventListener('dragover',function(event){event.preventDefault();event.dataTransfer.dropEffect='copy';place(event.clientY+scrollY);});
       document.addEventListener('dragleave',function(event){if(!event.relatedTarget)clearLine();});
       document.addEventListener('drop',function(event){event.preventDefault();var at=dropAt;clearLine();var id='';try{id=event.dataTransfer.getData('text/plain')||'';}catch(e){}send('letter:drop',{at:at==null?0:at,id:id});});
-      addEventListener('message',function(event){var d=event.data;if(event.source!==parent||!d)return;if(d.type==='letter:focus-block')pick(d.item,d.scroll);if(d.type==='letter:drag-end')clearLine();});
+      // Правка письма приходит сообщением и заменяет содержимое на месте: без перезагрузки iframe холст не мигает
+      // и не прыгает — прокрутка, выделение и панель действий остаются где были.
+      function update(d){var y=scrollY;var doc=new DOMParser().parseFromString(d.html,'text/html');if(active){active=null;}document.body.innerHTML=doc.body.innerHTML;if(doc.title&&doc.title!==document.title)document.title=doc.title;window.__names=d.names||[];line=null;hover=null;scrollTo(0,y);if(d.focus!=null)pick(d.focus,true);else if(d.picked!=null)pick(d.picked,false);else{picked=null;mark(null,'mbox-picked');tools();}}
+      addEventListener('message',function(event){var d=event.data;if(event.source!==parent||!d)return;if(d.type==='letter:update')update(d);if(d.type==='letter:focus-block')pick(d.item,d.scroll);if(d.type==='letter:drag-end')clearLine();});
       addEventListener('resize',tools);
       if(picked!=null)pick(picked,false);
     })();<\/script>`;
@@ -975,9 +973,18 @@
       const focus = state.focusAfterRender;
       state.focusAfterRender = null;
       const names = (body?.items || []).map((item) => `${item.component} · ${componentOf(item.component)?.name || ''}`);
-      // Письмо в песочнице: прокрутку оно само сообщает (letter:scroll) и восстанавливает при перерисовке.
-      const prelude = `<script>window.__picked=${state.selected != null ? state.selected : 'null'};window.__names=${JSON.stringify(names).replace(/</g, '\\u003c')};(function(){var t=${Number(state.letterScroll) || 0};function go(){scrollTo(0,t);}go();addEventListener("load",function(){go();${focus != null ? `parent.postMessage({type:"letter:ready",focus:${focus}},"*");` : ''}});var q=0;addEventListener("scroll",function(){clearTimeout(q);q=setTimeout(function(){parent.postMessage({type:"letter:scroll",y:scrollY},"*");},80);});})();<\/script>`;
       fitLetter();
+      publishContext();
+      // То же письмо уже загружено — обновляем содержимое на месте (см. update в мосте), без перезагрузки iframe.
+      if (state.frameLetter === state.letter.id && frame.contentWindow) {
+        if (result.html !== state.lastFrameHtml || focus != null) frame.contentWindow.postMessage({ type: 'letter:update', html: result.html, names, picked: state.selected, focus }, '*');
+        state.lastFrameHtml = result.html;
+        return;
+      }
+      state.frameLetter = null;
+      // Первая загрузка письма: прокрутку оно само сообщает (letter:scroll) и восстанавливает.
+      const prelude = `<script>window.__picked=${state.selected != null ? state.selected : 'null'};window.__names=${JSON.stringify(names).replace(/</g, '\\u003c')};(function(){var t=${Number(state.letterScroll) || 0};function go(){scrollTo(0,t);}go();addEventListener("load",function(){go();parent.postMessage({type:"letter:loaded",letter:${JSON.stringify(state.letter.id)}${focus != null ? `,focus:${focus}` : ''}},"*");});var q=0;addEventListener("scroll",function(){clearTimeout(q);q=setTimeout(function(){parent.postMessage({type:"letter:scroll",y:scrollY},"*");},80);});})();<\/script>`;
+      state.lastFrameHtml = result.html;
       frame.srcdoc = result.html.replace(/<\/body>/i, `${prelude}${EDITOR_BRIDGE}</body>`);
     }
     window.addEventListener('message', (event) => {
@@ -985,7 +992,13 @@
       if (event.source !== frame.contentWindow || !event.data) return;
       const data = event.data;
       if (data.type === 'letter:scroll') { state.letterScroll = Number(data.y) || 0; return; }
-      if (data.type === 'letter:ready') { focusBlock(Number(data.focus)); return; }
+      if (data.type === 'letter:loaded') {
+        state.frameLetter = data.letter;
+        if (data.focus != null) focusBlock(Number(data.focus));
+        // Пока грузилось, письмо могли поправить — догоняем последним состоянием.
+        if (data.letter !== state.letter?.id || renderResult(true).html !== state.lastFrameHtml) renderPreview();
+        return;
+      }
       if (data.type === 'letter:block') { if (state.selected !== Number(data.item)) selectItem(Number(data.item), { scroll: false }); else showPane('blocks'); return; }
       if (data.type === 'letter:action') { blockAction(Number(data.item), data.action); return; }
       if (data.type === 'letter:drop') { const id = draggedId(data.id); if (id) addToLetter(id, Number(data.at)); return; }
@@ -1120,7 +1133,9 @@
         card.dataset.id = component.id;
         card.draggable = true;
         card.title = `${component.name}${component.description ? ` — ${component.description}` : ''}\nПеретащите в письмо или нажмите «+»`;
-        card.innerHTML = `<div class="comp-thumb"><iframe loading="lazy" tabindex="-1" title="${component.id}"></iframe></div>
+        // Над iframe превью — прозрачная крышка: в Electron нажатие уходило прямо в iframe миниатюры (несмотря на
+        // pointer-events: none), и перетаскивание карточки не начиналось.
+        card.innerHTML = `<div class="comp-thumb"><iframe loading="lazy" tabindex="-1" title="${component.id}"></iframe></div><span class="comp-cover" aria-hidden="true"></span>
           <div class="comp-meta"><div class="comp-title"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span></div><small>${esc(component.category)}</small></div>
           <span class="chip accent used" data-used hidden></span>
           <button class="btn icon sm primary comp-add" type="button" title="Вставить после выбранного блока">${icon('plus', 'sm')}</button>`;
@@ -1358,6 +1373,43 @@
       ].filter(Boolean).join('\n'));
     });
 
+    // ── Сводка для чата ─────────────────────────────────────────────────────────────────
+    // Чат MBOX получает её вместе с чипом этой вкладки: «поправь заголовок во втором блоке» агент понимает без
+    // пересказа — какое письмо, какие блоки, что выделено, где ошибки. Обновляется после каждой правки.
+    let contextTimer = 0;
+    const clip = (text, size) => { const value = String(text ?? '').replace(/\s+/g, ' ').trim(); return value.length > size ? `${value.slice(0, size - 1)}…` : value; };
+    function publishContext() {
+      if (!bridge?.context) return;
+      clearTimeout(contextTimer);
+      contextTimer = setTimeout(() => {
+        const l = state.letter;
+        const body = bodyOf();
+        if (!l || !body) { bridge.context('Редактор письма email-campaign открыт, письмо не выбрано.'); return; }
+        const firstText = (item) => {
+          const component = componentOf(item.component);
+          const field = (component?.fields || []).find((f) => ['text', 'multiline'].includes(f.type) && String(item.fields?.[f.key] ?? '').trim());
+          return field ? ` «${clip(item.fields[field.key], 40)}»` : '';
+        };
+        const local = renderResult();
+        const lines = [
+          `Редактор письма навыка email-campaign. Письмо: letters/${l.id}.json · статус: ${STATUS_LABELS[l.status] || l.status || '—'}`,
+          `Тема «${clip(body.subject, 120) || '—'}» · прехедер «${clip(body.preheader, 120) || '—'}» · UTM ${body.utm.campaign || '—'} / ${body.utm.content || '—'}`,
+          `Блоки (${body.items.length}): ${body.items.map((item, i) => `${i + 1}. ${item.component} ${componentOf(item.component)?.name || '?'}${firstText(item)}`).join('; ') || 'нет'}`,
+        ];
+        const selected = state.selected != null ? body.items[state.selected] : null;
+        if (selected) {
+          const component = componentOf(selected.component);
+          const fields = (component?.fields || []).map((f) => `${f.key}=«${clip(selected.fields?.[f.key] ?? f.default ?? '', 80)}»`).join('; ');
+          lines.push(`Выделен блок ${state.selected + 1}: ${selected.component} «${component?.name || ''}»${fields ? ` — поля: ${fields}` : ''}${state.activeField?.item === state.selected ? `; курсор в поле ${state.activeField.field}` : ''}`);
+        } else lines.push('Блок не выделен.');
+        if (local.errors.length) lines.push(`Ошибки сборки: ${local.errors.slice(0, 6).join('; ')}`);
+        const e = l.check?.email_checker;
+        if (l.check) lines.push(`Проверка ${String(l.check.at || '').slice(0, 16).replace('T', ' ')}: ${e && !e.failed ? `ссылок с ошибкой ${(e.links_failed || []).length}, ошибок вёрстки ${(e.validation?.errors || []).length}` : 'Email Checker не отработал'}${(l.check.remaining || []).length ? `; на решение: ${l.check.remaining.slice(0, 3).map((r) => clip(typeof r === 'string' ? r : r.detail || r.message, 80)).join('; ')}` : ''}`);
+        lines.push(`Справа открыта ${state.pane === 'library' ? 'библиотека блоков' : 'панель «Блоки письма»'}. Правки — в letters/${l.id}.json (letter.items: component, fields, formats) через edit_skill_file; редактор перезагрузится сам.`);
+        bridge.context(lines.join('\n'));
+      }, 400);
+    }
+
     // ── Проверка ────────────────────────────────────────────────────────────────────────
     function blockingCount(local) {
       const e = state.letter?.check?.email_checker;
@@ -1404,16 +1456,6 @@
       }
     }
     $('#check-now').addEventListener('click', checkNow);
-    $('#ask-check').addEventListener('click', async () => {
-      const l = state.letter; if (!l) return;
-      await saveNow('Состав перед проверкой');
-      sendAgent([
-        `Навык email-campaign, письмо letters/${l.id}.json — состав готов в редакторе.`,
-        '1. `node scripts/letter.mjs build ' + l.id + '` — сборка, strict preflight и Email Checker.',
-        '2. Исправь актуальные ошибки: поля письма — edit_skill_file в letters/' + l.id + '.json, ошибка вёрстки блока — в его компоненте components/C###.html. Повтори build до чистого результата.',
-        '3. Замечания к тексту оцени по смыслу (склейку текста соседних блоков проверяльщик принимает за ошибки). Что исправил — в check.fixed, что оставил на решение — в check.remaining. Если чинил компонент или обходил правило — запиши `node scripts/letter.mjs learn "…"`. Открой мне готовый HTML через open_tab (path:) и коротко отчитайся.',
-      ].join('\n'));
-    });
     function renderCheck() {
       const box = $('#check-body');
       const l = state.letter;
@@ -1428,7 +1470,7 @@
       box.innerHTML = `
         <div class="notice ${c && !c.ok ? 'warn' : ''}">${c
           ? `<b>${headline}</b><br><span class="muted">${esc(c.by || 'агент')} · ${esc(String(c.at || '').slice(0, 16).replace('T', ' '))}${c.html_path ? ` · ${esc(c.html_path)}` : ''}</span>`
-          : 'Письмо ещё не проверялось — нажмите «Проверить» в шапке. Полный цикл с preflight и исправлениями — «С агентом».'}</div>
+          : 'Письмо ещё не проверялось — нажмите «Проверить» в шапке. Исправить найденное можно попросить в чате: агент видит это письмо.'}</div>
         ${section('Сейчас в редакторе', local.errors.length || local.warnings.length ? rows(local.errors, 'error') + rows(local.warnings, 'warn') : rows(['Все обязательные поля заполнены'], 'ok'))}
         ${section('Исправлено агентом', rows(c && c.fixed, 'ok'))}
         ${section('Осталось на решение', rows(c && c.remaining, 'warn'))}

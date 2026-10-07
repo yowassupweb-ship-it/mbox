@@ -98,7 +98,7 @@ type Suggestion = { value: string; hint?: string };
  * сообщением (props.context), чтобы «поправь тут заголовок» не начиналось с поиска файла по диску.
  * Чип можно отжать — тогда этот пункт агенту не отправится.
  */
-export type FocusItem = { key: string; kind: string; title: string; id?: string; detail?: string };
+export type FocusItem = { key: string; kind: string; title: string; id?: string; detail?: string; state?: string };
 
 const FOCUS_ICON: Record<string, typeof FileText> = { file: FileText, diff: FileText, note: StickyNote, todo: SquareCheck, web: Globe, storage: Table2, memory: Brain };
 
@@ -840,7 +840,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if (effectiveEffort) messageProps.effort = effectiveEffort;
       if (files.length) messageProps.attachments = files;
       if (thread) messageProps.thread = thread;
-      if (sharedFocus.length) messageProps.context = sharedFocus.map(({ kind, title, id, detail }) => ({ kind, title, ...(id ? { id } : {}), ...(detail ? { detail } : {}) }));
+      if (sharedFocus.length) messageProps.context = sharedFocus.map(({ kind, title, id, detail, state }) => ({ kind, title, ...(id ? { id } : {}), ...(detail ? { detail } : {}), ...(state ? { state } : {}) }));
       const result = await fetchJson<{ inbox_item?: AgentInboxItem }>("/api/mbox/agent/inbox", {
         method: "POST",
         headers: { "content-type": "application/json" },

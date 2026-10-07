@@ -59,7 +59,7 @@ import { encodeTabParam, projectIdOfTab, setWorkbenchStorageUser, usePersistentS
 import { WbMenu } from "./WbMenu";
 import { applyOpenTab, type OpenTabEvent, type OpenTabResult } from "./agentTabs";
 import { installBrowserAgent } from "./browserAgent";
-import { SkillPageDocument } from "./SkillPageDocument";
+import { SKILL_CONTEXT_EVENT, SkillPageDocument, skillPageContext } from "./SkillPageDocument";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
 import { askConfirm } from "../../ui/askText";
@@ -895,6 +895,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     nav.querySelector<HTMLElement>(".wb-activity.is-active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   }, [activity, tabs.active, consoleVisible]);
   // Что открыто сейчас: активные вкладки обеих областей. Агент получает это с сообщением и не ищет файл сам.
+  // Страница навыка прислала новую сводку — пересобрать чипы, чтобы агент получил свежее состояние.
+  const [skillContextVersion, setSkillContextVersion] = useState(0);
+  useEffect(() => {
+    const listener = () => setSkillContextVersion((value) => value + 1);
+    window.addEventListener(SKILL_CONTEXT_EVENT, listener);
+    return () => window.removeEventListener(SKILL_CONTEXT_EVENT, listener);
+  }, []);
   const chatFocus = useMemo<FocusItem[]>(() => {
     const keys = [...new Set([tabs.active, splitActive].filter((key): key is string => Boolean(key)))];
     const items = keys.flatMap((key): FocusItem[] => {
@@ -927,8 +934,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           return [{ key, kind: "project", title, id: first }];
         case "skill":
         case "skillpage":
-        case "skillblocks":
-          return [{ key, kind: "skill", title, id: first, ...(rest ? { detail: rest } : {}) }];
+        case "skillblocks": {
+          const state = kind === "skillpage" ? skillPageContext(key) : "";
+          return [{ key, kind: "skill", title, id: first, ...(rest ? { detail: rest } : {}), ...(state ? { state } : {}) }];
+        }
         default:
           return [];
       }
@@ -940,7 +949,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       seen.add(identity);
       return true;
     });
-  }, [tabs.active, splitTabs, splitActive, data, catalogTitles, localWorkspace.roots]);
+  }, [tabs.active, splitTabs, splitActive, data, catalogTitles, localWorkspace.roots, skillContextVersion]);
   const renderChat = (visible: boolean, paneId: string, debug?: ChatDebug) => (
     <AgentChat embedded visible={visible} peer={chatPeer(paneId)} debug={debug} jarvisEnabled={user.role === "owner" || user.jarvis_enabled !== false} defaultResponder={user.role === "owner" && user.jarvis_autoreply === false ? CLOUD_AGENTS.claude : undefined} focus={chatFocus} inbox={data.inbox} agents={data.agents} runs={data.runs} projects={data.projects} artifacts={data.artifacts} projectId={data.projects.find((project) => project.name === "MBOX")?.id} currentProjectName={currentProjectName} onSaved={data.reload} />
   );

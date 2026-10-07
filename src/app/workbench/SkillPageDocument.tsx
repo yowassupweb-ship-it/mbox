@@ -7,6 +7,19 @@ import { skillPageReplyTo } from "./agentTabs";
 import { scopedStorageKey, usePersistentState, type TabsApi } from "./tabs";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 
+/**
+ * Что сейчас на странице навыка — её сводка для чата (mbox.context). Агент получает её вместе с чипом вкладки
+ * и понимает «поправь заголовок» без пересказа: какое письмо, какие блоки, что выделено.
+ */
+export const SKILL_CONTEXT_EVENT = "mbox:skill-context";
+const skillContexts = new Map<string, string>();
+export const skillPageContext = (tabKey: string) => skillContexts.get(tabKey) || "";
+function setSkillPageContext(tabKey: string, text: string) {
+  if (skillContexts.get(tabKey) === text) return;
+  skillContexts.set(tabKey, text);
+  window.dispatchEvent(new CustomEvent(SKILL_CONTEXT_EVENT, { detail: { tabKey } }));
+}
+
 const HUMAN = "Человек";
 
 function activeTheme() {
@@ -86,6 +99,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
         try { window.localStorage.setItem(scopedStorageKey(storageKey), JSON.stringify(data.items)); } catch { /* без памяти */ }
       }
       if (data?.type === "mbox:close") tabs.close(tabKey);
+      if (data?.type === "mbox:context") setSkillPageContext(tabKey, String(data.text || "").slice(0, 4000));
       if (data?.type === "mbox:read" || data?.type === "mbox:write" || data?.type === "mbox:write-files" || data?.type === "mbox:files" || data?.type === "mbox:email-check" || data?.type === "mbox:agents" || data?.type === "mbox:send") void answer(data as BridgeCall);
     }
     window.addEventListener("message", onMessage);
@@ -238,7 +252,8 @@ read:function(path){return call("mbox:read",{path:String(path)});},
 write:function(path,content,message){return call("mbox:write",{path:String(path),content:String(content),message:String(message||"")});},
 writeFiles:function(files,message){return call("mbox:write-files",{files:Array.isArray(files)?files:[],message:String(message||"")});},
 emailCheck:function(html){return call("mbox:email-check",{html:String(html)});},
-files:function(){return call("mbox:files",{});}};
+files:function(){return call("mbox:files",{});},
+context:function(text){parent.postMessage({type:"mbox:context",text:String(text||"")},"*");}};
 })();</script>`;
   const head = html.match(/<head[^>]*>/i);
   if (head) return html.replace(head[0], `${head[0]}${bridge}`);
