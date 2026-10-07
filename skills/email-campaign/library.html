@@ -164,6 +164,8 @@
     .letter-fit { position: relative; height: 100%; margin: 0 auto; overflow: hidden; border-radius: var(--radius-sm); background: #fff; box-shadow: var(--shadow-sm); }
     .canvas.mobile .letter-fit { border-radius: 24px; }
     .letter-fit iframe { position: absolute; top: 0; left: 0; display: block; border: 0; background: #fff; transform-origin: 0 0; }
+    .stage.dragging .letter-fit { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-sm); }
+    .stage.drop { background: color-mix(in srgb, var(--accent) 8%, var(--sunken)); }
     .canvas-empty { position: absolute; inset: 16px; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; border: 2px dashed var(--line-strong); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--sunken) 92%, transparent); color: var(--text-2); text-align: center; }
     .canvas-empty.drop { border-color: var(--accent); background: var(--selected); }
     .canvas-empty strong { color: var(--text); font-size: var(--text-md); }
@@ -791,7 +793,7 @@
         event.preventDefault();
         const after = el.classList.contains('drop-after');
         el.classList.remove('drop-before', 'drop-after');
-        if (state.drag) { const id = state.drag; state.drag = null; addToLetter(id, index + (after ? 1 : 0)); return; }
+        if (!event.dataTransfer.types.includes('text/x-letter-item')) { const id = draggedId(event.dataTransfer.getData('text/plain')); if (id) addToLetter(id, index + (after ? 1 : 0)); return; }
         const from = Number(event.dataTransfer.getData('text/x-letter-item'));
         if (!Number.isInteger(from)) return;
         let to = index + (after ? 1 : 0);
@@ -950,7 +952,7 @@
       function clearLine(){if(line){line.remove();line=null;}}
       document.addEventListener('dragover',function(event){event.preventDefault();event.dataTransfer.dropEffect='copy';place(event.clientY+scrollY);});
       document.addEventListener('dragleave',function(event){if(!event.relatedTarget)clearLine();});
-      document.addEventListener('drop',function(event){event.preventDefault();var at=dropAt;clearLine();send('letter:drop',{at:at==null?0:at});});
+      document.addEventListener('drop',function(event){event.preventDefault();var at=dropAt;clearLine();var id='';try{id=event.dataTransfer.getData('text/plain')||'';}catch(e){}send('letter:drop',{at:at==null?0:at,id:id});});
       addEventListener('message',function(event){var d=event.data;if(event.source!==parent||!d)return;if(d.type==='letter:focus-block')pick(d.item,d.scroll);if(d.type==='letter:drag-end')clearLine();});
       addEventListener('resize',tools);
       if(picked!=null)pick(picked,false);
@@ -986,7 +988,7 @@
       if (data.type === 'letter:ready') { focusBlock(Number(data.focus)); return; }
       if (data.type === 'letter:block') { if (state.selected !== Number(data.item)) selectItem(Number(data.item), { scroll: false }); else showPane('blocks'); return; }
       if (data.type === 'letter:action') { blockAction(Number(data.item), data.action); return; }
-      if (data.type === 'letter:drop') { if (state.drag) { const id = state.drag; state.drag = null; addToLetter(id, Number(data.at)); } return; }
+      if (data.type === 'letter:drop') { const id = draggedId(data.id); if (id) addToLetter(id, Number(data.at)); return; }
       if (!/^letter:field-(select|commit)$/.test(data.type)) return;
       const itemIndex = Number(data.item);
       const item = state.letter?.letter?.items?.[itemIndex];
@@ -1050,12 +1052,35 @@
     });
     $('#empty-library').addEventListener('click', () => { showPane('library'); $('#c-search').focus(); });
     $('#empty-parse').addEventListener('click', () => openParse());
-    // Пустое письмо: блок можно бросить прямо на заглушку.
+    // Какой блок бросили: номер из самого перетаскивания (iframe читает его из dataTransfer), иначе — что
+    // тащили только что. Сообщение о сбросе из письма приходит уже после dragend в библиотеке.
+    function draggedId(fromDrop) {
+      const id = String(fromDrop || '').trim();
+      if (id && componentOf(id)) return id;
+      if (state.drag) return state.drag;
+      if (state.lastDrag && Date.now() - state.lastDrag.at < 15000) return state.lastDrag.id;
+      return '';
+    }
+    // Весь холст принимает блок: на письмо — в точку под курсором (линия внутри письма), на серое поле
+    // вокруг или на заглушку пустого письма — в конец.
     (() => {
+      const stage = $('#stage');
       const empty = $('#canvas-empty');
-      empty.addEventListener('dragover', (event) => { if (!state.drag) return; event.preventDefault(); empty.classList.add('drop'); });
-      empty.addEventListener('dragleave', () => empty.classList.remove('drop'));
-      empty.addEventListener('drop', (event) => { event.preventDefault(); empty.classList.remove('drop'); if (state.drag) { const id = state.drag; state.drag = null; addToLetter(id, 0); } });
+      stage.addEventListener('dragover', (event) => {
+        if (!state.drag && !event.dataTransfer.types.includes('text/plain')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        stage.classList.add('drop');
+        empty.classList.add('drop');
+      });
+      stage.addEventListener('dragleave', (event) => { if (!stage.contains(event.relatedTarget)) { stage.classList.remove('drop'); empty.classList.remove('drop'); } });
+      stage.addEventListener('drop', (event) => {
+        event.preventDefault();
+        stage.classList.remove('drop', 'dragging');
+        empty.classList.remove('drop');
+        const id = draggedId(event.dataTransfer.getData('text/plain'));
+        if (id) addToLetter(id, bodyOf()?.items.length || 0);
+      });
     })();
 
     // ── Библиотека блоков ───────────────────────────────────────────────────────────────
@@ -1102,8 +1127,8 @@
         $('iframe', card).srcdoc = previewDoc(state.kit.templates[component.id], component);
         $('.comp-add', card).addEventListener('click', (event) => { event.stopPropagation(); addToLetter(component.id); });
         card.addEventListener('dblclick', () => addToLetter(component.id));
-        card.addEventListener('dragstart', (event) => { state.drag = component.id; event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', component.id); });
-        card.addEventListener('dragend', () => { setTimeout(() => { state.drag = null; }, 0); $('#letter-frame').contentWindow?.postMessage({ type: 'letter:drag-end' }, '*'); });
+        card.addEventListener('dragstart', (event) => { state.drag = component.id; state.lastDrag = { id: component.id, at: Date.now() }; event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', component.id); $('#stage').classList.add('dragging'); });
+        card.addEventListener('dragend', () => { state.drag = null; $('#stage').classList.remove('dragging', 'drop'); $('#letter-frame').contentWindow?.postMessage({ type: 'letter:drag-end' }, '*'); });
         return card;
       }));
       requestAnimationFrame(fitThumbs);
