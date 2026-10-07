@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { syncSkills } from "./sync-skills.mjs";
 import { createInboxWake } from "./inbox-wake.mjs";
 import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
-import { claudeWindowFromEvent, postUsage } from "./usage-report.mjs";
+import { claudeWindowsFromEvent, postUsage } from "./usage-report.mjs";
 import { enrichFocus } from "./focus-excerpt.mjs";
 import { chatRules, clipError, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 
@@ -841,8 +841,8 @@ function spawnStreaming(command, args, options, input = "", inboxId = "", warm =
         state.rateLimit = event.rate_limit_info;
         // Любое событие лимита — в индикатор usage у агента (не только когда окно почти выбрано).
         // Облачный Claude работает под своей подпиской на сервере — публикует под своим именем (ClaudeCloud).
-        const window = claudeWindowFromEvent(event.rate_limit_info);
-        if (window) void postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), agentKind === "cloud_agent" ? agentName : "Claude", [window], (message) => console.log(`${logPrefix} ${message}`));
+        const windows = claudeWindowsFromEvent(event.rate_limit_info);
+        if (windows.length) void postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), agentKind === "cloud_agent" ? agentName : "Claude", windows, (message) => console.log(`${logPrefix} ${message}`));
         return;
       }
       if (event.type === "assistant" && event.message?.usage) {

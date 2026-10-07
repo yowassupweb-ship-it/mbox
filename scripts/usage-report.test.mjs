@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { claudeWindowFromEvent, parseCodexRateLimits } from "./usage-report.mjs";
+import { claudeWindowFromEvent, claudeWindowsFromEvent, parseCodexRateLimits } from "./usage-report.mjs";
 
 test("событие Claude: доля становится процентами, окно получает имя", () => {
   assert.deepEqual(claudeWindowFromEvent({ rateLimitType: "five_hour", utilization: 0.234, resetsAt: 1791289500 }), { id: "5h", label: "5 часов", used_percent: 23.4, resets_at: 1791289500 });
@@ -8,6 +8,17 @@ test("событие Claude: доля становится процентами,
   assert.equal(claudeWindowFromEvent({ rateLimitType: "seven_day_opus", utilization: 0.1 }).id, "seven_day_opus");
   assert.equal(claudeWindowFromEvent({ rateLimitType: "five_hour" }), null);
   assert.equal(claudeWindowFromEvent(null), null);
+});
+
+test("событие Claude Code 2.1.29x: оба окна из unifiedWindows", () => {
+  // Живое событие от 07.10.2026: в корне utilization нет, доли — по окнам.
+  const info = { status: "allowed", resetsAt: 1791401400, rateLimitType: "five_hour", unifiedWindows: { five_hour: { utilization: 0.15, resetsAt: 1791401400 }, seven_day: { utilization: 0.36, resetsAt: 1791817200 } } };
+  assert.deepEqual(claudeWindowsFromEvent(info), [
+    { id: "5h", label: "5 часов", used_percent: 15, resets_at: 1791401400 },
+    { id: "week", label: "Неделя", used_percent: 36, resets_at: 1791817200 },
+  ]);
+  assert.deepEqual(claudeWindowsFromEvent({ rateLimitType: "five_hour", utilization: 0.2 }).map((w) => w.used_percent), [20]);
+  assert.deepEqual(claudeWindowsFromEvent({ rateLimitType: "five_hour" }), []);
 });
 
 const LINE = (limits) => `{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":${JSON.stringify(limits)}}}`;

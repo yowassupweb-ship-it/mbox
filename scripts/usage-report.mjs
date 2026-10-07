@@ -9,6 +9,24 @@ const CLAUDE_WINDOWS = {
   seven_day: { id: "week", label: "Неделя" },
 };
 
+/**
+ * Все окна из rate_limit_info Claude Code. Новые версии CLI (2.1.29x) кладут доли в unifiedWindows —
+ * сразу по каждому окну ({ five_hour: { utilization, resetsAt }, seven_day: … }), а в корне события
+ * utilization нет: старый разбор искал её только там и ничего не публиковал — кружка Claude не было вовсе.
+ * Старый формат (одно окно в корне) тоже понимаем.
+ */
+export function claudeWindowsFromEvent(info) {
+  if (!info || typeof info !== "object") return [];
+  const unified = info.unifiedWindows && typeof info.unifiedWindows === "object" ? info.unifiedWindows : null;
+  if (unified) {
+    return Object.entries(unified)
+      .map(([type, window]) => claudeWindowFromEvent({ ...(window || {}), rateLimitType: type }))
+      .filter(Boolean);
+  }
+  const single = claudeWindowFromEvent(info);
+  return single ? [single] : [];
+}
+
 /** rate_limit_info из потока Claude Code: utilization — доля 0..1, resetsAt — unix-секунды, rateLimitType — какое окно. */
 export function claudeWindowFromEvent(info) {
   if (!info || typeof info !== "object") return null;
