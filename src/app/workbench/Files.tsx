@@ -14,6 +14,7 @@ import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { askConfirm, showNotice } from "../../ui/askText";
 import { Crumbs, reveal } from "./Crumbs";
+import { pressable } from "../../ui/pressable";
 
 const PROJECT_ICONS = "/assets/icons/project";
 const FILE_ICONS = "/assets/icons/files";
@@ -186,7 +187,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
           return (
             <ul className="wb-tree" key={group.key}>
               <li>
-                <div className="wb-tree-row wb-tree-project" style={{ ["--project-color" as string]: group.color || "#5b6b66", ["--depth" as string]: 0 }} onClick={() => toggle(group.key)}>
+                <div className="wb-tree-row wb-tree-project" style={{ ["--project-color" as string]: group.color || "var(--state-off)", ["--depth" as string]: 0 }} {...pressable(() => toggle(group.key), groupOpen)}>
                   <span className={groupOpen ? "wb-caret is-open" : "wb-caret"}>›</span>
                   <span className="wb-project-dot" />
                   <span className="wb-tree-label">{group.label}</span>
@@ -199,7 +200,7 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                       const open = Boolean(needle) || !collapsed.includes(key);
                       return (
                         <li key={category.name}>
-                          <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(key)}>
+                          <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} {...pressable(() => toggle(key), open)}>
                             <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
                             <FolderIcon open={open} />
                             <span className="wb-tree-label">{category.name}</span>

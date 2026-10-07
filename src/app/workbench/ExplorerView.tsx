@@ -16,6 +16,7 @@ import { usePersistentState, type TabsApi } from "./tabs";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { folderGlyph, TreeGlyph } from "./TreeGlyph";
 import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
+import { pressable } from "../../ui/pressable";
 
 
 const PROJECT_ICONS = "/assets/icons/project";
@@ -220,7 +221,7 @@ export function ExplorerView({ data, tabs, onProjectContext }: Props) {
             })}
             {files.length > 0 && (
               <li>
-                <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} onClick={() => toggle(`files:${project.id}`)}>
+                <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} {...pressable(() => toggle(`files:${project.id}`), isOpen(`files:${project.id}`))}>
                   <ChevronRight className={isOpen(`files:${project.id}`) ? "wb-chevron is-open" : "wb-chevron"} size={14} />
                   <TreeGlyph kind="files" />
                   <span className="wb-tree-label">Файлы</span>

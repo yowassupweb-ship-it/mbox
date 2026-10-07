@@ -2,6 +2,7 @@ import { ChevronRight, FileText, Folder, GitBranch, ListTodo } from "lucide-reac
 import { entityKindMeta } from "../features/tree/entityKinds";
 import type { CSSProperties, MouseEvent } from "react";
 import { useState } from "react";
+import { pressable } from "../ui/pressable";
 
 export type FolderTreeNode = {
   id?: string;
@@ -49,7 +50,7 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
   const kind = entityKindMeta(node.entityKind);
   const rowStyle = {
     "--tree-depth": level,
-    "--tree-color": node.color || "#2c2c2e",
+    "--tree-color": node.color || "var(--bg-raised)",
     ...(kind ? { "--kind-accent": kind.accent } : {}),
   } as CSSProperties;
 
@@ -62,7 +63,7 @@ function FolderNode({ node, level, path, defaultOpen, onContext, onSelect }: { n
   if (!hasChildren) {
     const FallbackIcon = node.type === "todo" ? ListTodo : node.type === "git_group" ? GitBranch : FileText;
     return (
-      <div className={rowClass} style={rowStyle} data-kind={node.entityKind} onClick={() => onSelect?.(node)} onContextMenu={openContext}>
+      <div className={rowClass} style={rowStyle} data-kind={node.entityKind} {...pressable(() => onSelect?.(node))} onContextMenu={openContext}>
         {node.type === "todo" && node.status === "doing" && <span className="todo-spinner" aria-label="В работе" />}
         {kind ? <img src={kind.image} width={18} height={18} alt="" /> : <FallbackIcon size={18} />}
         <span>{node.name}</span>
