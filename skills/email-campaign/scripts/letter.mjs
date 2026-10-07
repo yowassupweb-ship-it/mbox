@@ -5,6 +5,8 @@
 //   node scripts/letter.mjs propose <id> [--write]   черновик состава по брифу (рецепт LetterKit); --write — записать в письмо
 //   node scripts/letter.mjs build <id> [--no-remote] собрать HTML, strict preflight, Email Checker; отчёт записать в письмо
 //   node scripts/letter.mjs render <file.json> [--out file.html]   собрать локальный файл без проверок
+//   node scripts/letter.mjs parse <file.html> [--write] [--id <имя>] [--save-new]   разобрать готовое письмо на блоки
+//   node scripts/letter.mjs learn <наблюдение>   записать наблюдение в learnings.md (самоулучшение навыка)
 //
 // Источник: сервер MBOX, если заданы MBOX_URL и MBOX_PASSWORD (как у наблюдателей и MCP), иначе папка навыка.
 // --local — всегда папка навыка. Готовый HTML — в MAIL_READY_DIR или %USERPROFILE%/Desktop/Mbox/mail-skill/ready.
@@ -163,6 +165,62 @@ async function build(id) {
   process.exitCode = check.ok ? 0 : 1;
 }
 
+// ── Опыт навыка (learnings.md) ──────────────────────────────────────────────────────
+// Журнал наблюдений, из которого навык улучшает себя: конструктор и агент дописывают сюда то, что
+// пошло не по плану (неузнанные блоки, ошибки проверки, просьбы человека), а по «Улучшить навык»
+// агент разбирает «Открытые» — правит компоненты, реестр и правила — и переносит пункт в «Сделано».
+const LEARNINGS = 'learnings.md';
+const LEARNINGS_HEAD = '# Опыт навыка email-campaign\n\nЖурнал наблюдений для самоулучшения. Пишут конструктор (library.html) и агент. По кнопке «Улучшить навык» агент разбирает «Открытые»: правит компоненты, реестр, style-guide и SKILL.md, затем переносит пункт в «Сделано» с тем, что изменено.\n\n## Открытые\n\n## Сделано\n';
+async function learn(line) {
+  let text = '';
+  try { text = await readSkillFile(LEARNINGS); } catch { text = ''; }
+  if (!/## Открытые/.test(text)) text = LEARNINGS_HEAD;
+  const entry = `- ${new Date().toISOString().slice(0, 10)} · ${line}`;
+  text = text.replace(/## Открытые\n\n?/, (head) => `${head.trimEnd()}\n\n${entry}\n`);
+  await writeSkillFile(LEARNINGS, text, `Опыт навыка: ${line.slice(0, 80)}`);
+}
+
+// ── Разбор готового письма на блоки ────────────────────────────────────────────────
+async function parse(file) {
+  const { LetterKit, kit } = await loadKit();
+  const html = readFileSync(resolve(file), 'utf8');
+  const parsed = LetterKit.parseLetter(html, kit);
+  const known = parsed.blocks.filter((block) => block.item);
+  const fresh = parsed.blocks.filter((block) => !block.item);
+  const snippet = (block) => LetterKit.normalizeHtml(block.html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);
+  console.log(`Тема: ${parsed.subject || '—'}\nПрехедер: ${parsed.preheader || '—'}\nUTM: ${parsed.utm.campaign || '—'} / ${parsed.utm.content || '—'}\nБлоки (${parsed.source}): ${parsed.blocks.length}, узнано ${known.length}, новых ${fresh.length}`);
+  parsed.blocks.forEach((block) => console.log(block.item
+    ? `  ${block.index + 1}. ${block.item.component}${block.match === 'structure' ? ' (по структуре)' : ''} — ${Object.keys(block.item.fields).join(', ') || 'без полей'}`
+    : `  ${block.index + 1}. НОВЫЙ — ${snippet(block)}`));
+  if (!flag('--write')) {
+    console.log('\nЗаписать письмо: --write [--id <имя>]; новые блоки сохранить компонентами: --save-new.');
+    return;
+  }
+  const id = option('--id') || `${new Date().toISOString().slice(0, 10)}-${(parsed.subject || 'letter').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'parsed'}`;
+  const registry = kit.registry;
+  const created = [];
+  const items = [];
+  for (const block of parsed.blocks) {
+    if (block.item) { items.push(block.item); continue; }
+    if (!flag('--save-new')) continue;
+    const number = Math.max(registry.next || 1, ...registry.components.map((c) => Number(c.id.slice(1)) + 1));
+    const component = { id: `C${String(number).padStart(3, '0')}`, type: 'parsed', block: '', name: `Из письма: ${snippet(block).slice(0, 40) || 'блок'}`, category: 'Из писем', description: `Разобран из ${file.split(/[\\/]/).pop()} — поля ещё не вынесены`, fields: [], file: `components/C${String(number).padStart(3, '0')}.html` };
+    registry.components.push(component);
+    registry.next = number + 1;
+    await writeSkillFile(component.file, `${block.html.trim()}\n`, `Новый компонент ${component.id} из разбора письма`);
+    created.push(component.id);
+    items.push({ component: component.id, fields: {} });
+  }
+  if (created.length) await writeSkillFile('components/registry.json', `${JSON.stringify(registry, null, 2)}\n`, `Реестр: из разбора письма ${created.join(', ')}`);
+  const letter = LetterKit.newLetter(id);
+  letter.status = 'proposed';
+  letter.letter = { subject: parsed.subject, preheader: parsed.preheader, utm: parsed.utm, items };
+  letter.proposal = { by: 'разбор письма', at: new Date().toISOString(), notes: `Разобрано из ${file.split(/[\\/]/).pop()}: узнано ${known.length} из ${parsed.blocks.length}.`, questions: fresh.length ? [created.length ? `Новые компоненты без полей: ${created.join(', ')} — вынести поля` : `Не узнано блоков: ${fresh.length} — в письмо не вошли (запусти с --save-new)`] : [] };
+  await writeSkillFile(letterPath(id), `${JSON.stringify(letter, null, 2)}\n`, `Письмо из разбора ${file.split(/[\\/]/).pop()}`);
+  if (fresh.length) await learn(`разбор \`${file.split(/[\\/]/).pop()}\` → letters/${id}.json: не узнано ${fresh.length} из ${parsed.blocks.length}${created.length ? `, сохранены без полей как ${created.join(', ')} — вынести поля, проверить дубли с существующими` : ''}`);
+  console.log(`\nЗаписано: ${letterPath(id)}${created.length ? `; новые компоненты ${created.join(', ')}` : ''}`);
+}
+
 async function renderLocal(file) {
   const { LetterKit, kit } = await loadKit();
   const rendered = LetterKit.renderLetter(JSON.parse(readFileSync(resolve(file), 'utf8')), kit);
@@ -173,9 +231,9 @@ async function renderLocal(file) {
   process.exitCode = rendered.errors.length ? 1 : 0;
 }
 
-const commands = { propose: () => propose(target), build: () => build(target), render: () => renderLocal(target) };
+const commands = { propose: () => propose(target), build: () => build(target), render: () => renderLocal(target), parse: () => parse(target), learn: () => learn(args.slice(1).join(' ')) };
 if (!commands[command] || !target) {
-  console.error('Usage: node scripts/letter.mjs propose <id> [--write] | build <id> [--no-remote] [--local] [--out file] | render <file.json> [--out file]');
+  console.error('Usage: node scripts/letter.mjs propose <id> [--write] | build <id> [--no-remote] [--local] [--out file] | render <file.json> [--out file] | parse <file.html> [--write] [--id name] [--save-new] | learn <наблюдение>');
   process.exit(2);
 }
 commands[command]().catch((error) => { console.error(`ERROR ${error.message}`); process.exit(1); });

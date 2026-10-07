@@ -4,346 +4,455 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Конструктор письма — Вокруг света</title>
+  <title>Редактор письма — Вокруг света</title>
   <style>
-    /* Конструктор письма под управлением агента. Страница во вкладке MBOX (каталог навыков → «Запустить»
-       или MCP open_tab skill-file:email-campaign/library.html). Письмо — letters/<id>.json: бриф → состав из
-       компонентов C### с полями → проверка. Сборку делает components/render.js — тот же код, что у агента
-       (scripts/letter.mjs), поэтому предпросмотр здесь совпадает с готовым HTML. */
+    /* Редактор письма в духе UniSender. Страница во вкладке MBOX (MCP open_tab skill-file:email-campaign/library.html).
+       Письмо — letters/<id>.json: состав из компонентов C### с полями. Сборку делает components/render.js — тот же
+       код, что у агента (scripts/letter.mjs), поэтому предпросмотр совпадает с готовым HTML.
+       Две панели: слева письмо как его увидит подписчик, справа — библиотека блоков или блоки письма.
+       Бриф собирает агент в чате MBOX, отдельной формы нет.
+       Цвета, радиусы и шрифты — значения src/styles/tokens.css MBOX (тему присылает MBOX через data-theme). */
     :root,
     :root[data-theme="graphite"] {
       color-scheme: dark;
-      --bg: #202124; --surface: #26272b; --surface-2: #2a2b2f; --surface-3: #34353a; --sunken: #1b1c1f;
-      --line: rgba(255, 255, 255, .11); --line-strong: rgba(255, 255, 255, .18); --hover: rgba(255, 255, 255, .06); --selected: rgba(77, 163, 255, .17);
-      --accent: #4da3ff; --accent-hover: #69b2ff; --accent-soft: rgba(77, 163, 255, .12); --accent-ink: #fff;
-      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .5);
-      --ok: #35c759; --warn: #ffb000; --danger: #ff4d5e;
-      --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
-      --shadow-chin: 0 1px 0 rgba(0, 0, 0, .25), 0 8px 22px rgba(0, 0, 0, .12);
-      --font-sans: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-      --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Cascadia Mono", monospace;
+      --bg: #202124; --surface: #26272b; --element: #2d2e33; --raised: #34353a; --sunken: #1b1c1f; --chrome: #25262a;
+      --hover: rgba(255, 255, 255, .06); --selected: rgba(77, 163, 255, .17);
+      --line: rgba(255, 255, 255, .11); --line-strong: rgba(255, 255, 255, .18);
+      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .56);
+      --accent: #4da3ff; --accent-fill: #0071e3; --accent-fill-hover: #0077ed; --on-accent: #fff;
+      --ok: #35c759; --warn: #ffb000; --danger: #ff7582; --tone-danger: #ffb4a8;
+      --float: 0 18px 48px rgba(0, 0, 0, .32), 0 0 0 1px var(--line);
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, .24), 0 0 0 1px var(--line);
     }
     :root[data-theme="light"] {
       color-scheme: light;
-      --bg: #f5f5f7; --surface: #fff; --surface-2: #fff; --surface-3: #f0f0f2; --sunken: #e9e9ec;
-      --line: rgba(29, 29, 31, .14); --line-strong: rgba(29, 29, 31, .22); --hover: rgba(29, 29, 31, .055); --selected: rgba(0, 122, 255, .12);
-      --accent: #007aff; --accent-hover: #006ee6; --accent-soft: rgba(0, 122, 255, .09); --accent-ink: #fff;
-      --text: #1d1d1f; --text-2: rgba(29, 29, 31, .72); --text-muted: rgba(29, 29, 31, .5);
-      --shadow-chin: 0 1px 0 rgba(29, 29, 31, .04), 0 8px 24px rgba(29, 29, 31, .07);
+      --bg: #f5f5f7; --surface: #fff; --element: #fff; --raised: #fff; --sunken: #ececf0; --chrome: #f7f7f9;
+      --hover: rgba(22, 24, 29, .055); --selected: rgba(0, 122, 255, .12);
+      --line: rgba(22, 24, 29, .12); --line-strong: rgba(22, 24, 29, .2);
+      --text: #1d1d1f; --text-2: rgba(29, 29, 31, .72); --text-muted: rgba(29, 29, 31, .64);
+      --accent: #0066cc; --accent-fill: #0071e3; --accent-fill-hover: #0068d1;
+      --ok: #1a7f37; --warn: #9a5b00; --danger: #d70015; --tone-danger: #b3261e;
+      --float: 0 18px 48px rgba(31, 35, 42, .14), 0 0 0 1px var(--line);
+      --shadow-sm: 0 1px 2px rgba(31, 35, 42, .09), 0 0 0 1px var(--line);
     }
     :root[data-theme="black"] {
       color-scheme: dark;
-      --bg: #050506; --surface: #0a0a0c; --surface-2: #111114; --surface-3: #18181c; --sunken: #000;
-      --line: rgba(255, 255, 255, .12); --line-strong: rgba(255, 255, 255, .2); --hover: rgba(255, 255, 255, .07); --selected: rgba(77, 163, 255, .18);
-      --accent: #4da3ff; --accent-hover: #69b2ff; --accent-soft: rgba(77, 163, 255, .12); --accent-ink: #fff;
-      --text: #f5f5f7; --text-2: rgba(245, 245, 247, .72); --text-muted: rgba(245, 245, 247, .5);
-      --shadow-chin: 0 1px 0 rgba(255, 255, 255, .035), 0 10px 28px rgba(0, 0, 0, .36);
+      --bg: #050506; --surface: #0a0a0c; --element: #111114; --raised: #17171b; --sunken: #000; --chrome: #0b0b0d;
+      --line: rgba(255, 255, 255, .1); --line-strong: rgba(255, 255, 255, .18); --text-muted: rgba(245, 245, 247, .5);
     }
+    :root {
+      --radius-xs: 6px; --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-pill: 999px;
+      --text-2xs: 11px; --text-xs: 12px; --text-sm: 13px; --text-md: 14px; --text-lg: 16px;
+      --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    }
+
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font-sans); transition: background-color 140ms ease, color 140ms ease; }
+    body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font: var(--text-sm)/1.5 var(--font-sans); font-feature-settings: "cv05", "cv08"; -webkit-font-smoothing: antialiased; }
     button, input, textarea, select { font: inherit; color: inherit; }
     button { cursor: pointer; }
     [hidden] { display: none !important; }
+    svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    svg.i.sm { width: 14px; height: 14px; }
+    :where(svg, img, button) { -webkit-user-select: none; user-select: none; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 10px; background: color-mix(in srgb, var(--text) 18%, transparent) padding-box; }
 
-    .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-    .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--surface); box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 2%, transparent); }
-    .top-main { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; min-height: 42px; padding: 5px 10px; }
-    .letter-pick { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 220px; max-width: 520px; }
-    .letter-pick select { flex: 1; width: auto; min-width: 0; }
-    .top .btn, .stage-bar .btn { min-height: 30px; padding-inline: 9px; }
-    .top-nav { order: -1; display: flex; flex: none; align-items: center; gap: 8px; min-height: 42px; padding: 0 6px; border-right: 1px solid var(--line); }
-    .tabs { align-self: stretch; display: inline-flex; gap: 2px; }
-    .tabs button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 108px; padding: 0 9px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); text-align: left; }
-    .tabs button:hover { color: var(--text); background: var(--hover); }
-    .tabs button.on { border-bottom-color: var(--accent); background: var(--selected); color: var(--text); }
-    .tab-step { color: var(--accent); font: 600 10px var(--font-mono); }
-    .tabs b { margin-left: 5px; color: var(--text-muted); font: 600 11px var(--font-mono); }
-    .fill { flex: 1; }
-    .status { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-    .status.ok { color: var(--ok); } .status.err { color: var(--danger); }
-    .badge { padding: 1px 7px; border-radius: var(--radius-sm); font: 600 11px/18px var(--font-mono); background: rgba(255,255,255,.06); color: var(--text-2); white-space: nowrap; }
-    .badge.brief { color: var(--text-2); } .badge.proposed { color: var(--accent); background: var(--selected); }
-    .badge.checked { color: var(--ok); background: rgba(53,199,89,.12); } .badge.needs-fix { color: var(--warn); background: rgba(255,176,0,.12); }
-
-    .view { min-height: 0; overflow: auto; }
-    input, textarea, select { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); outline: none; }
-    textarea { resize: vertical; line-height: 1.45; }
-    input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--surface-3); }
+    /* ── Контролы ── */
+    input, textarea, select { width: 100%; min-height: 32px; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--element); outline: none; transition: border-color .12s, background-color .12s; }
+    input, select { border-radius: var(--radius-pill); }
+    textarea { resize: vertical; line-height: 1.5; }
+    input:hover, textarea:hover, select:hover { border-color: var(--line-strong); }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); background: var(--raised); }
     input::placeholder, textarea::placeholder { color: var(--text-muted); }
-    input:disabled, textarea:disabled, select:disabled { opacity: 1; color: var(--text-2); background: var(--sunken); -webkit-text-fill-color: var(--text-2); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: none; color: var(--text); font-size: 12px; white-space: nowrap; }
-    .btn:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); }
-    .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
-    .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+    input[type="checkbox"], input[type="radio"] { width: 16px; min-height: 16px; padding: 0; accent-color: var(--accent-fill); }
+    input[type="color"] { width: 32px; padding: 3px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: none; color: var(--text); font-size: var(--text-sm); font-weight: 500; white-space: nowrap; transition: background-color .12s, border-color .12s, color .12s; }
+    .btn:hover:not(:disabled) { background: var(--hover); border-color: color-mix(in srgb, var(--text) 26%, transparent); }
+    .btn.primary { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+    .btn.primary:hover:not(:disabled) { background: var(--accent-fill-hover); border-color: transparent; }
     .btn.ghost { border-color: transparent; color: var(--text-2); }
-    .btn.small { min-height: 28px; padding: 0 8px; }
+    .btn.ghost:hover:not(:disabled) { color: var(--text); border-color: transparent; }
+    .btn.sm { min-height: 28px; padding: 0 10px; font-size: var(--text-xs); }
+    .btn.icon { width: 32px; padding: 0; }
+    .btn.icon.sm { width: 28px; }
+    .btn.danger:hover:not(:disabled) { color: var(--danger); }
+    .btn.dashed { border-style: dashed; color: var(--text-2); }
     .btn:disabled { opacity: .4; cursor: default; }
-    .num { color: var(--accent); font: 700 13px/1 var(--font-mono); }
-    .chip { padding: 1px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); font-size: 11px; white-space: nowrap; }
+    .btn[aria-pressed="true"] { border-color: transparent; background: var(--selected); color: var(--accent); }
+    .btn[aria-busy="true"] svg { animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-pill); background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); }
+    .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
+    .seg button:hover { color: var(--text); }
+    .seg button.on { background: var(--raised); color: var(--text); box-shadow: var(--shadow-sm); }
+    .seg button b { min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--hover); color: var(--text-muted); font: 600 var(--text-2xs)/18px var(--font-sans); text-align: center; }
+    .seg button b.alert { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--text-2); font-size: var(--text-2xs); font-weight: 500; line-height: 20px; white-space: nowrap; }
+    .chip.accent { background: var(--selected); color: var(--accent); }
+    .chip.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+    .chip.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+    .num { display: inline-grid; place-items: center; flex: none; min-width: 40px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--selected); color: var(--accent); font: 600 var(--text-2xs)/1 var(--font-mono); }
     .muted { color: var(--text-muted); }
-    h2 { margin: 0 0 12px; color: var(--text); font: 600 13px/1.3 var(--font-sans); letter-spacing: -.01em; }
-    .panel { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); padding: 18px; box-shadow: var(--shadow-chin); }
-    .panel + .panel { margin-top: 12px; }
+    .fill { flex: 1; }
+    .field { display: grid; gap: 5px; min-width: 0; }
+    .field label { color: var(--text-2); font-size: var(--text-xs); font-weight: 500; }
+    .field label span { color: var(--text-muted); font-weight: 400; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .grid .wide { grid-column: 1 / -1; }
-    .field { display: grid; gap: 4px; min-width: 0; }
-    .field label { color: var(--text-2); font-size: 12px; }
-    .field label span { color: var(--text-muted); }
-    .field input, .field textarea, .field select { width: 100%; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
-    .notice { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--selected); }
-    .notice.warn { border-color: rgba(255,176,0,.35); background: rgba(255,176,0,.08); }
+    .empty { padding: 20px 12px; color: var(--text-muted); text-align: center; }
+    .notice { padding: 10px 12px; border-radius: var(--radius-md); background: var(--selected); font-size: var(--text-xs); }
+    .notice.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+    .notice b { font-weight: 600; }
     .notice ul { margin: 6px 0 0; padding-left: 18px; }
-    .empty { padding: 28px 12px; color: var(--text-muted); text-align: center; }
 
-    /* Бриф */
-    .page { max-width: 960px; margin: 0 auto; padding: 28px 24px 72px; }
-    .page.is-wide { max-width: 1440px; }
-    .page-intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; margin-bottom: 24px; padding: 4px 2px 22px; border-bottom: 1px solid var(--line); }
-    .page-intro .kicker { display: block; margin-bottom: 7px; color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
-    .page-intro h1 { max-width: 660px; margin: 0; font-size: clamp(27px, 3.6vw, 44px); line-height: 1.05; letter-spacing: -.035em; }
-    .page-intro p { max-width: 650px; margin: 12px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.65; }
-    .journey { display: grid; gap: 8px; min-width: 240px; margin: 0; padding: 0; list-style: none; }
-    .journey li { display: grid; grid-template-columns: 24px 1fr; align-items: center; gap: 9px; color: var(--text-2); font-size: 12px; }
-    .journey b { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--accent); font: 600 10px var(--font-mono); }
-    .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .type { padding: 9px 11px; border: 1px solid var(--line); border-left: 2px solid transparent; border-radius: var(--radius-sm); background: var(--surface); text-align: left; }
-    .type small { display: block; color: var(--text-muted); font-size: 11px; }
-    .type.on { border-left-color: var(--accent); background: var(--selected); }
-    .tour { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
-    .tour + .tour { margin-top: 8px; }
-    .tour-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .tour-head .num { flex: 1; }
+    /* ── Шапка ── */
+    .app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+    .bar { position: relative; z-index: 30; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--chrome); }
+    .letter-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 360px; min-height: 32px; padding: 0 10px 0 12px; border: 0; border-radius: var(--radius-pill); background: none; font-weight: 600; }
+    .letter-switch:hover, .letter-switch[aria-expanded="true"] { background: var(--hover); }
+    .letter-switch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .letter-switch .i:last-child { color: var(--text-muted); }
+    .badge { flex: none; padding: 0 8px; border-radius: var(--radius-pill); background: var(--hover); color: var(--text-2); font-size: var(--text-2xs); font-weight: 600; line-height: 20px; white-space: nowrap; }
+    .badge.proposed { background: var(--selected); color: var(--accent); }
+    .badge.checked, .badge.external-checked, .badge.local-checked { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+    .badge.needs-fix { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+    .save { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); font-size: var(--text-xs); }
+    .save span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .save::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); opacity: .6; }
+    .save.ok::before { background: var(--ok); opacity: 1; }
+    .save.busy::before { background: var(--accent); opacity: 1; animation: pulse 1s ease-in-out infinite; }
+    .save.err { color: var(--danger); } .save.err::before { background: var(--danger); opacity: 1; }
+    @keyframes pulse { 50% { opacity: .3; } }
+    .bar-actions { display: flex; align-items: center; gap: 4px; }
 
-    /* Сборка */
-    .build { --side: 380px; display: grid; grid-template-columns: var(--side) 5px minmax(0, 1fr); height: 100%; min-height: 0; }
-    .build.side-collapsed { grid-template-columns: 0 6px minmax(0, 1fr); }
-    .build.side-collapsed .side { visibility: hidden; padding: 0; border: 0; }
-    .side-resizer { position: relative; cursor: col-resize; background: transparent; border-left: 1px solid var(--line); }
-    .side-resizer:hover, .side-resizer.dragging { background: color-mix(in srgb, var(--accent) 30%, transparent); }
-    .build.side-collapsed .side-resizer { cursor: default; }
-    .side { min-width: 0; min-height: 0; overflow: auto; padding: 8px; }
-    .side .panel { padding: 12px; }
-    .side .panel + .panel { margin-top: 8px; }
-    .item { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
-    .item + .item { margin-top: 6px; }
-    .item.err { border-color: rgba(255,77,94,.45); }
-    .item-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; }
-    .item-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .item-body { display: grid; gap: 8px; padding: 8px; border-top: 1px solid var(--line); }
-    .adder { display: flex; gap: 6px; margin-top: 10px; }
-    .adder select { flex: 1; min-width: 0; }
-    .errors { margin: 8px 0 0; padding: 8px 10px 8px 26px; border: 1px solid rgba(255,77,94,.35); border-radius: var(--radius-sm); background: rgba(255,77,94,.07); color: #ffb3bb; font-size: 12px; }
-    .stage { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
-    .stage-bar { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-    .stage-bar:has(.formatbar:not([hidden])) { flex-wrap: wrap; }
-    .stage-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
-    .stage-actions + .stage-actions { padding-left: 6px; border-left: 1px solid var(--line); }
-    .editor-hint { display: none; }
-    .formatbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; padding-top: 8px; border-top: 1px solid var(--line); }
-    .formatbar .field-name { max-width: 240px; overflow: hidden; color: var(--text-2); font: 600 11px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-    .formatbar label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11px; }
-    .formatbar input[type="number"] { width: 62px; min-height: 26px; }
-    .formatbar input[type="color"] { width: 34px; min-height: 26px; padding: 2px; }
-    .formatbar .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--selected); color: var(--accent); }
-    .stage-body { min-height: 0; overflow: hidden; padding: 6px; background: var(--sunken); }
-    /* Письмо всегда верстается в настоящей ширине (700 px компьютер, 390 px телефон) и уменьшается под сцену:
-       в узкой сцене иначе срабатывала мобильная вёрстка и блоки «в ряд» вставали друг под друга. */
-    .letter-fit { position: relative; height: 100%; margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
-    .stage iframe { position: absolute; top: 0; left: 0; display: block; border: 0; background: #fff; transform-origin: 0 0; }
+    /* Всплывающие списки */
+    .pop { position: fixed; z-index: 50; display: grid; gap: 4px; width: min(380px, calc(100vw - 24px)); max-height: min(520px, 70vh); padding: 6px; border-radius: var(--radius-md); background: var(--raised); box-shadow: var(--float); }
+    .pop-search { position: relative; }
+    .pop-search .i { position: absolute; top: 9px; left: 11px; color: var(--text-muted); }
+    .pop-search input { padding-left: 32px; }
+    .pop-list { min-height: 0; overflow: auto; }
+    .pop-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 4px 10px; border: 0; border-radius: var(--radius-sm); background: none; text-align: left; }
+    .pop-row:hover, .pop-row.cursor { background: var(--hover); }
+    .pop-row.on { background: var(--selected); }
+    .pop-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pop-row small { color: var(--text-muted); font-size: var(--text-2xs); white-space: nowrap; }
+    .pop-foot { padding-top: 4px; border-top: 1px solid var(--line); }
+    .pop-foot .btn { width: 100%; justify-content: flex-start; }
+    .pop-empty { padding: 16px; color: var(--text-muted); text-align: center; }
 
-    /* Компоненты */
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
-    .card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; }
-    .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; }
-    .card-head .name { flex: 1; min-width: 180px; font-weight: 500; }
-    .card-info { padding: 0 10px 8px; color: var(--text-2); font-size: 12px; }
-    .card-info code { color: var(--text-muted); font: 11px var(--font-mono); }
-    .preview { padding: 10px; background: #fff6ed; }
-    .preview iframe { display: block; width: 100%; max-width: 660px; margin: 0 auto; border: 0; background: #fff6ed; }
-    .preview.is-scaled { position: relative; overflow: hidden; padding: 8px; }
-    .preview.is-scaled iframe { width: 700px; max-width: none; margin: 0; transform-origin: top left; }
-    .ask { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }
-    .ask textarea { flex: 1; min-height: 48px; }
-    .code { width: 100%; min-height: 200px; font: 12px/1.5 var(--font-mono); }
-    table.schema { width: 100%; border-collapse: collapse; font-size: 12px; }
-    table.schema th, table.schema td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
-    table.schema input, table.schema select { width: 100%; min-height: 24px; }
+    dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 0; border-radius: var(--radius-lg); background: var(--raised); color: var(--text); box-shadow: var(--float); }
+    dialog.wide { width: min(980px, calc(100vw - 32px)); }
+    dialog::backdrop { background: rgba(0, 0, 0, .45); }
+    .dialog { display: grid; gap: 14px; padding: 20px; }
+    .dialog h3 { margin: 0; font-size: var(--text-lg); font-weight: 600; }
+    .dialog p { margin: 0; color: var(--text-2); }
+    .dialog-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 
-    /* Проверка */
+    /* ── Редактор: письмо слева, панель справа ── */
+    .editor { --panel: 400px; display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--panel); height: 100%; min-height: 0; }
+    .resizer { cursor: col-resize; border-left: 1px solid var(--line); background: transparent; transition: background-color .12s; }
+    .resizer:hover, .resizer.dragging { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+    .canvas { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+    .canvas-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+    .hint { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+    .stage { position: relative; min-height: 0; overflow: hidden; padding: 16px; background: var(--sunken); }
+    /* Письмо верстается в настоящей ширине (700 px компьютер, 390 px телефон) и уменьшается под сцену. */
+    .letter-fit { position: relative; height: 100%; margin: 0 auto; overflow: hidden; border-radius: var(--radius-sm); background: #fff; box-shadow: var(--shadow-sm); }
+    .canvas.mobile .letter-fit { border-radius: 24px; }
+    .letter-fit iframe { position: absolute; top: 0; left: 0; display: block; border: 0; background: #fff; transform-origin: 0 0; }
+    .canvas-empty { position: absolute; inset: 16px; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; border: 2px dashed var(--line-strong); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--sunken) 92%, transparent); color: var(--text-2); text-align: center; }
+    .canvas-empty.drop { border-color: var(--accent); background: var(--selected); }
+    .canvas-empty strong { color: var(--text); font-size: var(--text-md); }
+    .canvas-empty div { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+    .panel { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--surface); }
+    .panel-tabs { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    .panel-tabs .seg { display: flex; }
+    .panel-tabs .seg button { flex: 1; }
+    .pane { min-height: 0; overflow: auto; padding: 10px; }
+    .pane > * + * { margin-top: 10px; }
+
+    /* Библиотека */
+    .lib-tools { position: sticky; top: -10px; z-index: 2; display: grid; gap: 8px; margin: -10px -10px 0; padding: 10px; background: var(--surface); }
+    .search { position: relative; }
+    .search .i { position: absolute; top: 9px; left: 11px; color: var(--text-muted); }
+    .search input { padding-left: 34px; }
+    .cats { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cats button { min-height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-pill); background: var(--hover); color: var(--text-2); font-size: var(--text-xs); font-weight: 500; }
+    .cats button:hover { color: var(--text); }
+    .cats button.on { background: var(--selected); color: var(--accent); }
+    .lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; }
+    .comp { position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--element); cursor: grab; transition: border-color .12s, box-shadow .12s; }
+    .comp:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--shadow-sm); }
+    .comp:active { cursor: grabbing; }
+    .comp-thumb { position: relative; height: 104px; overflow: hidden; background: #fff6ed; pointer-events: none; }
+    .comp-thumb iframe { position: absolute; top: 0; left: 0; width: 700px; height: 600px; border: 0; transform-origin: 0 0; }
+    .comp-meta { display: grid; gap: 2px; padding: 6px 8px 8px; }
+    .comp-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .comp-title .name { min-width: 0; overflow: hidden; font-size: var(--text-xs); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .comp-meta small { color: var(--text-muted); font-size: var(--text-2xs); }
+    .comp-add { position: absolute; top: 6px; right: 6px; opacity: 0; box-shadow: var(--shadow-sm); transition: opacity .12s; }
+    .comp:hover .comp-add, .comp:focus-within .comp-add { opacity: 1; }
+    .comp .used { position: absolute; top: 6px; left: 6px; }
+
+    /* Блоки письма */
+    .section { border-radius: var(--radius-md); background: var(--element); }
+    .section > summary, .section-head { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 10px 6px 12px; font-weight: 600; list-style: none; cursor: pointer; }
+    .section > summary::-webkit-details-marker { display: none; }
+    .section > summary .i:last-child { color: var(--text-muted); transition: transform .12s; }
+    .section[open] > summary .i:last-child { transform: rotate(180deg); }
+    .section-body { display: grid; gap: 10px; padding: 2px 12px 12px; }
+    .selected-block { border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); }
+    .selected-block .section-head { cursor: default; }
+    .selected-block .section-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .format { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border-radius: var(--radius-md); background: var(--selected); }
+    .format .field-name { flex: 1 1 100%; color: var(--accent); font: 600 var(--text-2xs)/1.2 var(--font-mono); }
+    .format label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--text-xs); }
+    .format input[type="number"] { width: 72px; min-height: 28px; }
+    .format input[type="color"] { min-height: 28px; }
+    .ask { display: grid; gap: 8px; }
+    .items { display: grid; gap: 2px; padding: 0 6px 6px; }
+    .item { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 2px 4px 2px 2px; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
+    .item:hover { background: var(--hover); }
+    .item.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--selected); }
+    .item.err .num { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+    .item.dragging { opacity: .45; }
+    .item.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+    .item.drop-after { box-shadow: 0 2px 0 var(--accent); }
+    .grip { display: grid; place-items: center; width: 18px; height: 28px; color: var(--text-muted); cursor: grab; opacity: .5; }
+    .item:hover .grip { opacity: 1; }
+    .item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .errors { margin: 0; padding: 8px 12px 8px 26px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger) 9%, transparent); color: var(--tone-danger); font-size: var(--text-xs); }
+    .check-group h4 { margin: 4px 0; color: var(--text-muted); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
     .check-list { margin: 0; padding: 0; list-style: none; }
-    .check-list li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .check-list li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--text-xs); }
     .check-list li:last-child { border-bottom: 0; }
-    .sev { display: inline-block; min-width: 64px; margin-right: 6px; font: 600 11px var(--font-mono); }
-    .sev.error { color: var(--danger); } .sev.warn { color: var(--warn); } .sev.ok { color: var(--ok); } .sev.info { color: var(--text-muted); }
-    .ctx { display: block; margin-top: 2px; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+    .check-list .i { margin-top: 1px; }
+    .sev-error .i { color: var(--danger); } .sev-warn .i { color: var(--warn); } .sev-ok .i { color: var(--ok); } .sev-info .i { color: var(--text-muted); }
+    .ctx { display: block; margin-top: 2px; color: var(--text-muted); overflow-wrap: anywhere; }
 
-    ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: color-mix(in srgb, var(--text) 18%, transparent); }
-    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    @media (max-width: 900px) { .top { display: grid; } .top-main { flex-wrap: wrap; } .letter-pick { flex: 1; max-width: none; } .letter-pick select { width: 100%; max-width: none; } .top-nav { order: 0; overflow-x: auto; border-top: 1px solid var(--line); border-right: 0; } .tabs button { min-width: 112px; } .page-intro { grid-template-columns: 1fr; } .journey { grid-template-columns: repeat(3, minmax(0, 1fr)); } .build, .build.side-collapsed { grid-template-columns: 1fr; height: auto; } .side-resizer { display: none; } .side { border-right: 0; border-bottom: 1px solid var(--line); } .grid, .types { grid-template-columns: 1fr; } .stage-bar { flex-wrap: wrap; } .stage-body { height: 75vh; } }
-    @media (max-width: 620px) { .top-main, .top-nav { padding-inline: 12px; } .top-main { gap: 10px; } .letter-pick { flex: 1 1 100%; min-width: 0; } .letter-pick select { flex: 1; min-width: 0; } .top-main > .status { flex: 1 1 100%; } .top-nav { align-items: stretch; } .tabs { flex: 1; } .tabs button { min-width: max-content; flex: 1; padding-inline: 10px; } .page { padding: 22px 14px 60px; } .journey { grid-template-columns: 1fr; } .page-intro h1 { font-size: 30px; } }
+    /* Разбор письма */
+    .parse-list { display: grid; gap: 8px; max-height: min(56vh, 560px); overflow: auto; padding: 2px; }
+    .parse-row { display: grid; grid-template-columns: 24px 200px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--element); }
+    .parse-row.off { opacity: .5; }
+    .parse-thumb { position: relative; height: 90px; overflow: hidden; border-radius: var(--radius-xs); background: #fff6ed; }
+    .parse-thumb iframe { position: absolute; top: 0; left: 0; width: 700px; height: 600px; border: 0; transform: scale(.2857); transform-origin: 0 0; pointer-events: none; }
+    .parse-info { display: grid; gap: 4px; min-width: 0; }
+    .parse-info .line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .parse-info .name { font-weight: 600; }
+    .parse-info code { overflow: hidden; color: var(--text-muted); font: var(--text-2xs)/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    .parse-target { display: flex; flex-wrap: wrap; gap: 14px; }
+    .parse-target label { display: inline-flex; align-items: center; gap: 6px; }
+    .drop-zone { display: grid; place-items: center; gap: 6px; padding: 18px; border: 2px dashed var(--line-strong); border-radius: var(--radius-md); color: var(--text-2); text-align: center; }
+    .drop-zone.drop { border-color: var(--accent); background: var(--selected); }
+    .code { min-height: 160px; font: var(--text-xs)/1.5 var(--font-mono); }
+    .learn-list { margin: 0; padding-left: 18px; color: var(--text-2); font-size: var(--text-xs); max-height: 180px; overflow: auto; }
+    table.schema { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+    table.schema th { color: var(--text-muted); font-weight: 500; }
+    table.schema th, table.schema td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+    table.schema input, table.schema select { min-height: 26px; padding: 2px 8px; }
+    .preview-new { position: relative; overflow: hidden; border-radius: var(--radius-md); background: #fff6ed; }
+    .preview-new iframe { display: block; width: 700px; border: 0; transform-origin: 0 0; }
+
+    @media (max-width: 980px) {
+      .editor { grid-template-columns: 1fr; grid-template-rows: minmax(360px, 55vh) auto; height: auto; }
+      body { overflow: auto; }
+      .resizer { display: none; }
+      .panel { border-top: 1px solid var(--line); }
+      .bar { flex-wrap: wrap; padding: 6px 10px; }
+      .bar .label { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
   </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-dup" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    <symbol id="i-bold" viewBox="0 0 24 24"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="18" height="7" rx="1"/></symbol>
+    <symbol id="i-grow" viewBox="0 0 24 24"><path d="M12 20v-8M12 12l-4 4M12 12l4 4M5 4h14"/><path d="M7 8h10"/></symbol>
+  </svg>
+
   <div class="app">
-    <header class="top">
-      <div class="top-main">
-        <div class="letter-pick">
-          <select id="letter-select" aria-label="Текущее письмо"></select>
-          <button class="btn" type="button" id="letter-new">Новое письмо</button>
-        </div>
-        <span class="badge" id="letter-status"></span>
-        <span class="fill"></span>
-        <span class="status" id="status">Загрузка…</span>
-      </div>
-      <div class="top-nav">
-        <div class="tabs" role="tablist" aria-label="Этапы подготовки письма">
-          <button type="button" data-tab="brief" role="tab"><span class="tab-step">01</span> Бриф</button>
-          <button type="button" data-tab="components" role="tab"><span class="tab-step">02</span> Блоки<b id="count-components">0</b></button>
-          <button type="button" data-tab="mailing" role="tab"><span class="tab-step">03</span> Готовое письмо<b id="count-items">0</b></button>
-        </div>
+    <header class="bar">
+      <button class="letter-switch" type="button" id="letter-switch" aria-haspopup="listbox" aria-expanded="false" title="Сменить письмо">
+        <svg class="i"><use href="#i-mail"/></svg><span id="letter-title">Письмо</span><svg class="i sm"><use href="#i-down"/></svg>
+      </button>
+      <span class="badge" id="letter-status" hidden></span>
+      <span class="save" id="status"><span>Загрузка…</span></span>
+      <span class="fill"></span>
+      <div class="bar-actions">
+        <button class="btn ghost" type="button" id="open-parse" title="Разобрать готовое письмо на блоки"><svg class="i"><use href="#i-split"/></svg><span class="label">Разобрать письмо</span></button>
+        <button class="btn ghost" type="button" id="open-learn" title="Записать, что улучшить, и отдать агенту"><svg class="i"><use href="#i-grow"/></svg><span class="label">Улучшить навык</span></button>
+        <button class="btn" type="button" id="ask-check" title="Сборка, preflight и исправления — агентом"><svg class="i"><use href="#i-spark"/></svg><span class="label">С агентом</span></button>
+        <button class="btn primary" type="button" id="check-now" title="Проверить письмо в Email Checker"><svg class="i"><use href="#i-shield"/></svg><span id="check-label">Проверить</span></button>
       </div>
     </header>
 
-    <!-- 1. Бриф -->
-    <main class="view" id="view-brief" hidden>
-      <div class="page">
-        <section class="page-intro">
-          <div>
-            <span class="kicker">Шаг 1 из 3</span>
-            <h1>Сначала смысл. Потом блоки и вёрстка.</h1>
-            <p>Опишите задачу письма и добавьте материалы. Агент предложит состав, соберёт его из проверенных компонентов и не станет выдумывать недостающие цены, даты или ссылки.</p>
+    <main class="editor" id="editor">
+      <!-- Слева: письмо -->
+      <section class="canvas" id="canvas" aria-label="Письмо">
+        <div class="canvas-bar">
+          <div class="seg" role="group" aria-label="Ширина предпросмотра">
+            <button type="button" id="view-desktop" class="on" title="Как на компьютере (700 px)"><svg class="i sm"><use href="#i-monitor"/></svg>Компьютер</button>
+            <button type="button" id="view-mobile" title="Как на телефоне (390 px)"><svg class="i sm"><use href="#i-phone"/></svg>Телефон</button>
           </div>
-          <ol class="journey" aria-label="Путь к готовому письму">
-            <li><b>01</b><span>Заполнить бриф</span></li>
-            <li><b>02</b><span>Собрать блоки</span></li>
-            <li><b>03</b><span>Проверить HTML</span></li>
-          </ol>
-        </section>
-        <div class="panel">
-          <h2>Формат</h2>
-          <div class="types" id="brief-types"></div>
+          <span class="hint fill">Клик — выбрать блок · двойной клик по тексту — изменить · блок из библиотеки можно перетащить в письмо</span>
+          <button class="btn icon ghost" type="button" id="copy-html" title="Копировать HTML письма"><svg class="i"><use href="#i-code"/></svg></button>
+          <button class="btn icon ghost" type="button" id="download-html" title="Скачать HTML"><svg class="i"><use href="#i-download"/></svg></button>
         </div>
-        <div class="panel">
-          <h2>Смысл письма</h2>
-          <div class="grid">
-            <div class="field"><label for="b-subject">Тема письма</label><input id="b-subject" data-brief="subject" placeholder="Последние места на ноябрьские выходные"></div>
-            <div class="field"><label for="b-preheader">Прехедер <span>строка рядом с темой</span></label><input id="b-preheader" data-brief="preheader" placeholder="Пять коротких поездок по России"></div>
-            <div class="field wide"><label for="b-title">Заголовок в письме <span>если отличается от темы</span></label><input id="b-title" data-brief="title"></div>
-            <div class="field wide"><label for="b-message">Главная мысль <span>пустая строка — новый абзац, **так** — жирный</span></label><textarea id="b-message" data-brief="message" rows="4" placeholder="Что важно сказать и почему сейчас?"></textarea></div>
-            <div class="field"><label for="b-cta">Главная кнопка</label><input id="b-cta" data-brief="cta" placeholder="Смотреть все туры"></div>
-            <div class="field"><label for="b-cta-url">Ссылка кнопки</label><input id="b-cta-url" data-brief="cta_url" placeholder="https://vs-travel.ru/…"></div>
-            <div class="field"><label for="b-promo">Промокод <span>если есть</span></label><input id="b-promo" data-brief="promo_code"></div>
-            <div class="field"><label for="b-section">Заголовок подборки <span>необязательно</span></label><input id="b-section" data-brief="section_title" placeholder="Туры подборки"></div>
-            <div class="field"><label for="b-campaign">UTM-кампания</label><input id="b-campaign" data-brief="utm_campaign" placeholder="november-weekends-2026"></div>
-            <div class="field"><label for="b-content">utm_content <span>идентификатор выпуска, ddmmyy</span></label><input id="b-content" data-brief="utm_content" placeholder="151126"></div>
-            <div class="field wide"><label for="b-extra">Пожелания агенту <span>какие блоки нужны или не нужны, тон, ограничения</span></label><textarea id="b-extra" data-brief="extra" rows="3"></textarea></div>
+        <div class="stage" id="stage">
+          <div class="letter-fit" id="letter-fit"><iframe id="letter-frame" title="Письмо"></iframe></div>
+          <div class="canvas-empty" id="canvas-empty" hidden>
+            <strong>Письмо пустое</strong>
+            <span>Перетащите сюда блок из библиотеки справа или разберите готовое письмо на блоки.</span>
+            <div><button class="btn primary" type="button" id="empty-library"><svg class="i"><use href="#i-plus"/></svg>Открыть библиотеку</button><button class="btn" type="button" id="empty-parse"><svg class="i"><use href="#i-split"/></svg>Разобрать письмо</button></div>
           </div>
         </div>
-        <div class="panel">
-          <h2>Туры</h2>
-          <div id="brief-tours"></div>
-          <div class="actions"><button class="btn" type="button" id="tour-add">+ Тур</button></div>
-        </div>
-        <div class="actions">
-          <button class="btn primary" type="button" id="ask-propose">Агенту: предложить блоки, собрать и проверить</button>
-          <button class="btn" type="button" id="draft-recipe" title="Состав по правилам — сразу, без агента">Черновик по правилам</button>
-          <span class="muted">Бриф сохраняется сам.</span>
-        </div>
-      </div>
-    </main>
+      </section>
 
-    <!-- 3. Рассылка: ручная сборка, предпросмотр и проверка -->
-    <main class="view" id="view-mailing" hidden>
-      <div class="build">
-        <aside class="side">
+      <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" aria-label="Ширина правой панели" title="Потяните, чтобы изменить ширину панели"></div>
+
+      <!-- Справа: библиотека или блоки письма -->
+      <aside class="panel" aria-label="Панель блоков">
+        <div class="panel-tabs">
+          <div class="seg" role="tablist" aria-label="Панель">
+            <button type="button" data-pane="library" role="tab">Библиотека <b id="count-components">0</b></button>
+            <button type="button" data-pane="blocks" role="tab">Блоки письма <b id="count-items">0</b></button>
+          </div>
+        </div>
+        <div class="pane" id="pane-library">
+          <div class="lib-tools">
+            <label class="search"><svg class="i"><use href="#i-search"/></svg><input id="c-search" type="search" placeholder="Номер или название: 7, карточка, подвал" aria-label="Поиск блока"></label>
+            <div class="cats" id="c-cats" role="group" aria-label="Категории"></div>
+          </div>
+          <div class="lib" id="lib"></div>
+          <button class="btn dashed" type="button" id="c-new-open" style="width:100%"><svg class="i"><use href="#i-plus"/></svg>Новый компонент из HTML</button>
+        </div>
+        <div class="pane" id="pane-blocks" hidden>
           <div id="proposal"></div>
-          <div class="panel">
-            <h2>Письмо</h2>
-            <div class="grid">
+          <div id="selected"></div>
+          <section class="section">
+            <div class="section-head">Состав <span class="muted" id="items-count"></span><span class="fill"></span><button class="btn sm ghost" type="button" id="add-block"><svg class="i sm"><use href="#i-plus"/></svg>Блок</button></div>
+            <div class="items" id="items"></div>
+            <div style="padding:0 10px 10px"><ul class="errors" id="render-errors" hidden></ul></div>
+          </section>
+          <details class="section" id="meta-section">
+            <summary>Тема, прехедер и UTM<span class="fill"></span><svg class="i sm"><use href="#i-down"/></svg></summary>
+            <div class="section-body grid">
               <div class="field wide"><label for="l-subject">Тема</label><input id="l-subject" data-letter="subject"></div>
               <div class="field wide"><label for="l-preheader">Прехедер</label><input id="l-preheader" data-letter="preheader"></div>
               <div class="field"><label for="l-campaign">utm_campaign</label><input id="l-campaign" data-utm="campaign"></div>
               <div class="field"><label for="l-content">utm_content</label><input id="l-content" data-utm="content"></div>
             </div>
-          </div>
-          <div class="panel">
-            <h2>Состав <span id="items-count"></span></h2>
-            <div id="items"></div>
-            <div class="adder"><select id="add-component" aria-label="Компонент"></select><button class="btn" type="button" id="add-button">Добавить</button></div>
-            <ul class="errors" id="render-errors" hidden></ul>
-          </div>
-          <div id="check"></div>
-        </aside>
-        <div class="side-resizer" id="side-resizer" role="separator" aria-orientation="vertical" aria-label="Ширина панели письма" title="Потяните, чтобы изменить ширину. Двойной клик — свернуть или развернуть"></div>
-        <section class="stage" id="stage">
-          <div class="stage-bar">
-            <div class="stage-actions">
-              <button class="btn primary" type="button" id="check-now" title="Проверить письмо в Email Checker">Проверить</button>
-              <button class="btn" type="button" id="ask-check" title="Передать исправления агенту">С агентом</button>
-            </div>
-            <div class="stage-actions">
-              <button class="btn" type="button" id="copy-html" title="Копировать HTML письма">HTML</button>
-              <button class="btn" type="button" id="download-html" title="Скачать письмо в формате HTML">Скачать</button>
-            </div>
-            <span class="fill"></span>
-            <span class="editor-hint" id="editor-hint">Дважды нажмите на текст письма, чтобы изменить его</span>
-            <div class="stage-actions">
-              <button class="btn ghost" type="button" id="toggle-side" title="Скрыть панель письма" aria-pressed="true">Панель</button>
-              <button class="btn ghost" type="button" id="toggle-mobile" aria-pressed="false">Телефон</button>
-            </div>
-            <div class="formatbar" id="text-tools" role="toolbar" aria-label="Форматирование текста" hidden>
-              <span class="field-name" id="text-field"></span>
-              <button class="btn small" type="button" id="format-bold" aria-pressed="false">Жирный</button>
-              <label for="format-size">Размер <input id="format-size" type="number" min="8" max="72" step="1" inputmode="numeric" placeholder="авто"></label>
-              <label for="format-color">Цвет <input id="format-color" type="color" value="#172b25"></label>
-              <button class="btn small ghost" type="button" id="format-reset">Сбросить оформление</button>
-            </div>
-          </div>
-          <div class="stage-body" id="stage-body"><div class="letter-fit" id="letter-fit"><iframe id="letter-frame" title="Письмо"></iframe></div></div>
-        </section>
-      </div>
-    </main>
-
-    <!-- 2. Компоненты -->
-    <main class="view" id="view-components" hidden>
-      <div class="page is-wide">
-        <section class="page-intro">
-          <div>
-            <span class="kicker">Шаг 2 из 3</span>
-            <h1>Библиотека проверенных блоков</h1>
-            <p>Найдите подходящий блок, посмотрите его в реальном масштабе и добавьте в письмо. Новые компоненты сразу получают номер и сохраняются для следующих выпусков.</p>
-          </div>
-        </section>
-        <div class="actions" style="margin-top:0; margin-bottom:12px">
-          <input id="c-search" type="search" placeholder="Номер или название: 7, карточка, подвал" style="flex:1">
-          <button class="btn primary" type="button" id="c-new-toggle">+ Новый компонент</button>
+          </details>
+          <details class="section" id="check-section">
+            <summary>Проверка <b class="chip" id="check-count" hidden></b><span class="fill"></span><svg class="i sm"><use href="#i-down"/></svg></summary>
+            <div class="section-body" id="check-body"></div>
+          </details>
         </div>
-        <section class="panel" id="c-new" hidden>
-          <h2>Новый компонент · номер <span class="num" id="c-new-number"></span></h2>
-          <div class="grid">
-            <div class="field"><label for="c-name">Название</label><input id="c-name" placeholder="Карточка тура: фото сверху"></div>
-            <div class="field"><label for="c-category">Категория</label><input id="c-category" list="c-categories" placeholder="Туры"></div>
-            <div class="field"><label for="c-type">Тип <span>для рецептов, латиницей</span></label><input id="c-type" placeholder="tour-card-top"></div>
-            <div class="field"><label for="c-description">Когда ставить</label><input id="c-description"></div>
-          </div>
-          <datalist id="c-categories"></datalist>
-          <div class="field" style="margin-top:10px"><label for="c-html">HTML: одна или несколько строк &lt;tr em="block"&gt;, поля — {{ключ}}, {{ключ|text}}, {{ключ|url}}</label><textarea class="code" id="c-html" spellcheck="false"></textarea></div>
-          <div id="c-schema"></div>
-          <div class="actions">
-            <button class="btn primary" type="button" id="c-save">Сохранить компонент</button>
-            <button class="btn" type="button" id="c-agent">Отдать агенту — пусть доведёт</button>
-            <button class="btn ghost" type="button" id="c-cancel">Отмена</button>
-          </div>
-          <div class="preview" id="c-preview" hidden><iframe title="Предпросмотр нового компонента"></iframe></div>
-        </section>
-        <div class="cards" id="cards"></div>
-      </div>
+      </aside>
     </main>
-
   </div>
+
+  <!-- Новое письмо -->
+  <dialog id="new-dialog" aria-labelledby="new-title">
+    <form class="dialog" method="dialog" id="new-form">
+      <h3 id="new-title">Новое письмо</h3>
+      <div class="field"><label for="new-subject">Тема письма</label><input id="new-subject" placeholder="Последние места на ноябрьские выходные" required autocomplete="off"></div>
+      <div class="field"><label for="new-id">Имя файла <span>· латиницей, придумывается само</span></label><input id="new-id" pattern="[a-z0-9-]+" required autocomplete="off"></div>
+      <span class="muted" id="new-error" role="alert"></span>
+      <div class="dialog-actions"><button class="btn ghost" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Создать</button></div>
+    </form>
+  </dialog>
+
+  <!-- Разбор письма на блоки -->
+  <dialog class="wide" id="parse-dialog" aria-labelledby="parse-title">
+    <div class="dialog">
+      <h3 id="parse-title">Разобрать письмо на блоки</h3>
+      <div id="parse-step-1">
+        <p>Готовое письмо — старый выпуск, присланный HTML или экспорт из UniSender — раскладывается на блоки библиотеки. Узнанные блоки встают с текстами и ссылками из письма, новые можно сохранить в библиотеку.</p>
+        <div class="drop-zone" id="parse-drop" style="margin-top:12px">Перетащите .html сюда или <button class="btn sm" type="button" id="parse-file-btn">выберите файл</button><input type="file" id="parse-file" accept=".html,.htm,text/html" hidden></div>
+        <div class="field" style="margin-top:12px"><label for="parse-html">или вставьте HTML</label><textarea class="code" id="parse-html" spellcheck="false" placeholder="<!DOCTYPE html>…"></textarea></div>
+      </div>
+      <div id="parse-step-2" hidden>
+        <div class="notice" id="parse-summary"></div>
+        <div class="parse-list" id="parse-list" style="margin-top:10px"></div>
+        <div class="parse-target" style="margin-top:12px" role="radiogroup" aria-label="Куда собрать">
+          <label><input type="radio" name="parse-target" value="new" checked> В новое письмо</label>
+          <label><input type="radio" name="parse-target" value="replace"> Заменить состав текущего</label>
+          <label><input type="radio" name="parse-target" value="append"> Добавить в конец текущего</label>
+        </div>
+      </div>
+      <span class="muted" id="parse-error" role="alert"></span>
+      <div class="dialog-actions">
+        <button class="btn ghost" type="button" id="parse-back" hidden>Назад</button>
+        <span class="fill"></span>
+        <button class="btn ghost" type="button" data-close>Отмена</button>
+        <button class="btn primary" type="button" id="parse-run"><svg class="i"><use href="#i-split"/></svg>Разобрать</button>
+        <button class="btn primary" type="button" id="parse-apply" hidden>Собрать письмо</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Улучшить навык -->
+  <dialog id="learn-dialog" aria-labelledby="learn-title">
+    <div class="dialog">
+      <h3 id="learn-title">Улучшить навык</h3>
+      <p>Заметки копятся в learnings.md навыка. Конструктор пишет туда сам — неузнанные блоки, ошибки проверки. Агент по ним правит компоненты, правила и этот редактор.</p>
+      <div class="field"><label for="learn-text">Что мешало или что улучшить</label><textarea id="learn-text" rows="3" placeholder="Например: у карточки тура нет поля для старой цены"></textarea></div>
+      <div id="learn-open"></div>
+      <div class="dialog-actions">
+        <button class="btn ghost" type="button" data-close>Закрыть</button>
+        <button class="btn" type="button" id="learn-save">Записать</button>
+        <button class="btn primary" type="button" id="learn-agent"><svg class="i"><use href="#i-spark"/></svg>Агенту: улучшить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Новый компонент -->
+  <dialog class="wide" id="comp-dialog" aria-labelledby="comp-title">
+    <div class="dialog">
+      <h3 id="comp-title">Новый компонент <span class="num" id="c-new-number"></span></h3>
+      <div class="grid">
+        <div class="field"><label for="c-name">Название</label><input id="c-name" placeholder="Карточка тура: фото сверху"></div>
+        <div class="field"><label for="c-category">Категория</label><input id="c-category" list="c-categories" placeholder="Туры"></div>
+        <div class="field"><label for="c-type">Тип <span>· латиницей</span></label><input id="c-type" placeholder="tour-card-top"></div>
+        <div class="field"><label for="c-description">Когда ставить</label><input id="c-description"></div>
+        <div class="field wide"><label for="c-html">HTML <span>· строки &lt;tr em="block"&gt;, поля — {{ключ}}, {{ключ|text}}, {{ключ|url}}</span></label><textarea class="code" id="c-html" spellcheck="false"></textarea></div>
+      </div>
+      <datalist id="c-categories"></datalist>
+      <div id="c-schema"></div>
+      <div class="preview-new" id="c-preview" hidden><iframe title="Предпросмотр нового компонента"></iframe></div>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="c-agent"><svg class="i"><use href="#i-spark"/></svg>Отдать агенту</button>
+        <span class="fill"></span>
+        <button class="btn ghost" type="button" data-close>Отмена</button>
+        <button class="btn primary" type="button" id="c-save">Сохранить</button>
+      </div>
+    </div>
+  </dialog>
 
   <script>
     'use strict';
@@ -353,19 +462,19 @@
     const writeFile = (path, content, message) => bridge && bridge.write ? bridge.write(path, content, message) : Promise.reject(new Error('Сохранять можно только во вкладке MBOX'));
     const writeFiles = (files, message) => bridge?.writeFiles ? bridge.writeFiles(files, message) : Promise.all(files.map((file) => writeFile(file.path, file.content, file.message || message)));
     const $ = (selector, rootEl = document) => rootEl.querySelector(selector);
+    const $$ = (selector, rootEl = document) => [...rootEl.querySelectorAll(selector)];
     const esc = (text) => String(text ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const icon = (name, cls = '') => `<svg class="i ${cls}"><use href="#i-${name}"/></svg>`;
     const pad = (n) => `C${String(n).padStart(3, '0')}`;
+    const today = () => new Date().toISOString().slice(0, 10);
     const UI = 'email-letter-ui';
-    const TYPES = [
-      { value: 'подборка', title: 'Подборка', hint: 'Несколько туров одной темы' },
-      { value: 'одна акция', title: 'Одна акция', hint: 'Один главный переход' },
-      { value: 'дайджест', title: 'Дайджест', hint: 'Много туров парами' },
-    ];
+    const STATUS_LABELS = { brief: 'черновик', proposed: 'состав предложен', 'local-checked': 'локальная проверка', 'external-checked': 'Email Checker пройден', checked: 'проверено', 'needs-fix': 'нужны исправления' };
 
-    const state = { kit: null, K: null, letters: [], letter: null, tab: 'brief', open: {}, mobile: false, activeField: null };
+    const state = { kit: null, K: null, letters: [], letter: null, pane: 'library', selected: null, mobile: false, activeField: null, category: '', drag: null };
     const ui = (() => { try { return JSON.parse(localStorage.getItem(UI) || '{}'); } catch { return {}; } })();
     const saveUi = () => { try { localStorage.setItem(UI, JSON.stringify(ui)); } catch { /* без хранилища */ } };
-    const setStatus = (text, tone = '') => { const el = $('#status'); el.textContent = text; el.className = `status ${tone}`; };
+    const setStatus = (text, tone = '') => { const el = $('#status'); el.firstElementChild.textContent = text; el.className = `save ${tone}`; el.title = text; };
+    $$('[data-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 
     async function loadKit() {
       const registry = JSON.parse(await readFile('components/registry.json'));
@@ -376,7 +485,6 @@
       state.K = window.LetterKit;
       state.kit = { registry, templates, shell };
     }
-
     async function loadLetters() {
       let ids = ['example'];
       if (bridge && bridge.files) ids = (await bridge.files()).map((f) => f.path).filter((p) => /^letters\/[^/]+\.json$/.test(p)).map((p) => p.slice(8, -5));
@@ -384,33 +492,136 @@
       state.letters = letters.filter(Boolean).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
     }
 
-    // ── Письмо: выбор, создание, автосохранение ─────────────────────────────────────────
-    function renderLetterPicker() {
-      $('#letter-select').innerHTML = state.letters.map((l) => `<option value="${esc(l.id)}">${esc(l.brief?.subject || l.letter?.subject || l.id)} · ${esc(l.id)}</option>`).join('') || '<option value="">Писем нет</option>';
-      if (state.letter) $('#letter-select').value = state.letter.id;
-      const status = state.letter?.status || '';
-      const labels = { brief: 'бриф', proposed: 'состав предложен', 'local-checked': 'локальная проверка', 'external-checked': 'Email Checker пройден', checked: 'проверено', 'needs-fix': 'нужны исправления' };
-      $('#letter-status').textContent = labels[status] || status;
-      $('#letter-status').className = `badge ${status}`;
+    // ── Опыт навыка (learnings.md): то, из чего навык улучшает себя ──────────────────────
+    const LEARNINGS = 'learnings.md';
+    const LEARNINGS_HEAD = '# Опыт навыка email-campaign\n\nЖурнал наблюдений для самоулучшения. Пишут конструктор (library.html) и агент. По кнопке «Улучшить навык» агент разбирает «Открытые»: правит компоненты, реестр, style-guide и SKILL.md, затем переносит пункт в «Сделано» с тем, что изменено.\n\n## Открытые\n\n## Сделано\n';
+    async function readLearnings() { try { return await readFile(LEARNINGS); } catch { return LEARNINGS_HEAD; } }
+    function openLearnings(text) {
+      const part = (text.split(/## Открытые/)[1] || '').split(/\n## /)[0];
+      return part.split('\n').filter((line) => /^- /.test(line)).map((line) => line.slice(2));
     }
-    $('#letter-select').addEventListener('change', () => selectLetter($('#letter-select').value));
-    $('#letter-new').addEventListener('click', async () => {
-      const slug = prompt('Короткое имя письма латиницей (станет именем файла)', `${new Date().toISOString().slice(0, 10)}-campaign`);
-      if (!slug) return;
-      const id = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
-      if (!id || state.letters.some((l) => l.id === id)) { setStatus('Такое письмо уже есть или имя пустое', 'err'); return; }
+    async function learn(line) {
+      if (!bridge?.write) return;
+      try {
+        let text = await readLearnings();
+        if (!/## Открытые/.test(text)) text = LEARNINGS_HEAD;
+        const entry = `- ${today()} · ${line.replace(/\s+/g, ' ').trim()}`;
+        text = text.replace(/## Открытые\n\n?/, (head) => `${head.trimEnd()}\n\n${entry}\n`);
+        await writeFile(LEARNINGS, text, `Опыт навыка: ${line.slice(0, 80)}`);
+      } catch { /* журнал — не главное: письмо важнее заметки */ }
+    }
+
+    // ── Всплывающий список (письма, вставка блока) ──────────────────────────────────────
+    let openPop = null;
+    function closePop() {
+      if (!openPop) return;
+      openPop.el.remove();
+      openPop.anchor.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('pointerdown', openPop.outside, true);
+      openPop = null;
+    }
+    function showPop(anchor, { placeholder, rows, onPick, footer }) {
+      if (openPop?.anchor === anchor) { closePop(); return; }
+      closePop();
+      const el = document.createElement('div');
+      el.className = 'pop';
+      el.setAttribute('role', 'dialog');
+      el.innerHTML = `<label class="pop-search">${icon('search', 'sm')}<input type="search" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}"></label><div class="pop-list" role="listbox"></div>${footer ? '<div class="pop-foot"></div>' : ''}`;
+      document.body.append(el);
+      const rect = anchor.getBoundingClientRect();
+      const width = el.offsetWidth;
+      el.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
+      const below = innerHeight - rect.bottom;
+      if (below < 260 && rect.top > below) el.style.bottom = `${innerHeight - rect.top + 6}px`; else el.style.top = `${rect.bottom + 6}px`;
+      const input = $('input', el), list = $('.pop-list', el);
+      let cursor = 0, shown = [];
+      const pick = (r) => { closePop(); onPick(r.id); };
+      const draw = () => {
+        const needle = input.value.trim().toLowerCase();
+        shown = rows.filter((r) => !needle || `${r.label} ${r.meta || ''} ${r.num || ''}`.toLowerCase().includes(needle));
+        cursor = Math.min(cursor, Math.max(0, shown.length - 1));
+        list.innerHTML = shown.length ? shown.map((r, i) => `<button type="button" class="pop-row ${r.on ? 'on' : ''} ${i === cursor ? 'cursor' : ''}" role="option" data-i="${i}" aria-selected="${Boolean(r.on)}">${r.num ? `<span class="num">${esc(r.num)}</span>` : ''}<span class="name">${esc(r.label)}</span>${r.meta ? `<small>${esc(r.meta)}</small>` : ''}</button>`).join('') : '<div class="pop-empty">Ничего не найдено</div>';
+        $$('.pop-row', list).forEach((row) => row.addEventListener('click', () => pick(shown[Number(row.dataset.i)])));
+        $('.pop-row.cursor', list)?.scrollIntoView({ block: 'nearest' });
+      };
+      input.addEventListener('input', () => { cursor = 0; draw(); });
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowDown') { event.preventDefault(); cursor = Math.min(shown.length - 1, cursor + 1); draw(); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); cursor = Math.max(0, cursor - 1); draw(); }
+        else if (event.key === 'Enter' && shown[cursor]) { event.preventDefault(); pick(shown[cursor]); }
+        else if (event.key === 'Escape') { closePop(); anchor.focus(); }
+      });
+      if (footer) footer($('.pop-foot', el));
+      const outside = (event) => { if (!el.contains(event.target) && !anchor.contains(event.target)) closePop(); };
+      document.addEventListener('pointerdown', outside, true);
+      anchor.setAttribute('aria-expanded', 'true');
+      openPop = { el, anchor, outside };
+      draw();
+      input.focus();
+    }
+
+    // ── Письмо: выбор, создание, сохранение ─────────────────────────────────────────────
+    const letterName = (l) => l?.letter?.subject || l?.brief?.subject || l?.id || '';
+    const bodyOf = () => { const l = state.letter; if (!l) return null; l.letter = l.letter || { subject: '', preheader: '', utm: {}, items: [] }; l.letter.utm = l.letter.utm || {}; l.letter.items = l.letter.items || []; return l.letter; };
+    function renderLetterPicker() {
+      $('#letter-title').textContent = state.letter ? (letterName(state.letter) || 'Без темы') : 'Писем нет';
+      const status = state.letter?.status || '';
+      const badge = $('#letter-status');
+      badge.hidden = !status;
+      badge.textContent = STATUS_LABELS[status] || status;
+      badge.className = `badge ${status}`;
+    }
+    $('#letter-switch').addEventListener('click', (event) => showPop(event.currentTarget, {
+      placeholder: 'Найти письмо',
+      rows: state.letters.map((l) => ({ id: l.id, label: letterName(l) || 'Без темы', meta: l.id, on: l.id === state.letter?.id })),
+      onPick: selectLetter,
+      footer: bridge?.write ? (box) => {
+        box.innerHTML = `<button class="btn ghost" type="button">${icon('plus')}Новое письмо</button>`;
+        $('button', box).addEventListener('click', () => { closePop(); openNewDialog(); });
+      } : null,
+    }));
+
+    const TRANSLIT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' };
+    const slugOf = (text) => String(text || '').toLowerCase().replace(/[а-яё]/g, (ch) => TRANSLIT[ch] ?? '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').split('-').slice(0, 6).join('-');
+    function uniqueId(base) { let id = base || `${today()}-letter`; let n = 2; while (state.letters.some((l) => l.id === id)) id = `${base}-${n++}`; return id; }
+    let idTouched = false;
+    function openNewDialog() {
+      idTouched = false;
+      $('#new-subject').value = '';
+      $('#new-id').value = `${today()}-letter`;
+      $('#new-error').textContent = '';
+      $('#new-dialog').showModal();
+    }
+    $('#new-subject').addEventListener('input', () => { if (!idTouched) $('#new-id').value = [today(), slugOf($('#new-subject').value) || 'letter'].join('-'); });
+    $('#new-id').addEventListener('input', () => { idTouched = true; });
+    $('#new-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const id = $('#new-id').value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+      if (!id) { $('#new-error').textContent = 'Нужно имя файла латиницей'; return; }
+      if (state.letters.some((l) => l.id === id)) { $('#new-error').textContent = 'Письмо с таким именем уже есть'; return; }
+      $('#new-dialog').close();
+      await createLetter(id, { subject: $('#new-subject').value.trim() });
+      showPane('library');
+    });
+    async function createLetter(id, { subject = '', preheader = '', utm = {}, items = [], proposal = null } = {}) {
       const letter = state.K.newLetter(id);
+      letter.letter = { subject, preheader, utm: { campaign: utm.campaign || '', content: utm.content || '' }, items };
+      if (subject) letter.brief.subject = subject;
+      if (proposal) { letter.proposal = proposal; letter.status = 'proposed'; }
       state.letters.unshift(letter);
       state.letter = letter;
+      state.selected = null;
+      ui.letter = id; saveUi();
       await saveNow('Новое письмо');
-      ui.letter = id; ui.tab = 'mailing'; saveUi();
       renderAll();
-      showTab('mailing');
-    });
+      return letter;
+    }
     function selectLetter(id) {
       state.letter = state.letters.find((l) => l.id === id) || state.letters[0] || null;
       ui.letter = state.letter?.id; saveUi();
-      state.open = {};
+      state.selected = null;
+      state.activeField = null;
+      state.letterScroll = 0;
       renderAll();
     }
 
@@ -420,7 +631,7 @@
       state.letter.updated_at = new Date().toISOString();
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => saveNow(), 1200);
-      setStatus('Изменения сохраняются…');
+      setStatus('Сохраняется…', 'busy');
     }
     async function saveNow(message = 'Правка письма на странице') {
       if (!state.letter) return;
@@ -430,298 +641,406 @@
         setStatus('Сохранено', 'ok');
       } catch (error) { setStatus(`Не сохранилось: ${error.message}`, 'err'); }
     }
+    document.addEventListener('keydown', (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveNow(); }
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') || document.querySelector('dialog[open]');
+      if (!typing && state.selected != null && (event.key === 'Delete' || event.key === 'Backspace')) { event.preventDefault(); blockAction(state.selected, 'del'); }
+      if (!typing && state.selected != null && event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); blockAction(state.selected, event.key === 'ArrowUp' ? 'up' : 'down'); }
+    });
 
     function sendAgent(text) {
       if (window.mbox && window.mbox.send) { window.mbox.send(text); setStatus('Задание отправлено агенту в чат MBOX', 'ok'); }
       else { navigator.clipboard?.writeText(text); setStatus('Не в MBOX: задание скопировано — вставьте его в чат агента', 'ok'); }
     }
 
-    // ── Вкладки ─────────────────────────────────────────────────────────────────────────
-    document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => showTab(button.dataset.tab)));
-    function showTab(tab) {
-      if (tab === 'build' || tab === 'check') tab = 'mailing';
-      if (!['brief', 'components', 'mailing'].includes(tab)) tab = 'mailing';
-      state.tab = tab; ui.tab = tab; saveUi();
-      document.querySelectorAll('[data-tab]').forEach((button) => {
-        const selected = button.dataset.tab === tab;
+    // ── Правая панель ───────────────────────────────────────────────────────────────────
+    $$('[data-pane]').forEach((button) => button.addEventListener('click', () => showPane(button.dataset.pane)));
+    function showPane(pane) {
+      state.pane = pane; ui.pane = pane; saveUi();
+      $$('[data-pane]').forEach((button) => {
+        const selected = button.dataset.pane === pane;
         button.classList.toggle('on', selected);
         button.setAttribute('aria-selected', String(selected));
       });
-      ['brief', 'components', 'mailing'].forEach((name) => { $(`#view-${name}`).hidden = name !== tab; });
-      if (tab === 'mailing') renderPreview();
+      $('#pane-library').hidden = pane !== 'library';
+      $('#pane-blocks').hidden = pane !== 'blocks';
+      if (pane === 'library') requestAnimationFrame(fitThumbs);
     }
-
-    function renderAll() {
-      renderLetterPicker();
-      renderBrief();
-      renderBuild();
-      renderComponents();
-      renderCheck();
-    }
-
-    // ── 1. Бриф ─────────────────────────────────────────────────────────────────────────
-    const briefOf = () => { const l = state.letter; if (!l) return null; l.brief = l.brief || {}; l.brief.tours = l.brief.tours || []; return l.brief; };
-    function renderBrief() {
-      const brief = briefOf();
-      $('#view-brief .page').style.opacity = brief ? '' : '.4';
-      if (!brief) return;
-      $('#brief-types').innerHTML = TYPES.map((t) => `<button type="button" class="type ${brief.type === t.value ? 'on' : ''}" data-type="${esc(t.value)}" aria-pressed="${brief.type === t.value}">${esc(t.title)}<small>${esc(t.hint)}</small></button>`).join('');
-      document.querySelectorAll('#brief-types [data-type]').forEach((button) => button.addEventListener('click', () => { brief.type = button.dataset.type; changed(); renderBrief(); }));
-      document.querySelectorAll('[data-brief]').forEach((input) => { input.value = brief[input.dataset.brief] ?? ''; });
-      renderTours();
-    }
-    document.querySelectorAll('[data-brief]').forEach((input) => input.addEventListener('input', () => { const brief = briefOf(); if (!brief) return; brief[input.dataset.brief] = input.value; changed(); }));
-    const TOUR_FIELDS = [['name', 'Название', true], ['route', 'Маршрут', true], ['dates', 'Даты и длительность'], ['price', 'Цена'], ['url', 'Ссылка тура', true], ['image', 'Картинка (https)', true], ['alt', 'Alt картинки', true], ['cta', 'Текст кнопки']];
-    function renderTours() {
-      const brief = briefOf();
-      const box = $('#brief-tours');
-      if (!brief.tours.length) { box.innerHTML = '<div class="muted">Туров нет. Для акции без карточек это нормально.</div>'; return; }
-      box.replaceChildren(...brief.tours.map((tour, index) => {
-        const el = document.createElement('div');
-        el.className = 'tour';
-        el.innerHTML = `<div class="tour-head"><span class="num">Тур ${index + 1}</span><button class="btn small ghost" type="button" data-act="up" ${index ? '' : 'disabled'}>↑</button><button class="btn small ghost" type="button" data-act="del">Удалить</button></div>
-          <div class="grid">${TOUR_FIELDS.map(([key, label, wide]) => `<div class="field ${key === 'name' || key === 'route' || key === 'url' || key === 'image' ? 'wide' : ''}"><label>${esc(label)}</label><input data-tour="${key}" value="${esc(tour[key] || '')}"></div>`).join('')}</div>`;
-        el.querySelectorAll('[data-tour]').forEach((input) => input.addEventListener('input', () => { tour[input.dataset.tour] = input.value; changed(); }));
-        el.querySelector('[data-act="del"]').addEventListener('click', () => { brief.tours.splice(index, 1); changed(); renderTours(); });
-        el.querySelector('[data-act="up"]').addEventListener('click', () => { brief.tours.splice(index - 1, 0, brief.tours.splice(index, 1)[0]); changed(); renderTours(); });
-        return el;
-      }));
-    }
-    $('#tour-add').addEventListener('click', () => { const brief = briefOf(); if (!brief) return; brief.tours.push({}); changed(); renderTours(); });
-
-    $('#draft-recipe').addEventListener('click', () => {
-      const l = state.letter; if (!l) return;
-      if ((l.letter?.items || []).length && !confirm('Заменить текущий состав черновиком по правилам?')) return;
-      const brief = briefOf();
-      const draft = state.K.proposeFromBrief(brief, state.kit.registry);
-      l.letter = { subject: brief.subject || '', preheader: brief.preheader || '', utm: { campaign: brief.utm_campaign || '', content: brief.utm_content || '' }, items: draft.items };
-      l.proposal = { by: 'правила', at: new Date().toISOString(), notes: draft.notes.join(' '), questions: draft.missing.map((m) => `Нужно: ${m}`) };
-      l.status = 'proposed';
-      saveNow('Черновик состава по правилам');
-      renderAll();
-      showTab('mailing');
-    });
-    $('#ask-propose').addEventListener('click', async () => {
-      const l = state.letter; if (!l) return;
-      await saveNow('Бриф перед отправкой агенту');
-      sendAgent([
-        `Навык email-campaign, письмо letters/${l.id}.json — бриф заполнен в конструкторе.`,
-        '1. Предложи состав: `node scripts/letter.mjs propose ' + l.id + ' --write`, затем поправь состав и поля по смыслу брифа и пожеланиям (edit_skill_file в letters/' + l.id + '.json: letter.items, letter.subject/preheader/utm). В proposal.notes коротко объясни выбор блоков, в proposal.questions — чего не хватает.',
-        '2. Собери и проверь: `node scripts/letter.mjs build ' + l.id + '` (strict preflight + Email Checker).',
-        '3. Исправь актуальные ошибки (поля письма или компонент), повтори build, запиши что исправил в check.fixed и что осталось на решение — в check.remaining.',
-        'Факты (цены, даты, ссылки) не выдумывай — спроси.',
-      ].join('\n'));
-    });
-
-    // ── 2. Сборка ───────────────────────────────────────────────────────────────────────
-    const componentOf = (id) => state.K.componentById(state.kit.registry, id);
-    function renderBuild() {
-      const l = state.letter;
-      const body = l ? (l.letter = l.letter || { subject: '', preheader: '', utm: {}, items: [] }) : null;
-      $('#count-items').textContent = body ? body.items.length : 0;
-      if (!body) { $('#items').innerHTML = '<div class="empty">Выберите или создайте письмо</div>'; return; }
-      body.utm = body.utm || {};
-      document.querySelectorAll('[data-letter]').forEach((input) => { input.value = body[input.dataset.letter] ?? ''; });
-      document.querySelectorAll('[data-utm]').forEach((input) => { input.value = body.utm[input.dataset.utm] ?? ''; });
-      const p = l.proposal;
-      $('#proposal').innerHTML = p ? `<div class="notice ${(p.questions || []).length ? 'warn' : ''}"><b>Предложение · ${esc(p.by || 'агент')}</b> <span class="muted">${esc(String(p.at || '').slice(0, 16).replace('T', ' '))}</span><div>${esc(p.notes || '')}</div>${(p.questions || []).length ? `<ul>${p.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}</div>` : '';
-      $('#items-count').textContent = `· ${body.items.length}`;
-      $('#add-component').innerHTML = state.kit.registry.components.map((c) => `<option value="${c.id}">${c.id} · ${esc(c.name)}</option>`).join('');
-      const items = $('#items');
-      if (!body.items.length) items.innerHTML = '<div class="empty">Рассылка пока пустая. Добавьте любой компонент из списка или перейдите во вкладку «Компоненты» и нажмите «+ В письмо». Бриф заполнять необязательно.</div>';
-      else items.replaceChildren(...body.items.map((item, index) => itemEditor(body, item, index)));
-      renderPreview();
-    }
-    document.querySelectorAll('[data-letter]').forEach((input) => input.addEventListener('input', () => { if (!state.letter) return; state.letter.letter[input.dataset.letter] = input.value; changed(); schedulePreview(); }));
-    document.querySelectorAll('[data-utm]').forEach((input) => input.addEventListener('input', () => { if (!state.letter) return; state.letter.letter.utm[input.dataset.utm] = input.value; changed(); schedulePreview(); }));
-
-    function itemEditor(body, item, index) {
-      const component = componentOf(item.component);
-      const el = document.createElement('div');
-      el.className = 'item';
-      const key = `${index}:${item.component}`;
-      const open = Boolean(state.open[key]);
-      el.innerHTML = `<div class="item-head"><span class="num">${esc(item.component)}</span><span class="name">${esc(component ? component.name : 'нет в реестре')}</span>
-        <button class="btn small ghost" type="button" data-act="up" ${index ? '' : 'disabled'} title="Выше">↑</button><button class="btn small ghost" type="button" data-act="down" ${index < body.items.length - 1 ? '' : 'disabled'} title="Ниже">↓</button>
-        <button class="btn small ghost" type="button" data-act="open" title="Поля">${open ? '▾' : '▸'}</button><button class="btn small ghost" type="button" data-act="del" title="Убрать">✕</button></div>`;
-      const act = (name, fn) => el.querySelector(`[data-act="${name}"]`).addEventListener('click', fn);
-      act('up', () => { body.items.splice(index - 1, 0, body.items.splice(index, 1)[0]); changed(); renderBuild(); });
-      act('down', () => { body.items.splice(index + 1, 0, body.items.splice(index, 1)[0]); changed(); renderBuild(); });
-      act('del', () => { body.items.splice(index, 1); changed(); renderBuild(); });
-      act('open', () => { state.open[key] = !open; renderBuild(); });
-      if (component && open) {
-        const fields = document.createElement('div');
-        fields.className = 'item-body';
-        item.fields = item.fields || {};
-        if (!component.fields.length) fields.innerHTML = '<div class="muted">Полей нет — блок одинаков во всех письмах.</div>';
-        component.fields.forEach((field) => {
-          const wrap = document.createElement('div');
-          wrap.className = 'field';
-          const multiline = field.type === 'multiline';
-          wrap.innerHTML = `<label>${esc(field.label || field.key)}${field.required ? '' : ' <span>необязательно</span>'}</label>`;
-          const input = document.createElement(multiline ? 'textarea' : 'input');
-          if (multiline) input.rows = 3;
-          input.value = item.fields[field.key] ?? '';
-          input.placeholder = field.default ? String(field.default).split('\n')[0] : '';
-          input.addEventListener('input', () => { if (input.value === '') delete item.fields[field.key]; else item.fields[field.key] = input.value; changed(); schedulePreview(); });
-          wrap.append(input);
-          fields.append(wrap);
-        });
-        el.append(fields);
-      }
-      return el;
-    }
-    $('#add-button').addEventListener('click', () => {
-      const l = state.letter; if (!l) return;
-      addToLetter($('#add-component').value);
-    });
-    // Блок встаёт в письмо сразу с теми же тестовыми данными, что в превью «Компонентов»; текст меняется двойным кликом по письму или в полях.
-    function addToLetter(id) {
-      const l = state.letter; if (!l) { setStatus('Сначала выберите письмо', 'err'); return false; }
-      const component = componentOf(id); if (!component) return false;
-      l.letter.items.push({ component: id, fields: sampleFields(component) });
-      state.scrollToEnd = true;
-      changed();
-      renderBuild();
-      return true;
-    }
-
-    function renderResult(editable = false) { return state.letter ? state.K.renderLetter(state.letter, state.kit, editable ? { editable: true } : undefined) : { html: '', errors: [], warnings: [] }; }
-    const EDITOR_BRIDGE = `<style>
-      [data-mbox-field]{cursor:text}
-      [data-mbox-field]:hover,[data-mbox-field]:focus{outline:1px dashed Highlight;outline-offset:3px}
-      [data-mbox-field][contenteditable="true"]{outline:2px solid Highlight;outline-offset:3px;white-space:pre-wrap}
-    </style><script>(function(){
-      var active=null,original='',originalHtml='';
-      function send(type,el,value){parent.postMessage({type:type,item:Number(el.getAttribute('data-mbox-item')),field:el.getAttribute('data-mbox-field'),value:value,multiline:el.getAttribute('data-mbox-multiline')==='true'},'*');}
-      function begin(el,x,y){if(!el||active===el)return; if(active)active.blur(); active=el;original=el.getAttribute('data-mbox-value')||'';originalHtml=el.innerHTML;if(el.textContent!==original)el.textContent=original;el.contentEditable='true';el.focus();
-        var selection=getSelection(),range=document.caretRangeFromPoint&&x!=null?document.caretRangeFromPoint(x,y):null;
-        if(!range||!el.contains(range.startContainer)){range=document.createRange();range.selectNodeContents(el);range.collapse(false);}
-        selection.removeAllRanges();selection.addRange(range);send('letter:field-select',el,original);}
-      // В редакторе ссылки не открываются: клик по тексту в ссылке уводил фокус в новое окно, и правка обрывалась.
-      document.addEventListener('click',function(event){if(event.target.closest&&event.target.closest('a,[data-mbox-field]'))event.preventDefault();},true);
-      document.addEventListener('dblclick',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el)return;event.preventDefault();begin(el,event.clientX,event.clientY);});
-      document.addEventListener('keydown',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el)return;if(event.key==='Escape'){event.preventDefault();el.textContent=original;el.blur();}else if(event.key==='Enter'&&el.getAttribute('data-mbox-multiline')!=='true'){event.preventDefault();el.blur();}});
-      document.addEventListener('blur',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el||el!==active)return;var value=(el.innerText||'').replace(/\\r/g,'').replace(/\\u00a0/g,' ');el.contentEditable='false';active=null;if(value!==original)send('letter:field-commit',el,value);else el.innerHTML=originalHtml;},true);
-    })();<\/script>`;
-    let previewTimer = 0;
-    const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 300); };
-    function renderPreview() {
-      if (!state.letter) return;
-      const result = renderResult(true);
-      const list = $('#render-errors');
-      list.hidden = !result.errors.length;
-      list.innerHTML = result.errors.map((e) => `<li>${esc(e)}</li>`).join('');
-      document.querySelectorAll('#items .item').forEach((el, index) => el.classList.toggle('err', result.errors.some((e) => e.includes(`(позиция ${index + 1})`))));
-      if (state.tab !== 'mailing') return;
-      const frame = $('#letter-frame');
-      // Письмо в песочнице: позицию прокрутки оно само сообщает (letter:scroll) и восстанавливает при перерисовке.
-      const target = state.scrollToEnd ? '"end"' : String(Number(state.letterScroll) || 0);
-      state.scrollToEnd = false;
-      const scrollScript = `<script>(function(){var t=${target};function go(){scrollTo(0,t==="end"?document.documentElement.scrollHeight:t);}go();addEventListener("load",go);var q=0;addEventListener("scroll",function(){clearTimeout(q);q=setTimeout(function(){parent.postMessage({type:"letter:scroll",y:scrollY},"*");},80);});})();<\/script>`;
-      fitLetter();
-      frame.srcdoc = result.html.replace(/<\/body>/i, `${EDITOR_BRIDGE}${scrollScript}</body>`);
-    }
-    function activeTextContext() {
-      const active = state.activeField;
-      const item = active && state.letter?.letter?.items?.[active.item];
-      const component = item && componentOf(item.component);
-      const field = component?.fields?.find((entry) => entry.key === active.field);
-      return item && field ? { active, item, component, field } : null;
-    }
-    function syncTextTools() {
-      const context = activeTextContext();
-      $('#text-tools').hidden = !context;
-      $('#editor-hint').hidden = Boolean(context);
-      if (!context) return;
-      const format = state.K.normalizeFormat(context.item.formats?.[context.field.key]);
-      $('#text-field').textContent = `${context.component.id} · ${context.field.label || context.field.key}`;
-      $('#format-bold').setAttribute('aria-pressed', format.bold ? 'true' : 'false');
-      $('#format-size').value = format.fontSize || '';
-      $('#format-color').value = format.color || '#172b25';
-    }
-    function updateActiveFormat(patch) {
-      const context = activeTextContext();
-      if (!context) return;
-      const formats = context.item.formats = context.item.formats || {};
-      const current = state.K.normalizeFormat(formats[context.field.key]);
-      const next = state.K.normalizeFormat({ ...current, ...patch });
-      if (!next.fontSize && !next.color && !next.bold) delete formats[context.field.key]; else formats[context.field.key] = next;
-      if (!Object.keys(formats).length) delete context.item.formats;
-      changed();
-      syncTextTools();
-      renderPreview();
-    }
-    window.addEventListener('message', (event) => {
-      const frame = $('#letter-frame');
-      if (event.source === frame.contentWindow && event.data?.type === 'letter:scroll') { state.letterScroll = Number(event.data.y) || 0; return; }
-      if (event.source !== frame.contentWindow || !event.data || !/^letter:field-(select|commit)$/.test(event.data.type)) return;
-      const itemIndex = Number(event.data.item);
-      const item = state.letter?.letter?.items?.[itemIndex];
-      const component = item && componentOf(item.component);
-      const field = component?.fields?.find((entry) => entry.key === event.data.field);
-      if (!item || !field || !['text', 'multiline'].includes(field.type)) return;
-      state.activeField = { item: itemIndex, field: field.key };
-      syncTextTools();
-      if (event.data.type === 'letter:field-commit') {
-        item.fields = item.fields || {};
-        const value = String(event.data.value || '');
-        if (value === '') delete item.fields[field.key]; else item.fields[field.key] = value;
-        changed();
-        renderBuild();
-        setStatus('Текст изменён и сохраняется');
-      }
-    });
-    $('#format-bold').addEventListener('click', () => updateActiveFormat({ bold: $('#format-bold').getAttribute('aria-pressed') !== 'true' }));
-    $('#format-size').addEventListener('input', () => updateActiveFormat({ fontSize: $('#format-size').value ? Number($('#format-size').value) : null }));
-    $('#format-color').addEventListener('input', () => updateActiveFormat({ color: $('#format-color').value }));
-    $('#format-reset').addEventListener('click', () => updateActiveFormat({ fontSize: null, color: '', bold: false }));
-    // Левая панель рассылки: ширина перетаскиванием (240–720 px), двойной клик или кнопка — свернуть. Запоминается.
+    // Ширина правой панели — перетаскиванием (320–640 px), запоминается.
     (() => {
-      const build = document.querySelector('#view-mailing .build');
-      const resizer = $('#side-resizer');
-      const toggle = $('#toggle-side');
-      const KEY = 'email-letter-side';
-      let saved = {};
-      try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { saved = {}; }
-      const apply = () => {
-        build.style.setProperty('--side', `${Math.min(640, Math.max(260, saved.width || 380))}px`);
-        build.classList.toggle('side-collapsed', Boolean(saved.collapsed));
-        toggle.textContent = 'Панель';
-        toggle.title = saved.collapsed ? 'Показать панель письма' : 'Скрыть панель письма';
-        toggle.setAttribute('aria-pressed', String(!saved.collapsed));
-      };
-      const store = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch { /* без хранилища */ } };
-      const flip = () => { saved.collapsed = !saved.collapsed; store(); apply(); };
-      toggle.addEventListener('click', flip);
-      resizer.addEventListener('dblclick', flip);
+      const editor = $('#editor'), resizer = $('#resizer');
+      const apply = () => editor.style.setProperty('--panel', `${Math.min(640, Math.max(320, ui.panel || 400))}px`);
       resizer.addEventListener('pointerdown', (event) => {
-        if (saved.collapsed) return;
         event.preventDefault();
         resizer.setPointerCapture(event.pointerId);
         resizer.classList.add('dragging');
-        const left = build.getBoundingClientRect().left;
-        const move = (moveEvent) => { saved.width = Math.round(moveEvent.clientX - left); apply(); };
-        const up = () => { resizer.classList.remove('dragging'); resizer.removeEventListener('pointermove', move); resizer.removeEventListener('pointerup', up); store(); };
+        const right = editor.getBoundingClientRect().right;
+        const move = (e) => { ui.panel = Math.round(right - e.clientX); apply(); fitLetter(); };
+        const up = () => { resizer.classList.remove('dragging'); resizer.removeEventListener('pointermove', move); resizer.removeEventListener('pointerup', up); saveUi(); fitThumbs(); };
         resizer.addEventListener('pointermove', move);
         resizer.addEventListener('pointerup', up);
       });
       apply();
     })();
-    // Масштаб письма под сцену: ширина вёрстки настоящая, уменьшается только картинка.
+
+    function renderAll() {
+      renderLetterPicker();
+      renderBlocks();
+      renderLibraryState();
+      renderCheck();
+    }
+
+    // ── Состав и выбранный блок ─────────────────────────────────────────────────────────
+    const componentOf = (id) => state.K.componentById(state.kit.registry, id);
+    function blockAction(index, action) {
+      const body = bodyOf(); if (!body || !body.items[index]) return;
+      const item = body.items[index];
+      if (action === 'up' && index > 0) moveItem(index, index - 1);
+      else if (action === 'down' && index < body.items.length - 1) moveItem(index, index + 1);
+      else if (action === 'dup') {
+        body.items.splice(index + 1, 0, JSON.parse(JSON.stringify(item)));
+        state.selected = index + 1;
+        changed(); renderBlocks();
+        setStatus(`${item.component} продублирован`);
+      } else if (action === 'del') {
+        body.items.splice(index, 1);
+        state.selected = body.items.length ? Math.min(index, body.items.length - 1) : null;
+        state.activeField = null;
+        changed(); renderBlocks(); renderLibraryState();
+        setStatus(`${item.component} убран из письма`);
+      }
+    }
+    function moveItem(from, to) {
+      const body = bodyOf();
+      if (to < 0 || to >= body.items.length || from === to) return;
+      body.items.splice(to, 0, body.items.splice(from, 1)[0]);
+      if (state.selected === from) state.selected = to;
+      else if (state.selected != null) {
+        if (from < state.selected && to >= state.selected) state.selected -= 1;
+        else if (from > state.selected && to <= state.selected) state.selected += 1;
+      }
+      changed();
+      renderBlocks();
+    }
+    function selectItem(index, { scroll = true, pane = true } = {}) {
+      state.selected = index;
+      state.activeField = null;
+      if (pane) showPane('blocks');
+      renderBlockPanel();
+      if (scroll) focusBlock(index);
+    }
+    // Новый блок встаёт после выбранного (или в указанное место) с тестовыми данными, как в превью библиотеки.
+    function addToLetter(id, at) {
+      const body = bodyOf(); if (!body) { setStatus('Сначала выберите или создайте письмо', 'err'); return false; }
+      const component = componentOf(id); if (!component) return false;
+      const index = at != null ? at : state.selected != null ? state.selected + 1 : body.items.length;
+      body.items.splice(index, 0, { component: id, fields: sampleFields(component) });
+      state.selected = index;
+      state.activeField = null;
+      state.focusAfterRender = index;
+      changed();
+      renderBlocks();
+      renderLibraryState();
+      setStatus(`${id} добавлен ${index + 1}-м`, 'ok');
+      return index;
+    }
+
+    function renderBlocks() {
+      renderBlockPanel();
+      renderPreview();
+    }
+    // Правая вкладка «Блоки письма»: выбранный блок с полями, состав, тема/UTM. Письмо не перерисовывает.
+    function renderBlockPanel() {
+      const body = bodyOf();
+      $('#count-items').textContent = body ? body.items.length : 0;
+      if (!body) { $('#items').innerHTML = '<div class="empty">Выберите или создайте письмо</div>'; $('#selected').innerHTML = ''; $('#proposal').innerHTML = ''; return; }
+      if (state.selected != null && state.selected >= body.items.length) state.selected = null;
+      $$('[data-letter]').forEach((input) => { if (document.activeElement !== input) input.value = body[input.dataset.letter] ?? ''; });
+      $$('[data-utm]').forEach((input) => { if (document.activeElement !== input) input.value = body.utm[input.dataset.utm] ?? ''; });
+      const p = state.letter.proposal;
+      $('#proposal').innerHTML = p && (p.notes || (p.questions || []).length) ? `<div class="notice ${(p.questions || []).length ? 'warn' : ''}"><b>${esc(p.by || 'Агент')}</b> <span class="muted">${esc(String(p.at || '').slice(0, 16).replace('T', ' '))}</span>${p.notes ? `<div>${esc(p.notes)}</div>` : ''}${(p.questions || []).length ? `<ul>${p.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}</div>` : '';
+      $('#items-count').textContent = body.items.length ? `· ${body.items.length}` : '';
+      const items = $('#items');
+      if (!body.items.length) items.innerHTML = '<div class="empty">Блоков нет — добавьте их из библиотеки</div>';
+      else items.replaceChildren(...body.items.map((item, index) => itemRow(body, item, index)));
+      renderSelected();
+    }
+    function itemRow(body, item, index) {
+      const component = componentOf(item.component);
+      const el = document.createElement('div');
+      el.className = `item ${state.selected === index ? 'on' : ''}`;
+      el.dataset.index = index;
+      el.draggable = true;
+      el.tabIndex = 0;
+      el.innerHTML = `<span class="grip" title="Перетащите, чтобы переставить">${icon('grip', 'sm')}</span><span class="num">${esc(item.component)}</span><span class="name">${esc(component ? component.name : 'нет в реестре')}</span>`;
+      el.addEventListener('click', () => selectItem(index));
+      el.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectItem(index); } });
+      // Перестановка перетаскиванием: линия показывает, куда встанет блок.
+      el.addEventListener('dragstart', (event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/x-letter-item', String(index)); el.classList.add('dragging'); });
+      el.addEventListener('dragend', () => { el.classList.remove('dragging'); $$('#items .item').forEach((row) => row.classList.remove('drop-before', 'drop-after')); });
+      el.addEventListener('dragover', (event) => {
+        if (!event.dataTransfer.types.includes('text/x-letter-item') && !state.drag) return;
+        event.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const after = event.clientY > rect.top + rect.height / 2;
+        el.classList.toggle('drop-after', after);
+        el.classList.toggle('drop-before', !after);
+      });
+      el.addEventListener('dragleave', () => el.classList.remove('drop-before', 'drop-after'));
+      el.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const after = el.classList.contains('drop-after');
+        el.classList.remove('drop-before', 'drop-after');
+        if (state.drag) { const id = state.drag; state.drag = null; addToLetter(id, index + (after ? 1 : 0)); return; }
+        const from = Number(event.dataTransfer.getData('text/x-letter-item'));
+        if (!Number.isInteger(from)) return;
+        let to = index + (after ? 1 : 0);
+        if (from < to) to -= 1;
+        moveItem(from, to);
+      });
+      return el;
+    }
+    function renderSelected() {
+      const box = $('#selected');
+      const body = bodyOf();
+      const index = state.selected;
+      const item = body && index != null ? body.items[index] : null;
+      if (!item) { box.innerHTML = body && body.items.length ? '<div class="notice">Выберите блок в письме слева — здесь появятся его тексты, ссылки и картинки.</div>' : ''; return; }
+      const component = componentOf(item.component);
+      box.innerHTML = `<section class="section selected-block">
+          <div class="section-head"><span class="num">${esc(item.component)}</span><span class="name" title="${esc(component?.name || '')}">${esc(component ? component.name : 'нет в реестре')}</span>
+            <button class="btn icon sm ghost" type="button" data-act="up" ${index ? '' : 'disabled'} title="Выше (Alt+↑)">${icon('up', 'sm')}</button>
+            <button class="btn icon sm ghost" type="button" data-act="down" ${index < body.items.length - 1 ? '' : 'disabled'} title="Ниже (Alt+↓)">${icon('down', 'sm')}</button>
+            <button class="btn icon sm ghost" type="button" data-act="dup" title="Дублировать">${icon('dup', 'sm')}</button>
+            <button class="btn icon sm ghost danger" type="button" data-act="del" title="Удалить (Delete)">${icon('trash', 'sm')}</button></div>
+          <div class="section-body" id="sel-body"></div>
+        </section>`;
+      $$('[data-act]', box).forEach((button) => button.addEventListener('click', () => blockAction(index, button.dataset.act)));
+      const fields = $('#sel-body', box);
+      if (component?.description) fields.insertAdjacentHTML('beforeend', `<div class="muted" style="font-size:var(--text-xs)">${esc(component.description)}</div>`);
+      item.fields = item.fields || {};
+      if (component && !component.fields.length) fields.insertAdjacentHTML('beforeend', '<div class="muted">Полей нет — блок одинаков во всех письмах.</div>');
+      (component?.fields || []).forEach((field) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'field';
+        const multiline = field.type === 'multiline';
+        wrap.innerHTML = `<label>${esc(field.label || field.key)}${field.required ? '' : ' <span>· необязательно</span>'}</label>`;
+        const input = document.createElement(multiline ? 'textarea' : 'input');
+        if (multiline) input.rows = 3;
+        if (field.type === 'url' || field.type === 'image') input.inputMode = 'url';
+        input.value = item.fields[field.key] ?? '';
+        input.placeholder = field.default ? String(field.default).split('\n')[0] : '';
+        input.dataset.field = field.key;
+        input.addEventListener('input', () => { if (input.value === '') delete item.fields[field.key]; else item.fields[field.key] = input.value; changed(); schedulePreview(); });
+        input.addEventListener('focus', () => { if (['text', 'multiline'].includes(field.type)) { state.activeField = { item: index, field: field.key }; renderFormat(); } });
+        wrap.append(input);
+        fields.append(wrap);
+      });
+      fields.insertAdjacentHTML('beforeend', '<div class="format" id="format" hidden></div>');
+      fields.insertAdjacentHTML('beforeend', `<details class="ask"><summary class="btn sm ghost" style="width:max-content">${icon('spark', 'sm')}Изменить компонент с агентом</summary><textarea placeholder="Что изменить в ${esc(item.component)}? Правка коснётся всех писем" rows="2"></textarea><button class="btn sm primary" type="button" style="justify-self:start">Отправить агенту</button></details>`);
+      $('.ask button', fields).addEventListener('click', () => {
+        const request = $('.ask textarea', fields).value.trim(); if (!request || !component) return;
+        sendAgent(`Навык email-campaign, компонент ${component.id} «${component.name}» (${component.file}, поля в components/registry.json): ${request}\nПравь edit_skill_file, номер не меняй; новые поля — {{ключ}} в шаблоне и описание в реестре. Проверь: node scripts/letter.mjs build example --no-remote. Запиши в learnings.md («Сделано»), что изменил.`);
+        $('.ask textarea', fields).value = '';
+        $('.ask', fields).open = false;
+      });
+      renderFormat();
+    }
+    $('#add-block').addEventListener('click', (event) => {
+      const counts = usageCounts();
+      showPop(event.currentTarget, {
+        placeholder: 'Блок: номер или название',
+        rows: [...state.kit.registry.components].map((c) => ({ id: c.id, num: c.id, label: c.name, meta: counts[c.id] ? `в письме ×${counts[c.id]}` : c.category })),
+        onPick: (id) => addToLetter(id),
+      });
+    });
+    $$('[data-letter]').forEach((input) => input.addEventListener('input', () => { const body = bodyOf(); if (!body) return; body[input.dataset.letter] = input.value; changed(); schedulePreview(); if (input.dataset.letter === 'subject') renderLetterPicker(); }));
+    $$('[data-utm]').forEach((input) => input.addEventListener('input', () => { const body = bodyOf(); if (!body) return; body.utm[input.dataset.utm] = input.value; changed(); schedulePreview(); }));
+
+    // Оформление текстового поля (размер, цвет, жирный) — для поля, которое правят в письме или в панели.
+    function activeTextContext() {
+      const active = state.activeField;
+      const item = active && state.letter?.letter?.items?.[active.item];
+      const component = item && componentOf(item.component);
+      const field = component?.fields?.find((entry) => entry.key === active.field);
+      return item && field && active.item === state.selected ? { item, component, field } : null;
+    }
+    function renderFormat() {
+      const box = $('#format');
+      if (!box) return;
+      const context = activeTextContext();
+      box.hidden = !context;
+      if (!context) return;
+      const format = state.K.normalizeFormat(context.item.formats?.[context.field.key]);
+      box.innerHTML = `<span class="field-name">Оформление · ${esc(context.field.label || context.field.key)}</span>
+        <button class="btn sm" type="button" id="format-bold" aria-pressed="${format.bold}">${icon('bold', 'sm')}Жирный</button>
+        <label>Размер <input id="format-size" type="number" min="8" max="72" step="1" inputmode="numeric" placeholder="авто" value="${format.fontSize || ''}"></label>
+        <label>Цвет <input id="format-color" type="color" value="${format.color || '#172b25'}"></label>
+        <button class="btn sm ghost" type="button" id="format-reset">${icon('reset', 'sm')}Сбросить</button>`;
+      $('#format-bold').addEventListener('click', () => updateActiveFormat({ bold: !format.bold }));
+      $('#format-size').addEventListener('input', (e) => updateActiveFormat({ fontSize: e.target.value ? Number(e.target.value) : null }, false));
+      $('#format-color').addEventListener('input', (e) => updateActiveFormat({ color: e.target.value }, false));
+      $('#format-reset').addEventListener('click', () => updateActiveFormat({ fontSize: null, color: '', bold: false }));
+    }
+    function updateActiveFormat(patch, redraw = true) {
+      const context = activeTextContext();
+      if (!context) return;
+      const formats = context.item.formats = context.item.formats || {};
+      const next = state.K.normalizeFormat({ ...state.K.normalizeFormat(formats[context.field.key]), ...patch });
+      if (!next.fontSize && !next.color && !next.bold) delete formats[context.field.key]; else formats[context.field.key] = next;
+      if (!Object.keys(formats).length) delete context.item.formats;
+      changed();
+      if (redraw) renderFormat();
+      schedulePreview();
+    }
+
+    // ── Письмо слева: предпросмотр, выделение, перетаскивание ───────────────────────────
+    function renderResult(editable = false) { return state.letter ? state.K.renderLetter(state.letter, state.kit, editable ? { editable: true } : undefined) : { html: '', errors: [], warnings: [] }; }
+    const TOOL_ICONS = {
+      up: '<path d="m18 15-6-6-6 6"/>', down: '<path d="m6 9 6 6 6-6"/>',
+      dup: '<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/>',
+      del: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+    };
+    // Мост в письме: подсветка блока под курсором, выделенный блок с панелью действий, перетаскивание
+    // блока из библиотеки (линия вставки), правка текста двойным кликом. Служебное не попадает в готовый HTML.
+    const EDITOR_BRIDGE = `<style>
+      [data-mbox-block]{cursor:pointer}
+      .mbox-hover{outline:1px dashed rgba(0,113,227,.6)!important;outline-offset:-1px}
+      .mbox-picked{outline:2px solid #0071e3!important;outline-offset:-2px}
+      [data-mbox-field]{cursor:text}
+      [data-mbox-field]:hover,[data-mbox-field]:focus{outline:1px dashed #0071e3;outline-offset:3px}
+      [data-mbox-field][contenteditable="true"]{outline:2px solid #0071e3;outline-offset:3px;white-space:pre-wrap}
+      #mbox-tools{position:absolute;z-index:10;display:flex;gap:2px;padding:3px;border-radius:999px;background:#0071e3;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+      #mbox-tools button{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:none;color:#fff;cursor:pointer}
+      #mbox-tools button:hover{background:rgba(255,255,255,.18)}
+      #mbox-tools svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      #mbox-tag{position:absolute;z-index:10;padding:2px 8px;border-radius:999px;background:#0071e3;color:#fff;font:600 11px/18px Inter,Segoe UI,sans-serif}
+      #mbox-line{position:absolute;z-index:11;left:0;right:0;height:4px;margin-top:-2px;border-radius:2px;background:#0071e3;box-shadow:0 0 0 2px rgba(0,113,227,.25);pointer-events:none}
+    </style><script>(function(){
+      var ICONS=${JSON.stringify(TOOL_ICONS)};
+      var active=null,original='',originalHtml='',hover=null,picked=window.__picked;
+      function send(type,data){data.type=type;parent.postMessage(data,'*');}
+      function fieldMsg(type,el,value){send(type,{item:Number(el.getAttribute('data-mbox-item')),field:el.getAttribute('data-mbox-field'),value:value});}
+      function outer(i){return Array.prototype.filter.call(document.querySelectorAll('[data-mbox-block="'+i+'"]'),function(el){var up=el.parentElement&&el.parentElement.closest('[data-mbox-block]');return !up||up.getAttribute('data-mbox-block')!==String(i);});}
+      function indices(){var seen={},out=[];Array.prototype.forEach.call(document.querySelectorAll('[data-mbox-block]'),function(el){var i=el.getAttribute('data-mbox-block');if(!seen[i]){seen[i]=1;out.push(Number(i));}});return out;}
+      function box(i){var rows=outer(i);if(!rows.length)return null;var a=rows[0].getBoundingClientRect(),b=rows[rows.length-1].getBoundingClientRect();return {top:a.top+scrollY,bottom:b.bottom+scrollY,left:Math.min(a.left,b.left)+scrollX,right:Math.max(a.right,b.right)+scrollX};}
+      function mark(i,cls){Array.prototype.forEach.call(document.querySelectorAll('.'+cls),function(el){el.classList.remove(cls);});if(i==null)return [];var rows=outer(i);rows.forEach(function(el){el.classList.add(cls);});return rows;}
+      function blockOf(target){var el=target&&target.closest&&target.closest('[data-mbox-block]');return el?Number(el.getAttribute('data-mbox-block')):null;}
+      function tools(){var old=document.getElementById('mbox-tools');if(old)old.remove();var tag=document.getElementById('mbox-tag');if(tag)tag.remove();if(picked==null)return;var b=box(picked);if(!b)return;
+        var bar=document.createElement('div');bar.id='mbox-tools';
+        [['up','Выше'],['down','Ниже'],['dup','Дублировать'],['del','Удалить']].forEach(function(a){var btn=document.createElement('button');btn.type='button';btn.title=a[1];btn.innerHTML='<svg viewBox="0 0 24 24">'+ICONS[a[0]]+'</svg>';btn.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();send('letter:action',{item:picked,action:a[0]});});bar.appendChild(btn);});
+        document.body.appendChild(bar);bar.style.top=Math.max(4,b.top+6)+'px';bar.style.left=Math.max(4,b.right-bar.offsetWidth-6)+'px';
+        var t=document.createElement('div');t.id='mbox-tag';t.textContent=window.__names&&window.__names[picked]||'';if(t.textContent){document.body.appendChild(t);t.style.top=Math.max(4,b.top+6)+'px';t.style.left=(b.left+6)+'px';}}
+      function pick(i,scroll){picked=i;var rows=mark(i,'mbox-picked');tools();if(rows[0]&&scroll){var r=rows[0].getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)scrollTo({top:scrollY+r.top-40,behavior:'smooth'});}}
+      function begin(el,x,y){if(!el||active===el)return; if(active)active.blur(); active=el;original=el.getAttribute('data-mbox-value')||'';originalHtml=el.innerHTML;if(el.textContent!==original)el.textContent=original;el.contentEditable='true';el.focus();
+        var selection=getSelection(),range=document.caretRangeFromPoint&&x!=null?document.caretRangeFromPoint(x,y):null;
+        if(!range||!el.contains(range.startContainer)){range=document.createRange();range.selectNodeContents(el);range.collapse(false);}
+        selection.removeAllRanges();selection.addRange(range);fieldMsg('letter:field-select',el,original);}
+      // Ссылки в редакторе не открываются: клик выбирает блок, двойной клик правит текст.
+      document.addEventListener('click',function(event){if(event.target.closest&&event.target.closest('#mbox-tools'))return;if(event.target.closest&&event.target.closest('a,[data-mbox-field],[data-mbox-block]'))event.preventDefault();var b=blockOf(event.target);if(b!=null&&!active){pick(b,false);send('letter:block',{item:b});}},true);
+      document.addEventListener('mouseover',function(event){var b=blockOf(event.target);if(b===hover)return;hover=b;mark(b,'mbox-hover');});
+      document.addEventListener('mouseleave',function(){hover=null;mark(null,'mbox-hover');});
+      document.addEventListener('dblclick',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el)return;event.preventDefault();begin(el,event.clientX,event.clientY);});
+      document.addEventListener('keydown',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el)return;if(event.key==='Escape'){event.preventDefault();el.textContent=original;el.blur();}else if(event.key==='Enter'&&el.getAttribute('data-mbox-multiline')!=='true'){event.preventDefault();el.blur();}});
+      document.addEventListener('blur',function(event){var el=event.target.closest&&event.target.closest('[data-mbox-field]');if(!el||el!==active)return;var value=(el.innerText||'').replace(/\\r/g,'').replace(/\\u00a0/g,' ');el.contentEditable='false';active=null;if(value!==original)fieldMsg('letter:field-commit',el,value);else el.innerHTML=originalHtml;},true);
+      // Блок из библиотеки тащат прямо в письмо: линия показывает, куда он встанет.
+      var line=null,dropAt=null;
+      function place(y){var list=indices();var at=list.length,top=null;for(var k=0;k<list.length;k++){var b=box(list[k]);if(!b)continue;if(y<(b.top+b.bottom)/2){at=k;top=b.top;break;}top=b.bottom;}
+        if(!line){line=document.createElement('div');line.id='mbox-line';document.body.appendChild(line);}line.style.top=(top==null?8:top)+'px';dropAt=at;}
+      function clearLine(){if(line){line.remove();line=null;}}
+      document.addEventListener('dragover',function(event){event.preventDefault();event.dataTransfer.dropEffect='copy';place(event.clientY+scrollY);});
+      document.addEventListener('dragleave',function(event){if(!event.relatedTarget)clearLine();});
+      document.addEventListener('drop',function(event){event.preventDefault();var at=dropAt;clearLine();send('letter:drop',{at:at==null?0:at});});
+      addEventListener('message',function(event){var d=event.data;if(event.source!==parent||!d)return;if(d.type==='letter:focus-block')pick(d.item,d.scroll);if(d.type==='letter:drag-end')clearLine();});
+      addEventListener('resize',tools);
+      if(picked!=null)pick(picked,false);
+    })();<\/script>`;
+    function focusBlock(index, scroll = true) { $('#letter-frame').contentWindow?.postMessage({ type: 'letter:focus-block', item: index, scroll }, '*'); }
+    let previewTimer = 0;
+    const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(renderPreview, 300); };
+    function renderPreview() {
+      clearTimeout(previewTimer);
+      const body = bodyOf();
+      $('#canvas-empty').hidden = Boolean(body && body.items.length);
+      if (!state.letter) return;
+      const result = renderResult(true);
+      const list = $('#render-errors');
+      list.hidden = !result.errors.length;
+      list.innerHTML = result.errors.map((e) => `<li>${esc(e)}</li>`).join('');
+      $$('#items .item').forEach((el, index) => el.classList.toggle('err', result.errors.some((e) => e.includes(`(позиция ${index + 1})`))));
+      updateCheckCount(result);
+      const frame = $('#letter-frame');
+      const focus = state.focusAfterRender;
+      state.focusAfterRender = null;
+      const names = (body?.items || []).map((item) => `${item.component} · ${componentOf(item.component)?.name || ''}`);
+      // Письмо в песочнице: прокрутку оно само сообщает (letter:scroll) и восстанавливает при перерисовке.
+      const prelude = `<script>window.__picked=${state.selected != null ? state.selected : 'null'};window.__names=${JSON.stringify(names).replace(/</g, '\\u003c')};(function(){var t=${Number(state.letterScroll) || 0};function go(){scrollTo(0,t);}go();addEventListener("load",function(){go();${focus != null ? `parent.postMessage({type:"letter:ready",focus:${focus}},"*");` : ''}});var q=0;addEventListener("scroll",function(){clearTimeout(q);q=setTimeout(function(){parent.postMessage({type:"letter:scroll",y:scrollY},"*");},80);});})();<\/script>`;
+      fitLetter();
+      frame.srcdoc = result.html.replace(/<\/body>/i, `${prelude}${EDITOR_BRIDGE}</body>`);
+    }
+    window.addEventListener('message', (event) => {
+      const frame = $('#letter-frame');
+      if (event.source !== frame.contentWindow || !event.data) return;
+      const data = event.data;
+      if (data.type === 'letter:scroll') { state.letterScroll = Number(data.y) || 0; return; }
+      if (data.type === 'letter:ready') { focusBlock(Number(data.focus)); return; }
+      if (data.type === 'letter:block') { if (state.selected !== Number(data.item)) selectItem(Number(data.item), { scroll: false }); else showPane('blocks'); return; }
+      if (data.type === 'letter:action') { blockAction(Number(data.item), data.action); return; }
+      if (data.type === 'letter:drop') { if (state.drag) { const id = state.drag; state.drag = null; addToLetter(id, Number(data.at)); } return; }
+      if (!/^letter:field-(select|commit)$/.test(data.type)) return;
+      const itemIndex = Number(data.item);
+      const item = state.letter?.letter?.items?.[itemIndex];
+      const component = item && componentOf(item.component);
+      const field = component?.fields?.find((entry) => entry.key === data.field);
+      if (!item || !field || !['text', 'multiline'].includes(field.type)) return;
+      state.activeField = { item: itemIndex, field: field.key };
+      if (state.selected !== itemIndex) { state.selected = itemIndex; showPane('blocks'); renderBlockPanel(); }
+      else renderFormat();
+      if (data.type === 'letter:field-commit') {
+        item.fields = item.fields || {};
+        const value = String(data.value || '');
+        if (value === '') delete item.fields[field.key]; else item.fields[field.key] = value;
+        const input = $(`#sel-body [data-field="${field.key}"]`);
+        if (input) input.value = value;
+        changed();
+        schedulePreview();
+      }
+    });
+
     function fitLetter() {
-      const body = $('#stage-body'), fit = $('#letter-fit'), frame = $('#letter-frame');
+      const stage = $('#stage'), fit = $('#letter-fit'), frame = $('#letter-frame');
       const width = state.mobile ? 390 : 700;
-      const availW = Math.max(120, body.clientWidth - 12), availH = Math.max(120, body.clientHeight - 12);
+      const availW = Math.max(120, stage.clientWidth - 32), availH = Math.max(120, stage.clientHeight - 32);
       const scale = Math.min(1, availW / width);
-      fit.style.width = `${Math.floor(width * scale) + 2}px`;
+      fit.style.width = `${Math.floor(width * scale)}px`;
       frame.style.width = `${width}px`;
       frame.style.height = `${Math.ceil(availH / scale)}px`;
       frame.style.transform = scale < 1 ? `scale(${scale})` : '';
     }
-    new ResizeObserver(fitLetter).observe($('#stage-body'));
-    $('#toggle-mobile').addEventListener('click', () => { state.mobile = !state.mobile; $('#stage').classList.toggle('mobile', state.mobile); $('#toggle-mobile').textContent = state.mobile ? 'Компьютер' : 'Телефон'; $('#toggle-mobile').setAttribute('aria-pressed', String(state.mobile)); fitLetter(); });
-    $('#copy-html').addEventListener('click', async () => { try { await navigator.clipboard.writeText(renderResult().html); setStatus('HTML скопирован', 'ok'); } catch { setStatus('Буфер недоступен — скачайте файл', 'err'); } });
+    new ResizeObserver(fitLetter).observe($('#stage'));
+    function setMobile(mobile) {
+      state.mobile = mobile;
+      $('#canvas').classList.toggle('mobile', mobile);
+      $('#view-mobile').classList.toggle('on', mobile);
+      $('#view-desktop').classList.toggle('on', !mobile);
+      fitLetter();
+    }
+    $('#view-mobile').addEventListener('click', () => setMobile(true));
+    $('#view-desktop').addEventListener('click', () => setMobile(false));
+    // В песочнице MBOX navigator.clipboard запрещён — тогда копируем старым способом через скрытое поле.
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); return true; } catch { /* песочница */ }
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.append(area);
+      area.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      area.remove();
+      return ok;
+    }
+    $('#copy-html').addEventListener('click', async () => { const ok = await copyText(renderResult().html); setStatus(ok ? 'HTML скопирован' : 'Буфер недоступен — скачайте файл', ok ? 'ok' : 'err'); });
     $('#download-html').addEventListener('click', () => {
       const link = document.createElement('a');
       link.href = URL.createObjectURL(new Blob([renderResult().html], { type: 'text/html;charset=utf-8' }));
@@ -729,60 +1048,17 @@
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     });
-    async function checkNow() {
-      const l = state.letter;
-      if (!l) return;
-      if (!bridge?.emailCheck) { setStatus('Обновите MBOX: в этой версии нет прямой проверки Email Checker', 'err'); return; }
-      const button = $('#check-now');
-      button.disabled = true;
-      button.setAttribute('aria-busy', 'true');
-      button.textContent = 'Проверяется…';
-      setStatus('Email Checker проверяет разметку, ссылки и текст…');
-      try {
-        await saveNow('Письмо перед внешней проверкой');
-        const rendered = renderResult();
-        const email = await bridge.emailCheck(rendered.html);
-        const externalBlocking = (email.links_failed || []).length + (email.validation?.errors || []).length + rendered.errors.length;
-        const previous = l.check || {};
-        l.check = {
-          ...previous,
-          at: new Date().toISOString(),
-          by: 'Email Checker',
-          ok: false,
-          external_ok: externalBlocking === 0,
-          external_status: 'checked',
-          render: { errors: rendered.errors, warnings: rendered.warnings },
-          preflight: { pending: true, errors: [], warnings: [] },
-          email_checker: email,
-          fixed: previous.fixed || [],
-          remaining: previous.remaining || [],
-        };
-        l.status = externalBlocking ? 'needs-fix' : 'external-checked';
-        await saveNow('Внешняя проверка Email Checker');
-        renderAll();
-        showTab('mailing');
-        setStatus(externalBlocking ? `Email Checker: найдено проблем — ${externalBlocking}` : 'Email Checker пройден', externalBlocking ? 'err' : 'ok');
-      } catch (error) {
-        setStatus(`Email Checker не завершил проверку: ${error.message}`, 'err');
-      } finally {
-        button.disabled = false;
-        button.removeAttribute('aria-busy');
-        button.textContent = 'Проверить';
-      }
-    }
-    $('#check-now').addEventListener('click', checkNow);
-    $('#ask-check').addEventListener('click', async () => {
-      const l = state.letter; if (!l) return;
-      await saveNow('Состав перед проверкой');
-      sendAgent([
-        `Навык email-campaign, письмо letters/${l.id}.json — состав готов в конструкторе.`,
-        '1. `node scripts/letter.mjs build ' + l.id + '` — сборка, strict preflight и Email Checker.',
-        '2. Исправь актуальные ошибки: поля письма — edit_skill_file в letters/' + l.id + '.json, ошибка вёрстки блока — в его компоненте components/C###.html. Повтори build до чистого результата.',
-        '3. Замечания к тексту оцени по смыслу (склейку текста соседних блоков проверяльщик принимает за ошибки). Что исправил — в check.fixed, что оставил на решение — в check.remaining. Открой мне готовый HTML через open_tab (path:) и коротко отчитайся.',
-      ].join('\n'));
-    });
+    $('#empty-library').addEventListener('click', () => { showPane('library'); $('#c-search').focus(); });
+    $('#empty-parse').addEventListener('click', () => openParse());
+    // Пустое письмо: блок можно бросить прямо на заглушку.
+    (() => {
+      const empty = $('#canvas-empty');
+      empty.addEventListener('dragover', (event) => { if (!state.drag) return; event.preventDefault(); empty.classList.add('drop'); });
+      empty.addEventListener('dragleave', () => empty.classList.remove('drop'));
+      empty.addEventListener('drop', (event) => { event.preventDefault(); empty.classList.remove('drop'); if (state.drag) { const id = state.drag; state.drag = null; addToLetter(id, 0); } });
+    })();
 
-    // ── 2. Компоненты ───────────────────────────────────────────────────────────────────
+    // ── Библиотека блоков ───────────────────────────────────────────────────────────────
     const PLACEHOLDER_IMG = 'https://img.hiteml.com/en/v5/user-files?userId=4445740&resource=himg&disposition=inline&name=6fyd1pt414fh9sd84bcbqiwsjac1xf7pmb846djbcmpc6s11n96s4cmmhthi4wr46hod3y1r93upkjoadxob66uaae9ntpi77hsignoassqqibmpqob3r9ze36rtn5pjq';
     function sampleFields(component) {
       const values = {};
@@ -792,71 +1068,85 @@
       });
       return values;
     }
-    const MEASURE = '<script>(function(){function h(){parent.postMessage({type:"lib:height",h:document.documentElement.scrollHeight},"*");}addEventListener("load",h);if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);setTimeout(h,300);})();<\/script>';
-    const frames = new Set();
-    window.addEventListener('message', (event) => {
-      if (!event.data || event.data.type !== 'lib:height') return;
-      for (const frame of frames) if (!frame.isConnected) frames.delete(frame); else if (frame.contentWindow === event.source) fitPreview(frame, Math.max(40, Number(event.data.h) || 0));
-    });
-    // Компонент рисуется в ширине настольного письма (700 px: у 660 и уже срабатывает мобильная вёрстка) и уменьшается под карточку: блоки больше не
-    // выглядят крупно, а пропорции остаются как в письме.
-    function fitPreview(frame, height) {
-      frame.style.height = `${height}px`;
-      const box = frame.parentElement;
-      if (!box || !box.classList.contains('is-scaled')) return;
-      const scale = Math.min(1, (box.clientWidth - 16) / 700);
-      frame.style.transform = `scale(${scale})`;
-      box.style.height = `${Math.ceil(height * scale) + 16}px`;
+    function usageCounts() {
+      const counts = {};
+      (state.letter?.letter?.items || []).forEach((item) => { counts[item.component] = (counts[item.component] || 0) + 1; });
+      return counts;
     }
-    window.addEventListener('resize', () => { for (const frame of frames) if (frame.isConnected && frame.style.height) fitPreview(frame, parseFloat(frame.style.height)); });
     function previewDoc(template, component) {
       const rendered = state.K.renderComponent(component, template, sampleFields(component));
-      const shell = state.kit.shell.replace('{{subject}}', '').replace('{{preheader}}', '').replace(state.K.MARK, rendered.html);
-      return shell.replace(/<\/body>/i, `${MEASURE}</body>`);
+      return state.kit.shell.replace('{{subject}}', '').replace('{{preheader}}', '').replace(state.K.MARK, rendered.html);
     }
-    function renderComponents() {
+    const blockDoc = (html) => state.kit.shell.replace('{{subject}}', '').replace('{{preheader}}', '').replace(state.K.MARK, html);
+    // Миниатюры — письмо шириной 700 px, уменьшенное под карточку; высота карточки фиксирована.
+    function fitThumbs() {
+      $$('.comp-thumb').forEach((thumb) => {
+        const frame = $('iframe', thumb);
+        if (thumb.clientWidth) frame.style.transform = `scale(${thumb.clientWidth / 700})`;
+      });
+    }
+    let libBuiltFor = null;
+    function buildLibrary() {
       const registry = state.kit.registry;
-      $('#count-components').textContent = registry.components.length;
-      $('#c-categories').innerHTML = [...new Set(registry.components.map((c) => c.category))].map((c) => `<option value="${esc(c)}">`).join('');
-      const needle = $('#c-search').value.trim().toLowerCase();
-      const exact = /^c?\d{1,3}$/.test(needle) ? pad(Number(needle.replace(/\D/g, ''))) : '';
-      const shown = registry.components.filter((c) => !needle || (exact ? c.id === exact : `${c.id} ${c.name} ${c.category} ${c.type} ${c.description}`.toLowerCase().includes(needle)));
-      $('#cards').replaceChildren(...shown.map((component) => {
+      libBuiltFor = registry.components;
+      $('#lib').replaceChildren(...registry.components.map((component) => {
         const card = document.createElement('article');
-        card.className = 'card';
-        card.innerHTML = `<div class="card-head"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span><span class="chip">${esc(component.category)}</span><span class="chip">${esc(component.type)}</span>
-          <button class="btn primary small" type="button" data-act="add">+ В письмо</button><button class="btn small" type="button" data-act="ask">Агенту</button></div>
-          <div class="card-info">${esc(component.description || '')}${component.fields.length ? `<br><code>${component.fields.map((f) => `${f.key}${f.required ? '*' : ''}`).join(' · ')}</code>` : ''}</div>
-          <div class="preview is-scaled"><iframe loading="lazy" title="${component.id}"></iframe></div>
-          <div class="ask" hidden><textarea placeholder="Что изменить в ${component.id}?"></textarea><button class="btn primary" type="button" data-act="ask-send">Отправить</button></div>`;
-        const frame = $('iframe', card);
-        frames.add(frame);
-        frame.srcdoc = previewDoc(state.kit.templates[component.id], component);
-        $('[data-act="add"]', card).addEventListener('click', () => {
-          if (addToLetter(component.id)) setStatus(`${component.id} добавлен в конец письма`, 'ok');
-        });
-        $('[data-act="ask"]', card).addEventListener('click', () => { const box = $('.ask', card); box.hidden = !box.hidden; });
-        $('[data-act="ask-send"]', card).addEventListener('click', () => {
-          const request = $('.ask textarea', card).value.trim(); if (!request) return;
-          sendAgent(`Навык email-campaign, компонент ${component.id} «${component.name}» (${component.file}, поля в components/registry.json): ${request}\nПравь edit_skill_file, номер не меняй; новые поля — {{ключ}} в шаблоне и описание в реестре. Проверь: node scripts/letter.mjs build example --no-remote.`);
-          $('.ask textarea', card).value = ''; $('.ask', card).hidden = true;
-        });
+        card.className = 'comp';
+        card.dataset.id = component.id;
+        card.draggable = true;
+        card.title = `${component.name}${component.description ? ` — ${component.description}` : ''}\nПеретащите в письмо или нажмите «+»`;
+        card.innerHTML = `<div class="comp-thumb"><iframe loading="lazy" tabindex="-1" title="${component.id}"></iframe></div>
+          <div class="comp-meta"><div class="comp-title"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span></div><small>${esc(component.category)}</small></div>
+          <span class="chip accent used" data-used hidden></span>
+          <button class="btn icon sm primary comp-add" type="button" title="Вставить после выбранного блока">${icon('plus', 'sm')}</button>`;
+        $('iframe', card).srcdoc = previewDoc(state.kit.templates[component.id], component);
+        $('.comp-add', card).addEventListener('click', (event) => { event.stopPropagation(); addToLetter(component.id); });
+        card.addEventListener('dblclick', () => addToLetter(component.id));
+        card.addEventListener('dragstart', (event) => { state.drag = component.id; event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', component.id); });
+        card.addEventListener('dragend', () => { setTimeout(() => { state.drag = null; }, 0); $('#letter-frame').contentWindow?.postMessage({ type: 'letter:drag-end' }, '*'); });
         return card;
       }));
+      requestAnimationFrame(fitThumbs);
     }
-    $('#c-search').addEventListener('input', renderComponents);
+    function renderLibraryState() {
+      if (!state.kit) return;
+      const registry = state.kit.registry;
+      if (libBuiltFor !== registry.components) buildLibrary();
+      $('#count-components').textContent = registry.components.length;
+      const categories = [...new Set(registry.components.map((c) => c.category))];
+      $('#c-categories').innerHTML = categories.map((c) => `<option value="${esc(c)}">`).join('');
+      $('#c-cats').innerHTML = ['', ...categories].map((c) => `<button type="button" data-cat="${esc(c)}" class="${state.category === c ? 'on' : ''}" aria-pressed="${state.category === c}">${esc(c || 'Все')}</button>`).join('');
+      $$('#c-cats [data-cat]').forEach((button) => button.addEventListener('click', () => { state.category = button.dataset.cat; renderLibraryState(); }));
+      const needle = $('#c-search').value.trim().toLowerCase();
+      const exact = /^c?\d{1,3}$/.test(needle) ? pad(Number(needle.replace(/\D/g, ''))) : '';
+      const counts = usageCounts();
+      let visible = 0;
+      $$('#lib .comp').forEach((card) => {
+        const c = componentOf(card.dataset.id);
+        const show = (!state.category || c.category === state.category) && (!needle || (exact ? c.id === exact : `${c.id} ${c.name} ${c.category} ${c.type} ${c.description}`.toLowerCase().includes(needle)));
+        card.hidden = !show;
+        if (show) visible += 1;
+        const used = $('[data-used]', card);
+        used.hidden = !counts[c.id];
+        used.textContent = counts[c.id] ? `в письме ×${counts[c.id]}` : '';
+      });
+      $('#lib-empty')?.remove();
+      if (!visible) $('#lib').insertAdjacentHTML('afterend', '<div class="empty" id="lib-empty">Ничего не найдено</div>');
+      requestAnimationFrame(fitThumbs);
+    }
+    $('#c-search').addEventListener('input', renderLibraryState);
+    new ResizeObserver(() => fitThumbs()).observe($('#pane-library'));
 
-    // Новый компонент: поля из {{ключей}} шаблона, описание — в таблице, номер — registry.next.
+    // Новый компонент из HTML: поля из {{ключей}} шаблона, номер — registry.next.
     const newSchema = {};
-    $('#c-new-toggle').addEventListener('click', () => { $('#c-new').hidden = !$('#c-new').hidden; $('#c-new-number').textContent = pad(state.kit.registry.next); });
-    $('#c-cancel').addEventListener('click', () => { $('#c-new').hidden = true; });
+    $('#c-new-open').addEventListener('click', () => { $('#c-new-number').textContent = pad(state.kit.registry.next); $('#comp-dialog').showModal(); $('#c-name').focus(); });
     function renderSchema() {
       const keys = state.K.templateFields($('#c-html').value);
       $('#c-schema').innerHTML = keys.length ? `<table class="schema"><tr><th>Поле</th><th>Подпись</th><th>Тип</th><th>Обязательное</th><th>По умолчанию</th></tr>${keys.map((key) => {
         const f = newSchema[key] = newSchema[key] || { key, label: key, type: /url|link|href/.test(key) ? 'url' : /image|img|src/.test(key) ? 'image' : /text|body/.test(key) ? 'multiline' : 'text', required: true, default: '' };
         return `<tr><td><code>${esc(key)}</code></td><td><input data-s="${esc(key)}:label" value="${esc(f.label)}"></td><td><select data-s="${esc(key)}:type">${['text', 'multiline', 'url', 'image'].map((t) => `<option ${f.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></td><td><input type="checkbox" data-s="${esc(key)}:required" ${f.required ? 'checked' : ''}></td><td><input data-s="${esc(key)}:default" value="${esc(f.default)}"></td></tr>`;
-      }).join('')}</table>` : '<div class="muted">Полей нет — блок будет одинаковым во всех письмах.</div>';
-      document.querySelectorAll('[data-s]').forEach((input) => input.addEventListener('input', () => {
+      }).join('')}</table>` : '<p class="muted">Полей нет — блок будет одинаковым во всех письмах.</p>';
+      $$('[data-s]').forEach((input) => input.addEventListener('input', () => {
         const [key, prop] = input.dataset.s.split(':');
         newSchema[key][prop] = input.type === 'checkbox' ? input.checked : input.value;
         previewNew();
@@ -872,67 +1162,258 @@
       $('#c-preview').hidden = !html;
       if (!html) return;
       const frame = $('#c-preview iframe');
-      frames.add(frame);
+      const box = $('#c-preview');
       frame.srcdoc = previewDoc(html, newComponent());
+      const scale = Math.min(1, (box.clientWidth || 900) / 700);
+      frame.style.transform = `scale(${scale})`;
+      frame.onload = () => { try { /* высота неизвестна из песочницы — задаём разумную */ } catch { /* */ } };
+      frame.style.height = '420px';
+      box.style.height = `${Math.ceil(420 * scale)}px`;
     }
     $('#c-html').addEventListener('input', renderSchema);
+    /** Сохранить компоненты: шаблоны и реестр одной операцией. list: [{ html, meta }] → номера. */
+    async function saveComponents(list, message) {
+      const registry = JSON.parse(await readFile('components/registry.json'));
+      const files = [];
+      const created = [];
+      list.forEach(({ html, meta }) => {
+        const number = Math.max(registry.next || 1, ...registry.components.map((c) => Number(c.id.slice(1)) + 1));
+        const component = { type: 'custom', block: '', category: 'Разное', description: '', fields: [], ...meta, id: pad(number), file: `components/${pad(number)}.html` };
+        registry.components.push(component);
+        registry.next = number + 1;
+        files.push({ path: component.file, content: `${html.trim()}\n`, message: `Новый компонент ${component.id}: ${component.name}` });
+        created.push(component);
+      });
+      files.push({ path: 'components/registry.json', content: `${JSON.stringify(registry, null, 2)}\n`, message: `Реестр: ${created.map((c) => c.id).join(', ')}` });
+      await writeFiles(files, message);
+      state.kit.registry = registry;
+      created.forEach((component, i) => { state.kit.templates[component.id] = list[i].html.trim(); });
+      return created;
+    }
     $('#c-save').addEventListener('click', async () => {
       const html = $('#c-html').value.trim();
       const component = newComponent();
       if (!html || !component.name) { setStatus('Нужны название и HTML', 'err'); return; }
       if (!/<tr\b[^>]*em\s*=\s*["']block["']/i.test(html)) { setStatus('Нужна строка <tr em="block"> — или отдайте HTML агенту', 'err'); return; }
       try {
-        const registry = JSON.parse(await readFile('components/registry.json'));
-        const number = Math.max(registry.next || 1, ...registry.components.map((c) => Number(c.id.slice(1)) + 1));
-        component.id = pad(number); component.file = `components/${component.id}.html`;
-        registry.components.push(component);
-        registry.next = number + 1;
-        await writeFiles([
-          { path: component.file, content: `${html}\n`, message: `Новый компонент ${component.id}: ${component.name}` },
-          { path: 'components/registry.json', content: `${JSON.stringify(registry, null, 2)}\n`, message: `Реестр: добавлен ${component.id}` },
-        ], `Облачный компонент ${component.id}: шаблон и реестр`);
-        state.kit.registry = registry;
-        state.kit.templates[component.id] = html;
-        $('#c-new').hidden = true;
+        const [saved] = await saveComponents([{ html, meta: { name: component.name, category: component.category, type: component.type, description: component.description, fields: component.fields } }], `Компонент ${component.name}`);
+        $('#comp-dialog').close();
         ['#c-html', '#c-name', '#c-category', '#c-type', '#c-description'].forEach((s) => { $(s).value = ''; });
-        $('#c-search').value = component.id;
-        renderComponents(); renderBuild();
-        setStatus(`${component.id} добавлен в облачную библиотеку`, 'ok');
+        $('#c-search').value = saved.id;
+        state.category = '';
+        renderLibraryState();
+        setStatus(`${saved.id} добавлен в библиотеку`, 'ok');
       } catch (error) { setStatus(`Не сохранилось: ${error.message}`, 'err'); }
     });
     $('#c-agent').addEventListener('click', () => {
       const html = $('#c-html').value.trim();
       if (!html) { setStatus('Вставьте HTML', 'err'); return; }
-      sendAgent(`Добавь в конструктор email-campaign новый компонент${$('#c-name').value.trim() ? ` «${$('#c-name').value.trim()}»` : ''} (категория: ${$('#c-category').value.trim() || 'определи'}; когда ставить: ${$('#c-description').value.trim() || 'определи'}). Номер — components/registry.json next (сейчас ${pad(state.kit.registry.next)}). Приведи к строкам <tr em="block"> в стиле components/shell.html и style-guide.md, изменяемое вынеси в поля {{ключ}} с описанием в реестре, сохрани write_skill_file и проверь node scripts/letter.mjs build example --no-remote. HTML:\n\n${html}`);
+      sendAgent(`Добавь в конструктор email-campaign новый компонент${$('#c-name').value.trim() ? ` «${$('#c-name').value.trim()}»` : ''} (категория: ${$('#c-category').value.trim() || 'определи'}; когда ставить: ${$('#c-description').value.trim() || 'определи'}). Номер — components/registry.json next (сейчас ${pad(state.kit.registry.next)}). Приведи к строкам <tr em="block"> в стиле components/shell.html и style-guide.md, изменяемое вынеси в поля {{ключ}} с описанием в реестре, сохрани write_skill_files и проверь node scripts/letter.mjs build example --no-remote. HTML:\n\n${html}`);
+      $('#comp-dialog').close();
     });
 
-    // ── Проверка внутри вкладки «Рассылка» ───────────────────────────────────────────────
+    // ── Разбор письма на блоки ──────────────────────────────────────────────────────────
+    let parsed = null;
+    function openParse() {
+      parsed = null;
+      $('#parse-step-1').hidden = false;
+      $('#parse-step-2').hidden = true;
+      $('#parse-run').hidden = false;
+      $('#parse-apply').hidden = true;
+      $('#parse-back').hidden = true;
+      $('#parse-error').textContent = '';
+      $('#parse-dialog').showModal();
+      $('#parse-html').focus();
+    }
+    $('#open-parse').addEventListener('click', openParse);
+    $('#parse-back').addEventListener('click', openParse);
+    $('#parse-file-btn').addEventListener('click', () => $('#parse-file').click());
+    const readHtmlFile = (file) => file.text().then((text) => { $('#parse-html').value = text; runParse(file.name); });
+    $('#parse-file').addEventListener('change', () => { const file = $('#parse-file').files[0]; if (file) readHtmlFile(file); });
+    (() => {
+      const zone = $('#parse-drop');
+      zone.addEventListener('dragover', (event) => { event.preventDefault(); zone.classList.add('drop'); });
+      zone.addEventListener('dragleave', () => zone.classList.remove('drop'));
+      zone.addEventListener('drop', (event) => { event.preventDefault(); zone.classList.remove('drop'); const file = event.dataTransfer.files[0]; if (file) readHtmlFile(file); });
+    })();
+    $('#parse-run').addEventListener('click', () => runParse());
+    function runParse(sourceName = '') {
+      const html = $('#parse-html').value.trim();
+      if (!html) { $('#parse-error').textContent = 'Вставьте HTML письма или выберите файл'; return; }
+      const result = state.K.parseLetter(html, state.kit);
+      if (!result.blocks.length) { $('#parse-error').textContent = 'Не нашёл в письме блоков: нет строк <tr em="block"> и таблицы с несколькими строками'; return; }
+      const snippet = (block) => state.K.normalizeHtml(block.html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      parsed = { ...result, sourceName: sourceName || 'вставленный HTML', rows: result.blocks.map((block) => ({ ...block, include: true, name: block.item ? '' : `Из письма: ${snippet(block).slice(0, 40) || 'блок'}`, text: snippet(block) })) };
+      $('#parse-error').textContent = '';
+      $('#parse-step-1').hidden = true;
+      $('#parse-step-2').hidden = false;
+      $('#parse-run').hidden = true;
+      $('#parse-apply').hidden = false;
+      $('#parse-back').hidden = false;
+      const known = parsed.rows.filter((r) => r.item).length;
+      $('#parse-summary').innerHTML = `<b>${esc(result.subject || 'Без темы')}</b>${result.preheader ? ` · <span class="muted">${esc(result.preheader)}</span>` : ''}<br>Блоков ${parsed.rows.length}: узнано ${known}, новых ${parsed.rows.length - known}${result.utm.campaign ? ` · UTM ${esc(result.utm.campaign)} / ${esc(result.utm.content || '—')}` : ''}. Новые блоки сохранятся в библиотеку без полей — агент вынесет поля по «Улучшить навык».`;
+      $('#parse-list').replaceChildren(...parsed.rows.map((row) => {
+        const el = document.createElement('div');
+        el.className = 'parse-row';
+        const component = row.item && componentOf(row.item.component);
+        el.innerHTML = `<input type="checkbox" checked aria-label="Взять блок ${row.index + 1}">
+          <div class="parse-thumb"><iframe loading="lazy" tabindex="-1" title="Блок ${row.index + 1}"></iframe></div>
+          <div class="parse-info">${row.item
+            ? `<div class="line"><span class="num">${esc(row.item.component)}</span><span class="name">${esc(component?.name || '')}</span><span class="chip ${row.match === 'exact' ? 'ok' : 'accent'}">${row.match === 'exact' ? 'совпал' : 'похож — тексты из письма'}</span></div><code>${esc(Object.entries(row.item.fields).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'без полей')}</code>`
+            : `<div class="line"><span class="chip warn">новый блок</span><span class="muted">сохранится в библиотеку</span></div><input type="text" value="${esc(row.name)}" aria-label="Название нового компонента"><code>${esc(row.text.slice(0, 140))}</code>`}</div>`;
+        $('iframe', el).srcdoc = blockDoc(row.html);
+        $('input[type="checkbox"]', el).addEventListener('change', (event) => { row.include = event.target.checked; el.classList.toggle('off', !row.include); });
+        $('input[type="text"]', el)?.addEventListener('input', (event) => { row.name = event.target.value; });
+        return el;
+      }));
+    }
+    $('#parse-apply').addEventListener('click', async () => {
+      if (!parsed) return;
+      const button = $('#parse-apply');
+      button.disabled = true;
+      try {
+        const rows = parsed.rows.filter((row) => row.include);
+        const fresh = rows.filter((row) => !row.item);
+        const created = fresh.length ? await saveComponents(fresh.map((row) => ({ html: row.html, meta: { type: 'parsed', name: row.name || 'Блок из письма', category: 'Из писем', description: `Разобран из ${parsed.sourceName} — поля ещё не вынесены` } })), `Разбор письма: ${fresh.length} новых блоков`) : [];
+        let next = 0;
+        const items = rows.map((row) => row.item ? JSON.parse(JSON.stringify(row.item)) : { component: created[next++].id, fields: {} });
+        const target = $('input[name="parse-target"]:checked').value;
+        const notes = `Разобрано из ${parsed.sourceName}: узнано ${rows.length - fresh.length} из ${rows.length}.`;
+        const questions = created.length ? [`Новые компоненты без полей: ${created.map((c) => c.id).join(', ')} — «Улучшить навык», чтобы агент вынес поля`] : [];
+        if (target === 'new' || !state.letter) {
+          const base = [today(), slugOf(parsed.subject) || 'parsed'].join('-');
+          await createLetter(uniqueId(base), { subject: parsed.subject, preheader: parsed.preheader, utm: parsed.utm, items, proposal: { by: 'Разбор письма', at: new Date().toISOString(), notes, questions } });
+        } else {
+          const body = bodyOf();
+          body.items = target === 'replace' ? items : body.items.concat(items);
+          if (target === 'replace') { if (parsed.subject) body.subject = parsed.subject; if (parsed.preheader) body.preheader = parsed.preheader; if (parsed.utm.campaign) body.utm = { ...parsed.utm }; }
+          state.letter.proposal = { by: 'Разбор письма', at: new Date().toISOString(), notes, questions };
+          state.selected = null;
+          changed();
+          await saveNow('Состав из разбора письма');
+          renderAll();
+        }
+        if (created.length || parsed.rows.length - rows.length) await learn(`разбор «${parsed.sourceName}» → letters/${state.letter.id}.json: узнано ${rows.length - fresh.length} из ${rows.length}${created.length ? `; новые блоки без полей ${created.map((c) => c.id).join(', ')} — вынести поля, проверить дубли с существующими` : ''}`);
+        $('#parse-dialog').close();
+        showPane('blocks');
+        renderLibraryState();
+        setStatus(`Письмо собрано из ${items.length} блоков${created.length ? `, новых компонентов: ${created.length}` : ''}`, 'ok');
+      } catch (error) {
+        $('#parse-error').textContent = `Не получилось: ${error.message}`;
+      } finally { button.disabled = false; }
+    });
+
+    // ── Улучшить навык ──────────────────────────────────────────────────────────────────
+    async function openLearn() {
+      $('#learn-text').value = '';
+      $('#learn-open').innerHTML = '<div class="muted">Читаю журнал…</div>';
+      $('#learn-dialog').showModal();
+      $('#learn-text').focus();
+      const items = openLearnings(await readLearnings());
+      $('#learn-open').innerHTML = items.length ? `<div class="field"><label>Открытые заметки · ${items.length}</label><ul class="learn-list">${items.slice(0, 12).map((line) => `<li>${esc(line)}</li>`).join('')}</ul></div>` : '<div class="muted">Открытых заметок нет.</div>';
+    }
+    $('#open-learn').addEventListener('click', openLearn);
+    $('#learn-save').addEventListener('click', async () => {
+      const text = $('#learn-text').value.trim(); if (!text) return;
+      await learn(`от человека: ${text}`);
+      setStatus('Заметка записана в learnings.md', 'ok');
+      openLearn();
+    });
+    $('#learn-agent').addEventListener('click', async () => {
+      const text = $('#learn-text').value.trim();
+      if (text) await learn(`от человека: ${text}`);
+      $('#learn-dialog').close();
+      sendAgent([
+        'Навык email-campaign — улучши навык по журналу learnings.md (раздел «Самоулучшение навыка» в SKILL.md).',
+        '1. Прочитай learnings.md, components/registry.json, style-guide.md и затронутые компоненты.',
+        '2. По каждому пункту «Открытые»: правь компоненты (вынеси поля в блоках «Из писем», убери дубли существующих), реестр (поля, описания «когда ставить»), style-guide.md, components.md, SKILL.md и редактор library.html, если мешает интерфейс. Факты и тексты писем не меняй.',
+        '3. Проверь: `node scripts/letter.mjs build example --no-remote`.',
+        '4. Перенеси обработанные пункты в «Сделано» одной строкой — что изменено (файлы, номера). Что не сделал — оставь с причиной. Коротко отчитайся.',
+        state.letter ? `Текущее письмо: letters/${state.letter.id}.json.` : '',
+      ].filter(Boolean).join('\n'));
+    });
+
+    // ── Проверка ────────────────────────────────────────────────────────────────────────
+    function blockingCount(local) {
+      const e = state.letter?.check?.email_checker;
+      const external = e && !e.failed ? (e.links_failed || []).length + (e.validation?.errors || []).length : 0;
+      return local.errors.length + external;
+    }
+    function updateCheckCount(local) {
+      const badge = $('#check-count');
+      const count = state.letter ? blockingCount(local) : 0;
+      badge.hidden = !count;
+      badge.textContent = count;
+      badge.className = count ? 'chip warn' : 'chip';
+    }
+    async function checkNow() {
+      const l = state.letter;
+      if (!l) return;
+      if (!bridge?.emailCheck) { setStatus('Обновите MBOX: в этой версии нет прямой проверки Email Checker', 'err'); return; }
+      const button = $('#check-now');
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      $('#check-label').textContent = 'Проверяется…';
+      setStatus('Email Checker проверяет разметку, ссылки и текст…', 'busy');
+      try {
+        await saveNow('Письмо перед внешней проверкой');
+        const rendered = renderResult();
+        const email = await bridge.emailCheck(rendered.html);
+        const externalBlocking = (email.links_failed || []).length + (email.validation?.errors || []).length + rendered.errors.length;
+        const previous = l.check || {};
+        l.check = { ...previous, at: new Date().toISOString(), by: 'Email Checker', ok: false, external_ok: externalBlocking === 0, external_status: 'checked', render: { errors: rendered.errors, warnings: rendered.warnings }, preflight: { pending: true, errors: [], warnings: [] }, email_checker: email, fixed: previous.fixed || [], remaining: previous.remaining || [] };
+        l.status = externalBlocking ? 'needs-fix' : 'external-checked';
+        await saveNow('Внешняя проверка Email Checker');
+        renderAll();
+        showPane('blocks');
+        $('#check-section').open = true;
+        $('#check-section').scrollIntoView({ block: 'nearest' });
+        setStatus(externalBlocking ? `Email Checker: найдено проблем — ${externalBlocking}` : 'Email Checker пройден', externalBlocking ? 'err' : 'ok');
+        if ((email.validation?.errors || []).length) learn(`Email Checker в letters/${l.id}.json: ошибки вёрстки — ${(email.validation.errors || []).slice(0, 3).map((e) => (typeof e === 'string' ? e : e.message || e.detail || '')).join('; ').slice(0, 200)} — проверить компоненты письма`);
+      } catch (error) {
+        setStatus(`Email Checker не завершил проверку: ${error.message}`, 'err');
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        $('#check-label').textContent = 'Проверить';
+      }
+    }
+    $('#check-now').addEventListener('click', checkNow);
+    $('#ask-check').addEventListener('click', async () => {
+      const l = state.letter; if (!l) return;
+      await saveNow('Состав перед проверкой');
+      sendAgent([
+        `Навык email-campaign, письмо letters/${l.id}.json — состав готов в редакторе.`,
+        '1. `node scripts/letter.mjs build ' + l.id + '` — сборка, strict preflight и Email Checker.',
+        '2. Исправь актуальные ошибки: поля письма — edit_skill_file в letters/' + l.id + '.json, ошибка вёрстки блока — в его компоненте components/C###.html. Повтори build до чистого результата.',
+        '3. Замечания к тексту оцени по смыслу (склейку текста соседних блоков проверяльщик принимает за ошибки). Что исправил — в check.fixed, что оставил на решение — в check.remaining. Если чинил компонент или обходил правило — запиши `node scripts/letter.mjs learn "…"`. Открой мне готовый HTML через open_tab (path:) и коротко отчитайся.',
+      ].join('\n'));
+    });
     function renderCheck() {
-      const box = $('#check');
+      const box = $('#check-body');
       const l = state.letter;
       const c = l && l.check;
       if (!l) { box.innerHTML = '<div class="empty">Выберите письмо</div>'; return; }
       const local = renderResult();
-      const rows = (items, sev) => (items || []).map((item) => `<li><span class="sev ${sev}">${sev === 'error' ? 'ошибка' : sev === 'warn' ? 'внимание' : sev === 'ok' ? 'исправлено' : 'заметка'}</span>${esc(typeof item === 'string' ? item : item.detail || item.message || item.url || JSON.stringify(item))}${item && item.context ? `<span class="ctx">${esc(item.context)}${item.suggestions && item.suggestions.length ? ` → ${esc(item.suggestions.join(' / '))}` : ''}</span>` : ''}${item && item.status ? `<span class="ctx">HTTP ${esc(item.status)} ${esc(item.note || '')}</span>` : ''}</li>`).join('');
-      const section = (title, html) => html ? `<div class="panel"><h2>${title}</h2><ul class="check-list">${html}</ul></div>` : '';
+      const SEV = { error: 'alert', warn: 'alert', ok: 'check', info: 'info' };
+      const rows = (items, sev) => (items || []).map((item) => `<li class="sev-${sev}">${icon(SEV[sev], 'sm')}<span>${esc(typeof item === 'string' ? item : item.detail || item.message || item.url || JSON.stringify(item))}${item && item.context ? `<span class="ctx">${esc(item.context)}${item.suggestions && item.suggestions.length ? ` → ${esc(item.suggestions.join(' / '))}` : ''}</span>` : ''}${item && item.status ? `<span class="ctx">HTTP ${esc(item.status)} ${esc(item.note || '')}</span>` : ''}</span></li>`).join('');
+      const section = (title, html) => html ? `<div class="check-group"><h4>${title}</h4><ul class="check-list">${html}</ul></div>` : '';
       const e = c && c.email_checker;
       const headline = c?.ok ? 'Полная проверка пройдена' : c?.external_ok && c?.preflight?.pending ? 'Email Checker пройден, preflight ещё не запускался' : c ? 'Есть блокирующие ошибки' : '';
       box.innerHTML = `
         <div class="notice ${c && !c.ok ? 'warn' : ''}">${c
-          ? `<b>${headline}</b> · проверил ${esc(c.by || 'агент')} ${esc(String(c.at || '').slice(0, 16).replace('T', ' '))}<br><span class="muted">${esc(c.email_checker?.provider || '')}${c.html_path ? ` · ${esc(c.html_path)}` : ''}</span>`
-          : 'Письмо ещё не проверялось. Email Checker можно запустить здесь; полный цикл с preflight и исправлениями выполняет агент.'}</div>
-        <div class="actions" style="margin:0 0 12px"><button class="btn primary" type="button" id="recheck-now">Проверить Email Checker сейчас</button><button class="btn" type="button" id="recheck">Агенту: preflight, исправления и повторная проверка</button><span class="muted">Сейчас в конструкторе: ${local.errors.length ? `${local.errors.length} незаполненных или неверных полей` : 'все обязательные поля заполнены'}</span></div>
+          ? `<b>${headline}</b><br><span class="muted">${esc(c.by || 'агент')} · ${esc(String(c.at || '').slice(0, 16).replace('T', ' '))}${c.html_path ? ` · ${esc(c.html_path)}` : ''}</span>`
+          : 'Письмо ещё не проверялось — нажмите «Проверить» в шапке. Полный цикл с preflight и исправлениями — «С агентом».'}</div>
+        ${section('Сейчас в редакторе', local.errors.length || local.warnings.length ? rows(local.errors, 'error') + rows(local.warnings, 'warn') : rows(['Все обязательные поля заполнены'], 'ok'))}
         ${section('Исправлено агентом', rows(c && c.fixed, 'ok'))}
         ${section('Осталось на решение', rows(c && c.remaining, 'warn'))}
-        ${section('Сборка', rows(local.errors, 'error') + rows(local.warnings, 'warn'))}
-        ${c?.preflight?.pending ? section('Preflight', '<li><span class="sev warn">ожидает</span>Запустите проверку агентом — он проверит ограничения UniSender, исправит ошибки и повторит Email Checker.</li>') : ''}
+        ${c?.preflight?.pending ? section('Preflight', rows(['Ожидает: агент проверит ограничения UniSender, исправит ошибки и повторит Email Checker.'], 'warn')) : ''}
         ${section('Preflight', c ? rows(c.preflight?.errors, 'error') + rows(c.preflight?.warnings, 'warn') : '')}
-        ${e && e.failed ? section('Email Checker', `<li><span class="sev warn">внимание</span>недоступен: ${esc(e.failed)}</li>`) : ''}
-        ${e && !e.failed ? section('Email Checker · ссылки', rows(e.links_failed, 'error') + rows((e.links_auth || []).map((url) => `${url} — страница за логином, это нормально`), 'info') + `<li><span class="sev info">итого</span>ссылок ${esc(e.summary?.totalLinks)}, с UTM ${esc(e.summary?.linksWithUtm)}, картинок без alt ${esc(e.summary?.imagesWithoutAlt)}</li>`) : ''}
+        ${e && e.failed ? section('Email Checker', rows([`недоступен: ${e.failed}`], 'warn')) : ''}
+        ${e && !e.failed ? section('Email Checker · ссылки', rows(e.links_failed, 'error') + rows((e.links_auth || []).map((url) => `${url} — страница за логином, это нормально`), 'info') + rows([`ссылок ${e.summary?.totalLinks ?? '—'}, с UTM ${e.summary?.linksWithUtm ?? '—'}, картинок без alt ${e.summary?.imagesWithoutAlt ?? '—'}`], 'info')) : ''}
         ${e && !e.failed ? section('Email Checker · вёрстка', rows(e.validation?.errors, 'error') + rows(e.validation?.warnings, 'warn')) : ''}
         ${e && !e.failed ? section('Email Checker · текст (оценивает агент)', rows(e.text_issues, 'info')) : ''}`;
-      $('#recheck-now').addEventListener('click', checkNow);
-      $('#recheck').addEventListener('click', () => $('#ask-check').click());
+      updateCheckCount(local);
     }
 
     // ── Старт ───────────────────────────────────────────────────────────────────────────
@@ -940,14 +1421,11 @@
       try {
         await loadKit();
         await loadLetters();
-        if (!state.letters.length && bridge && bridge.write) {
-          const first = state.K.newLetter(`${new Date().toISOString().slice(0, 10)}-letter`);
-          state.letters.push(first);
-        }
+        if (!state.letters.length && bridge && bridge.write) state.letters.push(state.K.newLetter(`${today()}-letter`));
         state.letter = state.letters.find((l) => l.id === ui.letter) || state.letters[0] || null;
         renderAll();
-        showTab(ui.tab || 'mailing');
-        setStatus(`${state.kit.registry.components.length} компонентов · ${state.letters.length} писем${bridge ? '' : ' · только просмотр'}`);
+        showPane(ui.pane === 'blocks' ? 'blocks' : 'library');
+        setStatus(`${state.kit.registry.components.length} блоков · ${state.letters.length} писем${bridge ? '' : ' · только просмотр'}`);
       } catch (error) {
         setStatus(`Не загрузилось: ${error.message}`, 'err');
       }
