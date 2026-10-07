@@ -180,3 +180,26 @@
 .meta-chip.tone-live { color: var(--state-live); }
 .meta-chip.tone-warn { color: var(--state-warn); }
 .meta-chip.tone-danger { color: var(--state-danger); }
+
+/* Подсказка для элементов с title (components/GlobalTooltip.tsx). */
+.mbox-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 5px 9px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-raised);
+  box-shadow: var(--float);
+  color: var(--text-main);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.mbox-tip.is-visible { opacity: 1; visibility: visible; }

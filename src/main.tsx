@@ -59,6 +59,7 @@ import type {
   SecretSummary, SectionKey, ServerMetrics, Todo,
 } from "./types";
 import "./styles.css";
+import { GlobalTooltip } from "./components/GlobalTooltip";
 
 type AppTheme = "light" | "graphite" | "black";
 
@@ -1318,5 +1319,6 @@ createRoot(document.getElementById("root")!).render(
     ) : (
       <App />
     )}
+    <GlobalTooltip />
   </StrictMode>,
 );
