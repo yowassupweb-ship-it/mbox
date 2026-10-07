@@ -23,7 +23,7 @@
     left: 12px;
     right: 12px;
     bottom: calc(var(--wb-nav-gap) + env(safe-area-inset-bottom));
-    z-index: 60;
+    z-index: var(--z-drawer);
     height: var(--wb-nav-h);
     display: flex;
     flex-direction: row;
@@ -327,7 +327,7 @@
     top: 0;
     bottom: auto;
     height: var(--app-height, 100dvh);
-    z-index: 300;
+    z-index: var(--z-modal);
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--bg-color);

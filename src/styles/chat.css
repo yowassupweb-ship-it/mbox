@@ -9,7 +9,7 @@
   /* Нижнее меню: 7px+7px паддинг + 44px min-height пункта + 1px бордер = 59px — кнопка садится
      вплотную на него, без зазора. */
   bottom: calc(59px + env(safe-area-inset-bottom));
-  z-index: 60;
+  z-index: var(--z-drawer);
   display: grid;
   gap: 4px;
   justify-items: end;
@@ -499,7 +499,7 @@
   .agent-chat {
     right: calc(18px + env(safe-area-inset-right));
     bottom: calc(14px + env(safe-area-inset-bottom));
-    z-index: 55;
+    z-index: calc(var(--z-nav) + 5);
   }
 
   .agent-chat-shell.console {
@@ -567,7 +567,7 @@
     max-height: none;
     border: 0;
     border-radius: 0;
-    z-index: 120;
+    z-index: var(--z-tooltip);
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
   }
@@ -1410,7 +1410,7 @@
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
-  z-index: 40;
+  z-index: var(--z-panel);
   min-width: 230px;
   max-width: calc(100vw - 24px);
   max-height: 320px;
@@ -1687,7 +1687,7 @@
 
 .console-threads .console-thread-menu {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-dropdown);
   top: calc(100% + 4px);
   left: 10px;
   right: 10px;
@@ -1889,7 +1889,7 @@
 .console-thread-menu.is-aside .console-thread-menu-legacy { border-radius: var(--radius-sm); }
 /* Узкая консоль: список не отнимает место у разговора, а ложится поверх него. */
 @container (max-width: 460px) {
-  .console-threads-aside { position: absolute; inset: 0 auto 0 0; z-index: 25; width: min(260px, 82%); box-shadow: var(--float); }
+  .console-threads-aside { position: absolute; inset: 0 auto 0 0; z-index: calc(var(--z-dropdown) + 5); width: min(260px, 82%); box-shadow: var(--float); }
 }
 .console-threads > .console-thread-icon:first-child { margin-left: 0; }
 
@@ -2069,7 +2069,7 @@
 
 /* Выпадающие списки поверх всего: портал в .wb и координаты окна (см. components/AnchoredPopover.tsx).
    Высоту и положение считает компонент по свободному месту, поэтому прежние absolute-правила снимаются. */
-.anchored-popover { position: fixed; z-index: 300; overflow: auto; max-width: calc(100vw - 16px); overscroll-behavior: contain; }
+.anchored-popover { position: fixed; z-index: var(--z-modal); overflow: auto; max-width: calc(100vw - 16px); overscroll-behavior: contain; }
 .console-picker-menu.anchored-popover { bottom: auto; right: auto; max-height: none; }
 .console-picker-note { margin: 4px 0 0; padding: 6px 8px 4px; border-top: 1px solid var(--border-color); color: var(--text-muted); font-size: var(--text-xs); line-height: 1.35; white-space: normal; }
 /* Меню переписок как всплывающее поверх всего: вне .console-threads прежнее правило не действует, оформление то же. */

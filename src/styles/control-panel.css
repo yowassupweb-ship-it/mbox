@@ -965,7 +965,7 @@
 .responder-key-row > button { justify-self: start; min-height: 32px; padding: 5px 11px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); color: var(--text-main); }
 .responder-key-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 
-@media (max-width: 820px) {
+@media (max-width: 900px) {
   .account-create-fields { grid-template-columns: 1fr; }
 }
 
@@ -1199,7 +1199,7 @@
 
 .entity-add-menu {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-dropdown);
   top: calc(100% + 6px);
   left: 0;
   width: max(220px, 100%);

@@ -697,7 +697,7 @@
 
 .seo-raw-body { min-width: 0; }
 
-@media (max-width: 760px) {
+@media (max-width: 720px) {
   .seo-board { padding: var(--space-3); }
   .seo-search input { width: 120px; }
   .seo-raw { grid-template-columns: minmax(0, 1fr); }
@@ -1220,7 +1220,7 @@
 .entity-modal-scrim {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-modal-scrim);
   display: grid;
   place-items: center;
   padding: var(--space-4);
@@ -2115,7 +2115,7 @@ time {
   position: fixed;
   left: 50%;
   top: 76px;
-  z-index: 24;
+  z-index: calc(var(--z-dropdown) + 4);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -2478,7 +2478,7 @@ time {
   align-items: end;
 }
 .todo-quick-submit { align-self: end; min-height: 40px; }
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .todo-quick-controls { grid-template-columns: 1fr 1fr; }
   .todo-quick-submit { grid-column: 1 / -1; }
 }

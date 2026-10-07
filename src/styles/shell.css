@@ -181,7 +181,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 50;
+  z-index: var(--z-nav);
   transform: none;
   width: 100%;
   /* Домашняя полоска и боковые вырезы: в альбомной ориентации iPhone чёлка уходит вбок,
@@ -295,7 +295,7 @@
 .topbar {
   position: sticky;
   top: var(--space-2);
-  z-index: 30;
+  z-index: var(--z-chrome);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -310,7 +310,7 @@
   top: calc(4px + env(safe-area-inset-top));
   left: 0;
   right: 0;
-  z-index: 20;
+  z-index: var(--z-dropdown);
   padding: 0;
   pointer-events: none;
 }

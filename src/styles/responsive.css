@@ -50,7 +50,7 @@
     top: calc(max(4px, env(safe-area-inset-top)) + var(--space-2));
     left: 0;
     right: 0;
-    z-index: 45;
+    z-index: calc(var(--z-panel) + 5);
     display: flex;
     justify-content: center;
     gap: 8px;

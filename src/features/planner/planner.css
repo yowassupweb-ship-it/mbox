@@ -44,7 +44,7 @@
 #planner-overlays { position: static; width: 0; height: 0; }
 
 /* Сообщения планировщика — сверху по центру. */
-.nx-toasts { position: fixed; z-index: 400; top: 48px; left: 50%; display: grid; gap: 8px; width: min(420px, calc(100vw - 24px)); transform: translateX(-50%); pointer-events: none; }
+.nx-toasts { position: fixed; z-index: var(--z-toast); top: 48px; left: 50%; display: grid; gap: 8px; width: min(420px, calc(100vw - 24px)); transform: translateX(-50%); pointer-events: none; }
 .nx-toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: var(--surface-panel); box-shadow: var(--float); color: var(--text-main); font-size: var(--text-sm); pointer-events: auto; animation: nx-fade var(--duration-base) var(--ease-out); }
 .nx-toast svg { flex: none; color: var(--accent-color); }
 .nx-toast[data-tone="error"] svg, .nx-toast[data-tone="warning"] svg { color: var(--state-danger); }
@@ -61,10 +61,8 @@
 :where(.nx) :where(button) { font: inherit; color: inherit; }
 :where(.nx) :where(a) { color: inherit; }
 
-/* Нажатие. В globals.css всем кнопкам задано scale(.94) правилом с высокой
-   специфичностью — оно же перебивало переходы наших кнопок (подсветку,
-   возврат строки после свайпа). Внутри .nx нажатие и переходы кнопок задаются
-   переменными: --press (во что сжимается) и --btn-transition. */
+/* Нажатие и переходы кнопок внутри .nx задаются переменными (наследие Shar, где общее
+   правило globals.css сжимало все кнопки и перебивало их переходы): --press (во что сжимается) и --btn-transition. */
 .nx button:not(:disabled):not([data-no-press]) {
   transition: var(--btn-transition, transform 0.08s ease);
 }
@@ -274,17 +272,16 @@
 }
 .nx-avatar > img,
 .nx-avatar > svg { border-radius: inherit; }
-/* Фото всегда ровно по кругу аватара. В globals.css мобильное правило задаёт
-   всем img height:auto; чанки вложенного layout могут подключиться раньше него,
-   поэтому без явного приоритета портретное фото вылезает из квадратного слота. */
+/* Фото всегда ровно по кругу аватара: портретное фото не вылезает из квадратного слота.
+   (!important был против img { height: auto } из globals.css Shar — в MBOX такого правила нет.) */
 .nx .nx-avatar > img {
   display: block;
-  width: 100% !important;
-  height: 100% !important;
+  width: 100%;
+  height: 100%;
   min-width: 100%;
   min-height: 100%;
-  max-width: 100% !important;
-  max-height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: cover;
 }
 .nx-avatar[data-shape="square"] { border-radius: var(--radius-md); }
@@ -337,7 +334,7 @@
   position: fixed;
   /* Выше листов и диалогов (200): меню, открытое из листа (повтор, напоминание,
      дата в редакторе события), пряталось под его затемнением. */
-  z-index: 240;
+  z-index: calc(var(--z-menu) + 40);
   min-width: 220px;
   max-width: min(320px, calc(100vw - 2 * var(--space-4)));
   padding: 6px;
@@ -403,7 +400,7 @@
      клавиатурой, и лист с полем поиска остаётся над ней целиком. */
   position: absolute;
   inset: 0;
-  z-index: 200;
+  z-index: var(--z-menu);
   display: grid;
   place-items: center;
   padding: var(--space-4);
@@ -573,7 +570,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  z-index: 25;
+  z-index: calc(var(--z-dropdown) + 5);
   width: 9px;
   margin-left: -5px;
   cursor: col-resize;

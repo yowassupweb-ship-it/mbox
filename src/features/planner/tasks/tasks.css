@@ -37,7 +37,7 @@
 .ntl-group-head {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -263,8 +263,8 @@
 }
 @keyframes ntd-slide { from { opacity: 0; transform: translate3d(16px, 0, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
 
-/* Старые общие правила globals.css ставят всем полям 16px !important и
-   appearance: none — у документа свои размеры, чекбокс рисуем сами. */
+/* На телефоне mobile.css ставит всем полям .wb 16px (против автозума iOS), и .wb input
+   специфичнее .ntd-title — поэтому размеры документа задаются с !important. Чекбокс рисуем сами. */
 .ntd-title { font-size: var(--text-2xl) !important; }
 .ntd-body { font-size: var(--text-sm) !important; }
 .ntd-title:focus-visible,

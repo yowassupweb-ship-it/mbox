@@ -58,7 +58,7 @@
 /* ─── Плавающие окна ─── */
 .wb-browser-pop {
   position: fixed;
-  z-index: 41;
+  z-index: calc(var(--z-panel) + 1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -68,9 +68,9 @@
   box-shadow: var(--float);
   color: var(--text-main);
 }
-.wb-browser-folder-menu { position: fixed; z-index: 1001; width: 320px; max-height: min(460px, calc(100dvh - 120px)); }
+.wb-browser-folder-menu { position: fixed; z-index: calc(var(--z-max) + 1); width: 320px; max-height: min(460px, calc(100dvh - 120px)); }
 .wb-browser { position: relative; }
-.wb-browser .wb-bookmark-scrim { position: absolute; inset: 0; z-index: 40; }
+.wb-browser .wb-bookmark-scrim { position: absolute; inset: 0; z-index: var(--z-panel); }
 .wb-browser-manager,
 .wb-browser-history,
 .wb-browser-settings { position: absolute; top: 54px; right: 8px; width: min(420px, calc(100% - 16px)); max-height: calc(100% - 60px); }

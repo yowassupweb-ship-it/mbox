@@ -141,8 +141,8 @@ body.wb-resizing * {
 .wb-titlebar .realtime-pill span:not(.pill-avatars) { display: none; }
 .wb-titlebar .pill-avatars .agent-avatar { width: 18px !important; height: 18px !important; }
 .wb-titlebar .topbar-logout { width: 28px; min-height: 28px; }
-.wb-titlebar .agent-status-popover { top: 34px; left: auto; right: 44px; transform: none; z-index: 90; max-height: 60vh; }
-.topbar-actions .desktop-popover { left: auto; right: 0; top: 34px; z-index: 100; }
+.wb-titlebar .agent-status-popover { top: 34px; left: auto; right: 44px; transform: none; z-index: calc(var(--z-popover) - 10); max-height: 60vh; }
+.topbar-actions .desktop-popover { left: auto; right: 0; top: 34px; z-index: var(--z-popover); }
 
 .command-center {
   flex: 0 1 340px;
@@ -240,7 +240,7 @@ body.wb-resizing * {
   position: absolute;
   left: calc(100% + 8px);
   top: 50%;
-  z-index: 120;
+  z-index: var(--z-tooltip);
   max-width: 240px;
   padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 26%, var(--wb-line));
@@ -1520,8 +1520,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-bookmark-folder svg { flex: none; opacity: .75; }
 
 /* Контекстное меню закладки: переименовать, открыть, удалить. */
-.wb-bookmark-scrim { position: fixed; inset: 0; z-index: 40; }
-.wb-bookmark-menu { position: fixed; z-index: 41; display: grid; gap: 2px; width: min(240px, calc(100vw - 16px)); padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
+.wb-bookmark-scrim { position: fixed; inset: 0; z-index: var(--z-panel); }
+.wb-bookmark-menu { position: fixed; z-index: calc(var(--z-panel) + 1); display: grid; gap: 2px; width: min(240px, calc(100vw - 16px)); padding: 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface); box-shadow: var(--float); }
 .wb-bookmark-menu input { margin-bottom: 4px; padding: 6px 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
 .wb-bookmark-menu input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
 .wb-bookmark-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
@@ -2000,7 +2000,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   position: absolute;
   top: 8px;
   right: 12px;
-  z-index: 12;
+  z-index: calc(var(--z-sticky) + 2);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2878,7 +2878,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 /* ─── Контекстное меню вкладки ──────────────────────── */
 
-.wb-menu-scrim { position: fixed; inset: 0; z-index: 200; }
+.wb-menu-scrim { position: fixed; inset: 0; z-index: var(--z-menu); }
 
 .wb-menu {
   position: fixed;
@@ -2984,7 +2984,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
     left: 0;
     right: 0;
     bottom: calc(52px + env(safe-area-inset-bottom));
-    z-index: 40;
+    z-index: var(--z-panel);
     width: auto;
     border-right: 0;
   }
@@ -3002,7 +3002,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
     left: 0;
     right: 0;
     bottom: calc(52px + env(safe-area-inset-bottom));
-    z-index: 50;
+    z-index: var(--z-nav);
   }
 
   .wb-doc-page,
@@ -3182,7 +3182,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   position: fixed;
   right: 16px;
   bottom: calc(var(--wb-status) + 12px + env(safe-area-inset-bottom, 0px));
-  z-index: 150;
+  z-index: var(--z-notice);
   max-width: min(460px, calc(100vw - 32px));
   padding: 9px 14px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 45%, transparent);
@@ -3234,7 +3234,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-menu-item-launch:hover { background: var(--wb-selected); }
 .wb-menu-item-launch:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 
-@media (max-width: 760px) {
+@media (max-width: 720px) {
   .wb-skill-doc { padding-top: 16px; }
   .wb-skill-hero { grid-template-columns: 1fr; gap: 20px; padding: 20px; }
   .wb-skill-hero h1 { font-size: var(--text-2xl); }
@@ -3247,7 +3247,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 /* ─── Диалог ввода (askText) — замена window.prompt, которого нет в Electron ─── */
-.ask-scrim { position: fixed; inset: 0; z-index: 400; display: grid; place-items: start center; padding-top: 18vh; background: rgba(0, 0, 0, .45); }
+.ask-scrim { position: fixed; inset: 0; z-index: var(--z-toast); display: grid; place-items: start center; padding-top: 18vh; background: rgba(0, 0, 0, .45); }
 .ask-dialog { width: min(420px, calc(100vw - 32px)); display: grid; gap: 8px; padding: 14px; border: 1px solid var(--glass-brd, rgba(133, 245, 219, .22)); border-radius: var(--radius-md, 8px); background: var(--wb-surface-2, #101114); box-shadow: 0 18px 48px rgba(0, 0, 0, .6); color: var(--text-main, #eef4f1); }
 .ask-title { color: var(--text-2, rgba(238, 244, 241, .7)); font-size: var(--text-sm); }
 .ask-dialog input { height: 32px; padding: 0 10px; border: 1px solid var(--accent-color, #29e0d6); border-radius: var(--radius-sm, 4px); background: var(--wb-surface, #0c0d0f); color: inherit; font: inherit; outline: none; }
@@ -3426,7 +3426,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 30;
+  z-index: var(--z-chrome);
   width: min(380px, calc(100vw - 32px));
   display: grid;
   gap: 12px;
@@ -3906,7 +3906,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .topbar {
 .tb-pop {
   position: absolute;
   top: 36px;
-  z-index: 120;
+  z-index: var(--z-tooltip);
   width: 300px;
   max-height: min(70vh, 560px);
   overflow-y: auto;
@@ -4000,7 +4000,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-chat-head-slot .console-thread-current { flex: 1 1 auto; justify-content: flex-start; min-width: 0; height: 26px; padding: 0 6px; font-size: var(--text-sm); }
 .wb-chat-head-slot .console-thread-title { font-weight: var(--weight-medium); }
 .wb-chat-head-slot .console-context { flex: none; }
-.wb-chat-head-slot .console-thread-menu { top: calc(100% + 4px); left: 0; z-index: 30; }
+.wb-chat-head-slot .console-thread-menu { top: calc(100% + 4px); left: 0; z-index: var(--z-chrome); }
 /* Узкая панель: у неактивных чатов — только аватар, ещё уже — и у активного. Подпись есть в подсказке. */
 @container (max-width: 760px) { .wb-chat-kind:not(.is-active) > .wb-chat-kind-label { display: none; } .wb-chat-kind:not(.is-active) { padding: 0 6px; } }
 @container (max-width: 520px) { .wb-chat-kind > .wb-chat-kind-label { display: none; } .wb-chat-kind { padding: 0 6px; } .wb-chat-head-slot .console-context-bar { display: none; } }
@@ -4169,7 +4169,7 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 @media (prefers-reduced-motion: reduce) { .wb-presence-dot.is-writing { animation: none; } }
 .wb-univer-wrap { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .wb-univer-wrap > .wb-univer-sheet { height: 100%; }
-.wb-presence-layer { position: absolute; z-index: 30; overflow: hidden; pointer-events: none; }
+.wb-presence-layer { position: absolute; z-index: var(--z-chrome); overflow: hidden; pointer-events: none; }
 .wb-cell-mark {
   position: absolute;
   box-sizing: border-box;
@@ -4246,8 +4246,8 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 /* Поиск в документе (Ctrl+F): панель и подсветка совпадений. */
 .wb-find-bar { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: min(360px, calc(100vw - 24px)); height: 36px; padding: 3px 4px 3px 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); box-shadow: var(--float); color: var(--text-muted); }
 .wb-find-bar > svg { flex: none; }
-.wb-find-bar.is-in-doc { position: absolute; z-index: 40; top: 8px; right: 12px; }
-.wb-find-bar.is-floating { position: fixed; z-index: 250; top: 48px; right: 20px; }
+.wb-find-bar.is-in-doc { position: absolute; z-index: var(--z-panel); top: 8px; right: 12px; }
+.wb-find-bar.is-floating { position: fixed; z-index: var(--z-spotlight); top: 48px; right: 20px; }
 .wb-find-bar input { flex: 1 1 auto; min-width: 0; height: 28px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
 .wb-find-status { flex: none; color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
 .wb-find-status.is-none { color: var(--danger-color, var(--text-muted)); }

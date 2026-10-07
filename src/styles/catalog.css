@@ -62,7 +62,7 @@
 }
 .wb-thumb-preview {
   position: fixed;
-  z-index: 300;
+  z-index: var(--z-modal);
   padding: 6px;
   transform: translateY(-50%);
   border: 1px solid var(--border-color);

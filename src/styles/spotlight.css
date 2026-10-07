@@ -4,7 +4,7 @@
 .wb-spot-scrim {
   position: fixed;
   inset: 0;
-  z-index: 250;
+  z-index: var(--z-spotlight);
   display: grid;
   justify-items: center;
   align-content: start;
