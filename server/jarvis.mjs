@@ -260,13 +260,15 @@ async function publishedCatalog() {
 
 const CLOUD_TWIN = { Claude: "ClaudeCloud", ChatGPT: "CodexCloud" };
 
-/** Каталог агента; у локального — тот из пары с облачным, что получен позже (источник помечается). */
+/**
+ * Каталог агента — список облачного близнеца (CLI на сервере), если он его прислал; локальный — запасной.
+ * Раньше брался тот, что пришёл позже, и отставший CLI на компьютере перебивал свежий серверный: в чате
+ * висели Sonnet 5 / Opus 5, хотя сервер уже знал Sonnet 5.5 / Opus 5.5. CLI на сервере обновляется вместе с выкаткой.
+ */
 function freshestCatalog(published, agent) {
   const own = published[agent];
   const twin = published[CLOUD_TWIN[agent]];
   if (!twin?.models?.length) return own;
-  const stamp = (row) => Date.parse(row?.fetched_at || row?.updated_at || "") || 0;
-  if (own?.models?.length && stamp(own) >= stamp(twin)) return own;
   return { ...twin, source: `${twin.source || "cli"} · ${CLOUD_TWIN[agent]}` };
 }
 
