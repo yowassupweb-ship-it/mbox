@@ -1186,6 +1186,8 @@ function mboxDevApi() {
               `WITH presence AS (
                  SELECT agent_name AS name, kind, client, scope, sessions, first_seen, last_seen
                  FROM agent_presence
+                 -- Как на проде: присутствие привязано к аккаунту, иначе наблюдатель участника задваивает агента владельца.
+                 WHERE owner_user_id = $2::bigint OR ($1::boolean AND owner_user_id IS NULL)
                ),
                audited AS (
                  SELECT actor AS name, count(*)::int AS events, max(created_at) AS last_seen
@@ -1199,6 +1201,7 @@ function mboxDevApi() {
                         count(*) FILTER (WHERE finished_at IS NULL AND heartbeat_at > now() - interval '5 minutes')::int AS live_runs,
                         max(GREATEST(heartbeat_at, started_at)) AS last_seen
                  FROM agent_runs
+                 WHERE props->>'mbox_user_id' = $3 OR ($1::boolean AND NOT (props ? 'mbox_user_id'))
                  GROUP BY agent_name
                ),
                names AS (
@@ -1220,6 +1223,7 @@ function mboxDevApi() {
                LEFT JOIN audited a ON a.name = n.name
                LEFT JOIN ran r ON r.name = n.name
                ORDER BY GREATEST(p.last_seen, a.last_seen, r.last_seen) DESC NULLS LAST`,
+              [sessionUser.role === "owner", sessionUser.id, String(sessionUser.id)],
             );
 
             const now = Date.now();
@@ -1334,7 +1338,7 @@ function mboxDevApi() {
 
           // Зеркало прод-ручки: лимиты подписок агентов (см. server/agent-usage.mjs).
           if (url.pathname === "/api/mbox/agent/usage" && req.method === "GET") {
-            return sendJson(res, 200, { usage: await readAgentUsage(queryPostgres) });
+            return sendJson(res, 200, { usage: await readAgentUsage(queryPostgres, Date.now(), JARVIS_NAME) });
           }
           if (url.pathname === "/api/mbox/agent/usage" && req.method === "POST") {
             if (sessionUser.role !== "owner") return sendJson(res, 403, { error: "owner_required" });

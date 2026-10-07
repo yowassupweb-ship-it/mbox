@@ -5,7 +5,7 @@ import type { ToolOutputLine, ToolRunEvent } from "../types";
 import { markOverlay } from "../app/workbench/BrowserDocument";
 import { TreeGlyph } from "../app/workbench/TreeGlyph";
 import { usageOf, useAgentUsage } from "../hooks/useAgentUsage";
-import { UsageRing } from "./UsageRing";
+import { UsageMeters } from "./UsageMeters";
 
 // Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
 // полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
@@ -401,7 +401,7 @@ export function TopBar({
                       <AgentAvatar name={agent.name} status={agent.status} live={agent.live} size={20} />
                       <AgentName name={agent.name} className="tb-pop-name" />
                       <span className="tb-pop-state">
-                        <UsageRing usage={usageOf(usage, agent.name)} size={16} />
+                        <UsageMeters usage={usageOf(usage, agent.name)} />
                         <small className={agent.live ? "is-live" : agent.status === "active" ? "is-ok" : undefined}>{agent.live ? "в работе" : agent.statusLabel}</small>
                       </span>
                     </li>

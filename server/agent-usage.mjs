@@ -1,8 +1,10 @@
 // Лимиты подписок агентов (Claude Code, Codex): сколько окна уже израсходовано и когда оно сбросится.
-// Данные присылают наблюдатели агентов на машине владельца (POST /api/mbox/agent/usage), интерфейс рисует из них
-// кружок «осталось N%» у агента. Окна у подписок два: пятичасовое и недельное; у каждого свой сброс.
+// Данные присылают наблюдатели агентов (POST /api/mbox/agent/usage): локальные — под «Claude»/«ChatGPT», облачные на
+// сервере — под своими именами, у них своя подписка. Окна у подписок два: пятичасовое и недельное; у каждого свой сброс.
+// У Джарвиса подписки нет — он ходит в бесплатные API (Gemini, Groq, Cloudflare) с суточными квотами по каждой модели,
+// поэтому его запись собирается здесь же из журнала groq_usage: расход за сегодня по моделям.
 
-export const USAGE_AGENTS = { claude: "Claude", chatgpt: "ChatGPT", codex: "ChatGPT" };
+export const USAGE_AGENTS = { claude: "Claude", chatgpt: "ChatGPT", codex: "ChatGPT", claudecloud: "ClaudeCloud", codexcloud: "CodexCloud" };
 
 const MAX_WINDOWS = 6;
 
@@ -74,12 +76,61 @@ export async function publishAgentUsage(query, body) {
   return { agent, windows: windows.length };
 }
 
-export async function readAgentUsage(query, now = Date.now()) {
+/**
+ * Суточные квоты бесплатных API в токенах, где они известны: «модель=токены» через запятую в JARVIS_DAILY_TOKEN_LIMITS.
+ * По умолчанию — только gpt-oss-120b на Groq: 200К токенов в сутки, упирались в него вживую (см. groqComplete).
+ */
+export function dailyTokenLimits(value = process.env.JARVIS_DAILY_TOKEN_LIMITS) {
+  const limits = { "openai/gpt-oss-120b": 200_000 };
+  for (const pair of String(value || "").split(",")) {
+    const at = pair.lastIndexOf("=");
+    if (at <= 0) continue;
+    const tokens = Number(pair.slice(at + 1));
+    if (Number.isFinite(tokens) && tokens > 0) limits[pair.slice(0, at).trim()] = Math.round(tokens);
+  }
+  return limits;
+}
+
+/** Расход Джарвиса за сегодня по моделям: токены, вызовы, доля суточной квоты, если она известна. */
+export function shapeDailyModels(rows, limits = dailyTokenLimits()) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const tokens = Number(row.tokens_today) || 0;
+      const limit = limits[row.model];
+      return {
+        model: String(row.model || ""),
+        tokens_today: tokens,
+        calls_today: Number(row.calls_today) || 0,
+        ...(limit ? { limit_tokens: limit, used_percent: Math.min(100, Math.round((tokens / limit) * 1000) / 10) } : {}),
+      };
+    })
+    .filter((row) => row.model && (row.tokens_today > 0 || row.calls_today > 0));
+}
+
+async function readJarvisDaily(query) {
+  const rows = (await query(
+    `SELECT model,
+            COALESCE(sum(total_tokens), 0)::bigint AS tokens_today,
+            count(*)::int AS calls_today,
+            max(created_at)::text AS last_call_at
+       FROM groq_usage
+      WHERE created_at > date_trunc('day', now())
+      GROUP BY model
+      ORDER BY sum(total_tokens) DESC`,
+  )).rows;
+  const last = rows.map((row) => row.last_call_at).filter(Boolean).sort().pop() || null;
+  return { kind: "daily", windows: [], models: shapeDailyModels(rows), updated_at: last };
+}
+
+export async function readAgentUsage(query, now = Date.now(), jarvisName = "Джарвис") {
+  const result = {};
   try {
     await ensureAgentUsage(query);
     const rows = (await query("SELECT agent, windows, updated_at::text FROM agent_usage")).rows;
-    return Object.fromEntries(rows.map((row) => [row.agent, { windows: shapeWindows(row.windows, now), updated_at: row.updated_at }]));
-  } catch {
-    return {};
-  }
+    for (const row of rows) result[row.agent] = { kind: "windows", windows: shapeWindows(row.windows, now), updated_at: row.updated_at };
+  } catch { /* таблицы ещё нет — подписок не показываем */ }
+  try {
+    result[jarvisName] = await readJarvisDaily(query);
+  } catch { /* нет groq_usage — у Джарвиса просто не будет строки расхода */ }
+  return result;
 }

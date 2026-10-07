@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { warmUpEditors } from "./warmup";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { usageOf, useAgentUsage } from "../../hooks/useAgentUsage";
-import { UsageRing } from "../../components/UsageRing";
+import { UsageMeters } from "../../components/UsageMeters";
 import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
@@ -1479,7 +1479,7 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                     <strong><AgentName name={agent.name} /><small>{isCloudAgent(agent.name) ? "сервер MBOX" : agentClientLabel(agent.client || agent.kind)}</small></strong>
                     <div className="wb-agent-statusline">
                       <span className={live ? "is-live" : status === "active" ? "is-ok" : undefined}>{stateText}</span>
-                      <UsageRing usage={usageOf(usage, agent.name)} />
+                      <UsageMeters usage={usageOf(usage, agent.name)} />
                     </div>
                   </div>
                   <div className="wb-agent-actions">

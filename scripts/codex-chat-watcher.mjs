@@ -112,9 +112,11 @@ publishModelCatalog({
   post: (body) => mboxFetch("/api/mbox/agent/models", { method: "POST", body: JSON.stringify(body) }),
   log: (message) => console.log(`${logPrefix} ${message}`),
 });
-// Лимиты подписки (окна 5 часов и неделя) — из записей сессий Codex; MBOX рисует по ним кружок «осталось N%» у агента.
-if (agentKind !== "cloud_agent") {
-  const reportUsage = () => postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), "ChatGPT", latestCodexRateLimits(), (message) => console.log(`${logPrefix} ${message}`));
+// Лимиты подписки (окна 5 часов и неделя) — из записей сессий Codex; MBOX рисует по ним индикатор у агента.
+// Облачный Codex — своя подписка на сервере, публикует под своим именем (CodexCloud).
+{
+  const usageAgent = agentKind === "cloud_agent" ? agentName : "ChatGPT";
+  const reportUsage = () => postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), usageAgent, latestCodexRateLimits(), (message) => console.log(`${logPrefix} ${message}`));
   void reportUsage();
   setInterval(reportUsage, 60_000).unref();
 }

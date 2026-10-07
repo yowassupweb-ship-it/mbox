@@ -4221,22 +4221,27 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 
 /* Доступ по ссылке: по строке на режим (просмотр / редактирование), как у заметок. */
 
-/* Кружок лимита агента (components/UsageRing.tsx): дуга — сколько осталось в самом тесном окне подписки. */
-.usage-ring { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--text-2xs); line-height: 1; }
-.usage-ring b { min-width: 2.4em; font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; text-align: left; overflow: visible; }
-.usage-ring svg { display: block; }
-.usage-ring-track { fill: none; stroke: color-mix(in srgb, var(--text-main) 16%, transparent); stroke-width: 2.4; }
-.usage-ring-arc { fill: none; stroke: var(--usage-tone, var(--state-live)); stroke-width: 2.4; stroke-linecap: round; transition: stroke-dasharray var(--duration-slow, 300ms) var(--ease-out); }
-.usage-ring.is-ok { --usage-tone: var(--state-ok, var(--accent-color)); }
-.usage-ring.is-warn { --usage-tone: var(--state-warn); }
-.usage-ring.is-danger { --usage-tone: var(--state-danger); }
-.usage-ring.is-warn b { color: var(--state-warn); }
-.usage-ring.is-danger b { color: var(--state-danger); }
-.wb-agent-list .usage-ring { overflow: visible; white-space: nowrap; font-size: var(--text-2xs); color: var(--text-muted); }
+/* Расход агента (components/UsageMeters.tsx): мини-шкала на каждое окно подписки (5ч, нед) или суточный расход Джарвиса. */
+.usage-meters { flex: none; display: inline-flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: var(--text-2xs); line-height: 1; white-space: nowrap; }
+.usage-meters.is-stale { opacity: 0.55; }
+.usage-meter, .usage-today { display: inline-flex; align-items: center; gap: 4px; }
+.usage-meters i { font-style: normal; color: var(--text-muted); }
+.usage-meters b { font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.usage-meter b { min-width: 2.2em; }
+.usage-bar { position: relative; width: 28px; height: 4px; overflow: hidden; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.usage-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--usage-tone); transition: width var(--duration-slow, 300ms) var(--ease-out); }
+.usage-meter.is-ok { --usage-tone: var(--state-ok, var(--accent-color)); }
+.usage-meter.is-warn { --usage-tone: var(--state-warn); }
+.usage-meter.is-danger { --usage-tone: var(--state-danger); }
+.usage-meter.is-warn b { color: var(--state-warn); }
+.usage-meter.is-danger b { color: var(--state-danger); }
 .tb-pop-state { display: inline-flex; align-items: center; gap: 8px; }
-@media (prefers-reduced-motion: reduce) { .usage-ring-arc { transition: none; } }
-.wb-agent-statusline { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.wb-agent-statusline > span:first-child { flex: 1 1 auto; min-width: 0; }
+.tb-pop-state .usage-meters { gap: 6px; }
+.tb-pop-state .usage-bar { width: 20px; }
+@media (prefers-reduced-motion: reduce) { .usage-bar > span { transition: none; } }
+/* Статус — своей строкой, расход агента — под ним: в одну строку они делили ширину, и статус схлопывался в «…». */
+.wb-agent-statusline { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.wb-agent-statusline > span:first-child { max-width: 100%; min-width: 0; }
 
 /* Поиск в документе (Ctrl+F): панель и подсветка совпадений. */
 .wb-find-bar { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: min(360px, calc(100vw - 24px)); height: 36px; padding: 3px 4px 3px 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); box-shadow: var(--float); color: var(--text-muted); }

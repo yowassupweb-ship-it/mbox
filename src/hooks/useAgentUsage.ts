@@ -1,8 +1,13 @@
 import { useSyncExternalStore } from "react";
 import { fetchJson } from "../lib/api";
+import { agentFamily, isCloudAgent } from "../lib/agents";
 
 export type UsageWindow = { id: string; label: string; used_percent: number; resets_at?: number; expired?: boolean };
-export type AgentUsage = { windows: UsageWindow[]; updated_at: string };
+export type DailyModelUsage = { model: string; tokens_today: number; calls_today: number; limit_tokens?: number; used_percent?: number };
+/** Подписка (Claude Code, Codex) — окна 5 ч и неделя; Джарвис — суточный расход бесплатных API по моделям. */
+export type AgentUsage =
+  | { kind?: "windows"; windows: UsageWindow[]; updated_at: string }
+  | { kind: "daily"; windows: []; models: DailyModelUsage[]; updated_at: string | null };
 
 const POLL_MS = 60_000;
 let usage: Record<string, AgentUsage> = {};
@@ -34,10 +39,17 @@ export function useAgentUsage() {
   return useSyncExternalStore(subscribe, () => usage, () => usage);
 }
 
-/** Лимиты агента по любому его имени: «Codex», «ChatGPT» и «chatgpt-cloud» → ChatGPT. */
+/**
+ * Лимиты конкретного агента. Своя запись есть у облачных (ClaudeCloud, CodexCloud — своя подписка на сервере) и у Джарвиса;
+ * локальные Claude и Codex под любым именем («Codex» через MCP, «ChatGPT» наблюдателя) делят подписку этого компьютера.
+ * Облачному без своей записи чужую подписку не подставляем — лучше ничего, чем чужие цифры.
+ */
 export function usageOf(map: Record<string, AgentUsage>, agentName: string): AgentUsage | undefined {
-  const name = agentName.toLowerCase();
-  if (name.includes("claude")) return map.Claude;
-  if (name.includes("chatgpt") || name.includes("codex")) return map.ChatGPT;
+  if (map[agentName]) return map[agentName];
+  if (isCloudAgent(agentName)) return undefined;
+  const family = agentFamily(agentName)?.key;
+  if (family === "claude") return map.Claude;
+  if (family === "codex") return map.ChatGPT;
+  if (family === "jarvis") return Object.values(map).find((entry) => entry.kind === "daily");
   return undefined;
 }

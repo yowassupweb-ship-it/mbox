@@ -827,9 +827,10 @@ function spawnStreaming(command, args, options, input = "", inboxId = "", warm =
       }
       if (event.type === "rate_limit_event" && event.rate_limit_info) {
         state.rateLimit = event.rate_limit_info;
-        // Любое событие лимита — в кружок usage у агента (не только когда окно почти выбрано).
-        const window = agentKind === "cloud_agent" ? null : claudeWindowFromEvent(event.rate_limit_info);
-        if (window) void postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), "Claude", [window], (message) => console.log(`${logPrefix} ${message}`));
+        // Любое событие лимита — в индикатор usage у агента (не только когда окно почти выбрано).
+        // Облачный Claude работает под своей подпиской на сервере — публикует под своим именем (ClaudeCloud).
+        const window = claudeWindowFromEvent(event.rate_limit_info);
+        if (window) void postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), agentKind === "cloud_agent" ? agentName : "Claude", [window], (message) => console.log(`${logPrefix} ${message}`));
         return;
       }
       if (event.type === "assistant" && event.message?.usage) {

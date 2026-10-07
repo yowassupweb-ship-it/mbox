@@ -1431,7 +1431,7 @@ async function handleApiWithContext(req, res, url) {
 
   // Лимиты подписок агентов (окна 5 ч и неделя): наблюдатели присылают, интерфейс рисует кружок «осталось N%».
   if (url.pathname === "/api/mbox/agent/usage" && req.method === "GET") {
-    return sendJson(res, 200, { usage: await readAgentUsage(query) });
+    return sendJson(res, 200, { usage: await readAgentUsage(query, Date.now(), JARVIS_NAME) });
   }
   if (url.pathname === "/api/mbox/agent/usage" && req.method === "POST") {
     if (!isOwner(user)) return sendJson(res, 403, { error: "owner_required" });

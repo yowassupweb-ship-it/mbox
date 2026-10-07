@@ -1,12 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeWindows, normalizeWindows, shapeWindows, usageAgentName } from "./agent-usage.mjs";
+import { dailyTokenLimits, mergeWindows, normalizeWindows, shapeDailyModels, shapeWindows, usageAgentName } from "./agent-usage.mjs";
 
 test("имена агентов приводятся к каталожным", () => {
   assert.equal(usageAgentName("claude"), "Claude");
   assert.equal(usageAgentName("Codex"), "ChatGPT");
   assert.equal(usageAgentName("ChatGPT"), "ChatGPT");
   assert.equal(usageAgentName("jarvis"), "");
+});
+
+test("облачные агенты публикуют под своим именем, а не под локальной подпиской", () => {
+  assert.equal(usageAgentName("ClaudeCloud"), "ClaudeCloud");
+  assert.equal(usageAgentName("codexcloud"), "CodexCloud");
+});
+
+test("суточные квоты Джарвиса: умолчание и переопределение из окружения", () => {
+  assert.equal(dailyTokenLimits("")["openai/gpt-oss-120b"], 200000);
+  const limits = dailyTokenLimits("openai/gpt-oss-20b=500000, bad, x=-1, @cf/meta/llama=10000");
+  assert.equal(limits["openai/gpt-oss-20b"], 500000);
+  assert.equal(limits["@cf/meta/llama"], 10000);
+  assert.equal(limits.x, undefined);
+});
+
+test("расход Джарвиса за сегодня: доля квоты только там, где она известна", () => {
+  const rows = shapeDailyModels([
+    { model: "openai/gpt-oss-120b", tokens_today: "50000", calls_today: 4 },
+    { model: "gemini-3.5-flash-lite", tokens_today: "11673", calls_today: 2 },
+    { model: "openai/gpt-oss-20b", tokens_today: "0", calls_today: 0 },
+  ], { "openai/gpt-oss-120b": 200000 });
+  assert.deepEqual(rows, [
+    { model: "openai/gpt-oss-120b", tokens_today: 50000, calls_today: 4, limit_tokens: 200000, used_percent: 25 },
+    { model: "gemini-3.5-flash-lite", tokens_today: 11673, calls_today: 2 },
+  ]);
 });
 
 test("окна нормализуются: диапазон, id, лишнее отбрасывается", () => {

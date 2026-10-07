@@ -6,4 +6,10 @@ export function mergeWindows(existing: unknown, incoming: UsageWindow[]): UsageW
 export function shapeWindows(windows: unknown, now?: number): UsageWindow[];
 export function ensureAgentUsage(query: Query): Promise<void>;
 export function publishAgentUsage(query: Query, body: unknown): Promise<{ agent: string; windows: number }>;
-export function readAgentUsage(query: Query, now?: number): Promise<Record<string, { windows: UsageWindow[]; updated_at: string }>>;
+export type DailyModelUsage = { model: string; tokens_today: number; calls_today: number; limit_tokens?: number; used_percent?: number };
+export type AgentUsageEntry =
+  | { kind: "windows"; windows: UsageWindow[]; updated_at: string }
+  | { kind: "daily"; windows: []; models: DailyModelUsage[]; updated_at: string | null };
+export function dailyTokenLimits(value?: string): Record<string, number>;
+export function shapeDailyModels(rows: unknown, limits?: Record<string, number>): DailyModelUsage[];
+export function readAgentUsage(query: Query, now?: number, jarvisName?: string): Promise<Record<string, AgentUsageEntry>>;
