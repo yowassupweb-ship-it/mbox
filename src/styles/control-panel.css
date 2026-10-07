@@ -950,6 +950,10 @@
 }
 
 .account-save:disabled { opacity: .45; cursor: default; }
+/* Временный пароль после сброса: показывается один раз, моноширинно, чтобы его можно было продиктовать. */
+.account-temp-password { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid color-mix(in srgb, var(--accent-color) 44%, var(--border-color)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent-color) 8%, var(--element-bg)); font-size: var(--text-sm); }
+.account-temp-password > span { color: var(--text-muted); }
+.account-temp-password code { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--container-bg); color: var(--text-main); font: var(--text-sm)/1.5 var(--font-mono); letter-spacing: 0.04em; user-select: all; }
 .account-error { color: var(--state-danger); font-size: var(--text-sm); }
 
 .responder-access { display: grid; gap: var(--space-3); }

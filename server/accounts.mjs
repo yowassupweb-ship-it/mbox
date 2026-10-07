@@ -45,6 +45,8 @@ export async function ensureAccountsSchema(query) {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_prefs JSONB NOT NULL DEFAULT '{}'");
   // Вход в локальные Claude Code / Codex: состояние присылает служба на компьютере человека, запросы «войти/выйти» ставит интерфейс.
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_cli JSONB NOT NULL DEFAULT '{}'");
+  // Пароль выдан владельцем (сброс): человек видит просьбу сменить его, пока не задаст свой.
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_at TIMESTAMPTZ");
   await query(`CREATE TABLE IF NOT EXISTS account_tokens (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -99,6 +101,21 @@ function credentialsError(username, password) {
   if (password.length < 8) return "password_too_short";
   if (password.length > 200) return "password_too_long";
   return "";
+}
+
+// Без похожих знаков (0/O, 1/l/I): временный пароль диктуют голосом или перепечатывают с экрана.
+const TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/** Временный пароль для сброса: 12 знаков, ~68 бит. Отбрасываем байты сверх кратного длине алфавита — без перекоса. */
+export function temporaryPassword(length = 12) {
+  const limit = 256 - (256 % TEMP_PASSWORD_ALPHABET.length);
+  let result = "";
+  while (result.length < length) {
+    for (const byte of randomBytes(length * 2)) {
+      if (byte < limit && result.length < length) result += TEMP_PASSWORD_ALPHABET[byte % TEMP_PASSWORD_ALPHABET.length];
+    }
+  }
+  return result;
 }
 
 async function usernameTaken(query, username, email) {
@@ -179,6 +196,7 @@ function looksLikePasswordHash(value) {
 async function accountRows(query) {
   return (await query(
     `SELECT u.id::text, u.email, u.username, u.role, COALESCE((to_jsonb(u)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled, u.created_at::text,
+            to_jsonb(u)->>'password_reset_at' AS password_reset_at,
             COALESCE(jsonb_agg(jsonb_build_object('project_id', p.id::text, 'project_name', p.name, 'role', pm.role)
               ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects
      FROM users u
@@ -350,7 +368,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (next.length > 200) { sendJson(res, 400, { error: "password_too_long" }); return true; }
     const ok = await query("SELECT 1 FROM users WHERE id = $1 AND password_hash = crypt($2, password_hash)", [user.id, current]);
     if (!ok.rows[0]) { sendJson(res, 403, { error: "wrong_current_password" }); return true; }
-    await query("UPDATE users SET password_hash = crypt($2, gen_salt('bf')) WHERE id = $1", [user.id, next]);
+    await query("UPDATE users SET password_hash = crypt($2, gen_salt('bf')), password_reset_at = NULL WHERE id = $1", [user.id, next]);
     // Остальные сессии аккаунта закрываем: пароль меняют, в том числе если его кто-то узнал. Текущая остаётся.
     const keep = String(req.headers.cookie || "").match(/(?:^|;\s*)mbox_session=([^;]+)/)?.[1];
     const keepHash = keep ? createHash("sha256").update(decodeURIComponent(keep)).digest("hex") : "";
@@ -384,8 +402,11 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     return true;
   }
   if (url.pathname === "/api/mbox/account/security" && req.method === "GET") {
-    const row = (await query("SELECT password_hash = crypt($2, password_hash) AS default_password FROM users WHERE id = $1", [user.id, DEFAULT_OWNER_PASSWORD])).rows[0];
-    sendJson(res, 200, { default_password: Boolean(row?.default_password) });
+    const row = (await query(
+      "SELECT password_hash = crypt($2, password_hash) AS default_password, password_reset_at IS NOT NULL AS temporary_password FROM users WHERE id = $1",
+      [user.id, DEFAULT_OWNER_PASSWORD],
+    )).rows[0];
+    sendJson(res, 200, { default_password: Boolean(row?.default_password), temporary_password: Boolean(row?.temporary_password) });
     return true;
   }
   if (url.pathname === "/api/mbox/admin/invites" && req.method === "GET") {
@@ -454,6 +475,20 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     sendJson(res, 201, { user: (await accountRows(query)).find((row) => row.id === created.rows[0].id) });
     return true;
   }
+  // Сброс пароля участника владельцем: новый временный пароль показывается один раз, все входы участника закрываются.
+  // Свой пароль владелец меняет в «Аккаунте» — сброс чужого владельца запрещён, как и правка его аккаунта.
+  const resetMatch = url.pathname.match(/^\/api\/mbox\/admin\/users\/(\d+)\/reset-password$/);
+  if (resetMatch && req.method === "POST") {
+    if (!ownerOnly(user, sendJson, res)) return true;
+    const target = (await query("SELECT id::text, role FROM users WHERE id = $1", [resetMatch[1]])).rows[0];
+    if (!target) { sendJson(res, 404, { error: "not_found" }); return true; }
+    if (target.role === "owner") { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
+    const password = temporaryPassword();
+    await query("UPDATE users SET password_hash = crypt($2, gen_salt('bf')), password_reset_at = now() WHERE id = $1", [target.id, password]);
+    const revoked = await query("DELETE FROM auth_sessions WHERE user_id = $1", [target.id]);
+    sendJson(res, 200, { password, sessions_revoked: revoked.rowCount });
+    return true;
+  }
   const match = url.pathname.match(/^\/api\/mbox\/admin\/users\/(\d+)$/);
   if (match && req.method === "PATCH") {
     if (!ownerOnly(user, sendJson, res)) return true;
@@ -466,7 +501,8 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
       `UPDATE users SET
          username = COALESCE(NULLIF($1, ''), username),
          email = COALESCE(NULLIF($2, ''), email),
-         password_hash = CASE WHEN length($3) >= 8 THEN crypt($3, gen_salt('bf')) ELSE password_hash END
+         password_hash = CASE WHEN length($3) >= 8 THEN crypt($3, gen_salt('bf')) ELSE password_hash END,
+         password_reset_at = CASE WHEN length($3) >= 8 AND role <> 'owner' THEN now() ELSE password_reset_at END
        WHERE id = $4`,
       [String(body.username || "").trim(), String(body.email || "").trim(), looksLikePasswordHash(password) ? "" : password, match[1]],
     );

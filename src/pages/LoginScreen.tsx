@@ -88,7 +88,7 @@ export function LoginScreen({ onLogin }: { onLogin: (me: Me) => void }) {
             )}
           </div>
         )}
-        <p className="login-hint">Нет аккаунта? Попросите у владельца ссылку-приглашение.</p>
+        <p className="login-hint">Нет аккаунта? Попросите у владельца ссылку-приглашение.<br />Забыли пароль? Владелец сбросит его в «Настройки → Команда».</p>
       </form>
     </main>
   );

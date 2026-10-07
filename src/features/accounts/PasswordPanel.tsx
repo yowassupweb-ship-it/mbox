@@ -6,7 +6,7 @@ import { Panel, PasswordInput } from "../../ui";
 import { showNotice } from "../../ui/askText";
 import { accountErrorText } from "./accountErrors";
 
-/** Смена своего пароля. Если у владельца всё ещё пароль из установки — сверху предупреждение. */
+/** Смена своего пароля. Пароль из установки или временный после сброса — сверху просьба сменить. */
 export function PasswordPanel() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -14,9 +14,13 @@ export function PasswordPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [isDefault, setIsDefault] = useState(false);
+  const [isTemporary, setIsTemporary] = useState(false);
 
   useEffect(() => {
-    fetchJson<{ default_password: boolean }>("/api/mbox/account/security").then((result) => setIsDefault(result.default_password)).catch(() => {});
+    fetchJson<{ default_password: boolean; temporary_password?: boolean }>("/api/mbox/account/security").then((result) => {
+      setIsDefault(result.default_password);
+      setIsTemporary(Boolean(result.temporary_password));
+    }).catch(() => {});
   }, []);
 
   async function submit(event: FormEvent) {
@@ -30,7 +34,7 @@ export function PasswordPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ current_password: current, new_password: next }),
       });
-      setCurrent(""); setNext(""); setRepeat(""); setIsDefault(false);
+      setCurrent(""); setNext(""); setRepeat(""); setIsDefault(false); setIsTemporary(false);
       showNotice("Пароль изменён", "На других устройствах придётся войти заново.");
     } catch (cause) {
       setError(accountErrorText(cause, "Не удалось сменить пароль. Попробуйте ещё раз"));
@@ -43,6 +47,7 @@ export function PasswordPanel() {
     <Panel title="Пароль" icon={KeyRound}>
       <form className="account-create" onSubmit={submit}>
         {isDefault && <div className="account-error" role="alert">Сейчас задан пароль из установки — смените его.</div>}
+        {isTemporary && <div className="account-error" role="alert">Пароль выдан владельцем при сбросе — задайте свой. Временный введите как текущий.</div>}
         <div className="account-create-fields">
           <PasswordInput value={current} onChange={(event) => setCurrent(event.target.value)} placeholder="Текущий пароль" autoComplete="current-password" required />
           <PasswordInput value={next} onChange={(event) => setNext(event.target.value)} placeholder="Новый, минимум 8 знаков" autoComplete="new-password" minLength={8} required />

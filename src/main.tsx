@@ -45,6 +45,7 @@ import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/t
 import { TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
 import { EmptyState, ManualForm, Panel } from "./ui";
+import { askConfirm } from "./ui/askText";
 import { AgentsOnThisComputer } from "./features/agents/AgentsOnThisComputer";
 import { bootstrapSeen, loadSeen } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
@@ -1037,6 +1038,7 @@ type AccountUser = {
   username: string;
   role: "owner" | "member";
   jarvis_enabled?: boolean;
+  password_reset_at?: string | null;
   projects: Array<{ project_id: string; project_name: string; role: string }>;
 };
 
@@ -1071,6 +1073,8 @@ function AccountManager({ projects }: { projects: Project[] }) {
   const [draftProjects, setDraftProjects] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  // Временный пароль после сброса: показывается один раз, в строке этого аккаунта, до «Скрыть».
+  const [issued, setIssued] = useState<{ id: string; password: string; copied: boolean } | null>(null);
 
   const load = useCallback(async () => {
     const result = await fetchJson<{ users: AccountUser[] }>("/api/mbox/admin/users");
@@ -1117,6 +1121,27 @@ function AccountManager({ projects }: { projects: Project[] }) {
   }
 
   // Свой Джарвис у участника: история и чаты только его, видит только его проекты. Выключен — вопросы его не будят.
+  async function resetPassword(account: AccountUser) {
+    const ok = await askConfirm({
+      title: `Сбросить пароль ${account.username}?`,
+      message: "Текущий пароль перестанет работать, все входы этого аккаунта закроются. Вы получите временный пароль — передайте его человеку, после входа MBOX попросит задать свой.",
+      confirmLabel: "Сбросить",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(`reset:${account.id}`);
+    setError("");
+    try {
+      const result = await fetchJson<{ password: string }>(`/api/mbox/admin/users/${account.id}/reset-password`, { method: "POST" });
+      setIssued({ id: account.id, password: result.password, copied: false });
+      await load();
+    } catch (cause) {
+      setError(accountErrorText(cause, "Не удалось сбросить пароль"));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function toggleJarvis(account: AccountUser, enabled: boolean) {
     setBusy(`jarvis:${account.id}`);
     setError("");
@@ -1157,7 +1182,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
               <div className="account-row" key={account.id}>
                 <div className="account-identity">
                   <strong>{account.username}</strong>
-                  <span>{account.email} · {account.role === "owner" ? "владелец" : "участник"}</span>
+                  <span>{account.email} · {account.role === "owner" ? "владелец" : "участник"}{account.password_reset_at ? " · временный пароль, ещё не сменён" : ""}</span>
                 </div>
                 {account.role === "owner" ? (
                   <span className="account-owner-note">Все проекты и личный Jarvis</span>
@@ -1169,7 +1194,16 @@ function AccountManager({ projects }: { projects: Project[] }) {
                       Свой Джарвис
                     </label>
                     <button className="account-save" type="button" disabled={!changed || busy === account.id} onClick={() => saveAccess(account)}>{busy === account.id ? "Сохраняю…" : "Сохранить доступ"}</button>
+                    <button className="ghost-action" type="button" disabled={busy === `reset:${account.id}`} onClick={() => void resetPassword(account)}>{busy === `reset:${account.id}` ? "Сбрасываю…" : "Сбросить пароль"}</button>
                   </>
+                )}
+                {issued?.id === account.id && (
+                  <div className="account-temp-password" role="status">
+                    <span>Временный пароль — покажется один раз:</span>
+                    <code>{issued.password}</code>
+                    <button className="ghost-action" type="button" onClick={() => void navigator.clipboard.writeText(issued.password).then(() => setIssued({ ...issued, copied: true }))}>{issued.copied ? "Скопирован" : "Копировать"}</button>
+                    <button className="ghost-action" type="button" onClick={() => setIssued(null)}>Скрыть</button>
+                  </div>
                 )}
               </div>
             );
