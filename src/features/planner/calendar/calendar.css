@@ -12,7 +12,8 @@
   height: 100%;
   min-height: 0;
 }
-.ncal[data-narrow="true"] { grid-template-columns: minmax(0, 1fr); }
+/* В MBOX мини-месяц и повестка — в боковой панели «Дел», во вкладке только сетка. */
+.ncal[data-layout="grid-only"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 
 /* ── Боковая панель ───────────────────────────────────────────────────── */
 .ncal-side {
@@ -572,3 +573,13 @@ button.ncal-line { cursor: pointer; }
 .ncal-chip-ev[data-task="true"] { background: transparent; }
 .ncal-chip-ev[data-task="true"]::before { content: ""; display: block; flex: none; width: 9px; height: 9px; border: 1.5px solid var(--ev); border-radius: 3px; }
 .ncal-chip-ev[data-done="true"] .ncal-chip-title { text-decoration: line-through; color: var(--text-muted); }
+
+/* ── MBOX: календарь «Дел» в боковой панели ──────────────────────────── */
+.ncal-sidebar { display: grid; align-content: start; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-4); }
+.ncal-agenda-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ncal-agenda-bar .nx-icon-btn { width: 26px; height: 26px; }
+/* Строка повестки: у события — время с цветной чертой, у задачи — галочка; текст — своя кнопка. */
+.ncal-sidebar .ncal-agenda-row { align-items: flex-start; cursor: default; }
+.ncal-sidebar .ncal-agenda-text { flex: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ncal-agenda-check { margin: 1px 11px 0 22px; }
+.ncal-agenda-row[data-done="true"] .ncal-agenda-title { text-decoration: line-through; color: var(--text-muted); }

@@ -3,13 +3,13 @@ import { warmUpEditors } from "./warmup";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { usageOf, useAgentUsage } from "../../hooks/useAgentUsage";
 import { UsageMeters } from "../../components/UsageMeters";
-import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
-import { CalendarScreen, PlannerHosts, rememberActiveTask, TasksScreen } from "../../features/planner";
+import { CalendarScreen, PlannerHosts, PlannerSidebar, PlannerStatus, setPlannerMode, setPlannerNavigator, TaskTab } from "../../features/planner";
 import type { ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf, CLOUD_AGENTS, isCloudAgent } from "../../lib/agents";
@@ -65,7 +65,7 @@ import { askConfirm } from "../../ui/askText";
 import { TreeGlyph } from "./TreeGlyph";
 import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 
-type Activity = "explorer" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
+type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
 
 /** Телефон: из какого списка открыт документ — туда ведёт «Назад» в шапке модального окна. */
@@ -389,6 +389,26 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     if (window.matchMedia("(max-width: 720px)").matches) setPanelOpen(false);
     if (next === "search") setSearchFocus((value) => value + 1);
   }
+
+  // «Дела» живут в боковой панели и вкладках: планировщик открывает их через этот навигатор, не зная про Workbench.
+  const plannerNavRef = useRef({ tabs, closeTab: (_key: string) => {}, split: (_key: string) => {} });
+  plannerNavRef.current = { tabs, closeTab: (key: string) => { void closeTab(key); }, split: (key: string) => splitTab(key) };
+  useEffect(() => {
+    setPlannerNavigator({
+      // Обычный клик — превью, его заменит следующая открытая задача; «новой вкладкой» — закреплённая;
+      // «во второй области» — открыть и перенести вправо, когда вкладка уже появилась в списке.
+      openTask: (taskId, how = "replace") => {
+        const key = `task:${taskId}`;
+        const nav = plannerNavRef.current;
+        nav.tabs.open(key, how !== "replace");
+        if (how === "split") window.setTimeout(() => plannerNavRef.current.split(key), 0);
+      },
+      openCalendar: () => { if (plannerNavRef.current.tabs.active !== "planner:calendar") plannerNavRef.current.tabs.open("planner:calendar", true); },
+      showSidebar: (mode) => { setPlannerMode(mode); setActivity("planner"); setSidebarOpen(true); },
+      closeTask: (taskId) => plannerNavRef.current.closeTab(`task:${taskId}`),
+      pinTask: (taskId) => plannerNavRef.current.tabs.pin(`task:${taskId}`),
+    });
+  }, [setActivity, setSidebarOpen]);
 
   // Разделы, которые открываются не боковой панелью, а вкладкой документа.
   const RAIL_TABS: Partial<Record<RailItemId, string>> = { history: "history" };
@@ -761,13 +781,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "artifacts":
         return <ArtifactsTab data={data} />;
       case "planner":
-        return (
-          <div className="nx planner-screen">
-            {first === "calendar"
-              ? <CalendarScreen onOpenTask={(taskId) => { rememberActiveTask(taskId); tabs.open("planner:tasks", true); }} />
-              : <TasksScreen />}
-          </div>
-        );
+        // «planner:tasks» — вкладка прежней версии: список задач теперь в боковой панели «Дел».
+        if (first !== "calendar") return lost("Задачи теперь в боковой панели: «Дела» на полосе слева или внизу.");
+        return <div className="nx planner-screen"><CalendarScreen visible={documentVisible} /></div>;
+      case "task":
+        return <div className="nx planner-screen"><TaskTab taskId={first} visible={documentVisible} /></div>;
       case "abilities":
         return <AbilitiesBoard />;
       case "history":
@@ -1016,6 +1034,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
       <aside className="wb-sidebar" aria-label="Боковая панель" data-scroll-scope={`sidebar:${activity}`}>
         {activity === "explorer" && <ExplorerView data={data} tabs={tabs} onProjectContext={onProjectContext} />}
+        {activity === "planner" && <PlannerSidebar />}
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
         {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
@@ -1259,16 +1278,15 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       </aside>
 
       <footer className="wb-statusbar">
-        <button type="button" className={`wb-status-item is-state state-${status.state}`} onClick={() => showActivity("agents")} title="Состояние агентов">
-          <i className="wb-state-dot" />{status.label}
-        </button>
+        {/* Вход в «Дела» — под боковой панелью; сводка агентов — справа, рядом с «Вниманием». */}
+        <PlannerStatus active={sidebarOpen && activity === "planner"} onOpen={() => showActivity("planner")} />
         <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
           <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
         </button>
         <span className="wb-status-fill" />
-        {/* Планировщик (из shar-2) — вкладками во всю ширину: список задач и неделя календаря в панели не помещались. */}
-        <button type="button" className={tabs.active === "planner:tasks" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => tabs.open("planner:tasks", true)} title="Задачи: личные и всех проектов"><CheckSquare size={12} /> Задачи</button>
-        <button type="button" className={tabs.active === "planner:calendar" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => tabs.open("planner:calendar", true)} title="Календарь"><CalendarDays size={12} /> Календарь</button>
+        <button type="button" className={`wb-status-item is-state state-${status.state}`} onClick={() => showActivity("agents")} title="Состояние агентов">
+          <i className="wb-state-dot" />{status.label}
+        </button>
         {attentionCount > 0 && (
           <button type="button" className={needsHuman.length ? "wb-status-item is-warn" : "wb-status-item"} onClick={() => showPanel("attention")} title="Требует внимания">
             <AlertTriangle size={12} /> {attentionCount}

@@ -339,11 +339,11 @@
 .ntd-chip[data-on="true"] svg { color: var(--accent-color); }
 
 /* ── MBOX: общий список задач всех проектов ───────────────────────────── */
-/* Поиск и выбор списка (проект / «Личные» / все) — одной строкой. */
+/* Выбор списка (проект / «Личные» / все) с числом открытых и «+ Задача» — одной строкой, поиск под ними. */
 .ntl-filters { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.ntl-filters > :first-child { flex: 1; min-width: 0; }
-.ntl-list-pick { flex: none; max-width: 46%; }
-.ntl-list-pick > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ntl-list-pick { flex: 1; min-width: 0; justify-content: flex-start; }
+.ntl-list-pick > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.ntl-list-pick > b { flex: none; color: var(--text-muted); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
 /* Проект задачи в строке — только в общем списке. */
 .ntl-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ntl-tag::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--tone, var(--note-gray)); }
@@ -351,3 +351,13 @@
 .ntl-agent { display: inline-flex; align-items: center; gap: 3px; color: var(--accent-color); }
 .ntd-chip[data-static="true"] { cursor: default; color: var(--accent-color); }
 .nx-pick-text small { font-size: var(--text-xs); color: var(--text-muted); }
+
+/* ── MBOX: список задач в боковой панели «Дел» ───────────────────────── */
+.ntl.ntl-side { flex: 1 1 0; min-height: 0; overflow: hidden; border-right: 0; background: transparent; }
+.ntl-side .ntl-list { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+.ntl-side .ntl-head { padding: var(--space-2) var(--space-2) var(--space-2); }
+.ntl-side .ntl-list { padding: 0 4px var(--space-4); }
+/* Вкладка задачи — документ во всю ширину, кнопка «назад» не нужна: список слева. */
+.planner-screen > .ntd { height: 100%; min-height: 0; }
+.planner-screen .ntd-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+.planner-screen .ntd-back { display: none; }

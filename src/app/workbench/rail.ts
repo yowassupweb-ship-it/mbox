@@ -14,6 +14,7 @@ import { scopedStorageKey } from "./tabs";
 
 export type RailItemId =
   | "explorer"
+  | "planner"
   | "notes"
   | "tables"
   | "local"
@@ -48,6 +49,11 @@ export const RAIL_GROUPS: Array<{ id: string; title: string; items: RailItem[] }
     id: "projects",
     title: "Проекты",
     items: [{ id: "explorer", label: "Проекты (Ctrl+Shift+E)", short: "Проекты", icon: `${NAVIGATION}/projects.png`, required: true }],
+  },
+  {
+    id: "planner",
+    title: "Дела",
+    items: [{ id: "planner", label: "Дела: задачи и календарь", short: "Дела", icon: "/assets/icons/planner/calendar.png" }],
   },
   {
     id: "documents",

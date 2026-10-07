@@ -15,6 +15,7 @@ import { renderMarkdown, toggleTaskLine } from './markdown';
 import { repeatIdOf, repeatLabel, TASK_REPEATS } from './repeat';
 import { DatePicker } from '../ui/DatePicker';
 import { continueList, MarkdownToolbar, markdownShortcut } from './MarkdownToolbar';
+import { pinTaskTab } from '../nav';
 
 /**
  * Задача — документ, как заметка MBOX: первая строка — крупный заголовок, дальше markdown с панелью форматирования.
@@ -75,13 +76,14 @@ export default function TaskDocument({ task, onBack, onGone }: {
     }
   }, [task.id]);
 
-  // Автосохранение.
+  // Автосохранение. Первая правка закрепляет вкладку-превью: следующий клик в списке её не заменит.
   useEffect(() => {
     if (title === saved.current.title && md === saved.current.md) return undefined;
+    pinTaskTab(task.id);
     setState('pending');
     const t = window.setTimeout(() => void save(), SAVE_DELAY);
     return () => window.clearTimeout(t);
-  }, [title, md, save]);
+  }, [title, md, save, task.id]);
 
   // Уход с задачи: досохранить. Пустую новую убирает экран списка — при смене задачи, а не здесь:
   // StrictMode вызывает эту очистку сразу после монтирования, и новая задача удалялась бы на глазах.

@@ -1,5 +1,5 @@
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { AlertCircle, Bot, CalendarDays, CalendarX, Check, ChevronDown, ChevronRight, CircleCheck, Copy, ExternalLink, Flag, FolderClosed, Plus, RotateCcw, RotateCw, Search, Trash2 } from 'lucide-react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { AlertCircle, Bot, CalendarDays, CalendarX, Check, ChevronDown, ChevronRight, CircleCheck, Columns2, Copy, ExternalLink, Flag, FolderClosed, PanelTop, Plus, RotateCcw, RotateCw, Search, Trash2 } from 'lucide-react';
 import { showToast } from '../ui/Toast';
 import { displayName, loadPeople, usePeople } from '../people';
 import { Avatar } from '../ui/Avatar';
@@ -8,31 +8,22 @@ import { SearchField } from '../ui/SearchField';
 import { SectionIcon } from '../ui/SectionIcon';
 import { useLongPress } from '../ui/useLongPress';
 import { askConfirm, Menu, MenuItem, type MenuAnchor } from '../ui/overlay';
-import Splitter from '../ui/Splitter';
 import {
   assigneesOf, createTask, deleteTask, DONE_STATUS, isDone, isImportant, loadTasks, PERSONAL, STATUSES, statusOf, type Status, taskMarkdown,
   type Task, type TaskList, updateTask, useTasks,
 } from './api';
 import { checklistProgress, plainSnippet } from './markdown';
-import TaskDocument, { dueLabel } from './TaskDocument';
+import { dueLabel } from './TaskDocument';
+import { closeTaskTab, openTask, usePlannerNav } from '../nav';
 
 /**
- * Раздел «Задачи» (перенесён из shar-2): мастер-деталь. Слева — поиск, выбор списка и задачи по статусам;
- * справа — задача-документ. Здесь все задачи разом: личные и задачи всех проектов, к которым есть доступ.
- * На узком окне (≤640px) — одна область за раз.
+ * Список задач «Дел» (из shar-2) — в боковой панели: поиск, выбор списка и задачи по статусам. Здесь все задачи разом:
+ * личные и задачи всех проектов, к которым есть доступ. Задача открывается вкладкой-документом (TaskTab).
  */
 
-const NARROW = '(max-width: 640px)';
-const subscribeMedia = (cb: () => void) => {
-  const mq = window.matchMedia(NARROW);
-  mq.addEventListener('change', cb);
-  return () => mq.removeEventListener('change', cb);
-};
-
-const ACTIVE_KEY = 'mbox.planner.activeTask';
 const FILTER_KEY = 'mbox.planner.taskList';
-const readStored = (key: string) => { try { return sessionStorage.getItem(key); } catch { return null; } };
-const writeStored = (key: string, value: string | null) => { try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key); } catch { /* без памяти */ } };
+const readStored = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
+const writeStored = (key: string, value: string | null) => { try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key); } catch { /* без памяти */ } };
 
 /** Фильтр списка: все, только личные или один проект. */
 type ListFilter = 'all' | string;
@@ -82,12 +73,11 @@ const Row = memo(function Row({ t, list, active, onOpen, onMenu }: { t: Task; li
   );
 });
 
-export default function TasksScreen() {
-  const narrow = useSyncExternalStore(subscribeMedia, () => window.matchMedia(NARROW).matches, () => false);
+export function TaskList() {
   const tasks = useTasks((s) => s.tasks);
   const lists = useTasks((s) => s.lists);
   const phase = useTasks((s) => s.phase);
-  const [activeId, setActiveId] = useState<string | null>(() => readStored(ACTIVE_KEY));
+  const activeId = usePlannerNav((s) => s.activeTask);
   const [filter, setFilter] = useState<ListFilter>(() => readStored(FILTER_KEY) || 'all');
   const [fresh, setFresh] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -97,18 +87,10 @@ export default function TasksScreen() {
   const [menu, setMenu] = useState<{ task: Task; anchor: MenuAnchor } | null>(null);
   const [listMenu, setListMenu] = useState<MenuAnchor | null>(null);
   const onMenu = useCallback((task: Task, anchor: MenuAnchor) => setMenu({ task, anchor }), []);
-  const layoutRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { void loadPeople().then(() => loadTasks()); }, []);
-  // Задачу открыли из календаря, когда вкладка уже была открыта.
-  useEffect(() => {
-    const onOpenTask = (event: Event) => { const id = String((event as CustomEvent).detail || ''); if (id) setActiveId(id); };
-    window.addEventListener('mbox:planner-open-task', onOpenTask);
-    return () => window.removeEventListener('mbox:planner-open-task', onOpenTask);
-  }, []);
 
-  const open = useCallback((id: string) => { writeStored(ACTIVE_KEY, id); setActiveId(id); }, []);
-  const back = useCallback(() => { writeStored(ACTIVE_KEY, null); setActiveId(null); }, []);
+  const open = useCallback((id: string) => openTask(id), []);
   const pickList = (value: ListFilter) => { writeStored(FILTER_KEY, value === 'all' ? null : value); setFilter(value); };
 
   const listsById = useMemo(() => Object.fromEntries(lists.map((l) => [l.id, l])), [lists]);
@@ -120,7 +102,7 @@ export default function TasksScreen() {
     try {
       const t = await createTask({ listId: filter === 'all' ? PERSONAL : filter });
       setFresh(t.id);
-      open(t.id);
+      openTask(t.id, 'tab');
     } catch {
       showToast('Задача не создалась — нет связи с сервером.', 'error');
     } finally {
@@ -128,12 +110,15 @@ export default function TasksScreen() {
     }
   };
 
-  // Ушли с только что созданной задачи, так ничего и не написав, — убираем её, чтобы не копились «пустышки».
+  // Ушли с только что созданной задачи, так ничего и не написав, — убираем её (и её вкладку), чтобы не копились «пустышки».
   useEffect(() => {
     if (!fresh || activeId === fresh) return undefined;
     const timer = window.setTimeout(() => {
       const left = useTasks.getState().tasks[fresh];
-      if (left && !left.title.trim() && !taskMarkdown(left).trim()) void deleteTask(fresh).catch(() => {});
+      if (left && !left.title.trim() && !taskMarkdown(left).trim()) {
+        closeTaskTab(fresh);
+        void deleteTask(fresh).catch(() => {});
+      }
       setFresh(null);
     }, 300);
     return () => window.clearTimeout(timer);
@@ -158,7 +143,6 @@ export default function TasksScreen() {
     return { open: out, done };
   }, [visible]);
 
-  const active = activeId ? tasks[activeId] : undefined;
   const openCount = groups.open.reduce((n, g) => n + g.items.length, 0);
   // В общем списке подпись проекта у строки нужна; в отфильтрованном по одному списку — лишняя.
   const listOf = (t: Task) => (filter === 'all' ? listsById[t.listId] : undefined);
@@ -211,31 +195,21 @@ export default function TasksScreen() {
   }
 
   return (
-    <div ref={layoutRef} className="ntn" data-pane={active ? 'detail' : 'list'}>
-      <aside className="ntl" aria-label="Задачи">
-        <header className="ntl-head">
-          <div className="ntl-title">
-            <h1>Задачи</h1>
-            <span className="ntl-total">{openCount} {plural(openCount, ['открытая', 'открытых', 'открытых'])}</span>
-            <button type="button" className="nx-primary ntl-new" onClick={() => void create()} disabled={creating}>
-              <Plus size={16} aria-hidden="true" /> Задача
-            </button>
-          </div>
-          <div className="ntl-filters">
-            <SearchField value={query} onChange={setQuery} placeholder="Поиск по задачам" />
-            <button type="button" className="ntd-chip ntl-list-pick" onClick={(e) => setListMenu({ element: e.currentTarget, align: 'end' })} aria-haspopup="menu" title="Какой список показывать">
-              <FolderClosed size={14} aria-hidden="true" /><span>{filterName}</span><ChevronDown size={13} aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-        <div className="ntl-list nx-scroll-y">{body}</div>
-      </aside>
+    <div className="ntl ntl-side" aria-label="Задачи">
+      <header className="ntl-head">
+        <div className="ntl-filters">
+          <button type="button" className="ntd-chip ntl-list-pick" onClick={(e) => setListMenu({ element: e.currentTarget, align: 'start' })} aria-haspopup="menu" title={`Какой список показывать · ${openCount} ${plural(openCount, ['открытая', 'открытых', 'открытых'])}`}>
+            <FolderClosed size={14} aria-hidden="true" /><span>{filterName}</span><b>{openCount}</b><ChevronDown size={13} aria-hidden="true" />
+          </button>
+          <button type="button" className="nx-primary ntl-new" onClick={() => void create()} disabled={creating}>
+            <Plus size={16} aria-hidden="true" /> Задача
+          </button>
+        </div>
+        <SearchField value={query} onChange={setQuery} placeholder="Поиск по задачам" />
+      </header>
+      <div className="ntl-list nx-scroll-y">{body}</div>
 
-      {!narrow && (
-        <Splitter containerRef={layoutRef} cssVar="--ntn-list" storageKey="mbox.planner.tasks-list-width" min={300} max={560} initial={380} label="Ширина списка задач" />
-      )}
-
-      {menu && <TaskMenu task={menu.task} anchor={menu.anchor} onClose={() => setMenu(null)} onOpen={open} onDeleted={(id) => { if (activeId === id) back(); }} />}
+      {menu && <TaskMenu task={menu.task} anchor={menu.anchor} onClose={() => setMenu(null)} onDeleted={(id) => closeTaskTab(id)} />}
       {listMenu && (
         <Menu anchor={listMenu} label="Список" onClose={() => setListMenu(null)}>
           <MenuItem icon={filter === 'all' ? <Check size={16} /> : <span className="ntd-menu-gap" />} onSelect={() => { setListMenu(null); pickList('all'); }}>Все списки</MenuItem>
@@ -244,18 +218,6 @@ export default function TasksScreen() {
             <MenuItem key={l.id} icon={filter === l.id ? <Check size={16} /> : <i className="ntd-dot" style={{ '--tone': l.color || 'var(--note-gray)', margin: '0 4px' } as CSSProperties} />} onSelect={() => { setListMenu(null); pickList(l.id); }}>{l.name}</MenuItem>
           ))}
         </Menu>
-      )}
-
-      {active ? (
-        <TaskDocument key={active.id} task={active} onBack={back} onGone={back} />
-      ) : (
-        <section className="ntd ntd-none" aria-label="Задача">
-          <div className="nx-state ntd-empty-state">
-            <SectionIcon name="todo" size={72} />
-            <h2>{activeId && phase !== 'ready' ? 'Загружаю задачу' : 'Выберите задачу'}</h2>
-            <p>Задача — это документ: заголовок, описание и чек-лист в markdown. Сохраняется само.</p>
-          </div>
-        </section>
       )}
     </div>
   );
@@ -266,8 +228,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const isoDay = (plusDays: number) => { const d = new Date(); d.setDate(d.getDate() + plusDays); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
 /** Контекстное меню задачи — как в macOS: действие, статусы, сроки, удаление в самом низу. */
-function TaskMenu({ task, anchor, onClose, onOpen, onDeleted }: {
-  task: Task; anchor: MenuAnchor; onClose: () => void; onOpen: (id: string) => void; onDeleted: (id: string) => void;
+function TaskMenu({ task, anchor, onClose, onDeleted }: {
+  task: Task; anchor: MenuAnchor; onClose: () => void; onDeleted: (id: string) => void;
 }) {
   const done = isDone(task);
   const status = statusOf(task);
@@ -286,7 +248,9 @@ function TaskMenu({ task, anchor, onClose, onOpen, onDeleted }: {
   };
   return (
     <Menu anchor={anchor} label={task.title || 'Задача'} onClose={onClose}>
-      <MenuItem icon={<ExternalLink size={16} />} onSelect={() => { onClose(); onOpen(task.id); }}>Открыть</MenuItem>
+      <MenuItem icon={<ExternalLink size={16} />} onSelect={() => { onClose(); openTask(task.id); }}>Открыть</MenuItem>
+      <MenuItem icon={<PanelTop size={16} />} onSelect={() => { onClose(); openTask(task.id, 'tab'); }}>Открыть в новой вкладке</MenuItem>
+      <MenuItem icon={<Columns2 size={16} />} onSelect={() => { onClose(); openTask(task.id, 'split'); }}>Открыть во второй области</MenuItem>
       <MenuItem icon={done ? <RotateCcw size={16} /> : <CircleCheck size={16} />} onSelect={() => apply({ status: done ? 'open' : 'done' })}>
         {done ? 'Вернуть в работу' : 'Отметить выполненной'}
       </MenuItem>

@@ -1,21 +1,20 @@
 import { useEffect } from 'react';
 import { plannerFetch } from './lib';
 import { normalize, parseLocal } from './calendar/model';
-import { ScopeHost } from './calendar/EventEditor';
+import EventEditor, { ScopeHost } from './calendar/EventEditor';
+import { closeEventEditor, useCalendarUi } from './calendar/ui';
+import { dayIso } from './calendar/model';
 import { OverlayHost } from './ui/overlay';
 import ToastHost, { showToast } from './ui/Toast';
 import './planner.css';
 import './tasks/tasks.css';
 import './calendar/calendar.css';
 
-export { default as TasksScreen } from './tasks/TasksScreen';
 export { default as CalendarScreen } from './calendar/CalendarScreen';
-
-/** Открыть задачу в «Задачах»: экран читает её id при показе (см. TasksScreen, ACTIVE_KEY). */
-export function rememberActiveTask(taskId: string) {
-  try { sessionStorage.setItem('mbox.planner.activeTask', taskId); } catch { /* без памяти — откроется список */ }
-  window.dispatchEvent(new CustomEvent('mbox:planner-open-task', { detail: taskId }));
-}
+export { PlannerSidebar } from './PlannerSidebar';
+export { PlannerStatus } from './PlannerStatus';
+export { TaskTab, taskTabTitle } from './tasks/TaskTab';
+export { setPlannerNavigator, usePlannerNav, setPlannerMode, type PlannerMode } from './nav';
 
 // ── Напоминания о событиях ──────────────────────────────────────────────────
 // Пока MBOX открыт: раз в 5 минут берём события ближайших суток, раз в 20 секунд проверяем, не пора ли.
@@ -101,11 +100,13 @@ function useEventReminders() {
   }, []);
 }
 
-/** Один раз на окно MBOX: подтверждения, вопрос «это / следующие / вся серия», сообщения и напоминания. */
+/** Один раз на окно MBOX: редактор события, подтверждения, вопрос «это / следующие / вся серия», сообщения и напоминания. */
 export function PlannerHosts() {
   useEventReminders();
+  const editor = useCalendarUi((s) => s.editor);
   return (
     <>
+      {editor && <EventEditor key={editor.mode === 'edit' ? editor.event.id : dayIso(parseLocal(editor.draft.start))} state={editor} onClose={closeEventEditor} />}
       <OverlayHost />
       <ScopeHost />
       <ToastHost />

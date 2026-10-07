@@ -6,6 +6,7 @@ import { noteTitle } from "./Notes";
 import { tableTitle } from "./TablesView";
 import { docTitle } from "./docsStore";
 import { folderGlyph } from "./TreeGlyph";
+import { taskTabTitle } from "../../features/planner/tasks/TaskTab";
 
 const MENU = "/assets/icons/bottom-menu";
 const NAVIGATION = "/assets/icons/navigation";
@@ -30,8 +31,10 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: "Артефакты", hint: "Файлы и документы", icon: `${NAVIGATION}/artifacts.png` };
     case "planner":
       return first === "calendar"
-        ? { title: "Календарь", hint: "Личный календарь и задачи со сроком", icon: "/assets/icons/planner/calendar.png" }
-        : { title: "Задачи", hint: "Личные задачи и задачи всех проектов", icon: "/assets/icons/planner/todo.png" };
+        ? { title: "Календарь", hint: "Дела: календарь и задачи со сроком", icon: "/assets/icons/planner/calendar.png" }
+        : { title: "Задачи", hint: "Дела: задачи", icon: "/assets/icons/planner/todo.png" };
+    case "task":
+      return { title: taskTabTitle(first), hint: `Дела · задача #${first}`, icon: "/assets/icons/planner/todo.png" };
     case "abilities":
       return { title: "Умения", hint: "Навыки и инструменты", icon: `${NAVIGATION}/skills.png` };
     case "history":
