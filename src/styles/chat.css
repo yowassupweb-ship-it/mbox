@@ -244,7 +244,7 @@
   padding: 0 4px;
   border-radius: var(--radius-pill);
   background: var(--state-ok);
-  color: #04210e;
+  color: var(--on-state);
   font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   line-height: 14px;

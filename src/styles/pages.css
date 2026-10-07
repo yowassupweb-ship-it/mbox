@@ -800,8 +800,8 @@
 }
 
 .row-dot.live {
-  background: var(--state-ok, #65d68b);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-ok, #65d68b) 18%, transparent);
+  background: var(--state-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-ok) 18%, transparent);
 }
 
 /* Подробности — тоже строками, а не сеткой карточек. */
@@ -890,7 +890,7 @@
 .row-line-actions button:hover,
 .row-line-actions a:hover { color: var(--text-main); border-color: var(--accent-color); }
 .row-line-actions button:disabled { opacity: .4; cursor: not-allowed; }
-.row-line-actions .is-stop { color: var(--state-danger); border-color: color-mix(in srgb, #ff6b6b 40%, var(--border-color)); }
+.row-line-actions .is-stop { color: var(--state-danger); border-color: color-mix(in srgb, var(--state-danger) 40%, var(--border-color)); }
 
 .row-console { background: var(--container-bg); }
 
@@ -1186,7 +1186,7 @@
 }
 
 .todo-chip.muted { color: var(--text-muted); }
-.todo-chip.status-doing { color: #051826; background: var(--state-live); }
+.todo-chip.status-doing { color: var(--on-state); background: var(--state-live); }
 .todo-chip.status-blocked { color: var(--state-danger); background: color-mix(in srgb, var(--state-danger) 16%, transparent); }
 .todo-chip.status-review { color: var(--state-warn); background: color-mix(in srgb, var(--state-warn) 14%, transparent); }
 .todo-chip.status-next { color: var(--state-ok-soft); background: color-mix(in srgb, var(--state-ok) 14%, transparent); }
@@ -1615,7 +1615,7 @@
 
 .row-id {
   font-weight: var(--weight-bold);
-  color: #2f7dab;
+  color: var(--accent-color);
 }
 
 .memory-row p,
@@ -1638,8 +1638,8 @@
 .meta-chip {
   border-radius: var(--radius-pill);
   padding: 5px 10px;
-  background: rgba(45,156,219,.12);
-  color: #185f8b;
+  background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+  color: var(--tone-info-text);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
 }
@@ -1707,7 +1707,7 @@ time {
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-xl);
   overflow: hidden;
-  background: #151517;
+  background: var(--bg-sunken);
   box-shadow: var(--container-inset);
   touch-action: none;
   cursor: grab;
@@ -1725,7 +1725,7 @@ time {
   min-height: 0;
   border: 0;
   border-radius: 0;
-  background: #151517;
+  background: var(--bg-sunken);
   box-shadow: none;
 }
 
@@ -1896,7 +1896,7 @@ time {
 
 .agent-contract p {
   margin: 0;
-  color: #c8d0dc;
+  color: var(--text-2);
   line-height: 1.42;
 }
 
@@ -1961,7 +1961,7 @@ time {
   border-radius: var(--radius-pill);
   padding: 4px 6px 4px 12px;
   background: rgba(123, 180, 255, .13);
-  color: #c4dcff;
+  color: var(--tone-info-text);
   box-shadow: var(--chin-shadow);
 }
 
@@ -2019,7 +2019,7 @@ time {
   border-radius: var(--radius-pill);
   padding: 0 13px;
   background: rgba(30, 71, 112, .62);
-  color: #d7e8ff;
+  color: var(--tone-info-text);
   box-shadow: var(--chin-shadow);
 }
 
@@ -2318,14 +2318,14 @@ time {
   line-height: 1.4;
   color: var(--text-2);
   background: color-mix(in srgb, var(--text-main) 5%, transparent);
-  border-left: 2px solid var(--chip-accent, #7cc6ff);
+  border-left: 2px solid var(--chip-accent, var(--status-working));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.memory-link-chip.out { --chip-accent: #7cc6ff; }
-.memory-link-chip.in { --chip-accent: #a7d79b; }
+.memory-link-chip.out { --chip-accent: var(--status-working); }
+.memory-link-chip.in { --chip-accent: var(--status-decision); }
 .memory-link-chip em { font-style: normal; color: var(--text-muted); font-size: var(--text-2xs); }
 .memory-link-chip svg { flex: none; opacity: .7; }
 
@@ -2339,7 +2339,7 @@ time {
 .console {
   border-radius: var(--radius-lg);
   border: var(--border-width) solid var(--border-color);
-  background: #0c0c0e;
+  background: var(--bg-sunken);
   box-shadow: var(--container-inset);
   overflow: hidden;
 }
@@ -2349,7 +2349,7 @@ time {
   align-items: center;
   gap: 8px;
   padding: 9px 14px;
-  background: #17171a;
+  background: var(--surface-chrome);
   border-bottom: 1px solid color-mix(in srgb, var(--text-main) 6%, transparent);
 }
 
@@ -2392,14 +2392,14 @@ time {
 .c-time { color: var(--text-muted); }
 .c-actor { color: var(--text-2); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; }
 .c-act { text-transform: uppercase; letter-spacing: .04em; font-size: var(--text-xs); }
-.c-entity { color: #8a9bb8; overflow: hidden; text-overflow: ellipsis; }
+.c-entity { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 .c-msg { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
 
 /* цвет по действию — читается сразу, как в настоящем логе */
 .act-create  .c-act { color: var(--state-ok); }
 .act-update  .c-act { color: var(--accent-color); }
-.act-delete  .c-act { color: #ff5f57; }
-.act-claim   .c-act { color: #febc2e; }
+.act-delete  .c-act { color: var(--state-danger); }
+.act-claim   .c-act { color: var(--state-warn); }
 .act-finish  .c-act { color: var(--state-ok-soft); }
 .act-heartbeat .c-act { color: var(--text-muted); }
 .act-heartbeat { opacity: .72; }
@@ -2436,7 +2436,7 @@ time {
 /* SQL-действия из триггеров аудита (INSERT/UPDATE/DELETE) */
 .act-insert .c-act { color: var(--state-ok); }
 .act-update .c-act { color: var(--accent-color); }
-.act-delete .c-act { color: #ff5f57; }
+.act-delete .c-act { color: var(--state-danger); }
 
 /* Редактор сущностей — правка выбором строки, без ввода id */
 .entity-editor {
@@ -2651,7 +2651,7 @@ time {
 .facts-toggle b { font-variant-numeric: tabular-nums; }
 
 .facts-toggle.is-active {
-  color: #051826;
+  color: var(--on-state);
   background: var(--state-warn);
   border-color: var(--state-warn);
 }

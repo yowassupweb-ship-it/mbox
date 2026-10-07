@@ -474,13 +474,13 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #6b7280;
+  background: var(--status-off);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-main) 4%, transparent);
 }
 
 .desktop-dot.live {
-  background: #65d68b;
-  box-shadow: 0 0 0 3px rgba(101, 214, 139, .16);
+  background: var(--state-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-ok) 16%, transparent);
 }
 
 .desktop-actions {
@@ -502,7 +502,7 @@
 }
 
 .desktop-update-state.is-error {
-  color: #ffb4a8;
+  color: var(--tone-danger-text);
 }
 
 @keyframes desktop-pop {
@@ -601,7 +601,7 @@
 }
 
 .realtime-pill.offline {
-  color: #ffb7b0;
+  color: var(--tone-danger-text);
   border-color: rgba(255, 138, 128, .2);
 }
 

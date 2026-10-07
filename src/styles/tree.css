@@ -43,8 +43,8 @@
   height: 14px;
   flex: 0 0 auto;
   border-radius: 50%;
-  border: 2px solid rgba(210, 224, 246, .22);
-  border-top-color: #cfe3ff;
+  border: 2px solid color-mix(in srgb, var(--text-main) 18%, transparent);
+  border-top-color: var(--accent-color);
   animation: todo-spin .82s linear infinite;
 }
 
@@ -70,7 +70,7 @@
 }
 
 .tree-row.tree-todo_group {
-  background: color-mix(in srgb, #203a5f 52%, var(--element-bg));
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--element-bg));
   border-color: rgba(123, 180, 255, .18);
 }
 
@@ -79,29 +79,29 @@
 }
 
 .tree-row.tree-git_group {
-  background: color-mix(in srgb, #1f4330 48%, var(--element-bg));
+  background: color-mix(in srgb, var(--state-ok) 9%, var(--element-bg));
   border-color: rgba(121, 211, 143, .16);
 }
 
 .tree-row.tree-git_group svg {
-  color: #9bdcae;
+  color: var(--state-ok);
 }
 
 .tree-row.tree-project_entity {
-  background: color-mix(in srgb, #34343a 66%, var(--element-bg));
+  background: color-mix(in srgb, var(--text-main) 5%, var(--element-bg));
   border-color: color-mix(in srgb, var(--text-main) 8%, transparent);
 }
 
 .tree-row.tree-project_entity svg {
-  color: #d4dceb;
+  color: var(--text-2);
 }
 
 /* Каждая постоянная сущность проекта узнаётся по цвету иконки и левой метке. */
-.tree-row[data-kind] svg { color: var(--kind-accent, #d4dceb); }
+.tree-row[data-kind] svg { color: var(--kind-accent, var(--text-2)); }
 
 .tree-row[data-kind] {
   position: relative;
-  border-color: color-mix(in srgb, var(--kind-accent, #d4dceb) 22%, color-mix(in srgb, var(--text-main) 8%, transparent));
+  border-color: color-mix(in srgb, var(--kind-accent, var(--text-2)) 22%, color-mix(in srgb, var(--text-main) 8%, transparent));
 }
 
 .tree-row[data-kind]::after {
@@ -112,7 +112,7 @@
   bottom: 22%;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: var(--kind-accent, #d4dceb);
+  background: var(--kind-accent, var(--text-2));
   opacity: .8;
 }
 
@@ -198,15 +198,15 @@
 }
 
 .tree-menu .danger-action {
-  color: #ff8a80;
+  color: var(--state-danger);
 }
 
 .folder-row {
-  color: #e3ecfb;
+  color: var(--text-main);
 }
 
 .file-row {
-  color: #b9c6d8;
+  color: var(--text-2);
 }
 
 .library-note {

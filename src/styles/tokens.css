@@ -181,6 +181,51 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 0 0 1px var(--border-color);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.22);
 
+  /* Тоны текста для баннеров, чипов и сообщений: светлые оттенки состояний читаются на тёмном,
+     в светлой теме у каждого своё тёмное значение. Раньше были вписаны числами и на белом пропадали. */
+  --tone-info-text: #bfe9ff;
+  --tone-warn-text: #ffd98a;
+  --tone-danger-text: #ffb4a8;
+  --tone-ok-text: #a8e6bd;
+  /* Текст на яркой заливке состояния (бейджи-счётчики, активный фильтр). */
+  --on-state: #051826;
+
+  /* Присутствие и статусы агентов/задач. */
+  --status-off: #6b7280;
+  --status-idle: #ffd60a;
+  --status-working: #7cc6ff;
+  --status-next: #8ab4ff;
+  --status-inbox: #ffd27d;
+  --status-decision: #a7d79b;
+
+  /* Git: изменённый / удалённый файл. Добавленный — --state-ok. */
+  --git-modified: #e2c08d;
+  --git-deleted: #f48771;
+
+  /* Типы файлов в дереве и вкладках. */
+  --ft-code: #7fb5ff;
+  --ft-data: #f0b35b;
+  --ft-config: #a9a8b3;
+  --ft-document: #8bb9ff;
+  --ft-image: #c695ff;
+  --ft-archive: #e3a65c;
+  --ft-audio: #dc8cff;
+  --ft-video: #f07f9b;
+  --ft-sheet: #65c895;
+  --ft-presentation: #f08c65;
+  --ft-security: #e5c45d;
+  --ft-link: #68c7d9;
+
+  /* Шкала слоёв: значения z-index пишутся только этими токенами. */
+  --z-raised: 1;
+  --z-sticky: 10;
+  --z-dropdown: 40;
+  --z-overlay: 60;
+  --z-popover: 120;
+  --z-modal: 300;
+  --z-toast: 400;
+  --z-max: 1000;
+
   font-family: var(--font-sans);
   font-optical-sizing: auto;
   /* cv05 — «l» с хвостиком, cv08 — «I» с засечками: l, I и 1 не путаются в названиях и путях. */
@@ -237,6 +282,77 @@
   --code-bg: rgba(22, 24, 29, 0.055);
   --code-text: #0b6b63;
   --code-block-text: #1f2937;
+  --tone-info-text: #0b4f8a;
+  --tone-warn-text: #7a4a00;
+  --tone-danger-text: #b3261e;
+  --tone-ok-text: #146c2e;
+  --on-state: #ffffff;
+  --status-idle: #b38600;
+  --status-working: #0a84d6;
+  --status-next: #3b6fd8;
+  --status-inbox: #a86b00;
+  --status-decision: #3f8a2f;
+  --git-modified: #9a6700;
+  --git-deleted: #c4321c;
+  --ft-code: #0969da;
+  --ft-data: #9a6700;
+  --ft-config: #6e7781;
+  --ft-document: #0550ae;
+  --ft-image: #8250df;
+  --ft-archive: #953800;
+  --ft-audio: #a21caf;
+  --ft-video: #cf222e;
+  --ft-sheet: #1a7f37;
+  --ft-presentation: #bc4c00;
+  --ft-security: #7d6200;
+  --ft-link: #0e7490;
+}
+
+/* Цвета содержимого (подсветка кода, правки, поиск) зависят не от темы приложения, а от темы
+   листа: светлая заметка внутри тёмного MBOX должна получить светлую палитру, и наоборот. */
+:root,
+.doc-theme-graphite,
+.doc-theme-black {
+  --syn-comment: #6a7b76;
+  --syn-string: #b5e08c;
+  --syn-keyword: #c792ea;
+  --syn-number: #f7a26c;
+  --syn-tag: #29e0d6;
+  --syn-attr: #ffcb6b;
+  --syn-color: #ff8fa3;
+  --syn-fn: #82aaff;
+  --syn-punct: #7f918c;
+  --caret: #eef4f1;
+  --diff-add-bg: rgba(115, 201, 145, 0.12);
+  --diff-add-text: #a8e6bd;
+  --diff-add-word-bg: rgba(115, 201, 145, 0.32);
+  --diff-add-word-text: #d6f5e2;
+  --diff-del-bg: rgba(244, 135, 113, 0.12);
+  --diff-del-text: #f5b5a8;
+  --diff-del-word-bg: rgba(244, 135, 113, 0.28);
+  --diff-del-word-text: #ffd0c6;
+}
+
+:root[data-theme="light"],
+.doc-theme-light {
+  --syn-comment: #6e7781;
+  --syn-string: #0a3069;
+  --syn-keyword: #cf222e;
+  --syn-number: #0550ae;
+  --syn-tag: #116329;
+  --syn-attr: #953800;
+  --syn-color: #8250df;
+  --syn-fn: #6639ba;
+  --syn-punct: #57606a;
+  --caret: #1d1d1f;
+  --diff-add-bg: rgba(26, 127, 55, 0.1);
+  --diff-add-text: #116329;
+  --diff-add-word-bg: rgba(26, 127, 55, 0.24);
+  --diff-add-word-text: #0b4a1f;
+  --diff-del-bg: rgba(207, 34, 46, 0.08);
+  --diff-del-text: #a40e26;
+  --diff-del-word-bg: rgba(207, 34, 46, 0.2);
+  --diff-del-word-text: #82071e;
 }
 
 :root[data-theme="black"] {

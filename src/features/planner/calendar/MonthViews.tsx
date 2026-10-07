@@ -153,7 +153,7 @@ export function DayAgenda({ day, events, onOpen, onCreate, title, onMenu }: {
                 <span className="ncal-agenda-time">{e.allDay ? 'весь день' : timeRange(e).replace('–', '\n')}</span>
                 <span className="ncal-agenda-text">
                   <span className="ncal-agenda-title">
-                    {e.title || 'Без названия'}
+                    <span className="ncal-agenda-name">{e.title || 'Без названия'}</span>
                     {e.masterId && <Repeat size={11} aria-hidden="true" />}
                     <EventMarks e={e} />
                     {e.taskId && <CheckSquare size={11} aria-hidden="true" />}

@@ -78,7 +78,7 @@ export function CalendarSide() {
                     <span className="ncal-agenda-time">{e.allDay ? 'весь день' : timeRange(e).replace('–', '\n')}</span>
                   )}
                   <button type="button" className="ncal-agenda-text" onClick={() => { if (!e.taskId) openCalendar(); openEvent(e); }}>
-                    <span className="ncal-agenda-title">{e.title || 'Без названия'}<EventMarks e={e} /></span>
+                    <span className="ncal-agenda-title"><span className="ncal-agenda-name">{e.title || 'Без названия'}</span><EventMarks e={e} /></span>
                     {e.location && <span className="ncal-agenda-place">{e.location}</span>}
                   </button>
                 </div>

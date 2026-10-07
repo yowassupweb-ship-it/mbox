@@ -270,7 +270,7 @@
 .theme-preview.is-black { background: #050506; }
 .theme-preview-rail { background: color-mix(in srgb, currentColor 7%, transparent); border-right: 1px solid rgba(127, 127, 127, .18); }
 .theme-preview-body { display: grid; align-content: start; gap: 8px; padding: 14px 12px; }
-.theme-preview-body::before { content: ""; width: 52%; height: 8px; border-radius: var(--radius-pill); background: #4da3ff; }
+.theme-preview-body::before { content: ""; width: 52%; height: 8px; border-radius: var(--radius-pill); background: var(--accent-color); }
 .theme-preview-body i { display: block; height: 6px; border-radius: var(--radius-pill); background: rgba(127, 127, 127, .32); }
 .theme-preview-body i:nth-child(2) { width: 82%; }
 .theme-preview-body i:nth-child(3) { width: 64%; }

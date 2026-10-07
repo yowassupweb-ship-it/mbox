@@ -111,7 +111,7 @@
   white-space: nowrap;
   border-radius: var(--radius-pill);
   background: var(--state-live);
-  color: #06120e;
+  color: var(--on-state);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
@@ -184,7 +184,7 @@
   transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
 }
 
-.entity-tile svg { grid-area: icon; color: var(--kind-accent, #d4dceb); }
+.entity-tile svg { grid-area: icon; color: var(--kind-accent, var(--text-2)); }
 /* Растровые иконки (public/assets/icons) вместо lucide — без grid-area они уходили в
    авто-размещение грида и расплющивались по ширине колонки. flex:none + object-fit — квадратные
    пропорции не едут, сколько бы ни задали width/height в JSX. */
@@ -384,7 +384,7 @@
   padding: 0 5px;
   border-radius: var(--radius-pill);
   background: var(--state-ok);
-  color: #04210e;
+  color: var(--on-state);
   font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   line-height: 17px;
@@ -749,9 +749,9 @@
   align-items: center;
   gap: 6px;
   padding: 6px 8px 6px 12px;
-  border: var(--border-width) solid color-mix(in srgb, #7cd8e8 26%, var(--border-color));
+  border: var(--border-width) solid color-mix(in srgb, var(--state-live) 26%, var(--border-color));
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, #7cd8e8 10%, var(--element-bg));
+  background: color-mix(in srgb, var(--state-live) 10%, var(--element-bg));
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
@@ -780,14 +780,14 @@
   gap: var(--space-3);
   max-width: 100%;
   padding: var(--space-3) var(--space-4);
-  border: var(--border-width) solid color-mix(in srgb, #7ee2a8 26%, var(--border-color));
+  border: var(--border-width) solid color-mix(in srgb, var(--state-ok) 26%, var(--border-color));
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, #7ee2a8 8%, var(--element-bg));
+  background: color-mix(in srgb, var(--state-ok) 8%, var(--element-bg));
   color: var(--text-main);
   text-decoration: none;
 }
 
-.git-link:hover { border-color: color-mix(in srgb, #7ee2a8 55%, var(--border-color)); }
+.git-link:hover { border-color: color-mix(in srgb, var(--state-ok) 55%, var(--border-color)); }
 .git-link svg { color: var(--state-ok); flex: none; }
 .git-repo { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .git-host { color: var(--text-muted); font-size: var(--text-sm); }
@@ -874,7 +874,7 @@
   line-height: 1.45;
 }
 
-.principle-list svg { color: #ffd479; margin-top: 2px; }
+.principle-list svg { color: var(--state-warn); margin-top: 2px; }
 
 /* Доступ */
 
@@ -994,7 +994,7 @@
   background: color-mix(in srgb, #f2a0c0 12%, var(--element-bg));
 }
 
-.access-level.is-active small { color: #e8d3dc; }
+.access-level.is-active small { color: var(--text-2); }
 
 /* Очередь проверки на Обзоре */
 

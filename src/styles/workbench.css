@@ -526,7 +526,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-status-dot.status-doing { background: var(--state-live); box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-live) 30%, transparent); }
-.wb-status-dot.status-next { background: #8ab4ff; }
+.wb-status-dot.status-next { background: var(--status-next); }
 .wb-status-dot.status-open { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-muted); }
 .wb-status-dot.status-blocked { background: var(--state-danger); }
 .wb-status-dot.status-review { background: var(--state-warn); }
@@ -609,7 +609,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   padding: 0 1px;
   border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--state-warn) 26%, transparent);
-  color: #ffe2a3;
+  color: var(--tone-warn-text);
 }
 
 .wb-hit-meta {
@@ -743,19 +743,19 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-tab img,
 .wb-tab .wb-file-type-icon { width: 18px; height: 18px; flex: none; image-rendering: auto; opacity: 0.9; }
 .wb-file-type-icon { color: var(--text-muted); }
-.wb-file-type-icon.is-code { color: #7fb5ff; }
-.wb-file-type-icon.is-data { color: #f0b35b; }
-.wb-file-type-icon.is-config { color: #a9a8b3; }
-.wb-file-type-icon.is-document { color: #8bb9ff; }
-.wb-file-type-icon.is-image { color: #c695ff; }
-.wb-file-type-icon.is-archive { color: #e3a65c; }
-.wb-file-type-icon.is-audio { color: #dc8cff; }
-.wb-file-type-icon.is-video { color: #f07f9b; }
-.wb-file-type-icon.is-sheet { color: #65c895; }
-.wb-file-type-icon.is-presentation { color: #f08c65; }
-.wb-file-type-icon.is-security { color: #e5c45d; }
+.wb-file-type-icon.is-code { color: var(--ft-code); }
+.wb-file-type-icon.is-data { color: var(--ft-data); }
+.wb-file-type-icon.is-config { color: var(--ft-config); }
+.wb-file-type-icon.is-document { color: var(--ft-document); }
+.wb-file-type-icon.is-image { color: var(--ft-image); }
+.wb-file-type-icon.is-archive { color: var(--ft-archive); }
+.wb-file-type-icon.is-audio { color: var(--ft-audio); }
+.wb-file-type-icon.is-video { color: var(--ft-video); }
+.wb-file-type-icon.is-sheet { color: var(--ft-sheet); }
+.wb-file-type-icon.is-presentation { color: var(--ft-presentation); }
+.wb-file-type-icon.is-security { color: var(--ft-security); }
 .wb-file-type-icon.is-mail,
-.wb-file-type-icon.is-link { color: #68c7d9; }
+.wb-file-type-icon.is-link { color: var(--ft-link); }
 .wb-tab:hover { background: var(--wb-hover); color: var(--text-2); }
 .wb-tab.is-active { background: var(--bg-color); color: var(--text-main); box-shadow: inset 0 1px 0 var(--accent-color); }
 .wb-tab.is-active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg-color); }
@@ -1110,7 +1110,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-attention li:hover .wb-attention-done,
 .wb-attention-done:hover,
 .wb-attention-done:focus-visible { opacity: 1; }
-.wb-attention-done:hover { background: var(--wb-hover); color: var(--state-ok, #3fa06a); }
+.wb-attention-done:hover { background: var(--wb-hover); color: var(--state-ok); }
 
 /* Консоль агентов, встроенная в панель: без плавающей кнопки, фиксированного позиционирования и рамки. */
 .wb .agent-chat.is-embedded {
@@ -1429,18 +1429,18 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-code-layer,
 .wb-code-editor.is-layered { position: absolute; inset: 0; margin: 0; padding: 12px 16px; border: 0; font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6; white-space: pre; tab-size: 2; letter-spacing: normal; word-spacing: normal; }
 .wb-code-layer { overflow: hidden; color: var(--code-block-text); pointer-events: none; }
-.wb-code-editor.is-layered { height: 100%; min-height: 0; background: transparent; color: transparent; caret-color: #eef4f1; overflow: auto; }
+.wb-code-editor.is-layered { height: 100%; min-height: 0; background: transparent; color: transparent; caret-color: var(--caret); overflow: auto; }
 .wb-code-editor.is-layered::selection { background: rgba(41, 224, 214, .28); color: transparent; }
 .wb-code-editor.is-layered::placeholder { color: var(--text-muted); }
-.tok-comment { color: #6a7b76; font-style: italic; }
-.tok-string, .tok-value { color: #b5e08c; }
-.tok-keyword { color: #c792ea; }
-.tok-number { color: #f7a26c; }
-.tok-tag { color: #29e0d6; }
-.tok-attr, .tok-prop { color: #ffcb6b; }
-.tok-color { color: #ff8fa3; }
-.tok-fn { color: #82aaff; }
-.tok-punct { color: #7f918c; }
+.tok-comment { color: var(--syn-comment); font-style: italic; }
+.tok-string, .tok-value { color: var(--syn-string); }
+.tok-keyword { color: var(--syn-keyword); }
+.tok-number { color: var(--syn-number); }
+.tok-tag { color: var(--syn-tag); }
+.tok-attr, .tok-prop { color: var(--syn-attr); }
+.tok-color { color: var(--syn-color); }
+.tok-fn { color: var(--syn-fn); }
+.tok-punct { color: var(--syn-punct); }
 
 /* Markdown-документы используют тот же двухслойный редактор, но с метриками обычного текста. */
 .wb-code-wrap.is-document { min-height: 0; overflow: hidden; background: transparent; }
@@ -1685,8 +1685,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-console-pane.is-ssh {
-  border-color: color-mix(in srgb, #73c991 56%, var(--wb-line));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #73c991 10%, transparent);
+  border-color: color-mix(in srgb, var(--state-ok) 56%, var(--wb-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-ok) 10%, transparent);
 }
 
 .wb-console-pane > .wb-console-pane-head { flex: none; height: 28px; }
@@ -1721,8 +1721,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 18%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent-color) 16%, transparent);
 }
 .wb-console-pane.is-ssh.is-focused {
-  border-color: color-mix(in srgb, #73c991 78%, var(--wb-line));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #73c991 18%, transparent), 0 0 0 1px color-mix(in srgb, #73c991 16%, transparent);
+  border-color: color-mix(in srgb, var(--state-ok) 78%, var(--wb-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-ok) 18%, transparent), 0 0 0 1px color-mix(in srgb, var(--state-ok) 16%, transparent);
 }
 .wb-console-pane.is-focused > .wb-console-pane-head { box-shadow: inset 0 1px 0 var(--accent-color); }
 
@@ -1807,7 +1807,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   overflow-wrap: anywhere;
 }
 
-.wb-session-log .is-err { color: #ff9aa4; }
+.wb-session-log .is-err { color: var(--tone-danger-text); }
 .wb-session-cmd { margin-bottom: 6px; color: var(--text-muted); }
 .wb-session-end { margin-top: 8px; color: var(--text-muted); }
 
@@ -1833,12 +1833,12 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-agent-toggle.is-on { color: var(--accent-color); }
 
 .wb-git-letter { flex: none; width: 14px; text-align: center; font-size: var(--text-2xs); font-weight: var(--weight-bold); }
-.wb-git-letter.is-M { color: #e2c08d; }
+.wb-git-letter.is-M { color: var(--git-modified); }
 .wb-git-letter.is-A,
 .wb-git-letter.is-U { color: var(--state-ok); }
-.wb-git-letter.is-D { color: #f48771; }
+.wb-git-letter.is-D { color: var(--git-deleted); }
 .wb-git-letter.is-R { color: var(--accent-color); }
-.wb-tree-row.git-M .wb-tree-label { color: #e2c08d; }
+.wb-tree-row.git-M .wb-tree-label { color: var(--git-modified); }
 .wb-tree-row.git-A .wb-tree-label,
 .wb-tree-row.git-U .wb-tree-label { color: var(--state-ok); }
 .wb-doc-crumbs .wb-git-letter { margin-left: 8px; }
@@ -1913,9 +1913,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   font-size: var(--text-xs);
 }
 
-.wb-banner.is-warn { background: color-mix(in srgb, var(--state-warn) 12%, var(--wb-surface)); color: #ffd98a; }
+.wb-banner.is-warn { background: color-mix(in srgb, var(--state-warn) 12%, var(--wb-surface)); color: var(--tone-warn-text); }
 .wb-banner.is-error { background: color-mix(in srgb, var(--state-danger) 12%, var(--wb-surface)); color: var(--state-danger); }
-.wb-banner.is-live { background: color-mix(in srgb, var(--state-live) 10%, var(--wb-surface)); color: #bfe9ff; }
+.wb-banner.is-live { background: color-mix(in srgb, var(--state-live) 10%, var(--wb-surface)); color: var(--tone-info-text); }
 .wb-banner button { height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface-2); color: var(--text-main); font: inherit; cursor: pointer; }
 .wb-banner button.is-on { border-color: var(--accent-color); color: var(--accent-color); }
 
@@ -1927,14 +1927,14 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Только значок «+»/«−» в начале строки. Раньше правило било по любому прямому span внутри строки,
    и подсветка слов разложила текст в столбик по 16 пикселей. */
 .wb-diff-line > .wb-diff-mark { display: inline-block; width: 16px; color: var(--text-muted); user-select: none; }
-.wb-diff-line.is-add { background: rgba(115, 201, 145, 0.12); color: #a8e6bd; }
-.wb-diff-line.is-del { background: rgba(244, 135, 113, 0.12); color: #f5b5a8; }
+.wb-diff-line.is-add { background: var(--diff-add-bg); color: var(--diff-add-text); }
+.wb-diff-line.is-del { background: var(--diff-del-bg); color: var(--diff-del-text); }
 /* Правленая строка: текст показан один раз, фон нейтральный — красят только изменившиеся слова.
    Удалённое ещё и зачёркнуто: по одному цвету отличить убранное от дописанного нельзя. */
 .wb-diff-line.is-edit { background: rgba(138, 180, 255, 0.06); }
 .wb-diff-word { padding: 0 1px; border-radius: var(--radius-2xs); background: none; color: inherit; }
-.wb-diff-word.is-add { background: rgba(115, 201, 145, 0.32); color: #d6f5e2; }
-.wb-diff-word.is-del { background: rgba(244, 135, 113, 0.28); color: #ffd0c6; text-decoration: line-through; }
+.wb-diff-word.is-add { background: var(--diff-add-word-bg); color: var(--diff-add-word-text); }
+.wb-diff-word.is-del { background: var(--diff-del-word-bg); color: var(--diff-del-word-text); text-decoration: line-through; }
 .wb-diff-line.is-hunk { margin-top: 6px; background: rgba(138, 180, 255, 0.08); color: var(--accent-color); }
 .wb-diff-line.is-meta { color: var(--text-muted); }
 .wb-diff-gap { padding: 2px 16px; color: var(--text-muted); font-size: var(--text-xs); background: color-mix(in srgb, var(--text-main) 2%, transparent); }
@@ -1956,7 +1956,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-version-source.is-mbox { background: rgba(138, 180, 255, 0.16); color: var(--accent-color); }
 /* Правка заметки человеком снаружи MBOX — отдельный цвет: по списку версий должно быть сразу видно,
    что текст поменял не владелец, а тот, кому дали ссылку. */
-.wb-version-source.is-share { background: color-mix(in srgb, var(--note-purple, #b18cff) 20%, transparent); color: var(--note-purple, #b18cff); }
+.wb-version-source.is-share { background: color-mix(in srgb, var(--note-purple) 20%, transparent); color: var(--note-purple); }
 .wb-version-source.is-baseline { background: color-mix(in srgb, var(--text-main) 5%, transparent); color: var(--text-muted); }
 .wb-file-meta { margin-top: 14px; }
 
@@ -3252,10 +3252,10 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .ask-title { color: var(--text-2, rgba(238, 244, 241, .7)); font-size: var(--text-sm); }
 .ask-dialog input { height: 32px; padding: 0 10px; border: 1px solid var(--accent-color, #29e0d6); border-radius: var(--radius-sm, 4px); background: var(--wb-surface, #0c0d0f); color: inherit; font: inherit; outline: none; }
 .ask-hint { color: var(--text-muted, rgba(238, 244, 241, .44)); font-size: var(--text-xs); }
-.ask-hint.is-error { color: var(--state-danger, #ff4d5e); }
+.ask-hint.is-error { color: var(--state-danger); }
 .ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .ask-actions button { height: 28px; padding: 0 12px; border: 1px solid var(--wb-line, rgba(133, 245, 219, .12)); border-radius: var(--radius-sm, 4px); background: none; color: inherit; font: inherit; font-size: var(--text-sm); cursor: pointer; }
-.ask-actions button.is-primary { border-color: var(--accent-color, #29e0d6); background: var(--accent-color, #29e0d6); color: #031312; font-weight: var(--weight-semibold); }
+.ask-actions button.is-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); font-weight: var(--weight-semibold); }
 
 /* ─── Панель markdown (MarkdownToolbar) и новые элементы просмотра ─── */
 /* Панель не переносится на вторую строку: иначе шапка меняла высоту при каждом «сохраняю… / сохранено» и текст прыгал. */
@@ -3268,7 +3268,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-doc-bar .wb-bar-select { max-width: 150px; text-overflow: ellipsis; }
 .wb-md-toolbar button { position: relative; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--text-2); cursor: pointer; }
 .wb-md-toolbar button:hover { border-color: var(--wb-line); background: var(--wb-hover); color: var(--text-main); }
-.wb-md-toolbar button b { position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-sm); background: var(--accent-color); color: #031312; font-size: var(--text-2xs); line-height: 14px; }
+.wb-md-toolbar button b { position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--on-accent); font-size: var(--text-2xs); line-height: 14px; }
 .wb-md-toolbar i { width: 1px; height: 16px; margin: 0 4px; background: var(--wb-line); }
 .wb-memory-edit .wb-md-toolbar { margin-bottom: 6px; }
 .wb-memory-body s { color: var(--text-muted); }
@@ -3865,7 +3865,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   border: 1.5px solid var(--wb-surface);
   border-radius: var(--radius-pill);
   background: var(--state-ok);
-  color: #0b1a10;
+  color: var(--on-state);
   font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   line-height: 11px;

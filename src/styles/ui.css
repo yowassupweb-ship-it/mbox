@@ -25,8 +25,8 @@
 .ghost-action:hover { filter: brightness(1.14); }
 .ghost-action:active { transform: translateY(1px); box-shadow: var(--container-inset); }
 
-.save-button.is-saved { --accent-color: var(--state-ok); --accent-chin: #1c7a37; }
-.save-button.is-error { --accent-color: var(--state-danger); --accent-chin: #99251d; }
+.save-button.is-saved { --accent-color: var(--state-ok); --accent-chin: color-mix(in srgb, var(--state-ok) 70%, #000); }
+.save-button.is-error { --accent-color: var(--state-danger); --accent-chin: color-mix(in srgb, var(--state-danger) 70%, #000); }
 .save-button:disabled { opacity: .68; cursor: default; }
 
 .field {

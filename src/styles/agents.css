@@ -42,25 +42,25 @@
 }
 
 .agent-work-row.needs-human {
-  color: #ffd7a8;
+  color: var(--tone-warn-text);
 }
 
 .agent-dot {
   width: 9px;
   height: 9px;
   border-radius: var(--radius-pill);
-  background: #8aa4c2;
+  background: var(--status-off);
   box-shadow: 0 0 0 4px rgba(138, 164, 194, .12);
 }
 
 .agent-dot.active,
 .agent-dot.running,
 .agent-dot.doing {
-  background: #7cc6ff;
+  background: var(--status-working);
 }
 
 .agent-dot.offline {
-  background: #6b7280;
+  background: var(--status-off);
   box-shadow: none;
 }
 
@@ -73,11 +73,11 @@
 }
 
 .agent-dot.inbox {
-  background: #ffd27d;
+  background: var(--status-inbox);
 }
 
 .agent-dot.decision {
-  background: #a7d79b;
+  background: var(--status-decision);
 }
 
 /* Agent identity — avatars, presence rings, roster */
@@ -103,7 +103,7 @@
    под ними читался как лишняя рамка, а не как часть иконки. Фон = фон страницы, кружок остаётся
    только у generic-аватарок (буква/инициалы), которым он и даёт единственный цветовой сигнал. */
 .agent-avatar.has-image {
-  background: var(--container-bg, #1c1c1e);
+  background: var(--container-bg);
   box-shadow: none;
   outline: none;
 }
@@ -118,15 +118,15 @@
   min-width: 8px;
   min-height: 8px;
   border-radius: 50%;
-  background: #6b7280;
-  box-shadow: 0 0 0 2px var(--container-bg, #1c1c1e);
+  background: var(--status-off);
+  box-shadow: 0 0 0 2px var(--container-bg);
   transition: background-color .3s ease;
 }
 
-.agent-avatar.active::after { background: #35c759; }
-.agent-avatar.idle::after { background: #ffd60a; }
-.agent-avatar.offline::after { background: #6b7280; }
-.agent-avatar.working::after { background: #7cc6ff; }
+.agent-avatar.active::after { background: var(--state-ok); }
+.agent-avatar.idle::after { background: var(--status-idle); }
+.agent-avatar.offline::after { background: var(--status-off); }
+.agent-avatar.working::after { background: var(--status-working); }
 
 /* Имя облачного агента: «Claude» и облачко после имени (служебное ClaudeCloud не показываем). */
 .agent-name {
@@ -214,7 +214,7 @@
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
-.attention-done:hover { background: rgba(63, 160, 106, .18); color: var(--state-ok, #3fa06a); }
+.attention-done:hover { background: rgba(63, 160, 106, .18); color: var(--state-ok); }
 
 .attention-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--state-warn); }
 .attention-dot.status-blocked { background: var(--state-danger); }
@@ -360,7 +360,7 @@
   border: var(--border-width) solid var(--border-color);
   background:
     radial-gradient(140% 120% at 100% 0%, color-mix(in srgb, var(--agent-accent, #8aa4c2) 12%, transparent), transparent 46%),
-    var(--container-bg, #1c1c1e);
+    var(--container-bg);
   box-shadow: var(--chin-shadow);
   overflow: hidden;
   transition: border-color .3s ease, box-shadow .3s ease, transform .3s ease;
@@ -414,7 +414,7 @@
 }
 
 .agent-card-state.active { color: var(--state-ok-soft); background: rgba(53, 199, 89, .12); }
-.agent-card-state.working { color: #051826; background: #7cc6ff; }
+.agent-card-state.working { color: var(--on-state); background: var(--status-working); }
 .agent-card-state.offline { color: var(--text-muted); }
 
 .agent-card-now {
@@ -478,7 +478,7 @@
   padding: 2px 7px;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--text-main) 5.5%, transparent);
-  color: #b6c1d4;
+  color: var(--text-2);
   font-family: var(--font-mono);
   max-width: 100%;
   overflow: hidden;
@@ -522,7 +522,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-  color: color-mix(in srgb, var(--agent-accent, #a7d79b) 70%, #cfe3ff);
+  color: color-mix(in srgb, var(--agent-accent, var(--status-decision)) 70%, var(--text-main));
 }
 
 .agent-card-decision.muted { color: var(--text-muted); }
@@ -537,7 +537,7 @@
 .agent-stream {
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--radius-lg);
-  background: var(--container-bg, #1c1c1e);
+  background: var(--container-bg);
   box-shadow: var(--chin-shadow);
   padding: 14px;
   min-width: 0;
@@ -561,7 +561,7 @@
 .stream-row + .stream-row { margin-top: 9px; }
 .stream-row-body { min-width: 0; display: grid; gap: 1px; }
 
-.stream-row-actor { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: #dfe6f1; }
+.stream-row-actor { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-main); }
 .stream-row-actor em { color: var(--text-muted); font-style: normal; font-weight: var(--weight-medium); }
 
 .stream-row-title {
