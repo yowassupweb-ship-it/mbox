@@ -2,6 +2,7 @@ import { Copy, FolderOpen, Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fetchOr } from "../lib/api";
 import type { LocalTool, ToolRunEvent } from "../types";
+import { OctopusSpinner } from "../components/OctopusSpinner";
 
 /** Инструменты — внешние проекты как рабочие поверхности для агентов: браузеры, парсеры,
  * дизайнерские среды, деплой и всё, что даёт MBOX новые действия. Каталог живёт на сервере
@@ -124,7 +125,7 @@ export function ToolsBoard() {
         <span>{tools.length}{inDesktop ? "" : " · запуск в приложении"}</span>
       </header>
 
-      {loading && <p className="muted empty-state">Загрузка</p>}
+      {loading && <OctopusSpinner />}
       {!loading && tools.length === 0 && <p className="muted empty-state">Инструментов пока нет</p>}
 
       <div className="rows">

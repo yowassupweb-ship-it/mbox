@@ -11,6 +11,7 @@ import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { askConfirm, showNotice } from "../../ui/askText";
 import { Crumbs, reveal } from "./Crumbs";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 type MemoryRecord = Memory & { project_name?: string | null; todo_id?: string | null };
 type MemoryLink = { id: string; from_memory_id: string; from_title: string; to_memory_id: string; to_title: string; link_type: string };
@@ -246,7 +247,7 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
   });
 
   if (missing) return <div className="wb-doc-missing">Запись #{memoryId} не найдена — возможно, её удалили или она в чужом проекте.</div>;
-  if (!isNew && !memory) return <div className="wb-doc-missing">Загрузка записи #{memoryId}…</div>;
+  if (!isNew && !memory) return <div className="wb-doc-missing"><OctopusSpinner label={`Загружаю запись #${memoryId}…`} /></div>;
 
   const metadata = memory?.metadata ?? {};
   const sourceAgent = typeof metadata.source_agent === "string" ? metadata.source_agent : "";

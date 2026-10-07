@@ -13,6 +13,7 @@ import { buildLocalPreview } from "./localPreview";
 import { MarkdownToolbarBay, markdownShortcut, toggleTask } from "./MarkdownToolbar";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { WORKSPACE_VERSION_EVENT } from "../../hooks/useRealtime";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 
@@ -498,7 +499,7 @@ export function GitDiffDocument({ rootKey, path, tabs }: { rootKey: string; path
         <span className="wb-doc-detail">изменения относительно HEAD · {rootName(rootKey)}</span>
         <button type="button" className="wb-inline-btn" onClick={() => tabs.open(`local:${rootKey}:${path}`, true)}>Открыть файл</button>
       </header>
-      {error ? <p className="wb-error">{error}</p> : !state ? <p className="wb-empty">Загрузка…</p> : state.diff ? <UnifiedDiff text={state.diff} /> : <p className="wb-empty">{state.note}</p>}
+      {error ? <p className="wb-error">{error}</p> : !state ? <OctopusSpinner compact /> : state.diff ? <UnifiedDiff text={state.diff} /> : <p className="wb-empty">{state.note}</p>}
     </div>
   );
 }
@@ -512,7 +513,7 @@ export function CommitDocument({ rootKey, hash }: { rootKey: string; hash: strin
   }, [bridge, rootKey, hash]);
   if (!bridge) return <div className="wb-doc-missing">Git доступен в приложении MBOX Desktop.</div>;
   if (error) return <div className="wb-doc-missing">{error}</div>;
-  if (!text) return <div className="wb-doc-missing">Загрузка коммита…</div>;
+  if (!text) return <div className="wb-doc-missing"><OctopusSpinner label="Загружаю коммит…" /></div>;
   const [meta, ...rest] = text.split(/\n(?=diff --git| \S.*\|)/);
   return (
     <div className="wb-doc-page">

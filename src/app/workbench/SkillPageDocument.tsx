@@ -5,6 +5,7 @@ import { DocShell } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import { skillPageReplyTo } from "./agentTabs";
 import { scopedStorageKey, usePersistentState, type TabsApi } from "./tabs";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 
 const HUMAN = "Человек";
 
@@ -201,7 +202,7 @@ export function SkillPageDocument({ skill, file, tabKey, tabs, projectId }: { sk
       {error ? (
         <div className="wb-doc-missing">{error}</div>
       ) : content === null ? (
-        <div className="wb-doc-missing">Загрузка…</div>
+        <div className="wb-doc-missing"><OctopusSpinner /></div>
       ) : isHtml ? (
         <div className={viewport === "mobile" ? "wb-html-preview is-mobile" : "wb-html-preview"}>
           <iframe ref={frameRef} key={reload} title={`${skill}/${file}`} sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads" srcDoc={srcDoc} onLoad={() => frameRef.current?.contentWindow?.postMessage({ type: "mbox:theme", theme: activeTheme() }, "*")} />

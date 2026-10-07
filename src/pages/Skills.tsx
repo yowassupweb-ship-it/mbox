@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchOr } from "../lib/api";
 import type { AgentSkill, SkillServiceMode } from "../types";
+import { OctopusSpinner } from "../components/OctopusSpinner";
 
 /** Навык — одноразовый вызов модели без оркестрации инструментами: Джарвис отдаёт его отдельным
  * вызовом, чтобы не тратить свой тесный контекст и квоту. Идут на Gemini, младшая oss-модель —
@@ -48,7 +49,7 @@ export function SkillsBoard() {
         <span>{skills.length} · {skills.reduce((sum, skill) => sum + skill.calls, 0)} вызовов</span>
       </header>
 
-      {loading && <p className="muted empty-state">Загрузка</p>}
+      {loading && <OctopusSpinner />}
       {!loading && skills.length === 0 && <p className="muted empty-state">Навыков пока нет</p>}
 
       <div className="rows">
