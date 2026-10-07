@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createUniver, LocaleType, mergeLocales, type IDocumentData } from "@univerjs/presets";
 import { UniverDocsCorePreset } from "@univerjs/preset-docs-core";
 import { DocSkeletonManagerService, DocSelectionManagerService } from "@univerjs/docs";
-import { NodePositionConvertToCursor } from "@univerjs/docs-ui";
+import { DocBackScrollRenderController, NodePositionConvertToCursor } from "@univerjs/docs-ui";
 import { IRenderManagerService } from "@univerjs/engine-render";
 import UniverPresetDocsCoreRuRU from "@univerjs/preset-docs-core/locales/ru-RU";
 import "@univerjs/preset-docs-core/lib/index.css";
 import { styleDocSurface, mboxUniverTheme, useDocumentTheme } from "./univerTheme";
 import type { Peer, PresenceState } from "./presence";
+import { FindBar } from "../../components/FindBar";
+import { useFindRequest } from "../../hooks/useFindRequest";
 
 type Props = {
   /** Снимок, с которого начинается редактирование. Подмена снимка без смены loadKey редактор не перечитывает. */
@@ -29,6 +31,21 @@ type RenderUnit = {
 };
 type Box = { left: number; top: number; width: number; height: number };
 type Mark = { key: string; name: string; color: string; caret: Box; boxes: Box[] };
+type FindMark = { boxes: Box[]; current: boolean };
+
+/** Вхождения `query` в тексте документа: смещения в dataStream совпадают с позициями курсора в редакторе. */
+function findInStream(stream: string, query: string): [number, number][] {
+  const needle = query.trim();
+  if (!needle) return [];
+  const pattern = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu");
+  const found: [number, number][] = [];
+  for (const match of stream.matchAll(pattern)) {
+    if (!match[0].length) continue;
+    found.push([match.index, match.index + match[0].length]);
+    if (found.length >= 2000) break;
+  }
+  return found;
+}
 
 /**
  * Документ с листами A4: Univer Docs в «традиционной» раскладке (поля, разрывы страниц, линейка страниц),
@@ -50,6 +67,16 @@ export function DocEditor({ snapshot, loadKey, onChange, visible, readOnly = fal
   const placeRef = useRef<() => void>(() => {});
   const [marks, setMarks] = useState<Mark[]>([]);
   const [layer, setLayer] = useState<Box>({ left: 0, top: 0, width: 0, height: 0 });
+  // Поиск по документу (Ctrl+F): текст на холсте, в DOM его нет — ищем по снимку и рисуем подсветку слоем поверх.
+  const [find, setFind] = useState<{ open: boolean; n: number }>({ open: false, n: 0 });
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<[number, number][]>([]);
+  const [cursor, setCursor] = useState(-1);
+  const [findMarks, setFindMarks] = useState<FindMark[]>([]);
+  const findRef = useRef<{ hits: [number, number][]; cursor: number }>({ hits: [], cursor: -1 });
+  findRef.current = { hits, cursor };
+  const apiRef = useRef<{ text: () => string; select: (from: number, to: number) => void } | null>(null);
+  useFindRequest(visible, () => setFind((current) => ({ open: true, n: current.n + 1 })));
 
   useEffect(() => {
     const host = hostRef.current;
@@ -119,8 +146,36 @@ export function DocEditor({ snapshot, loadKey, onChange, visible, readOnly = fal
         } catch { /* позиция вне текста */ }
       }
       setMarks(next);
+      const wanted = findRef.current;
+      const marked: FindMark[] = [];
+      for (let at = 0; at < wanted.hits.length && marked.length < 400; at += 1) {
+        try {
+          const [from, to] = wanted.hits[at];
+          const start = skeleton.findNodePositionByCharIndex(from);
+          const end = skeleton.findNodePositionByCharIndex(to);
+          if (!start || !end) continue;
+          const { contentBoxPointGroup } = converter.getRangePointData(start, end);
+          const boxes = contentBoxPointGroup.map((points) => {
+            const xs = points.map((point) => point.x);
+            const ys = points.map((point) => point.y);
+            return { left: (Math.min(...xs) - scrollX + shiftX) * scale, top: (Math.min(...ys) - scrollY + shiftY) * scale, width: (Math.max(...xs) - Math.min(...xs)) * scale, height: (Math.max(...ys) - Math.min(...ys)) * scale };
+          }).filter((box) => box.top + box.height > -40 && box.top < canvasBox.height + 40);
+          if (boxes.length) marked.push({ boxes, current: at === wanted.cursor });
+        } catch { /* позиция вне текста */ }
+      }
+      setFindMarks(marked);
     };
     placeRef.current = place;
+    apiRef.current = {
+      text: () => String((document.save() as { body?: { dataStream?: string } }).body?.dataStream ?? ""),
+      // Только прокрутка к совпадению: выделение не ставим — оно открывало бы плавающую панель форматирования над текстом.
+      select: (from, to) => {
+        try {
+          const render = injector.get<IRenderManagerService>(IRenderManagerService).getRenderUnitById(unitId) as unknown as RenderUnit | null;
+          render?.with<DocBackScrollRenderController>(DocBackScrollRenderController).scrollToRange({ startOffset: from, endOffset: to, collapsed: false });
+        } catch { /* вне текста */ }
+      },
+    };
 
     const publishSelection = () => {
       if (!onSelectRef.current) return;
@@ -144,6 +199,7 @@ export function DocEditor({ snapshot, loadKey, onChange, visible, readOnly = fal
     });
 
     return () => {
+      apiRef.current = null;
       window.clearTimeout(readyTimer);
       window.clearTimeout(syncTimer);
       subscription.dispose();
@@ -154,6 +210,31 @@ export function DocEditor({ snapshot, loadKey, onChange, visible, readOnly = fal
 
   useEffect(() => { placeRef.current(); }, [peers]);
 
+  const search = (text: string, keep = 0) => {
+    const found = apiRef.current ? findInStream(apiRef.current.text(), text) : [];
+    const at = found.length ? Math.min(Math.max(keep, 0), found.length - 1) : -1;
+    findRef.current = { hits: found, cursor: at };
+    setHits(found);
+    setCursor(at);
+    if (at >= 0) apiRef.current?.select(found[at][0], found[at][1]);
+    window.requestAnimationFrame(() => placeRef.current());
+  };
+  useEffect(() => { if (find.open) search(query); }, [query, find.open, loadKey]);
+  const stepFind = (delta: number) => {
+    // Текст мог измениться — пересобираем и идём от текущей позиции.
+    const before = findRef.current.hits[findRef.current.cursor];
+    const fresh = apiRef.current ? findInStream(apiRef.current.text(), query) : [];
+    if (!fresh.length) { search(query); return; }
+    let at = before ? fresh.findIndex((hit) => hit[0] >= before[0]) : -1;
+    if (at < 0) at = 0;
+    search(query, (at + delta + fresh.length) % fresh.length);
+  };
+  const closeFind = () => {
+    setFind((current) => ({ ...current, open: false }));
+    setHits([]); setCursor(-1); setFindMarks([]);
+    findRef.current = { hits: [], cursor: -1 };
+  };
+
   useEffect(() => {
     if (!visible) return;
     window.dispatchEvent(new Event("resize"));
@@ -162,7 +243,11 @@ export function DocEditor({ snapshot, loadKey, onChange, visible, readOnly = fal
   return (
     <div className="wb-univer-wrap" ref={wrapRef}>
       <div className="wb-univer-doc is-editor" ref={hostRef} aria-label="Редактор документа" />
+      {find.open && (
+        <FindBar className="is-in-doc" query={query} onQuery={setQuery} count={hits.length} index={cursor} onNext={() => stepFind(1)} onPrev={() => stepFind(-1)} onClose={closeFind} focusKey={find.n} />
+      )}
       <div className="wb-presence-layer" style={layer} aria-hidden="true">
+        {findMarks.map((mark, at) => mark.boxes.map((box, index) => <span key={`f${at}-${index}`} className={mark.current ? "wb-find-mark is-current" : "wb-find-mark"} style={box} />))}
         {marks.map((mark) => (
           <span key={mark.key} style={{ ["--peer" as string]: mark.color }}>
             {mark.boxes.map((box, index) => <span key={index} className="wb-rcaret-selection" style={box} />)}

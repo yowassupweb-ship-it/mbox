@@ -1070,7 +1070,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 .wb-attention { margin: 4px 0 0; padding: 0; list-style: none; }
 
-.wb-attention button {
+.wb-attention li > button:not(.wb-attention-done) {
   width: 100%;
   display: flex;
   align-items: center;
@@ -1085,13 +1085,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   cursor: pointer;
 }
 
-.wb-attention button:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-attention li > button:not(.wb-attention-done):hover { background: var(--wb-hover); color: var(--text-main); }
 .wb-attention-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-attention-meta { flex: none; color: var(--text-muted); font-size: var(--text-xs); }
 
 /* Галочка «готово» рядом с карточкой: появляется по наведению, чтобы не мельтешить в списке. */
 .wb-attention li { display: flex; align-items: center; gap: 2px; }
-.wb-attention li > button:first-child { flex: 1; min-width: 0; }
+.wb-attention li > button:first-child { flex: 1 1 auto; min-width: 0; width: auto; }
 .wb-attention-done {
   flex: none;
   width: 28px;
@@ -1104,10 +1104,11 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  opacity: 0;
+  opacity: .55;
   transition: opacity var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
 }
 .wb-attention li:hover .wb-attention-done,
+.wb-attention-done:hover,
 .wb-attention-done:focus-visible { opacity: 1; }
 .wb-attention-done:hover { background: var(--wb-hover); color: var(--state-ok, #3fa06a); }
 
@@ -1133,7 +1134,9 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 
 /* Журнал в панели: лента сама занимает всю высоту и скроллится. Раньше у .console-body был
    overflow-x + overscroll-behavior: contain без ограничения высоты — колесо уходило в никуда. */
-.wb-panel-pane.is-journal { overflow: hidden; }
+.wb-panel-pane.is-journal { overflow: auto; overscroll-behavior: contain; }
+/* Журнал теперь страница-документ (.wb-history): в панели она не ограничена по ширине и скроллится самой панелью. */
+.wb-panel-pane.is-journal > .wb-history { max-width: none; height: auto; min-height: 0; overflow: visible; padding: 8px 16px 20px; }
 .wb-panel-pane.is-journal > .panel { height: 100%; display: flex; flex-direction: column; margin: 0; padding: 0; }
 .wb-panel-pane.is-journal > .panel > .panel-title { display: none; }
 .wb-panel-pane.is-journal .console { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
@@ -2219,7 +2222,8 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
   color: var(--accent-color);
 }
 .wb-table-copy { min-width: 0; display: grid; gap: var(--space-1); }
-.wb-table-title { overflow: hidden; color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-semibold); line-height: var(--leading-tight); text-overflow: ellipsis; white-space: nowrap; }
+/* Название переносится на две строки: в одну оно резалось на 12–15 знаках при свободном месте рядом. */
+.wb-table-title { display: -webkit-box; overflow: hidden; color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-semibold); line-height: var(--leading-tight); overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .wb-table-details { display: flex; align-items: center; gap: var(--space-1); overflow: hidden; color: var(--text-muted); font-size: var(--text-2xs); line-height: var(--leading-tight); white-space: nowrap; }
 .wb-table-pin {
   flex: none;
@@ -3668,8 +3672,13 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-note-save.is-error { color: var(--state-danger); }
 .wb-note-save.is-error > svg { color: currentColor; }
 .wb-note-spinner { width: 11px; height: 11px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: wb-ssh-spin 0.8s linear infinite; }
-.wb-note-flag { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: var(--text-2xs); }
+.wb-note-flag { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-2); font-size: var(--text-2xs); }
 .wb-note-notice { overflow: hidden; color: var(--state-warn); text-overflow: ellipsis; }
+/* Мало места: сжимается «Изменено …» с многоточием, плашки «Закреплена» / «По ссылке» остаются целыми
+   (раньше общий overflow: hidden строки статуса резал их на полуслове). */
+.wb-note-status > .wb-note-save { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-note-status > .wb-note-save > svg { flex: none; }
+.wb-note-save-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .wb-note-tools { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
 .wb-note-divider { width: 1px; height: 16px; margin: 0 6px; background: var(--wb-line); }
@@ -4093,16 +4102,17 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 .wb-md-bay > .wb-md-toolbar { flex: 1 1 auto; }
 
 /* ─── Переключатель «Таблицы | Документы» и редактор документов ─── */
-.wb-mode-switch { display: inline-flex; min-width: 0; padding: 2px; border-radius: var(--radius-pill); background: var(--surface-hover); text-transform: none; letter-spacing: 0; }
-.wb-mode-switch button {
-  width: 30px;
-  height: 24px;
+.wb-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin: 0 var(--space-2) var(--space-2); padding: 3px; border-radius: var(--radius-md); background: var(--surface-hover); text-transform: none; letter-spacing: 0; }
+.wb-mode-tabs button {
   min-width: 0;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text-2);
   font: inherit;
@@ -4111,13 +4121,15 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
-.wb-mode-switch button > svg { flex: none; }
-.wb-mode-switch button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-mode-switch button:hover:not(.is-on) { background: var(--surface-hover); color: var(--text-main); }
-.wb-mode-switch button.is-on { background: var(--bg-raised); color: var(--text-main); box-shadow: var(--shadow-sm); }
-.wb-mode-switch button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
-.wb-mode-switch button:active:not(.is-on) { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
-@media (prefers-reduced-motion: reduce) { .wb-mode-switch button { transition: none; } }
+.wb-mode-tabs button > svg { flex: none; }
+.wb-mode-tabs button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-mode-tabs button > b { flex: none; min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 16%, transparent); color: var(--accent-color); font-size: var(--text-2xs); font-weight: var(--weight-semibold); line-height: 16px; text-align: center; }
+.wb-mode-tabs button:hover:not(.is-on) { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-main); }
+.wb-mode-tabs button.is-on { background: var(--bg-raised); color: var(--text-main); box-shadow: var(--shadow-sm); }
+.wb-mode-tabs button.is-on > svg { color: var(--accent-color); }
+.wb-mode-tabs button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+@media (pointer: coarse) { .wb-mode-tabs button { height: 40px; } }
+@media (prefers-reduced-motion: reduce) { .wb-mode-tabs button { transition: none; } }
 .wb-table-snippet { display: -webkit-box; margin-top: 2px; overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-normal); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .wb-univer-doc.is-editor { height: 100%; min-height: 0; }
 .wb-univer-doc.is-editor [data-u-comp="ribbon-header-menu"] { display: flex !important; align-items: center !important; justify-content: center !important; min-height: 46px !important; padding: var(--space-2) var(--space-3) !important; border-bottom: 1px solid var(--wb-line) !important; background: var(--surface-chrome) !important; }
@@ -4207,47 +4219,54 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 @media (prefers-reduced-motion: reduce) { .wb-rcaret { transition: none; } }
 .wb-browser-tabs-view .wb-view-body { display: grid; align-content: start; gap: 2px; padding: var(--space-1) var(--space-2) var(--space-3); }
 
-/* Окно «Поделиться» документом */
-.wb-share { display: grid; gap: var(--space-3); width: min(340px, calc(100vw - 24px)); padding: var(--space-4); font-size: var(--text-sm); }
-.wb-share-head { display: flex; align-items: center; justify-content: space-between; }
-.wb-share-head strong { font-size: var(--text-md); font-weight: var(--weight-semibold); }
-.wb-share-head button,
-.wb-share-people button { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-muted); }
-.wb-share-head button:hover,
-.wb-share-people button:hover { background: var(--wb-hover); color: var(--text-main); }
-.wb-share-block { display: grid; gap: var(--space-2); }
-.wb-share-block h4 { margin: 0; color: var(--text-2); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
-.wb-share-block small,
-.wb-share-note,
-.wb-share-empty { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
-.wb-share-field { display: flex; align-items: center; gap: var(--space-2); color: var(--text-2); }
-.wb-share-field > span { flex: none; min-width: 108px; }
-.wb-share select { min-width: 0; height: 28px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-main); font-size: var(--text-sm); }
-.wb-share-field select { flex: 1; }
-.wb-share-people { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
-.wb-share-people li { display: flex; align-items: center; gap: var(--space-2); }
-.wb-share-people li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-share-add { display: flex; gap: var(--space-1); }
-.wb-share-add select:first-child { flex: 1; }
-.wb-share-add button { flex: none; min-height: 28px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-pill); background: var(--accent-fill); color: var(--on-accent); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
-.wb-share-add button:hover:not(:disabled) { background: var(--accent-fill-hover); }
-.wb-share-add button:disabled { background: var(--surface-hover); color: var(--text-muted); cursor: default; }
-.wb-share-error { margin: 0; color: var(--state-danger); font-size: var(--text-xs); }
-.wb-share :is(button, select):focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent); }
-.wb-doc-share {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 26px;
-  padding: 0 var(--space-3);
-  border: var(--border-width) solid var(--border-color);
-  border-radius: var(--radius-pill);
-  background: var(--element-bg);
-  color: var(--text-main);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  transition: background var(--duration-fast) var(--ease-out);
-}
-.wb-doc-share:hover,
-.wb-doc-share.is-on { background: var(--surface-selected); }
-.wb-doc-share:focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent); }
+/* Доступ по ссылке: по строке на режим (просмотр / редактирование), как у заметок. */
+
+/* Кружок лимита агента (components/UsageRing.tsx): дуга — сколько осталось в самом тесном окне подписки. */
+.usage-ring { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--text-2xs); line-height: 1; }
+.usage-ring b { min-width: 2.4em; font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; text-align: left; overflow: visible; }
+.usage-ring svg { display: block; }
+.usage-ring-track { fill: none; stroke: color-mix(in srgb, var(--text-main) 16%, transparent); stroke-width: 2.4; }
+.usage-ring-arc { fill: none; stroke: var(--usage-tone, var(--state-live)); stroke-width: 2.4; stroke-linecap: round; transition: stroke-dasharray var(--duration-slow, 300ms) var(--ease-out); }
+.usage-ring.is-ok { --usage-tone: var(--state-ok, var(--accent-color)); }
+.usage-ring.is-warn { --usage-tone: var(--state-warn); }
+.usage-ring.is-danger { --usage-tone: var(--state-danger); }
+.usage-ring.is-warn b { color: var(--state-warn); }
+.usage-ring.is-danger b { color: var(--state-danger); }
+.wb-agent-list .usage-ring { overflow: visible; white-space: nowrap; font-size: var(--text-2xs); color: var(--text-muted); }
+.tb-pop-state { display: inline-flex; align-items: center; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { .usage-ring-arc { transition: none; } }
+.wb-agent-statusline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wb-agent-statusline > span:first-child { flex: 1 1 auto; min-width: 0; }
+
+/* Поиск в документе (Ctrl+F): панель и подсветка совпадений. */
+.wb-find-bar { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: min(360px, calc(100vw - 24px)); height: 36px; padding: 3px 4px 3px 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); background: var(--wb-surface-2); box-shadow: var(--float); color: var(--text-muted); }
+.wb-find-bar > svg { flex: none; }
+.wb-find-bar.is-in-doc { position: absolute; z-index: 40; top: 8px; right: 12px; }
+.wb-find-bar.is-floating { position: fixed; z-index: 250; top: 48px; right: 20px; }
+.wb-find-bar input { flex: 1 1 auto; min-width: 0; height: 28px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.wb-find-status { flex: none; color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
+.wb-find-status.is-none { color: var(--danger-color, var(--text-muted)); }
+.wb-find-bar button { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-muted); }
+.wb-find-bar button:hover:not(:disabled) { background: var(--wb-hover); color: var(--text-main); }
+.wb-find-bar button:disabled { opacity: .4; }
+.wb-find-bar:focus-within { border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color)); }
+::highlight(mbox-find) { background-color: color-mix(in srgb, #f5c542 38%, transparent); color: inherit; }
+::highlight(mbox-find-current) { background-color: color-mix(in srgb, #ff9f1c 72%, transparent); color: inherit; }
+.wb-find-mark { position: absolute; border-radius: var(--radius-2xs); background: color-mix(in srgb, #f5c542 38%, transparent); pointer-events: none; }
+.wb-find-mark.is-current { background: color-mix(in srgb, #ff9f1c 66%, transparent); outline: 1px solid color-mix(in srgb, #ff9f1c 80%, transparent); }
+@media (max-width: 640px) { .wb-find-bar.is-floating { top: 8px; right: 8px; left: 8px; width: auto; } }
+@media (pointer: coarse) { .wb-attention-done { width: 44px; height: 44px; opacity: 1; } .wb-attention li > button:not(.wb-attention-done) { min-height: 44px; } }
+
+/* «Поделиться»: доступ в MBOX у документов (внутри общей панели ShareLinks). */
+.wb-share-people { padding-top: 12px; border-top: 1px solid var(--wb-line); }
+.wb-share-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: var(--text-xs); }
+.wb-share-panel select { height: 26px; min-width: 0; max-width: 170px; padding: 0 6px; border: 1px solid var(--wb-line); border-radius: var(--radius-sm); background: var(--wb-surface); color: var(--text-main); font: inherit; font-size: var(--text-xs); }
+.wb-share-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.wb-share-list li { display: flex; align-items: center; gap: 6px; min-height: 26px; font-size: var(--text-sm); }
+.wb-share-list li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-share-list li > button { width: 26px; padding: 0; }
+.wb-share-list .wb-share-empty { color: var(--text-muted); font-size: var(--text-xs); }
+.wb-share-add { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-share-add select:first-child { flex: 1 1 120px; max-width: none; }
+.wb-share-note, .wb-share-error { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
+.wb-share-error { color: var(--state-danger); }

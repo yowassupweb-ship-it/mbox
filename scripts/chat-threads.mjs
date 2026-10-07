@@ -256,6 +256,14 @@ export function codexContextUsage(sessionId) {
 export function focusLines(item) {
   const context = Array.isArray(item?.props?.context) ? item.props.context.slice(0, 6) : [];
   const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+  // Начало содержимого вкладки (scripts/focus-excerpt.mjs): тема видна сразу, дочитывать — по инструменту из строки выше.
+  const excerptOf = (entry) => {
+    const text = String(entry?.excerpt?.text ?? "").trim();
+    if (!text) return "";
+    const total = Number(entry.excerpt.total) || text.length;
+    const quoted = text.split(String.fromCharCode(10)).map((line) => `  > ${line.slice(0, 300)}`).join(String.fromCharCode(10));
+    return `${String.fromCharCode(10)}  begins (${total} chars in all${total > text.length ? ", truncated" : ""}):${String.fromCharCode(10)}${quoted}`;
+  };
   const lines = context.map((entry) => {
     const title = clean(entry?.title);
     const detail = clean(entry?.detail);
@@ -264,15 +272,18 @@ export function focusLines(item) {
       case "file": return `- local file: ${detail || title}`;
       case "diff": return `- git diff of local file: ${detail || title}`;
       case "note": return `- MBOX note #${id} «${title}» (read with note_read)`;
+      case "doc": return `- MBOX document #${id} «${title}» (read with doc_read, edit with doc_edit)`;
+      case "table": return `- MBOX table #${id} «${title}» (read with table_read, write with table_write_cells)`;
+      case "mbox-file": return `- MBOX storage file #${id} «${title}» (read with storage_read)`;
       case "todo": return `- MBOX task #${id} «${title}» (read with get_task)`;
       case "memory": return `- MBOX memory #${id} «${title}» (read with get_memory)`;
       case "storage": return `- S3 storage object: ${detail} (table open in the MBOX editor)`;
       case "web": return `- web page in the MBOX browser: ${detail}${title ? ` («${title}»)` : ""} — read it with the mbox-prod tool browser_snapshot, act with browser_fill / browser_click / browser_highlight (MBOX browser, not Claude Desktop's)`;
       case "project": return `- MBOX project «${title}»`;
       case "skill": return `- MBOX skill «${title}»${detail ? `, file ${detail}` : ""}`;
-      default: return title ? `- ${clean(entry?.kind) || "tab"}: ${title}${detail ? ` (${detail})` : ""}` : "";
+      default: return title ? `- ${clean(entry?.kind) || "tab"}${id ? ` #${id}` : ""}: ${title}${detail ? ` (${detail})` : ""}` : "";
     }
-  }).filter(Boolean);
+  }).map((line, index) => (line ? line + excerptOf(context[index]) : line)).filter(Boolean);
   return lines.length
     ? ["Open in the owner's MBOX right now — the message most likely refers to these; use them directly instead of searching:", ...lines]
     : [];
@@ -293,7 +304,7 @@ export function chatRules({ agentName, skills = [], windows = process.platform =
     "- Do not create an MBOX inbox response yourself; the watcher posts your final answer.",
     "- MBOX is a Russian-language project: write the final answer in Russian, unless the owner wrote in another language. Concise and directly useful.",
     "- Short follow-ups, pronouns and «это/там/его» refer to <chat_history> and <open_tabs> — resolve them from there, do not search for them.",
-    "- Report, audit, research or anything longer than ~20 lines: save the full text with the mbox-prod MCP tool save_report and reply with a 5-10 line summary plus the returned markdown_link.",
+    "- Use the mbox-prod MCP tool save_report when the user explicitly asks to save the result or when the result is a standalone document (report, audit, export). An ordinary chat answer stays in the chat even when it is 30-40 lines long; after save_report, reply with a 5-10 line summary plus the returned markdown_link.",
     "",
     "Work economically:",
     "- Routine requests (edit a file, fix formatting, rename, small change): fewest possible steps — one call to change, one to read the result back. No renderers, converters or viewers (LibreOffice, Word COM, render scripts), no visual checks unless asked, no filesystem exploration beyond the task, even if a skill demands heavier verification.",
@@ -356,7 +367,7 @@ export function agentLessons({ windows = process.platform === "win32" } = {}) {
     ...(windows ? [
       "- Shell here is Windows PowerShell: `rg`/`grep` are not installed — use `Select-String -Path <files> -Pattern <re>` and `Get-ChildItem -Recurse -Include *.md`; `Select-Object -Index (20..65)` needs the parentheses; `-Filter` takes one pattern, not a list.",
     ] : []),
-    "- MBOX local folders: workspace_* tools need the folder key. If a call answers «Не понял, какая папка», call workspace_list once and retry with the right key — never repeat an identical failing call.",
+    "- MBOX local folders: workspace_* tools take the file's absolute path or «Folder name/sub/file» as `path` — no key and no workspace_list needed first (`workspace` is optional: id, name or part of the name). If a call answers «Не понял, какая папка», its text lists the folders with their root paths — retry once with one of them, never repeat an identical failing call.",
     "- note_edit answering «old_text not found»: note_read that tab again before the next edit.",
     "- Read each SKILL.md, note or file once per answer and keep it; do not re-read the same thing.",
     "- Batch work (many tours, files, pages): run the skill script once for the whole batch and print only a short summary (counts, failures, paths). Long command output is resent to the model on every following step.",

@@ -387,10 +387,12 @@
 
 /* Вкладки сжимаются, когда их много, как в Chrome: сначала ужимаются до значка и начала названия,
    и только потом полоса начинает прокручиваться. Активная не уже 120px — её название должно читаться. */
-.wb-tab { flex: 0 1 220px; min-width: 72px; max-width: 220px; }
+/* Ширина вкладки — по названию (до 220px); когда вкладок много, они сжимаются до 72px. Раньше базис был 220px у всех, и «Заметка» занимала столько же, сколько длинный заголовок. */
+.wb-tab { flex: 0 1 auto; min-width: 72px; max-width: 220px; }
 .wb-tab.is-active { min-width: 120px; }
 .wb-tab-title { min-width: 0; flex: 1 1 auto; }
-.wb-tab:not(:hover):not(.is-active):not(.is-dirty) .wb-tab-close { width: 0; margin: 0; overflow: hidden; }
+/* Место под крестик занято всегда (он лишь скрыт visibility): иначе вкладка раздувалась от наведения и соседние дёргались. */
+.wb-tab .wb-tab-close { flex: none; }
 
 /* Меню «…» заметки: фиксированная ширина, цвета метки — ровная сетка с одинаковыми полями,
    выбранный цвет — кольцо снаружи кружка, а не тень, которую обрезает соседний. */
@@ -412,3 +414,10 @@
 .wb-tree-ctx > button > svg { flex: 0 0 auto; color: var(--text-muted); }
 .wb-tree-ctx > button:hover > svg, .wb-tree-ctx > button:focus-visible > svg { color: inherit; }
 .wb-tree-ctx > .wb-note-menu-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Лента чата и поле ввода — колонка читаемой ширины по центру: на широком экране их не разводит на весь экран.
+   Полосу прокрутки оставляем у края области (ограничены поля внутри), поэтому ширину задаёт padding. */
+:root { --chat-column: 860px; }
+.agent-chat-shell .console-log, .console-log { padding-inline: max(14px, calc((100% - var(--chat-column)) / 2)); }
+.agent-chat-shell .console-composer, .console-composer { padding-inline: max(12px, calc((100% - var(--chat-column)) / 2)); }
+.console-needs-answer { padding-inline: max(0px, calc((100% - var(--chat-column)) / 2)); }

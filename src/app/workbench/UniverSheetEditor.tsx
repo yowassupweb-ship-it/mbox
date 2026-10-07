@@ -6,6 +6,8 @@ import UniverPresetSheetsCoreRuRU from "@univerjs/preset-sheets-core/locales/ru-
 import { mboxUniverTheme as mboxSheetTheme, useDocumentTheme } from "./univerTheme";
 import type { AgentPeer, Peer, PresenceState } from "./presence";
 import "@univerjs/preset-sheets-core/lib/index.css";
+import { FindBar } from "../../components/FindBar";
+import { useFindRequest } from "../../hooks/useFindRequest";
 
 type Props = {
   book: ExcelWorkbook;
@@ -20,6 +22,33 @@ type Props = {
   /** Своё выделение — для присутствия: где у меня курсор. */
   onSelect?: (state: PresenceState) => void;
 };
+
+type CellHit = { sheet: string; row: number; col: number };
+
+/** Ячейки всех листов, где текст содержит `query` (без учёта регистра): в порядке листов, строк и столбцов. */
+function findCells(snapshot: IWorkbookData, query: string): CellHit[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const hits: CellHit[] = [];
+  const order = snapshot.sheetOrder?.length ? snapshot.sheetOrder : Object.keys(snapshot.sheets || {});
+  for (const id of order) {
+    const sheet = snapshot.sheets?.[id];
+    if (!sheet?.cellData) continue;
+    const rows = Object.keys(sheet.cellData).map(Number).sort((a, b) => a - b);
+    for (const row of rows) {
+      const cells = sheet.cellData[row] || {};
+      for (const col of Object.keys(cells).map(Number).sort((a, b) => a - b)) {
+        const cell = cells[col];
+        const text = cell?.v === undefined || cell?.v === null ? "" : String(cell.v);
+        if (text && text.toLowerCase().includes(needle)) {
+          hits.push({ sheet: sheet.name || id, row, col });
+          if (hits.length >= 2000) return hits;
+        }
+      }
+    }
+  }
+  return hits;
+}
 
 type Mark = { key: string; label: string; color: string; left: number; top: number; width: number; height: number; agent: boolean };
 
@@ -104,6 +133,15 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
   const agentsRef = useRef(agents);
   const onSelectRef = useRef(onSelect);
   const placeRef = useRef<() => void>(() => undefined);
+  // Поиск (Ctrl+F): ячейки ищем в данных книги, текущую выделяем и прокручиваем к ней, остальные красим слоем поверх.
+  const [find, setFind] = useState<{ open: boolean; n: number }>({ open: false, n: 0 });
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<CellHit[]>([]);
+  const [cursor, setCursor] = useState(-1);
+  const findRef = useRef<{ hits: CellHit[]; cursor: number }>({ hits: [], cursor: -1 });
+  findRef.current = { hits, cursor };
+  const findApi = useRef<{ search: (text: string) => CellHit[]; go: (hit: CellHit) => void; paint: (found: CellHit[], current: number) => void } | null>(null);
+  useFindRequest(visible, () => setFind((current) => ({ open: true, n: current.n + 1 })));
   peersRef.current = peers;
   agentsRef.current = agents;
   onSelectRef.current = onSelect;
@@ -187,6 +225,35 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
       setMarks(next);
     };
     placeRef.current = place;
+    // Подсветку рисует сам Univer (highlightRanges): он учитывает прокрутку и масштаб, свои рамки считались в неверных координатах.
+    let findPaint: { dispose: () => void }[] = [];
+    const clearPaint = () => { findPaint.forEach((item) => item.dispose()); findPaint = []; };
+    findApi.current = {
+      paint: (found, current) => {
+        clearPaint();
+        try {
+          const sheet = workbook.getActiveSheet();
+          const name = sheet.getSheetName();
+          const cells = found.map((hit, at) => ({ hit, at })).filter(({ hit }) => hit.sheet === name).slice(0, 500);
+          const others = cells.filter(({ at }) => at !== current).map(({ hit }) => sheet.getRange(hit.row, hit.col));
+          if (others.length) findPaint.push(sheet.highlightRanges(others, { stroke: "rgba(245,197,66,0.9)", strokeWidth: 1, fill: "rgba(245,197,66,0.38)" }));
+          const now = cells.find(({ at }) => at === current);
+          if (now) findPaint.push(sheet.highlightRanges([sheet.getRange(now.hit.row, now.hit.col)], { stroke: "rgba(255,159,28,1)", strokeWidth: 2, fill: "rgba(255,159,28,0.5)" }));
+        } catch { /* лист закрыт */ }
+      },
+      search: (text) => findCells(workbook.getWorkbook().getSnapshot() as IWorkbookData, text),
+      go: (hit) => {
+        try {
+          const target = workbook.getSheetByName(hit.sheet);
+          if (!target) return;
+          if (workbook.getActiveSheet().getSheetName() !== hit.sheet) workbook.setActiveSheet(target);
+          const sheet = workbook.getActiveSheet();
+          sheet.getRange(hit.row, hit.col).activate();
+          sheet.scrollToCell(hit.row, hit.col);
+          onSheetNameRef.current(hit.sheet);
+        } catch { /* лист удалён за время поиска */ }
+      },
+    };
     const scrollEvent = univerAPI.addEvent(univerAPI.Event.Scroll, place);
     const zoomEvent = univerAPI.addEvent(univerAPI.Event.SheetZoomChanged, place);
     // Свой курсор для присутствия. Событие SelectionChanged на клик мышью не срабатывает, поэтому слушаем операцию
@@ -225,6 +292,8 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
       }, 120);
     });
     return () => {
+      clearPaint();
+      findApi.current = null;
       window.clearTimeout(readyTimer);
       window.clearTimeout(syncTimer);
       disposed = true;
@@ -250,9 +319,37 @@ export function SheetEditor({ book, sheetName, onSheetName, onChange, visible, r
   const replace = useCallback(() => placeRef.current(), []);
   useEffect(() => { replace(); }, [peers, agents, replace]);
 
+  const search = (text: string, keep = 0, fresh?: CellHit[]) => {
+    const found = fresh ?? findApi.current?.search(text) ?? [];
+    const at = found.length ? Math.min(Math.max(keep, 0), found.length - 1) : -1;
+    findRef.current = { hits: found, cursor: at };
+    setHits(found);
+    setCursor(at);
+    if (at >= 0) findApi.current?.go(found[at]);
+    findApi.current?.paint(found, at);
+  };
+  useEffect(() => { if (find.open) search(query); }, [query, find.open, book]);
+  const stepFind = (delta: number) => {
+    const fresh = findApi.current?.search(query) ?? [];
+    if (!fresh.length) { search(query, 0, fresh); return; }
+    const before = findRef.current.hits[findRef.current.cursor];
+    let at = before ? fresh.findIndex((hit) => hit.sheet === before.sheet && hit.row === before.row && hit.col === before.col) : -1;
+    if (at < 0) at = 0;
+    search(query, (at + delta + fresh.length) % fresh.length, fresh);
+  };
+  const closeFind = () => {
+    setFind((current) => ({ ...current, open: false }));
+    findApi.current?.paint([], -1);
+    setHits([]); setCursor(-1);
+    findRef.current = { hits: [], cursor: -1 };
+  };
+
   return (
     <div className="wb-univer-wrap" ref={wrapRef}>
       <div className="wb-univer-sheet" ref={hostRef} aria-label="Редактор таблицы Univer" />
+      {find.open && (
+        <FindBar className="is-in-doc" query={query} onQuery={setQuery} count={hits.length} index={cursor} onNext={() => stepFind(1)} onPrev={() => stepFind(-1)} onClose={closeFind} focusKey={find.n} placeholder="Найти в таблице" />
+      )}
       <div className="wb-presence-layer" style={{ left: layer.left, top: layer.top, width: layer.width, height: layer.height }} aria-hidden="true">
         {marks.map((mark) => (
           <span key={mark.key} className={mark.agent ? "wb-cell-mark is-agent" : "wb-cell-mark"} style={{ left: mark.left, top: mark.top, width: mark.width, height: mark.height, ["--peer" as string]: mark.color }}>

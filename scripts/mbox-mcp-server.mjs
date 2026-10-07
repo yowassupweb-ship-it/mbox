@@ -1,6 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { pickWorkspace } from "./workspace-resolve.mjs";
+import { applyFragmentEdit } from "./fragment-edit.mjs";
+import { formatSearch, SEARCH_KINDS } from "./search-format.mjs";
 
 const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "";
@@ -188,7 +191,7 @@ server.registerTool(
   },
   async ({ project, detail }) => {
     const data = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project)}&detail=${encodeURIComponent(detail)}`);
-    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data) }] });
   },
 );
 
@@ -265,7 +268,8 @@ server.registerTool(
   async ({ scenario, build_package }) => {
     const data = await mboxFetch("/api/mbox/seo/run", {
       method: "POST",
-      body: JSON.stringify({ scenario, buildPackage: build_package }),
+      // wait: сессии агента нужен готовый результат (run_id и package_id); экран SEO Wizard запускает сбор в фоне.
+      body: JSON.stringify({ scenario, buildPackage: build_package, wait: true }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
   },
@@ -1197,18 +1201,18 @@ async function ping(event) {
 // Файлы на компьютере владельца. Операции идут через MBOX: приложение на компьютере выполняет их,
 // а каждая запись попадает в историю версий с именем агента — откатить можно из интерфейса.
 
-async function resolveWorkspace(workspace) {
+// Папка + путь внутри неё: понимает id, имя, часть имени, абсолютный путь и «Имя/подпапка/файл» (см. workspace-resolve.mjs).
+async function resolveWorkspacePath(workspace, path = "", options = {}) {
   const { workspaces } = await mboxFetch("/api/mbox/workspaces");
-  const key = String(workspace || "").trim().toLowerCase();
-  const match = key
-    ? workspaces.find((row) => row.id === key || row.name.toLowerCase() === key)
-    : workspaces.length === 1 ? workspaces[0] : null;
-  if (!match) throw new Error(`Не понял, какая папка. Есть: ${workspaces.map((row) => `#${row.id} ${row.name}`).join(", ") || "ни одной — подключите в MBOX Desktop"}`);
-  return match;
+  return pickWorkspace(workspaces, workspace, path, options);
 }
 
-async function workspaceOp(workspace, op, path, extra = {}) {
-  const target = await resolveWorkspace(workspace);
+async function resolveWorkspace(workspace) {
+  return (await resolveWorkspacePath(workspace)).workspace;
+}
+
+async function workspaceOp(workspace, op, rawPath, extra = {}) {
+  const { workspace: target, path } = await resolveWorkspacePath(workspace, rawPath, { pathIsQuery: op === "find" });
   const response = await fetch(`${baseUrl}/api/mbox/workspaces/${target.id}/ops`, {
     method: "POST",
     // Та же авторизация, что в mboxFetch: с токеном доступа cookie пуст, и операции с папками отвечали 401.
@@ -1220,7 +1224,10 @@ async function workspaceOp(workspace, op, path, extra = {}) {
   return { workspace: target, result: data.op.result || {} };
 }
 
-const workspaceArg = z.string().default("").describe("Workspace name or id from workspace_list (may be omitted when there is only one)");
+const workspaceArg = z.string().default("").describe("Workspace name or id (optional): omit it when there is one folder or when `path` is an absolute path / starts with the folder name. workspace_list is not required first.");
+
+// old_text не совпал буквально, но нашёлся единственный вариант с точностью до пробелов/переносов/кавычек.
+const FUZZY_NOTE = " (old_text matched ignoring whitespace/quote differences — check the result if it matters.)";
 
 function textResult(text) {
   return withPush({ content: [{ type: "text", text }] });
@@ -1304,8 +1311,8 @@ server.registerTool(
     inputSchema: { workspace: workspaceArg, path: z.string() },
   },
   async ({ workspace, path }) => {
-    const target = await resolveWorkspace(workspace);
-    const { versions } = await mboxFetch(`/api/mbox/workspaces/${target.id}/versions?path=${encodeURIComponent(path)}`);
+    const { workspace: target, path: relPath } = await resolveWorkspacePath(workspace, path);
+    const { versions } = await mboxFetch(`/api/mbox/workspaces/${target.id}/versions?path=${encodeURIComponent(relPath)}`);
     return textResult(JSON.stringify(versions, null, 2));
   },
 );
@@ -1370,10 +1377,10 @@ server.registerTool(
   },
   async ({ id, file, old_text, new_text, message }) => {
     const { content } = await mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}?file=${encodeURIComponent(file)}`);
-    const count = old_text ? content.split(old_text).length - 1 : 0;
-    if (count !== 1) throw new Error(count ? `old_text occurs ${count} times — add surrounding lines to make it unique` : "old_text not found in the file — re-read it with get_skill");
-    const result = await putSkillFile(id, file, content.replace(old_text, () => new_text), message);
-    return textResult(result.unchanged ? "No change." : `Saved ${id}/${file} (version ${result.version_id}). Live now.`);
+    if (!old_text) throw new Error("old_text is empty");
+    const edit = applyFragmentEdit(content, old_text, new_text, { what: "the skill file", reread: "re-read it with get_skill" });
+    const result = await putSkillFile(id, file, edit.text, message);
+    return textResult(result.unchanged ? "No change." : `Saved ${id}/${file} (version ${result.version_id}). Live now.${edit.fuzzy ? FUZZY_NOTE : ""}`);
   },
 );
 
@@ -1461,6 +1468,30 @@ async function patchNote(noteId, change) {
 }
 
 server.registerTool(
+  "search",
+  {
+    title: "Search everything in MBOX at once",
+    description: "ONE search over notes (all tabs), documents, tables (cell text), tasks, memories, projects and files, with the owner's access rights. Words are matched with endings cut off, so «пересборке» finds «пересборка». If nothing contains ALL the words, it automatically retries for ANY of them. Each hit says which tool reads it. Use this first when you do not know where something is; note_search / doc_search / table_search / search_memory stay for narrowing inside one kind.",
+    inputSchema: {
+      query: z.string().min(1),
+      kinds: z.array(z.enum(SEARCH_KINDS)).default([]).describe("Limit to these kinds; empty means all"),
+      limit: z.number().int().min(1).max(40).default(15),
+    },
+  },
+  async ({ query, kinds, limit }) => {
+    const ask = (mode) => mboxFetch(`/api/mbox/spotlight?q=${encodeURIComponent(query)}&limit=100${mode ? `&mode=${mode}` : ""}`);
+    const wanted = (rows) => (kinds.length ? rows.filter((row) => kinds.includes(row.kind)) : rows);
+    let data = await ask("");
+    let fallback = false;
+    if (!wanted(data.results || []).length && (data.terms || []).length > 1) {
+      data = await ask("any");
+      fallback = true;
+    }
+    return textResult(formatSearch(data.results || [], { query, kinds, fallback, limit }));
+  },
+);
+
+server.registerTool(
   "note_search",
   {
     title: "Find the owner's notes (documents)",
@@ -1536,7 +1567,7 @@ server.registerTool(
   "note_edit",
   {
     title: "Edit part of a note",
-    description: "Replace an exact fragment of a note tab with new text (like a code edit). old_text must match exactly once unless replace_all. Cheaper and safer than rewriting the note.",
+    description: "Replace an exact fragment of a note tab with new text (like a code edit). old_text must match exactly once unless replace_all. Cheaper and safer than rewriting the note. If the text changed since you read it, the error shows the closest current fragment with its line number — retry with that instead of re-reading everything; a single match that differs only in whitespace/quotes is applied automatically.",
     inputSchema: {
       note_id: z.string(),
       old_text: z.string().min(1),
@@ -1549,18 +1580,18 @@ server.registerTool(
   async ({ note_id, old_text, new_text, replace_all, tab, show }) => {
     const id = String(note_id).replace(/^#/, "");
     let replaced = 0;
+    let fuzzy = false;
     const note = await patchNote(id, (current) => {
       const tabs = noteTabsOf(current);
       const index = pickTab(tabs, tab);
       const text = tabs[index].content;
-      const count = text.split(old_text).length - 1;
-      if (!count) throw new Error("old_text not found in the note — read it again with note_read");
-      if (count > 1 && !replace_all) throw new Error(`old_text occurs ${count} times — add surrounding text or pass replace_all`);
-      tabs[index].content = replace_all ? text.split(old_text).join(new_text) : text.replace(old_text, () => new_text);
-      replaced = replace_all ? count : 1;
+      const edit = applyFragmentEdit(text, old_text, new_text, { replaceAll: replace_all, what: "the note", reread: "read it again with note_read" });
+      tabs[index].content = edit.text;
+      replaced = edit.count;
+      fuzzy = edit.fuzzy;
       return { tabs, content: tabs[0].content };
     });
-    return textResult(`Edited note #${note.id} «${note.title}»: ${replaced} replacement(s).${show ? await showInMbox(`note:${note.id}`, note.title) : ""}`);
+    return textResult(`Edited note #${note.id} «${note.title}»: ${replaced} replacement(s).${fuzzy ? FUZZY_NOTE : ""}${show ? await showInMbox(`note:${note.id}`, note.title) : ""}`);
   },
 );
 
@@ -1631,18 +1662,16 @@ server.registerTool(
   "doc_edit",
   {
     title: "Edit part of an MBOX document",
-    description: "Replace an exact fragment of the document text (as doc_read shows it) with new text. old_text must match exactly once unless replace_all. Cheaper and safer than rewriting everything with doc_write.",
+    description: "Replace an exact fragment of the document text (as doc_read shows it) with new text. old_text must match exactly once unless replace_all. Cheaper and safer than rewriting everything with doc_write. If the text changed since you read it, the error shows the closest current fragment with its line number — retry with that instead of re-reading everything; a single match that differs only in whitespace/quotes is applied automatically.",
     inputSchema: { doc_id: z.string(), old_text: z.string().min(1), new_text: z.string(), replace_all: z.boolean().default(false), show: showArg },
   },
   async ({ doc_id, old_text, new_text, replace_all, show }) => {
     const id = docIdOf(doc_id);
     const { markdown } = await mboxFetch(`/api/mbox/documents/${id}?format=markdown`);
-    const count = markdown.split(old_text).length - 1;
-    if (!count) throw new Error("old_text not found in the document — read it again with doc_read");
-    if (count > 1 && !replace_all) throw new Error(`old_text occurs ${count} times — add surrounding text or pass replace_all`);
-    const next = replace_all ? markdown.split(old_text).join(new_text) : markdown.replace(old_text, () => new_text);
+    const edit = applyFragmentEdit(markdown, old_text, new_text, { replaceAll: replace_all, what: "the document", reread: "read it again with doc_read" });
+    const next = edit.text;
     const { document } = await mboxFetch(`/api/mbox/documents/${id}`, { method: "PATCH", body: JSON.stringify({ markdown: next, mode: "replace" }) });
-    return textResult(`Edited document #${document.id} «${document.title}»: ${replace_all ? count : 1} replacement(s).${show ? await showInMbox(`doc:${document.id}`, document.title) : ""}`);
+    return textResult(`Edited document #${document.id} «${document.title}»: ${edit.count} replacement(s).${edit.fuzzy ? FUZZY_NOTE : ""}${show ? await showInMbox(`doc:${document.id}`, document.title) : ""}`);
   },
 );
 
@@ -1778,12 +1807,10 @@ server.registerTool(
     const { result: file } = await workspaceOp(workspace, "read", path);
     if (file.binary || file.tooLarge) throw new Error("Not an editable text file");
     const text = String(file.content ?? "");
-    const count = text.split(old_text).length - 1;
-    if (!count) throw new Error("old_text not found — read the file again");
-    if (count > 1 && !replace_all) throw new Error(`old_text occurs ${count} times — add surrounding text or pass replace_all`);
-    const next = replace_all ? text.split(old_text).join(new_text) : text.replace(old_text, () => new_text);
+    const edit = applyFragmentEdit(text, old_text, new_text, { replaceAll: replace_all, what: "the file", reread: "read the file again" });
+    const next = edit.text;
     const { workspace: target, result } = await workspaceOp(workspace, "write", path, { content: next, message });
-    return textResult(`Edited ${result.path} in «${target.name}»: ${replace_all ? count : 1} replacement(s).${show ? await showInMbox(localTarget(target, result.path)) : ""}`);
+    return textResult(`Edited ${result.path} in «${target.name}»: ${edit.count} replacement(s).${edit.fuzzy ? FUZZY_NOTE : ""}${show ? await showInMbox(localTarget(target, result.path)) : ""}`);
   },
 );
 
@@ -2246,7 +2273,7 @@ server.registerTool(
   {
     title: "Call an external API through MBOX",
     description: [
-      "Call an external API with the owner's stored key (MBOX adds the auth header; you never see the key). service = code from integration_list: topvisor, yandex_webmaster, yandex_metrica or a custom one.",
+      "Call an external API with the owner's stored key (MBOX adds the auth header; you never see the key). service = code from integration_list: topvisor, yandex_webmaster, yandex_metrica, yandex_wordstat (all methods POST with JSON body) or a custom one.",
       "Topvisor API v2: path is the method name, e.g. get/projects_2/projects, get/keywords_2/keywords, get/positions_2/history; send parameters as JSON in body (method POST). Other services: method GET/POST/PUT/PATCH/DELETE, path relative to the base URL (no query string), URL parameters in query.",
       "Read-only by default: do not change data in an external service (create/delete projects, keywords, goals) unless the owner explicitly asked. Large answers are truncated — narrow with limit/filters or raise max_chars (max 60000).",
     ].join("\n"),
@@ -2515,6 +2542,194 @@ server.registerTool(
   async ({ key }) => {
     try { const data = await mboxFetch(storageUrl("object", { key }), { method: "DELETE" }); return textResult(`Deleted objects: ${data.deleted}.`); }
     catch (error) { return storageError(error); }
+  },
+);
+
+// ─── Личные задачи и календарь владельца, ссылки «Поделиться», обзор SEO ────────────────────────────────────────
+// Эти возможности появились в интерфейсе (нижняя панель «Задачи» и «Календарь», единое «Поделиться», экран SEO Wizard),
+// а у агента к ним доступа не было: он видел только задачи проектов. Здесь — те же ручки, что у интерфейса.
+
+const plannerLine = (item, kind) => {
+  if (kind === "task") return `task #${item.id} ${item.completed_at ? "[done]" : "[open]"} «${item.title}»${item.due_at ? ` · due ${String(item.due_at).slice(0, 16)}` : ""}${item.recurrence_rule ? ` · repeats ${item.recurrence_rule}` : ""}`;
+  return `event #${item.id} «${item.title}» · ${String(item.starts_at).slice(0, 16)} – ${String(item.ends_at).slice(11, 16)}${item.all_day ? " · all day" : ""}${item.location ? ` · ${item.location}` : ""}${item.recurrence_rule ? ` · repeats ${item.recurrence_rule}` : ""}`;
+};
+
+server.registerTool(
+  "planner_read",
+  {
+    title: "Read the owner's personal tasks and calendar",
+    description: "The owner's PERSONAL tasks (bottom panel «Задачи») and calendar events («Календарь») — not project todos (those are get_next_task / get_task). Without dates returns open personal tasks and events for the next 14 days; pass from/to (YYYY-MM-DD) to look at another period. Recurring events are expanded into occurrences.",
+    inputSchema: {
+      from: z.string().default("").describe("YYYY-MM-DD, default today"),
+      to: z.string().default("").describe("YYYY-MM-DD, default today + 14 days"),
+      include_done: z.boolean().default(false),
+    },
+  },
+  async ({ from, to, include_done }) => {
+    const day = (offset) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const start = from || day(0);
+    const end = to || day(14);
+    const [tasks, events] = await Promise.all([
+      mboxFetch("/api/mbox/personal-tasks"),
+      mboxFetch(`/api/mbox/calendar-events?from=${encodeURIComponent(`${start}T00:00:00`)}&to=${encodeURIComponent(`${end}T23:59:59`)}`),
+    ]);
+    const openTasks = (tasks.tasks || []).filter((item) => include_done || !item.completed_at);
+    const lines = [
+      `Personal tasks (${openTasks.length}):`,
+      ...(openTasks.length ? openTasks.map((item) => `- ${plannerLine(item, "task")}`) : ["- none"]),
+      "",
+      `Calendar ${start} … ${end} (${(events.events || []).length}):`,
+      ...((events.events || []).length ? events.events.map((item) => `- ${plannerLine(item, "event")}`) : ["- none"]),
+    ];
+    return textResult(lines.join("\n"));
+  },
+);
+
+server.registerTool(
+  "planner_task",
+  {
+    title: "Create, change, complete or delete a personal task of the owner",
+    description: "Without id creates a personal task. With id changes only the fields you pass (title, description, due_at, done) and keeps the rest. delete=true removes it. Dates are local, YYYY-MM-DD or YYYY-MM-DDTHH:MM. Ask the owner first before creating tasks for them on your own initiative.",
+    inputSchema: {
+      id: z.string().default(""),
+      title: z.string().default(""),
+      description: z.string().optional(),
+      due_at: z.string().optional().describe("empty string clears the due date"),
+      done: z.boolean().optional(),
+      delete: z.boolean().default(false),
+    },
+  },
+  async ({ id, title, description, due_at, done, delete: remove }) => {
+    const base = "/api/mbox/personal-tasks";
+    if (!id) {
+      if (!title.trim()) return textResult("A title is required to create a task.");
+      const { task } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, description: description ?? "", due_at: due_at || null, completed: Boolean(done) }) });
+      // Ответ записи отдаёт время в UTC, список — местное: показываем то, что владелец увидит в панели.
+      return textResult(`Created ${plannerLine({ ...task, due_at: due_at || task.due_at }, "task")}`);
+    }
+    const cleanId = String(id).replace(/^#/, "");
+    if (remove) {
+      await mboxFetch(`${base}/${cleanId}`, { method: "DELETE" });
+      return textResult(`Deleted personal task #${cleanId}`);
+    }
+    const current = ((await mboxFetch(base)).tasks || []).find((item) => String(item.id) === cleanId);
+    if (!current) return textResult(`No personal task #${cleanId}. List them with planner_read.`);
+    const body = {
+      title: title || current.title,
+      description: description ?? current.description ?? "",
+      due_at: due_at === undefined ? current.due_at : due_at || null,
+      recurrence_rule: current.recurrence_rule || null,
+      completed: done === undefined ? Boolean(current.completed_at) : done,
+    };
+    const { task } = await mboxFetch(`${base}/${cleanId}`, { method: "PATCH", body: JSON.stringify(body) });
+    return textResult(`Updated ${plannerLine({ ...task, due_at: body.due_at ?? task.due_at }, "task")}`);
+  },
+);
+
+server.registerTool(
+  "planner_event",
+  {
+    title: "Create, change or delete a calendar event of the owner",
+    description: "Without id creates an event (title, starts_at and ends_at are required; local time YYYY-MM-DDTHH:MM, all_day events: dates with T00:00). With id changes only the fields you pass. delete=true removes it (a recurring event is removed entirely). Colors: blue, green, orange, red, purple, yellow, cyan, gray. Recurrence as RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE.",
+    inputSchema: {
+      id: z.string().default(""),
+      title: z.string().default(""),
+      starts_at: z.string().default(""),
+      ends_at: z.string().default(""),
+      description: z.string().optional(),
+      location: z.string().optional(),
+      color: z.string().optional(),
+      all_day: z.boolean().optional(),
+      recurrence_rule: z.string().optional(),
+      delete: z.boolean().default(false),
+    },
+  },
+  async ({ id, title, starts_at, ends_at, description, location, color, all_day, recurrence_rule, delete: remove }) => {
+    const base = "/api/mbox/calendar-events";
+    if (!id) {
+      if (!title.trim() || !starts_at || !ends_at) return textResult("Creating an event needs title, starts_at and ends_at.");
+      const { event } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, starts_at, ends_at, description: description ?? "", location: location ?? "", color: color ?? "blue", all_day: Boolean(all_day), recurrence_rule: recurrence_rule || null }) });
+      return textResult(`Created ${plannerLine({ ...event, starts_at, ends_at }, "event")}`);
+    }
+    const cleanId = String(id).replace(/^#/, "").split("::")[0];
+    if (remove) {
+      await mboxFetch(`${base}/${cleanId}`, { method: "DELETE" });
+      return textResult(`Deleted calendar event #${cleanId}`);
+    }
+    const wide = await mboxFetch(`${base}?from=1970-01-01T00:00:00&to=2100-01-01T00:00:00`);
+    // Повторяющееся событие приходит развёрнутым на вхождения; исходные поля — у самого раннего вхождения.
+    const source = (wide.events || []).filter((item) => String(item.master_id || item.id) === cleanId).sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))[0];
+    if (!source) return textResult(`No calendar event #${cleanId}. Find it with planner_read.`);
+    const body = {
+      title: title || source.title,
+      description: description ?? source.description ?? "",
+      starts_at: starts_at || source.starts_at,
+      ends_at: ends_at || source.ends_at,
+      all_day: all_day === undefined ? Boolean(source.all_day) : all_day,
+      location: location ?? source.location ?? "",
+      color: color ?? source.color ?? "blue",
+      reminder_minutes: source.reminder_minutes ?? null,
+      recurrence_rule: recurrence_rule === undefined ? source.recurrence_rule || null : recurrence_rule || null,
+    };
+    const { event } = await mboxFetch(`${base}/${cleanId}`, { method: "PATCH", body: JSON.stringify(body) });
+    return textResult(`Updated ${plannerLine({ ...event, starts_at: body.starts_at, ends_at: body.ends_at }, "event")}`);
+  },
+);
+
+const SHARE_PATHS = { note: ["notes", "shares", "share", "n"], table: ["tables", "shares", "share", "t"], document: ["documents", "links", "link", "d"] };
+
+server.registerTool(
+  "share_link",
+  {
+    title: "Get a public link to a note, table or document",
+    description: "Creates (or returns the existing) link that opens a note, table or document without logging in to MBOX: mode view = read only, mode edit = anyone with the link can change it. Use it to hand the owner or a colleague a document in chat or e-mail. regenerate=true makes a NEW link and the old one stops working. Do not create edit links unless the owner asked for it.",
+    inputSchema: {
+      kind: z.enum(["note", "table", "document"]),
+      id: z.string(),
+      mode: z.enum(["view", "edit"]).default("view"),
+      regenerate: z.boolean().default(false),
+    },
+  },
+  async ({ kind, id, mode, regenerate }) => {
+    const [collection, listKey, itemKey, prefix] = SHARE_PATHS[kind];
+    const cleanId = String(id).replace(/^#/, "");
+    const path = `/api/mbox/${collection}/${cleanId}/${listKey}`;
+    const existing = regenerate ? null : ((await mboxFetch(path))[listKey] || []).find((item) => item.mode === mode);
+    const link = existing || (await mboxFetch(path, { method: "POST", body: JSON.stringify({ mode, regenerate }) }))[itemKey];
+    return textResult(`${kind} #${cleanId} · ${mode === "edit" ? "editing" : "view only"} link:\n${String(baseUrl).replace(/\/+$/, "")}/${prefix}/${link.token}`);
+  },
+);
+
+server.registerTool(
+  "seo_overview",
+  {
+    title: "SEO Wizard: what to do now and what is possible",
+    description: "What the SEO Wizard screen shows the owner: the cycle (collect → findings → week choice → implementation → check → results) with live numbers and the schedule, and the strategy — what we have, can do, could do if connected, and cannot do. Read it before an SEO session: it says which sources are stale and what is blocked.",
+    inputSchema: {},
+  },
+  async () => {
+    const [scenario, strategy, settings] = await Promise.all([mboxFetch("/api/mbox/seo/scenario"), mboxFetch("/api/mbox/seo/strategy"), mboxFetch("/api/mbox/seo/settings").catch(() => null)]);
+    // Цели Метрики с описаниями владельца: что значит каждая цель и считается ли она заявкой.
+    const roleLabel = { lead: "lead", booking: "booking", track: "tracked, not a lead" };
+    const metricaLines = (settings?.config?.metrica_counters || []).flatMap((counter) => [
+      `- counter ${counter.id}${counter.name ? ` «${counter.name}»` : ""}${counter.site ? ` (${counter.site})` : ""}:`,
+      ...(counter.goals || []).filter((goal) => goal.role || goal.description).map((goal) => `  - goal ${goal.id} «${goal.name || "?"}» [${roleLabel[goal.role] || "not collected"}]${goal.description ? ` — ${goal.description}` : ""}`),
+    ]);
+    const lines = [
+      `Today ${scenario.today}. ${scenario.live ? `Collection is running: ${scenario.live.stage}` : "No collection running"}. Autorun ${scenario.autorun?.enabled ? "on" : "off"}.`,
+      "",
+      "Cycle:",
+      ...scenario.flow.map((step, index) => `${index + 1}. ${step.title} [${step.status}] ${step.value} ${step.label} — ${step.detail}`),
+      "",
+      "Schedule:",
+      ...scenario.rhythm.map((item) => `- ${item.title} (${item.when}): next ${item.next_day || "?"}, last package ${item.last_package_at ? String(item.last_package_at).slice(0, 10) : "never"}${item.candidates !== null ? `, candidates ${item.candidates}` : ""}`),
+      "",
+      `Sources ${strategy.summary.connected}/${strategy.summary.total}${strategy.summary.stale ? `, stale ${strategy.summary.stale}` : ""}: ${strategy.sources.map((item) => `${item.label} ${item.status}${item.age_days !== null ? ` (${item.age_days}d)` : ""}`).join("; ")}`,
+      "",
+      ...[["have", "We have"], ["can", "We can"], ["could", "We could (needs)"], ["cannot", "We cannot"]].flatMap(([key, label]) => [`${label}:`, ...strategy.columns[key].map((item) => `- ${item.title}${item.needs ? ` — needs: ${item.needs}` : ""}`), ""]),
+      ...(metricaLines.length ? ["Metrica counters and goals (owner descriptions):", ...metricaLines] : []),
+    ];
+    return textResult(lines.join("\n"));
   },
 );
 

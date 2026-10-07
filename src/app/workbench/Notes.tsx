@@ -1,8 +1,9 @@
 import { RemoteCarets } from "./RemoteCarets";
+import { ShareButton } from "./ShareLinks";
 import { usePresence } from "./presence";
 import { PresenceAvatars } from "./PresenceAvatars";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Copy, Eye, FileText, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Share2, Trash2, Upload, Users, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Copy, Eye, FileText, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Trash2, Upload, Users, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
@@ -699,7 +700,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
             ) : saveBusy ? (
               <span className="wb-note-save is-busy"><span className="wb-note-spinner" aria-hidden="true" /> Сохраняю…</span>
             ) : (
-              <span className="wb-note-save"><Check size={13} aria-hidden="true" /> Изменено {formatSince(note.updated_at)}</span>
+              <span className="wb-note-save"><Check size={13} aria-hidden="true" /><span className="wb-note-save-text">Изменено {formatSince(note.updated_at)}</span></span>
             )}
             {note.pinned && <span className="wb-note-flag" title="Закреплена сверху списка"><Pin size={11} aria-hidden="true" /> Закреплена</span>}
             {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
@@ -731,7 +732,7 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
               </select>
             </label>
             <span className="wb-note-divider" aria-hidden="true" />
-            <ShareButton noteId={noteId} onSharedChange={setShared} />
+            <ShareButton kind="note" id={noteId} onSharedChange={setShared} />
             <input ref={wordInputRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWordIntoNote(file); event.target.value = ""; }} />
             <button type="button" className={`wb-note-icon${drawerOpen ? " is-on" : ""}`} onClick={() => setDrawerOpen(!drawerOpen)} aria-pressed={drawerOpen} title={drawerOpen ? "Скрыть историю версий" : "История версий"} aria-label="История версий">
               <History size={14} aria-hidden="true" />
@@ -905,108 +906,3 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
   );
 }
 
-type NoteShare = { token: string; mode: "view" | "edit"; created_at: string; last_used_at?: string | null };
-
-/**
- * «Поделиться»: ссылка на просмотр и ссылка на правку. Открываются в любом браузере без входа в MBOX
- * (/n/<токен>), отзываются одной кнопкой. Перевыпуск — новый токен, старая ссылка перестаёт работать.
- */
-function ShareButton({ noteId, onSharedChange }: { noteId: string; onSharedChange?: (shared: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const [shares, setShares] = useState<NoteShare[]>([]);
-  const [busy, setBusy] = useState("");
-  const [copied, setCopied] = useState("");
-  const boxRef = useRef<HTMLDivElement | null>(null);
-
-  const load = useCallback(async () => {
-    const next = (await fetchJson<{ shares: NoteShare[] }>(`/api/mbox/notes/${noteId}/shares`)).shares;
-    setShares(next);
-    onSharedChange?.(next.length > 0);
-  }, [noteId, onSharedChange]);
-
-  useEffect(() => {
-    void load().catch(() => {
-      setShares([]);
-      onSharedChange?.(false);
-    });
-  }, [load, onSharedChange]);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => { if (!boxRef.current?.contains(event.target as Node)) setOpen(false); };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [open]);
-
-  const linkOf = (share: NoteShare) => `${serverOrigin()}/n/${share.token}`;
-
-  async function create(mode: "view" | "edit", regenerate = false) {
-    setBusy(mode);
-    try {
-      const { share } = await fetchJson<{ share: NoteShare }>(`/api/mbox/notes/${noteId}/shares`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode, regenerate }) });
-      await load();
-      await copy(share);
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function revoke(mode: "view" | "edit") {
-    if (!(await askConfirm({ title: mode === "edit" ? "Отозвать ссылку на правку? Она перестанет открываться." : "Отозвать ссылку на просмотр? Она перестанет открываться.", confirmLabel: "Отозвать", danger: true }))) return;
-    setBusy(mode);
-    try {
-      await fetchJson(`/api/mbox/notes/${noteId}/shares/${mode}`, { method: "DELETE" });
-      await load();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function copy(share: NoteShare) {
-    try { await navigator.clipboard.writeText(linkOf(share)); } catch { /* буфер недоступен — ссылка видна в поле */ }
-    setCopied(share.mode);
-    window.setTimeout(() => setCopied(""), 1600);
-  }
-
-  const rows: Array<{ mode: "view" | "edit"; label: string; hint: string }> = [
-    { mode: "view", label: "Просмотр", hint: "Читать без входа в MBOX" },
-    { mode: "edit", label: "Редактирование", hint: "Править текст и вставлять картинки" },
-  ];
-
-  return (
-    <div className="wb-share" ref={boxRef}>
-      <button type="button" className={shares.length ? "is-on" : undefined} onClick={() => setOpen(!open)} title="Поделиться ссылкой" aria-expanded={open}>
-        <Share2 size={14} />
-      </button>
-      {open && (
-        <div className="wb-share-panel" role="dialog" aria-label="Ссылки на заметку">
-          {rows.map((row) => {
-            const share = shares.find((item) => item.mode === row.mode);
-            return (
-              <div key={row.mode} className="wb-share-row">
-                <div className="wb-share-head">
-                  <b>{row.label}</b>
-                  <span>{row.hint}</span>
-                </div>
-                {share ? (
-                  <>
-                    <div className="wb-share-link">
-                      <input readOnly value={linkOf(share)} onFocus={(event) => event.currentTarget.select()} aria-label={`Ссылка: ${row.label}`} />
-                      <button type="button" onClick={() => void copy(share)} title="Скопировать">{copied === row.mode ? <Check size={13} /> : <Copy size={13} />}</button>
-                    </div>
-                    <div className="wb-share-actions">
-                      <span>{share.last_used_at ? `открывали ${formatSince(share.last_used_at)}` : "ещё не открывали"}</span>
-                      <button type="button" disabled={busy === row.mode} onClick={() => void create(row.mode, true)} title="Новая ссылка, старая перестанет работать"><RefreshCw size={12} /> Перевыпустить</button>
-                      <button type="button" className="is-danger" disabled={busy === row.mode} onClick={() => void revoke(row.mode)}><X size={12} /> Отозвать</button>
-                    </div>
-                  </>
-                ) : (
-                  <button type="button" className="wb-share-create" disabled={busy === row.mode} onClick={() => void create(row.mode)}><Link2 size={13} /> Создать ссылку</button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}

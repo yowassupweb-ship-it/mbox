@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 const ROOT_PACKAGE = path.resolve(SCRIPTS_DIR, "..", "package.json");
 // Набор файлов, с которым наблюдатели работают на чужом компьютере: только встроенные модули Node, кроме MCP-сервера.
-const AGENT_KIT = ["mbox-agent.mjs", "claude-inbox-watcher.mjs", "codex-chat-watcher.mjs", "sync-skills.mjs", "inbox-wake.mjs", "model-catalog.mjs", "chat-threads.mjs", "mbox-mcp-server.mjs", "cli-auth.mjs"];
+const AGENT_KIT = ["mbox-agent.mjs", "claude-inbox-watcher.mjs", "codex-chat-watcher.mjs", "sync-skills.mjs", "inbox-wake.mjs", "model-catalog.mjs", "chat-threads.mjs", "mbox-mcp-server.mjs", "cli-auth.mjs", "usage-report.mjs", "focus-excerpt.mjs", "workspace-resolve.mjs", "fragment-edit.mjs", "search-format.mjs"];
 const AGENT_FAMILIES = ["claude", "codex"];
 
 function agentKitPackage() {

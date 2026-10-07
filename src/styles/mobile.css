@@ -114,8 +114,7 @@
   .wb-titlebar .topbar { padding-inline: 12px; }
   .wb-editor { grid-template-rows: 44px minmax(0, 1fr); }
   .wb-tabs { padding: 0 8px; gap: 4px; scroll-snap-type: x proximity; }
-  .wb-tab { height: 32px; min-width: 96px; max-width: 180px; scroll-snap-align: start; }
-  .wb-tab.is-active { min-width: 130px; }
+  .wb-tab { height: 40px; min-width: 72px; max-width: 180px; scroll-snap-align: start; }
 
   /* ─── Касания: цели крупнее, поля без автоувеличения iOS ─── */
   .wb input,
@@ -201,18 +200,18 @@
     padding: 0;
   }
   .wb-note-popup > svg + svg { display: none; }
-  .wb-note-surface { grid-template-rows: minmax(0, 1fr) 34px; }
+  .wb-note-surface { grid-template-rows: minmax(0, 1fr) 48px; }
   .wb-note-title { padding: 18px 16px 4px; }
   .wb-note-edit .wb-note-editor { padding-inline: 16px; }
   .wb-note-tabs {
-    height: 34px;
-    padding: 4px 8px 0;
+    height: 48px;
+    padding: 4px 8px;
     scrollbar-width: none;
   }
   .wb-note-tabs::-webkit-scrollbar { display: none; }
   .wb-note-tab {
     min-width: 112px;
-    height: 30px;
+    height: 40px;
   }
   .wb-note-tab > [role="tab"] { font-size: var(--text-xs); }
   .wb-note-tab-close {
@@ -224,8 +223,8 @@
     opacity: 1;
   }
   .wb-note-tab-add {
-    width: 30px;
-    height: 30px;
+    width: 44px;
+    height: 40px;
   }
   .wb-note-surface > .wb-reading,
   .wb-note-edit .wb-note-editor { scroll-padding-bottom: var(--wb-nav-space); }
@@ -284,4 +283,158 @@
 @media (max-width: 720px) {
   .settings-tabs { display: flex; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
   .settings-tabs .settings-tab { flex: none; }
+}
+
+/* Цели нажатия не меньше 44×44 (HIG). Значки остаются прежнего размера — растёт только область касания.
+   Шапка на телефоне как раз 44px, строка вкладок тоже, поэтому в них кнопки вписываются без сдвига раскладки. */
+@media (max-width: 720px) {
+  .wb-titlebar .command-center { flex-basis: 44px; width: 44px; height: 44px; }
+  .topbar-actions button,
+  .wb-titlebar .topbar-icon-action,
+  .wb-titlebar .topbar-logout { width: auto; min-width: 44px; min-height: 44px; }
+  .wb-tabs-nav { padding: 0; gap: 0; margin-right: 0; background: none; border-radius: 0; }
+  .wb-tabs-nav button { width: 44px; height: 44px; }
+  .wb-icon-btn,
+  .wb-note-mode button,
+  .wb-note-icon,
+  .wb-note-popup,
+  .wb-note-tools .wb-share > button,
+  .wb-md-toolbar button { min-width: 44px; height: 44px; }
+  .wb-note-popup { width: 44px; }
+  .wb-tab-close,
+  .wb-note-tab-close { min-width: 28px; min-height: 28px; }
+}
+
+/* Пустое рабочее место: на устройствах с касанием сочетания клавиш бесполезны — вместо них подсказка про меню. */
+.wb-watermark-touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .wb-watermark dl { display: none; }
+  .wb-watermark-touch { display: block; margin: 0; max-width: 240px; text-align: center; color: var(--text-3, var(--text-2)); font-size: var(--text-sm); line-height: 1.4; }
+}
+
+/* iPhone: высота оболочки — по видимой области (см. useVisualViewport), иначе клавиатура сдвигает страницу и курсор уезжает от текста. */
+@media (max-width: 720px) {
+  .app.app-workbench,
+  .wb { height: var(--app-height, 100dvh); }
+}
+
+/* Чат на телефоне — модальное окно на весь экран: без нижнего меню, закрывается крестиком.
+   Высота по видимой области (--app-height из useVisualViewport), поэтому клавиатура не закрывает поле ввода. */
+.wb-panel-refresh { display: none; }
+@media (max-width: 720px) {
+  .wb.has-panel .wb-activitybar { display: none; }
+  .wb.has-panel .wb-panel {
+    top: 0;
+    bottom: auto;
+    height: var(--app-height, 100dvh);
+    z-index: 300;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--bg-color);
+    grid-template-rows: 48px minmax(0, 1fr);
+  }
+  /* «Развернуть» и «перенести вправо» при полном экране не нужны; остаются «Обновить» и крупный «Закрыть». */
+  .wb.has-panel .wb-panel-tabs .wb-icon-btn:not(.wb-panel-refresh):not(.wb-panel-close) { display: none; }
+  .wb.has-panel .wb-panel-refresh { display: inline-grid; }
+  .wb.has-panel .wb-panel-close { color: var(--text-main); }
+}
+
+/* Документ на телефоне — модальное окно на весь экран (Workbench: .is-phone-doc). Нижнего меню, общей шапки
+   и ленты вкладок нет: одна строка «‹ список · название · поиск · чат · закрыть», ниже — только документ.
+   Нижний отступ прокрутки вместо места под капсулу — только безопасная зона iPhone. */
+.wb-phone-docbar { display: none; }
+@media (max-width: 720px) {
+  .wb.is-phone-doc {
+    --wb-nav-space: calc(12px + env(safe-area-inset-bottom));
+    grid-template-rows: 0 minmax(0, 1fr);
+  }
+  .wb.is-phone-doc .wb-titlebar,
+  .wb.is-phone-doc .wb-activitybar,
+  .wb.is-phone-doc .wb-editor:not(.is-split) > .wb-tabs { display: none; }
+  .wb.is-phone-doc .wb-editor { grid-template-rows: auto minmax(0, 1fr); }
+  .wb-phone-docbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    height: calc(48px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) max(4px, env(safe-area-inset-right)) 0 max(4px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--wb-line);
+    background: var(--wb-surface);
+  }
+  .wb-phone-docbar button {
+    flex: none;
+    min-width: 44px;
+    height: 44px;
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--text-main);
+    cursor: pointer;
+  }
+  .wb-phone-docbar button:active { background: var(--wb-hover); }
+  .wb-phone-docbar .wb-phone-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    max-width: 34%;
+    padding-right: 6px;
+    color: var(--accent-color);
+    font-size: var(--text-md);
+  }
+  .wb-phone-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wb-phone-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+    text-align: center;
+  }
+  /* Панель заметки и вкладки заметки внизу — над безопасной зоной, а не под «домашней» полоской. */
+  .wb.is-phone-doc .wb-note-surface { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Чат на телефоне: цели касания не меньше 40–44 px, «Ответить» видно без наведения. */
+@media (max-width: 720px) {
+  .wb.has-panel .wb-panel-tab { height: 40px; padding: 0 12px; font-size: var(--text-sm); }
+  .wb.has-panel .wb-panel-tabs .wb-icon-btn { min-width: 44px; height: 44px; }
+  .wb-chat-kind { min-width: 40px; min-height: 40px; }
+  .console-threads .console-thread-icon { width: 40px; height: 40px; }
+  .console-threads .console-thread-current { min-height: 40px; }
+  .console-attach-btn { width: 40px; height: 40px; align-self: end; }
+  .console-send-btn { width: 40px; height: 40px; }
+  .agent-chat-shell .console-composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+  .wb.has-panel .wb-panel .agent-chat-shell .console-composer { padding-bottom: 8px; }
+  .console-log-line .console-reply-btn { opacity: 0.75; min-height: 32px; }
+  .console-log-pre { max-width: 100%; font-size: var(--text-xs); }
+}
+@media (max-width: 720px) {
+  /* Строка «кто отвечает · чаты» выше на телефоне, иначе подложки 40-px кнопок вылезают за неё. */
+  .wb.has-panel .wb-console { grid-template-rows: 46px minmax(0, 1fr); }
+  .wb.has-panel .wb-chat-kinds { height: 46px; }
+  /* Поле ввода выше кнопки отправки — круг не вылезает за рамку. */
+  .console-input-row { min-height: 56px; align-items: center; }
+  .console-input-row .console-send-btn { align-self: center; margin-right: 2px; }
+  /* Вкладки заметки внизу: крестик закрытия только у активной, без «пустых» кружков на соседних. */
+  .wb-note-tab:not(.is-active) .wb-note-tab-close { opacity: 0; pointer-events: none; }
+}
+
+@media (max-width: 720px) {
+  /* Клавиатура открыта (data-keyboard из useVisualViewport): лента вкладок заметки и безопасная зона снизу
+     не нужны — всё место над клавиатурой отдаём тексту. */
+  :root[data-keyboard="open"] .wb-note-surface { grid-template-rows: minmax(0, 1fr) 0; padding-bottom: 0; }
+  :root[data-keyboard="open"] .wb-note-tabs { display: none; }
+  :root[data-keyboard="open"] .wb.has-panel .wb-panel { padding-bottom: 0; }
+  :root[data-keyboard="open"] .wb.is-phone-doc { --wb-nav-space: 12px; }
+
+  /* Шапки списков (заметки, таблицы…): кнопки «создать», «импорт» и закрепление — под палец. */
+  .wb-view-head button { min-width: 44px; min-height: 44px; }
+  .wb-note-pin { top: 4px; right: 4px; min-width: 40px; min-height: 40px; }
 }

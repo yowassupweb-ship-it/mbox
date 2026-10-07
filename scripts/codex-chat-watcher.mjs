@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInboxWake } from "./inbox-wake.mjs";
+import { enrichFocus } from "./focus-excerpt.mjs";
 import { chatRules, clipError, codexContextUsage, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, RESUME_REMINDER, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 import { codexCachedModels, publishModelCatalog } from "./model-catalog.mjs";
+import { latestCodexRateLimits, postUsage } from "./usage-report.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const LOCK_TOUCH_MS = 30_000;
@@ -110,6 +112,12 @@ publishModelCatalog({
   post: (body) => mboxFetch("/api/mbox/agent/models", { method: "POST", body: JSON.stringify(body) }),
   log: (message) => console.log(`${logPrefix} ${message}`),
 });
+// Лимиты подписки (окна 5 часов и неделя) — из записей сессий Codex; MBOX рисует по ним кружок «осталось N%» у агента.
+if (agentKind !== "cloud_agent") {
+  const reportUsage = () => postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), "ChatGPT", latestCodexRateLimits(), (message) => console.log(`${logPrefix} ${message}`));
+  void reportUsage();
+  setInterval(reportUsage, 60_000).unref();
+}
 const wake = createInboxWake({
   baseUrl,
   authHeaders: () => ({ ...(accessToken ? { authorization: `Bearer ${accessToken}` } : { cookie }), "x-mbox-agent": encodeURIComponent(agentName) }),
@@ -308,7 +316,34 @@ function resolveCodexCommand(command) {
 }
 
 function findCodexExecutable() {
-  return findOnPath("codex") || findLatestVsCodeCodex() || findOnPath("codex.exe");
+  const found = findOnPath("codex");
+  // Node 22 на Windows не запускает .cmd/.bat через spawn без shell (EINVAL, защита от CVE-2024-27980).
+  // npm-шим codex.cmd подменяем настоящим codex.exe из пакета, потом exe из расширения VS Code.
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(found)) {
+    return npmShimExecutable(found) || findLatestVsCodeCodex() || found;
+  }
+  return found || findLatestVsCodeCodex() || findOnPath("codex.exe");
+}
+
+function npmShimExecutable(shimPath) {
+  const vendor = path.join(path.dirname(shimPath), "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor");
+  const walk = (dir, depth) => {
+    if (depth < 0) return "";
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return "";
+    }
+    const file = entries.find((entry) => entry.isFile() && entry.name.toLowerCase() === "codex.exe");
+    if (file) return path.join(dir, file.name);
+    for (const entry of entries.filter((item) => item.isDirectory())) {
+      const hit = walk(path.join(dir, entry.name), depth - 1);
+      if (hit) return hit;
+    }
+    return "";
+  };
+  return walk(vendor, 3);
 }
 
 function findOnPath(command) {
@@ -708,11 +743,12 @@ async function runCodex(item) {
  * на каждый ход у codex exec нет, поэтому в продолженной сессии — короткое напоминание (RESUME_REMINDER).
  */
 async function freshPrompt(item) {
+  const message = await enrichFocus(item, mboxFetch);
   return [
     chatRules({ agentName }),
     "Spend tokens carefully: search with explicit paths and exclude build artifacts, binaries and generated assets.",
     await recentConversationContext(item),
-    messageBlock(item),
+    messageBlock(message),
     item.imageDir ? imageLine(item.imageDir) : "",
   ].filter(Boolean).join("\n\n");
 }
@@ -720,7 +756,7 @@ async function freshPrompt(item) {
 async function runCodexTurn(item, resumeId) {
   const outputFile = path.join(os.tmpdir(), `codex-mbox-chat-${item.id}-${Date.now()}.txt`);
   const prompt = resumeId
-    ? [RESUME_REMINDER, messageBlock(item), item.imageDir ? imageLine(item.imageDir) : ""].filter(Boolean).join("\n\n")
+    ? [RESUME_REMINDER, messageBlock(await enrichFocus(item, mboxFetch)), item.imageDir ? imageLine(item.imageDir) : ""].filter(Boolean).join("\n\n")
     : await freshPrompt(item);
 
   // resume не знает -C и --sandbox: папка берётся из сессии, режим песочницы — через -c.

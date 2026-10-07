@@ -559,7 +559,7 @@ export async function handleSharedNoteApi({ req, res, url, query, readBody, send
     const note = (await query(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = $1`, [share.note_id])).rows[0];
     const shaped = (row) => {
       const tabs = tabsWithContent(noteTabs(row.tabs, row.content), (content) => toSharedUrls(content, token));
-      return { title: row.title, content: tabs[0].content, tabs, theme: noteTheme(row.theme), updated_at: row.updated_at };
+      return { id: row.id, title: row.title, content: tabs[0].content, tabs, theme: noteTheme(row.theme), updated_at: row.updated_at };
     };
 
     if (req.method === "GET") {

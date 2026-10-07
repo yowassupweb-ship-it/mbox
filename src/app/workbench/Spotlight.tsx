@@ -132,7 +132,11 @@ function fuzzy(command: SpotlightCommand, query: string) {
   return words.length > 1 && words.every((word) => hay.includes(word)) ? 1 : 0;
 }
 
-export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; onClose: () => void; tabs: TabsApi; commands: SpotlightCommand[] }) {
+/** all — Ctrl+K: команды, файлы, всё подряд. content — Ctrl+F: только заметки, документы и таблицы. */
+export type SpotlightScope = "all" | "content";
+
+export function Spotlight({ open, onClose, tabs, commands, scope = "all" }: { open: boolean; onClose: () => void; tabs: TabsApi; commands: SpotlightCommand[]; scope?: SpotlightScope }) {
+  const contentOnly = scope === "content";
   const [query, setQuery] = useState("");
   const [data, setData] = useState<Response | null>(null);
   const [files, setFiles] = useState<Array<{ rootKey: string; path: string; root: string }>>([]);
@@ -170,7 +174,7 @@ export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; on
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/mbox/spotlight?q=${encodeURIComponent(trimmed)}`, { signal: controller.signal });
+        const response = await fetch(`/api/mbox/spotlight?q=${encodeURIComponent(trimmed)}${contentOnly ? "&kinds=note,doc,table" : ""}`, { signal: controller.signal });
         if (!response.ok) throw new Error(String(response.status));
         const next = (await response.json()) as Response;
         if (id === requestId.current) { setData(next); setFailed(false); setCursor(0); }
@@ -181,26 +185,26 @@ export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; on
       }
     }, trimmed ? 90 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [open, trimmed]);
+  }, [open, trimmed, contentOnly]);
 
   // Файлы локальных папок (Desktop): по имени, как «Найти файл» в боковой панели.
   useEffect(() => {
     const bridge = workspaceBridge();
-    if (!open || !bridge || trimmed.length < 2) { setFiles([]); return; }
+    if (!open || contentOnly || !bridge || trimmed.length < 2) { setFiles([]); return; }
     let alive = true;
     const timer = window.setTimeout(async () => {
       const found = await Promise.all(ws.roots.map(async (root) => (await bridge.find(root.key, trimmed).catch(() => [])).map((path) => ({ rootKey: root.key, path, root: root.name }))));
       if (alive) setFiles(found.flat().slice(0, 12));
     }, 160);
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [open, trimmed, ws.roots]);
+  }, [open, trimmed, ws.roots, contentOnly]);
 
   const finish = useCallback((action: () => void) => { onClose(); window.setTimeout(action, 0); }, [onClose]);
   const stems = useMemo(() => queryStems(trimmed), [trimmed]);
 
   const items = useMemo<Item[]>(() => {
     const list: Item[] = [];
-    const calc = trimmed ? calculate(trimmed) : null;
+    const calc = trimmed && !contentOnly ? calculate(trimmed) : null;
     if (calc !== null) {
       const shown = formatNumber(calc);
       list.push({
@@ -208,7 +212,7 @@ export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; on
         note: "Enter — скопировать результат", run: () => { void navigator.clipboard?.writeText(String(calc)); setCopied(true); window.setTimeout(() => setCopied(false), 1200); onClose(); },
       });
     }
-    const matchedCommands = trimmed
+    const matchedCommands = contentOnly ? [] : trimmed
       ? commands.map((command) => ({ command, rank: fuzzy(command, trimmed) })).filter((entry) => entry.rank > 0).sort((a, b) => b.rank - a.rank).map((entry) => entry.command)
       : commands.slice(0, 6);
     for (const command of matchedCommands) {
@@ -233,7 +237,7 @@ export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; on
       const name = file.path.split("/").pop() || file.path;
       list.push({ id: `file:${file.rootKey}:${file.path}`, group: "file", title: name, subtitle: `${file.root} · ${file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "корень"}`, icon: <FileIcon size={16} aria-hidden="true" />, run: () => finish(() => tabs.open(`local:${file.rootKey}:${file.path}`, true)) });
     }
-    if (trimmed && calc === null) {
+    if (trimmed && calc === null && !contentOnly) {
       const engine = readBrowserSettings().search;
       const open = (url: string) => finish(() => { if (browserBridge()) tabs.open(browserTabKey(url), true); else window.open(url, "_blank", "noopener"); });
       if (URL_LIKE.test(trimmed)) {
@@ -243,7 +247,7 @@ export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; on
       list.push({ id: "web:search", group: "web", title: `Искать «${trimmed}» в интернете`, subtitle: "Поиск в браузере", icon: <Search size={16} aria-hidden="true" />, run: () => open((SEARCH_URLS[engine] ?? SEARCH_URLS.duckduckgo)(encodeURIComponent(trimmed))) });
     }
     return list;
-  }, [commands, data, files, finish, onClose, tabs, trimmed]);
+  }, [commands, contentOnly, data, files, finish, onClose, tabs, trimmed]);
 
   // Порядок на экране: лучшее совпадение, затем группы по порядку; каждая группа ограничена.
   const sections = useMemo(() => {
@@ -289,7 +293,7 @@ export function Spotlight({ open, onClose, tabs, commands }: { open: boolean; on
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Поиск по заметкам, документам, таблицам, задачам и файлам"
+            placeholder={contentOnly ? "Найти в заметках, документах и таблицах" : "Поиск по заметкам, документам, таблицам, задачам и файлам"}
             spellCheck={false}
             autoComplete="off"
             role="combobox"

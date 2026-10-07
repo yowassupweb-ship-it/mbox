@@ -10,12 +10,34 @@ import { createDocAndOpen, docsStore, emitDocs, importDocx, patchDoc, refreshDoc
 
 export type SheetsDocsMode = "tables" | "docs";
 
-/** Переключатель «Таблицы | Документы» в шапке боковой панели. Только значки: подпись — в подсказке. */
-export function SheetsDocsSwitch({ mode, onMode }: { mode: SheetsDocsMode; onMode: (mode: SheetsDocsMode) => void }) {
+/**
+ * Переключатель «Таблицы | Документы»: две вкладки на всю ширину с подписями, под шапкой списка. Раньше это
+ * были два значка без текста в шапке — непонятно, что где, и маленькая цель нажатия. У активной вкладки —
+ * число записей в списке; стрелки влево/вправо переключают, как у обычных вкладок.
+ */
+export function SheetsDocsSwitch({ mode, onMode, count }: { mode: SheetsDocsMode; onMode: (mode: SheetsDocsMode) => void; count?: number }) {
+  const items: Array<{ id: SheetsDocsMode; label: string; icon: typeof FileText }> = [
+    { id: "tables", label: "Таблицы", icon: Table2 },
+    { id: "docs", label: "Документы", icon: FileText },
+  ];
   return (
-    <div className="wb-mode-switch" role="radiogroup" aria-label="Раздел">
-      <button type="button" role="radio" aria-checked={mode === "tables"} className={mode === "tables" ? "is-on" : undefined} onClick={() => onMode("tables")} title="Таблицы" aria-label="Таблицы"><Table2 size={15} aria-hidden="true" /></button>
-      <button type="button" role="radio" aria-checked={mode === "docs"} className={mode === "docs" ? "is-on" : undefined} onClick={() => onMode("docs")} title="Документы" aria-label="Документы"><FileText size={15} aria-hidden="true" /></button>
+    <div
+      className="wb-mode-tabs"
+      role="tablist"
+      aria-label="Раздел"
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        onMode(mode === "tables" ? "docs" : "tables");
+      }}
+    >
+      {items.map(({ id, label, icon: Icon }) => (
+        <button key={id} type="button" role="tab" aria-selected={mode === id} tabIndex={mode === id ? 0 : -1} className={mode === id ? "is-on" : undefined} onClick={() => onMode(id)}>
+          <Icon size={14} aria-hidden="true" />
+          <span>{label}</span>
+          {mode === id && count !== undefined && <b>{count}</b>}
+        </button>
+      ))}
     </div>
   );
 }
@@ -106,13 +128,14 @@ export function DocumentsView({ tabs, defaultProjectId = null, onOpen, mode, onM
   return (
     <div className="wb-view wb-tables-view">
       <header className="wb-view-head">
-        <SheetsDocsSwitch mode={mode} onMode={onMode} />
+        <span className="wb-tables-heading">Таблицы и документы</span>
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importRef.current?.click()} title={canCreate ? "Импорт Word (.docx)" : "Нет доступных проектов"} aria-label="Импорт Word"><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => void create()} title={canCreate ? "Новый документ" : "Нет доступных проектов"} aria-label="Новый документ"><Plus size={14} /></button>
           <input ref={importRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWord(file); event.target.value = ""; }} />
         </div>
       </header>
+      <SheetsDocsSwitch mode={mode} onMode={onMode} count={docsStore.list.length} />
       <div className="wb-filter">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти в документах" aria-label="Найти в документах" onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
         {query && <button type="button" onClick={() => setQuery("")} aria-label="Очистить"><X size={13} /></button>}

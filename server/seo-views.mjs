@@ -1042,7 +1042,7 @@ export async function seoDashboard(query, settings) {
   const r = ranks[0] || {};
   const kpis = [
     { key: "sitemap", label: "URL в sitemap", value: c.sitemap ?? 0, hint: `проверено HTTP: ${c.checked ?? 0}` },
-    { key: "indexed", label: "Страниц в поиске", value: sources.has.webmaster ? (c.in_search || s.urls || 0) : null, hint: sources.has.webmaster ? "Вебмастер" : "нужен Вебмастер" },
+    { key: "indexed", label: "Страниц в поиске", value: sources.has.webmaster ? (c.in_search || sources.run?.sources?.webmaster?.searchable_pages || 0) : null, hint: sources.has.webmaster ? "Вебмастер" : "нужен Вебмастер" },
     { key: "clicks", label: "Клики 28д", value: sources.has.webmaster ? s.clicks ?? 0 : null, hint: sources.has.webmaster ? "Вебмастер" : "нужен Вебмастер" },
     { key: "impressions", label: "Показы 28д", value: sources.has.webmaster ? s.impressions ?? 0 : null, hint: sources.has.webmaster ? "Вебмастер" : "нужен Вебмастер" },
     { key: "ctr", label: "CTR", value: sources.has.webmaster && s.impressions ? round((s.clicks / s.impressions) * 100, 2) : null, unit: "%", hint: sources.has.webmaster ? "Вебмастер" : "нужен Вебмастер" },

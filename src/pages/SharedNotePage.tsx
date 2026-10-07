@@ -8,8 +8,11 @@ import { CodeEditor } from "../app/workbench/CodeEditor";
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "../app/workbench/DocumentTools";
 import { createNoteTab, mergeNoteTabs, noteTabsOf, sameNoteTabs, type NoteTab } from "../app/workbench/noteTabs";
 import { askText, askConfirm } from "../ui/askText";
+import { PresenceAvatars } from "../app/workbench/PresenceAvatars";
+import { RemoteCarets } from "../app/workbench/RemoteCarets";
+import { useSharedPresence } from "../app/workbench/presence";
 
-type SharedNote = { title: string; content: string; tabs?: NoteTab[]; theme: "light" | "graphite" | "black"; updated_at: string };
+type SharedNote = { id: string; title: string; content: string; tabs?: NoteTab[]; theme: "light" | "graphite" | "black"; updated_at: string };
 type Status = "loading" | "saved" | "pending" | "saving" | "error" | "missing";
 
 const POLL_MS = 4000;
@@ -32,6 +35,8 @@ export function SharedNotePage({ token }: { token: string }) {
   const api = `/api/share/notes/${token}`;
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [editing, setEditing] = useState(false);
+  const canEdit = mode === "edit";
+  const showEditor = canEdit && editing;
   const [tabs, setTabs] = useState<NoteTab[]>(() => noteTabsOf(null));
   const [activeTabId, setActiveTabId] = useState("main");
   const [tabsOpen, setTabsOpen] = useState(() => window.localStorage.getItem("mbox.shared-note-tabs") !== "closed");
@@ -45,6 +50,8 @@ export function SharedNotePage({ token }: { token: string }) {
   const [viewerTheme, setViewerTheme] = useState<SharedNote["theme"] | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [notice, setNotice] = useState("");
+  const [noteId, setNoteId] = useState<string | null>(null);
+  const presence = useSharedPresence("note", token, noteId ? `note:${noteId}` : null);
   const base = useRef<{ tabs: NoteTab[]; updatedAt: string }>({ tabs: noteTabsOf(null), updatedAt: "" });
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -60,6 +67,19 @@ export function SharedNotePage({ token }: { token: string }) {
   const titleRef = useRef<HTMLInputElement | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const find = useDocumentFind({ editorRef: textareaRef, previewRef, text: content });
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !showEditor) return;
+    const publish = () => {
+      const backward = textarea.selectionDirection === "backward";
+      presence.update({ field: activeTabId, anchor: backward ? textarea.selectionEnd : textarea.selectionStart, head: backward ? textarea.selectionStart : textarea.selectionEnd, typing: true });
+    };
+    const rest = () => presence.update({ typing: false });
+    for (const name of ["select", "keyup", "click", "input", "focus"]) textarea.addEventListener(name, publish);
+    textarea.addEventListener("blur", rest);
+    return () => { for (const name of ["select", "keyup", "click", "input", "focus"]) textarea.removeEventListener(name, publish); textarea.removeEventListener("blur", rest); };
+  }, [showEditor, activeTabId, presence.update]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(SHARED_THEME_KEY);
@@ -104,6 +124,7 @@ export function SharedNotePage({ token }: { token: string }) {
         if (!alive) return;
         if (!response.ok) { setStatus("missing"); setNotice(data.error || "Ссылка недействительна"); return; }
         setMode(data.mode);
+        setNoteId(data.note.id);
         setEditing(false);
         const loadedTabs = noteTabsOf(data.note);
         base.current = { tabs: loadedTabs, updatedAt: data.note.updated_at };
@@ -257,8 +278,6 @@ export function SharedNotePage({ token }: { token: string }) {
     );
   }
 
-  const canEdit = mode === "edit";
-  const showEditor = canEdit && editing;
   const activeTheme = viewerTheme || theme;
   useEffect(() => {
     document.documentElement.dataset.theme = activeTheme;
@@ -276,6 +295,7 @@ export function SharedNotePage({ token }: { token: string }) {
         <span className="share-brand"><img src={WORKING_FRAMES[0]} width={24} height={24} alt="" />MBOX</span>
         {/* «Документ открыт» у читателя — шум; статус сохранения нужен только тому, кто правит. */}
         {canEdit && <span className={`share-status is-${status}`}>{statusLabel[status]}</span>}
+        <PresenceAvatars people={presence.people} agents={presence.agents} />
         <span className="share-access">{canEdit ? <><Pencil size={12} /> Можно редактировать</> : <><Lock size={12} /> Только просмотр</>}</span>
         <button
           type="button"
@@ -321,6 +341,7 @@ export function SharedNotePage({ token }: { token: string }) {
                 value={bodyText}
                 onChange={(value) => setParts(titleText, value)}
                 onKeyDown={(event) => { markdownShortcut(event); }}
+                overlay={<RemoteCarets textareaRef={textareaRef} peers={presence.peers} field={activeTabId} value={bodyText} />}
                 onPaste={images.onPaste}
                 onDrop={images.onDrop}
                 onContextMenu={(event) => openDocumentMenu(event, setContextMenu)}

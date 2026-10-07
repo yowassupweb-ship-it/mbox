@@ -19,9 +19,10 @@ import { SKILL_CATALOG } from "./skill-catalog.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
-import { ensureDocumentsSchema, handleDocumentsApi } from "./documents.mjs";
+import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
-import { createPresenceHub } from "./presence.mjs";
+import { handlePlannerApi } from "./planner.mjs";
+import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
@@ -35,10 +36,13 @@ import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { createHelp, handleBrowserAgentApi, handleBrowserHelpApi, runBrowserOp, waitHelp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
+import { startSeoScheduler } from "./seo-scheduler.mjs";
 import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
 import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
 import { callIntegration, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
+import { publishAgentUsage, readAgentUsage } from "./agent-usage.mjs";
+import { buildShortAgentContext } from "./agent-context-short.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -145,6 +149,31 @@ const agentStructure = {
       "server auto-creates an agent-work memory when a todo becomes done or an agent_run finishes; manual record_memory for the same todo_id/agent_run_id prevents duplicates",
       "use /api/mbox/todos/:id/trail to inspect the task -> decision -> change -> memory chain",
     ],
+    small_changes: "edit of 1-2 files: claim_task, edit, then ONE finish_task call (it records memory, agent run, inbox report and status). record_decision is not needed unless you chose between real alternatives.",
+    rules_priority: [
+      "1. The owner's direct instruction in the current message.",
+      "2. CLAUDE.md of the project and the owner's global CLAUDE.md: how to work with the code and with MBOX.",
+      "3. This agent_contract and MBOX skills: how to keep records and how to do a specific kind of work.",
+      "4. The client's system prompt: general behaviour. On conflict the lower number wins.",
+    ],
+    where_to_write: {
+      owner_preferences: "the client's own file memory (Claude: ~/.claude/projects/..., Codex: its own): who the owner is and how they like to work. Never project facts.",
+      project_facts: "MBOX memory (record_memory) with project and todo_id: what was done, where files are, why it matters.",
+      decisions: "record_decision, only when one option was chosen among several and the why matters later.",
+      tasks: "MBOX todos. Task lists are not kept in repository files.",
+      handoffs: "MBOX inbox (create_inbox_item to=Codex|Claude|Человек).",
+    },
+    source_of_truth: [
+      "code and git: how it works right now",
+      "todo: what must be done and its status",
+      "note/memory: why it was decided. If a note disagrees with the code, trust the code and fix or mark the note outdated.",
+    ],
+    tool_map: {
+      load_together: "If your client loads MCP tools lazily (ToolSearch), fetch the whole set for the job in ONE call instead of one tool at a time: get_agent_context, get_next_task, claim_task, finish_task, search, note_read, note_edit, doc_read, doc_edit, table_read, record_memory, create_inbox_item.",
+      find: "search finds notes, documents, tables, tasks and memory in one call (kinds=[...] narrows it; mode any retries by separate words). note_search / doc_search / table_search / search_memory are narrower versions of the same.",
+      read_write: "note_read/note_edit, doc_read/doc_edit, table_read/table_write_cells for MBOX content; workspace_* for files on the owner's computer (accepts a folder name or an absolute path, no key needed); storage_* for S3.",
+      open_tabs: "The chat message lists what is open in the owner's MBOX with the beginning of its text; read the rest with the tool named next to it.",
+    },
   },
 };
 
@@ -164,6 +193,7 @@ const INBOX_COLUMNS = "id::text, project_id::text, agent_name, item_type, title,
 const INBOX_COLUMNS_LIGHT = INBOX_COLUMNS.replace("props,", "props - 'steps' - 'trace' - 'last_error' AS props,");
 
 function sendJson(res, status, body) {
+  if (res.headersSent || res.writableEnded) { console.error(`[sendJson] ответ ${status} на уже отправленный запрос`, new Error().stack?.split(String.fromCharCode(10)).slice(2, 5).join(" | ")); return; }
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
 }
@@ -1267,6 +1297,7 @@ async function handleApiWithContext(req, res, url) {
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleSpotlightApi({ req, res, url, query, sendJson, scope: { ...scope, userId: String(user.id) }, searchTerms })) return;
@@ -1396,6 +1427,19 @@ async function handleApiWithContext(req, res, url) {
       .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
       .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
     return sendJson(res, 200, { skills: [...skills, ...unknown], modes: skillAllowedList === null ? modes : [] });
+  }
+
+  // Лимиты подписок агентов (окна 5 ч и неделя): наблюдатели присылают, интерфейс рисует кружок «осталось N%».
+  if (url.pathname === "/api/mbox/agent/usage" && req.method === "GET") {
+    return sendJson(res, 200, { usage: await readAgentUsage(query) });
+  }
+  if (url.pathname === "/api/mbox/agent/usage" && req.method === "POST") {
+    if (!isOwner(user)) return sendJson(res, 403, { error: "owner_required" });
+    try {
+      return sendJson(res, 200, await publishAgentUsage(query, await readBody(req)));
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
   }
 
   // Какие модели и «усилия» доступны чату: список собирает jarvis.mjs по наличию ключей —
@@ -2689,99 +2733,17 @@ async function handleApiWithContext(req, res, url) {
     if (detail === "full") {
       return sendJson(res, 200, { project, detail, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, memories, approved_secrets: secrets.rows });
     }
-    return sendJson(res, 200, {
+    return sendJson(res, 200, buildShortAgentContext({
       project,
-      detail,
-      counts: {
-        todos: todos.rows.length,
-        relations: relations.rows.length,
-        decisions: decisions.rows.length,
-        inbox: inbox.rows.length,
-        runs: runs.rows.length,
-        history: history.rows.length,
-        approved_secrets: secrets.rows.length,
-        memories: memories.length,
-      },
-      todos: todos.rows.map((todo) => compactTextRow({
-        id: todo.id,
-        project_id: todo.project_id,
-        title: todo.title,
-        note: todo.note,
-        status: todo.status,
-        priority: todo.priority,
-        props_keys: Object.keys(todo.props || {}),
-        claimed_by: todo.claimed_by,
-        claimed_until: todo.claimed_until,
-        heartbeat_at: todo.heartbeat_at,
-        memory_bytes: todo.memory_bytes,
-      }, ["note"], 180)),
-      relations: relations.rows.map((relation) => ({
-        id: relation.id,
-        from_entity: relation.from_entity,
-        from_id: relation.from_id,
-        from_label: relation.from_label,
-        to_entity: relation.to_entity,
-        to_id: relation.to_id,
-        to_label: relation.to_label,
-        edge_type: relation.edge_type,
-        title: relation.title,
-        description_preview: textPreview(relation.description, 160),
-        owner: relation.owner,
-        group_entity: relation.group_entity,
-        strength: relation.strength,
-        valid_until: relation.valid_until,
-      })),
-      decisions: decisions.rows.map((decision) => ({
-        id: decision.id,
-        todo_id: decision.todo_id,
-        agent_run_id: decision.agent_run_id,
-        actor: decision.actor,
-        title: decision.title,
-        decision_preview: textPreview(decision.decision, 180),
-        rationale_preview: textPreview(decision.rationale, 120),
-        impact_preview: textPreview(decision.impact, 120),
-        props_keys: Object.keys(decision.props || {}),
-        created_at: decision.created_at,
-      })),
-      inbox: inbox.rows.map((item) => ({
-        id: item.id,
-        agent_name: item.agent_name,
-        item_type: item.item_type,
-        title: item.title,
-        body_preview: textPreview(item.body, 180),
-        status: item.status,
-        priority: item.priority,
-        requires_human: item.requires_human,
-        props_keys: Object.keys(item.props || {}),
-        created_at: item.created_at,
-        updated_at: item.updated_at,
-      })),
-      runs: runs.rows.map((run) => ({
-        id: run.id,
-        todo_id: run.todo_id,
-        agent_name: run.agent_name,
-        status: run.status,
-        goal: run.goal,
-        touched_files: run.touched_files,
-        result_preview: textPreview(run.result, 160),
-        props_keys: Object.keys(run.props || {}),
-        started_at: run.started_at,
-        heartbeat_at: run.heartbeat_at,
-        finished_at: run.finished_at,
-      })),
-      history: history.rows.map((event) => ({
-        id: event.id,
-        actor: event.actor,
-        action: event.action,
-        entity_type: event.entity_type,
-        entity_id: event.entity_id,
-        summary: event.summary,
-        metadata_preview: textPreview(event.metadata, 160),
-        created_at: event.created_at,
-      })),
+      todos: todos.rows,
+      relations: relations.rows,
+      decisions: decisions.rows,
+      inbox: inbox.rows,
+      runs: runs.rows,
+      history: history.rows,
       memories,
-      approved_secrets: secrets.rows.map((secret) => ({ id: secret.id, title: secret.title, login: secret.login, url: secret.url, approved_until: secret.approved_until })),
-    });
+      secrets: secrets.rows,
+    }));
   }
 
   // Отметки «просмотрено», привязанные к пользователю, а не к браузеру.
@@ -3365,7 +3327,7 @@ const httpServer = http.createServer(async (req, res) => {
         },
         broadcast: (payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }),
       });
-      if (!handled && !(await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
+      if (!handled && !(await handleSharedTableApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) })) && !(await handleSharedDocumentApi({ req, res, url, query, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime("entity_changed", { ...payload, actor: "по ссылке" }) }))) sendJson(res, 404, { error: "not_found" });
       return;
     }
     return serveStatic(req, res, url);
@@ -3387,6 +3349,18 @@ realtimeServer.on("connection", (socket) => {
 
 httpServer.on("upgrade", async (req, socket, head) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  if (url.pathname === "/api/share/realtime") {
+    try {
+      const kind = String(url.searchParams.get("kind") || "");
+      const token = String(url.searchParams.get("token") || "");
+      const share = await resolveSharedPresence(query, kind, token);
+      if (!share) return socket.destroy();
+      return realtimeServer.handleUpgrade(req, socket, head, (ws) => {
+        presenceHub.attach(ws, { ...share, kind, token });
+        ws.send(JSON.stringify({ type: "connected", at: new Date().toISOString() }));
+      });
+    } catch { return socket.destroy(); }
+  }
   if (url.pathname !== "/api/mbox/realtime") return socket.destroy();
   try {
     const user = await currentUser(req);
@@ -3437,6 +3411,7 @@ setInterval(() => {
   releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.message}`));
 }, 60000).unref();
 releaseExpiredLeases().catch((error) => console.error(`lease sweep: ${error.message}`));
+import("./migrations.mjs").then(({ runMigrations }) => runMigrations(getPool())).catch((error) => console.error(`migrations: ${error.message}`));
 
 // Схемы создаём здесь, а не рядом с импортами: query() читает requestContext, объявленный ниже импортов, —
 // вызов в начале модуля падал с «Cannot access 'requestContext' before initialization».
@@ -3454,6 +3429,8 @@ ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${err
 ensureSkillAccessSchema(query).catch((error) => console.error(`skill access schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
+// Расписание сборов SEO Wizard — только при SEO_AUTORUN=1 на сервере (иначе сбор запускается кнопкой).
+startSeoScheduler({ query });
 
 httpServer.listen(port, host, () => {
   console.log(`MBOX listening on http://${host}:${port}`);

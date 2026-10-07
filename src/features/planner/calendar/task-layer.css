@@ -1,0 +1,1 @@
+.calendar-layer{display:flex;align-items:center;gap:6px;min-height:44px;color:var(--wb-muted);padding:0 4px}.calendar-event.is-task{background:color-mix(in srgb,var(--note-green) 8%,var(--wb-control))}

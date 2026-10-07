@@ -82,6 +82,53 @@ export function usePresence(doc: string | null, active: boolean) {
   return { peers, people, agents, update };
 }
 
+export function useSharedPresence(kind: "note" | "table" | "doc", token: string, doc: string | null, active = true) {
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const state = useRef<PresenceState>({});
+  const socket = useRef<WebSocket | null>(null);
+  const timer = useRef(0);
+  const last = useRef(0);
+  const send = useCallback(() => {
+    if (!doc || socket.current?.readyState !== WebSocket.OPEN) return;
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    last.current = Date.now();
+    socket.current.send(JSON.stringify({ type: "presence", doc, state: state.current }));
+  }, [doc]);
+  const update = useCallback((patch: PresenceState) => {
+    state.current = { ...state.current, ...patch };
+    const wait = SEND_EVERY_MS - (Date.now() - last.current);
+    if (wait <= 0) send();
+    else if (!timer.current) timer.current = window.setTimeout(send, wait);
+  }, [send]);
+  useEffect(() => {
+    if (!active || !doc || !token) { setPeers([]); return; }
+    let stopped = false;
+    let reconnect = 0;
+    const open = () => {
+      const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${scheme}//${location.host}/api/share/realtime?kind=${kind}&token=${encodeURIComponent(token)}`);
+      socket.current = ws;
+      ws.onopen = send;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(String(event.data)) as Message;
+          if (message.type === "presence" && message.doc === doc) setPeers(message.peers ?? []);
+        } catch { /* ignore malformed realtime events */ }
+      };
+      ws.onclose = (event) => { if (!stopped && event.code !== 1008) reconnect = window.setTimeout(open, 1500); };
+    };
+    open();
+    return () => { stopped = true; window.clearTimeout(reconnect); window.clearTimeout(timer.current); socket.current?.close(); socket.current = null; setPeers([]); };
+  }, [active, doc, kind, token, send]);
+  const people = useMemo(() => {
+    const seen = new Map<string, Peer>();
+    for (const peer of peers) if (!seen.has(peer.user_id)) seen.set(peer.user_id, peer);
+    return [...seen.values()];
+  }, [peers]);
+  return { peers, people, agents: [] as AgentPeer[], update };
+}
+
 /** «Иван Петров» → «ИП», «admin» → «A». */
 export function initialsOf(name: string) {
   const parts = name.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/).filter(Boolean);

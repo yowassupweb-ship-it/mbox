@@ -4,6 +4,8 @@ import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS
 import type { ToolOutputLine, ToolRunEvent } from "../types";
 import { markOverlay } from "../app/workbench/BrowserDocument";
 import { TreeGlyph } from "../app/workbench/TreeGlyph";
+import { usageOf, useAgentUsage } from "../hooks/useAgentUsage";
+import { UsageRing } from "./UsageRing";
 
 // Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
 // полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
@@ -120,6 +122,7 @@ export function TopBar({
   onLogout,
   busy = false,
 }: TopBarProps) {
+  const usage = useAgentUsage();
   const [open, setOpen] = useState(false);
   const [logoBurst, setLogoBurst] = useState(false);
   const [desktopOpen, setDesktopOpen] = useState(false);
@@ -346,7 +349,7 @@ export function TopBar({
           </div>
         )}
       </div>
-      <button className={`realtime-pill monostatus tb-pop-trigger ${realtimeState}`} type="button" onClick={() => { setDesktopOpen(false); setOpen((value) => !value); }} aria-expanded={open} title="Агенты и последние действия">
+      <button className={`realtime-pill monostatus tb-pop-trigger ${realtimeState}`} type="button" onClick={() => { setDesktopOpen(false); setOpen((value) => !value); }} aria-expanded={open} title={realtimeLabel === "MBOX" ? "Агенты и последние действия" : `${realtimeLabel}. Агенты и последние действия`}>
         {stack.length > 0 && (
           <span className="pill-avatars" aria-hidden="true">
             {stack.map((agent) => (
@@ -355,8 +358,8 @@ export function TopBar({
           </span>
         )}
         <img className="topbar-logo" src={busy || logoBurst ? logoFrame : WORKING_FRAMES[0]} width={32} height={32} alt="" />
-        {/* «MBOX» рядом с логотипом — повтор бренда; подпись нужна, только когда это состояние («Агент подключается»). */}
-        {realtimeLabel === "MBOX" ? <span className="topbar-sr">MBOX: статус агентов</span> : <strong>{realtimeLabel}</strong>}
+        {/* Текст статуса («N агентов в работе…») — только в футере; здесь он в подсказке и для скринридеров. */}
+        <span className="topbar-sr">{realtimeLabel === "MBOX" ? "MBOX: статус агентов" : realtimeLabel}</span>
         {notice && <span>{notice}</span>}
       </button>
       {onLogout && (
@@ -397,7 +400,10 @@ export function TopBar({
                     <li key={agent.id} className="tb-pop-row" title={agent.detail || agent.statusLabel}>
                       <AgentAvatar name={agent.name} status={agent.status} live={agent.live} size={20} />
                       <AgentName name={agent.name} className="tb-pop-name" />
-                      <small className={agent.live ? "is-live" : agent.status === "active" ? "is-ok" : undefined}>{agent.live ? "в работе" : agent.statusLabel}</small>
+                      <span className="tb-pop-state">
+                        <UsageRing usage={usageOf(usage, agent.name)} size={16} />
+                        <small className={agent.live ? "is-live" : agent.status === "active" ? "is-ok" : undefined}>{agent.live ? "в работе" : agent.statusLabel}</small>
+                      </span>
                     </li>
                   ))}
                 </ul>

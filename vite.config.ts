@@ -10,13 +10,16 @@ import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg
 import { WebSocket, WebSocketServer } from "ws";
 import { UX_UI_SKILL_CATALOG } from "./server/ux-ui-skill-catalog.mjs";
 import { SKILL_CATALOG } from "./server/skill-catalog.mjs";
+import { buildShortAgentContext } from "./server/agent-context-short.mjs";
+import { publishAgentUsage, readAgentUsage } from "./server/agent-usage.mjs";
 import { ensureAgentPresenceSchema } from "./server/agent-presence.mjs";
 import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./server/tables.mjs";
-import { ensureDocumentsSchema, handleDocumentsApi } from "./server/documents.mjs";
+import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./server/documents.mjs";
 import { handleSpotlightApi } from "./server/spotlight.mjs";
-import { createPresenceHub } from "./server/presence.mjs";
+import { handlePlannerApi } from "./server/planner.mjs";
+import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
@@ -49,6 +52,8 @@ function loadLocalEnv() {
 const INBOX_COLUMNS = "id::text, project_id::text, agent_name, item_type, title, body, status, priority, requires_human, props, pg_column_size(agent_inbox)::int AS memory_bytes, created_at::text, updated_at::text";
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
+  // Второй ответ на тот же запрос раньше ронял весь dev-сервер (ERR_HTTP_HEADERS_SENT): теперь — строка в лог со стеком.
+  if (res.headersSent || res.writableEnded) { console.error(`[sendJson] ответ ${status} на уже отправленный запрос ${res.req?.method} ${res.req?.url}`, new Error().stack?.split(String.fromCharCode(10)).slice(2, 5).join(" | ")); return; }
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
@@ -392,6 +397,31 @@ const agentStructure = {
       "server auto-creates an agent-work memory when a todo becomes done or an agent_run finishes; manual record_memory for the same todo_id/agent_run_id prevents duplicates",
       "use /api/mbox/todos/:id/trail to inspect the task -> decision -> change -> memory chain",
     ],
+    small_changes: "edit of 1-2 files: claim_task, edit, then ONE finish_task call (it records memory, agent run, inbox report and status). record_decision is not needed unless you chose between real alternatives.",
+    rules_priority: [
+      "1. The owner's direct instruction in the current message.",
+      "2. CLAUDE.md of the project and the owner's global CLAUDE.md: how to work with the code and with MBOX.",
+      "3. This agent_contract and MBOX skills: how to keep records and how to do a specific kind of work.",
+      "4. The client's system prompt: general behaviour. On conflict the lower number wins.",
+    ],
+    where_to_write: {
+      owner_preferences: "the client's own file memory (Claude: ~/.claude/projects/..., Codex: its own): who the owner is and how they like to work. Never project facts.",
+      project_facts: "MBOX memory (record_memory) with project and todo_id: what was done, where files are, why it matters.",
+      decisions: "record_decision, only when one option was chosen among several and the why matters later.",
+      tasks: "MBOX todos. Task lists are not kept in repository files.",
+      handoffs: "MBOX inbox (create_inbox_item to=Codex|Claude|Человек).",
+    },
+    source_of_truth: [
+      "code and git: how it works right now",
+      "todo: what must be done and its status",
+      "note/memory: why it was decided. If a note disagrees with the code, trust the code and fix or mark the note outdated.",
+    ],
+    tool_map: {
+      load_together: "If your client loads MCP tools lazily (ToolSearch), fetch the whole set for the job in ONE call instead of one tool at a time: get_agent_context, get_next_task, claim_task, finish_task, search, note_read, note_edit, doc_read, doc_edit, table_read, record_memory, create_inbox_item.",
+      find: "search finds notes, documents, tables, tasks and memory in one call (kinds=[...] narrows it; mode any retries by separate words). note_search / doc_search / table_search / search_memory are narrower versions of the same.",
+      read_write: "note_read/note_edit, doc_read/doc_edit, table_read/table_write_cells for MBOX content; workspace_* for files on the owner's computer (accepts a folder name or an absolute path, no key needed); storage_* for S3.",
+      open_tabs: "The chat message lists what is open in the owner's MBOX with the beginning of its text; read the rest with the tool named next to it.",
+    },
   },
 };
 
@@ -954,6 +984,7 @@ function mboxDevApi() {
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
       ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
       ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
+      import("./server/migrations.mjs").then(({ runMigrations }) => runMigrations(getPool())).catch((error: Error) => console.error(`migrations: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
 
       presenceHub = createPresenceHub({ query: queryPostgres, scopeFor: devProjectScope });
@@ -967,6 +998,18 @@ function mboxDevApi() {
 
       server.httpServer?.on("upgrade", async (req, socket, head) => {
         const url = new URL(req.url ?? "/", "http://localhost");
+        if (url.pathname === "/api/share/realtime") {
+          try {
+            const kind = String(url.searchParams.get("kind") || "");
+            const token = String(url.searchParams.get("token") || "");
+            const share = await resolveSharedPresence(queryPostgres, kind, token);
+            if (!share) return socket.destroy();
+            return realtimeServer.handleUpgrade(req, socket, head, (ws) => {
+              presenceHub?.attach(ws, { ...share, kind, token });
+              ws.send(JSON.stringify({ type: "connected", at: new Date().toISOString() }));
+            });
+          } catch { return socket.destroy(); }
+        }
         if (url.pathname !== "/api/mbox/realtime") return;
         try {
           const user = await currentUser(req);
@@ -1029,7 +1072,7 @@ function mboxDevApi() {
               },
               broadcast: (payload) => broadcastRealtime(realtimeClients, "entity_changed", { ...payload, actor: "по ссылке" }),
             });
-            if (!handled && !(await handleSharedTableApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) }))) sendJson(res, 404, { error: "not_found" });
+            if (!handled && !(await handleSharedTableApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) && !(await handleSharedDocumentApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) }))) sendJson(res, 404, { error: "not_found" });
           } catch (error) {
             sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
           }
@@ -1090,6 +1133,7 @@ function mboxDevApi() {
           const ownerOnly = sessionUser.role === "owner";
           const devActor = actor || await resolveRequestActor(req);
           if (await handleNotesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, allowed: true, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handlePlannerApi({ req, res, url, query: queryPostgres, readBody, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleTablesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
@@ -1286,6 +1330,19 @@ function mboxDevApi() {
               .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
               .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
             return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
+          }
+
+          // Зеркало прод-ручки: лимиты подписок агентов (см. server/agent-usage.mjs).
+          if (url.pathname === "/api/mbox/agent/usage" && req.method === "GET") {
+            return sendJson(res, 200, { usage: await readAgentUsage(queryPostgres) });
+          }
+          if (url.pathname === "/api/mbox/agent/usage" && req.method === "POST") {
+            if (sessionUser.role !== "owner") return sendJson(res, 403, { error: "owner_required" });
+            try {
+              return sendJson(res, 200, await publishAgentUsage(queryPostgres, await readBody(req)));
+            } catch (error) {
+              return sendJson(res, 400, { error: (error as Error).message });
+            }
           }
 
           // Зеркало прод-ручки: список моделей и «усилий» для чата (см. server/jarvis.mjs).
@@ -2326,62 +2383,7 @@ function mboxDevApi() {
             const history = await queryPostgres<Record<string, any>>("SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text FROM audit_events WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50", [project.id]);
             const memories = await relevantMemories(`${project.name} ${Array.isArray(project.stack) ? project.stack.join(" ") : ""} ${JSON.stringify(project.props || {})}`, { projectId: project.id, limit: 5 });
             if (detail === "full") return sendJson(res, 200, { project, detail, todos: todos.rows, decisions: decisions.rows, runs: runs.rows, history: history.rows, memories });
-            return sendJson(res, 200, {
-              project,
-              detail,
-              counts: { todos: todos.rows.length, decisions: decisions.rows.length, runs: runs.rows.length, history: history.rows.length, memories: memories.length },
-              todos: todos.rows.map((todo) => ({
-                id: todo.id,
-                project_id: todo.project_id,
-                title: todo.title,
-                note_preview: textPreview(todo.note, 180),
-                note_bytes: Buffer.byteLength(String(todo.note || ""), "utf8"),
-                note_truncated: String(todo.note || "").length > textPreview(todo.note, 180).length,
-                status: todo.status,
-                priority: todo.priority,
-                props_keys: Object.keys(todo.props || {}),
-                claimed_by: todo.claimed_by,
-                claimed_until: todo.claimed_until,
-                heartbeat_at: todo.heartbeat_at,
-                memory_bytes: todo.memory_bytes,
-              })),
-              decisions: decisions.rows.map((decision) => ({
-                id: decision.id,
-                todo_id: decision.todo_id,
-                agent_run_id: decision.agent_run_id,
-                actor: decision.actor,
-                title: decision.title,
-                decision_preview: textPreview(decision.decision, 180),
-                rationale_preview: textPreview(decision.rationale, 120),
-                impact_preview: textPreview(decision.impact, 120),
-                props_keys: Object.keys(decision.props || {}),
-                created_at: decision.created_at,
-              })),
-              runs: runs.rows.map((run) => ({
-                id: run.id,
-                todo_id: run.todo_id,
-                agent_name: run.agent_name,
-                status: run.status,
-                goal: run.goal,
-                touched_files: run.touched_files,
-                result_preview: textPreview(run.result, 160),
-                props_keys: Object.keys(run.props || {}),
-                started_at: run.started_at,
-                heartbeat_at: run.heartbeat_at,
-                finished_at: run.finished_at,
-              })),
-              history: history.rows.map((event) => ({
-                id: event.id,
-                actor: event.actor,
-                action: event.action,
-                entity_type: event.entity_type,
-                entity_id: event.entity_id,
-                summary: event.summary,
-                metadata_preview: textPreview(event.metadata, 160),
-                created_at: event.created_at,
-              })),
-              memories,
-            });
+            return sendJson(res, 200, buildShortAgentContext({ project, todos: todos.rows, decisions: decisions.rows, runs: runs.rows, history: history.rows, memories }));
           }
 
           // Отметки «просмотрено». Держать в паре с server/mbox-server.mjs — реализации независимые.

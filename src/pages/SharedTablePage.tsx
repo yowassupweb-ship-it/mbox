@@ -3,6 +3,8 @@ import { Check, Contrast, Download, Lock, Pencil, Save } from "lucide-react";
 import type { Workbook } from "exceljs";
 import { OctopusSpinner } from "../components/OctopusSpinner";
 import { base64ToArrayBuffer, bytesToBase64 } from "../app/workbench/officeFormat";
+import { PresenceAvatars } from "../app/workbench/PresenceAvatars";
+import { useSharedPresence } from "../app/workbench/presence";
 
 const SheetEditor = lazy(() => import("../app/workbench/UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
 
@@ -29,6 +31,7 @@ export function SharedTablePage({ token }: { token: string }) {
   });
   const baseUpdatedAt = useRef("");
   const saving = useRef(false);
+  const presence = useSharedPresence("table", token, table ? `table:${table.id}` : null);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(SHARED_TABLE_THEME_KEY);
@@ -114,6 +117,7 @@ export function SharedTablePage({ token }: { token: string }) {
     <header className="share-sheet-bar">
       <div><span className="share-sheet-kicker">MBOX · Таблица по ссылке</span><h1>{table.title || "Таблица"}</h1></div>
       <div className="share-sheet-actions">
+        <PresenceAvatars people={presence.people} agents={presence.agents} />
         <span className={status === "error" ? "is-error" : undefined} role="status">{status === "saved" ? <Check size={13} /> : null}{stateLabel}</span>
         <button type="button" onClick={() => void download()} title="Скачать Excel"><Download size={15} /> Скачать</button>
         <button
@@ -130,7 +134,7 @@ export function SharedTablePage({ token }: { token: string }) {
     </header>
     {notice && <p className="share-sheet-notice" role="alert">{notice}</p>}
     <section className={`share-sheet-editor${editable ? "" : " is-readonly"}`} aria-label={editable ? "Редактирование таблицы" : "Просмотр таблицы"}>
-      <Suspense fallback={<OctopusSpinner label="Загружаю редактор…" />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setStatus("dirty")} visible readOnly={!editable} /></Suspense>
+      <Suspense fallback={<OctopusSpinner label="Загружаю редактор…" />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setStatus("dirty")} visible readOnly={!editable} peers={presence.peers} agents={presence.agents} onSelect={presence.update} /></Suspense>
       {!editable && <div className="share-sheet-readonly" aria-hidden="true"><Lock size={14} /> Только просмотр</div>}
     </section>
   </main>;

@@ -154,7 +154,7 @@ function uniqueModels(models) {
  * тратить: Fable дорог и нужен для больших задач, мелочь дешевле отдать Haiku.
  */
 const CLAUDE_MODELS = [
-  { id: "sonnet", provider: "claude-code", label: "Sonnet 5", role: "по умолчанию — обычная работа" },
+  { id: "sonnet", provider: "claude-code", label: "Sonnet 5.5", role: "по умолчанию — обычная работа" },
   { id: "haiku", provider: "claude-code", label: "Haiku 4.5", role: "мелкие задачи, быстро и дёшево" },
   { id: "opus", provider: "claude-code", label: "Opus 5.5", role: "сложные задачи" },
   { id: "fable", provider: "claude-code", label: "Fable 5.1", role: "самая сильная — только для больших задач" },
@@ -258,6 +258,18 @@ async function publishedCatalog() {
   }
 }
 
+const CLOUD_TWIN = { Claude: "ClaudeCloud", ChatGPT: "CodexCloud" };
+
+/** Каталог агента; у локального — тот из пары с облачным, что получен позже (источник помечается). */
+function freshestCatalog(published, agent) {
+  const own = published[agent];
+  const twin = published[CLOUD_TWIN[agent]];
+  if (!twin?.models?.length) return own;
+  const stamp = (row) => Date.parse(row?.fetched_at || row?.updated_at || "") || 0;
+  if (own?.models?.length && stamp(own) >= stamp(twin)) return own;
+  return { ...twin, source: `${twin.source || "cli"} · ${CLOUD_TWIN[agent]}` };
+}
+
 export async function jarvisModels() {
   const models = [];
   const published = await publishedCatalog();
@@ -271,7 +283,8 @@ export async function jarvisModels() {
   const fallback = { Claude: uniqueModels([...CLAUDE_MODELS, ...CLAUDE_EXTRA_MODELS]), ChatGPT: uniqueModels(CODEX_MODELS) };
   const fallbackDefault = { Claude: CLAUDE_DEFAULT_MODEL, ChatGPT: CODEX_MODELS[0]?.id || "" };
   for (const agent of Object.keys(CATALOG_AGENTS)) {
-    const live = published[agent];
+    // Локальный CLI может отстать по версии (и не знать новых моделей) — берём самый свежий каталог из пары «локальный / Cloud».
+    const live = freshestCatalog(published, agent);
     if (live?.models?.length) {
       for (const model of live.models) models.push({ ...model, provider: CATALOG_AGENTS[agent], agent, available: true });
       defaults[agent] = live.default_model || "";
@@ -1477,7 +1490,7 @@ export const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "integration_list",
-      description: "Внешние API, подключённые в MBOX (Topvisor, Яндекс Вебмастер, Яндекс Метрика и добавленные владельцем): что заполнено, адрес, подсказка по путям. Ключей не показывает. Вызывай перед integration_call, если не уверен, подключен ли сервис.",
+      description: "Внешние API, подключённые в MBOX (Topvisor, Яндекс Вебмастер, Яндекс Метрика, Яндекс Wordstat и добавленные владельцем): что заполнено, адрес, подсказка по путям. Ключей не показывает. Вызывай перед integration_call, если не уверен, подключен ли сервис.",
       parameters: { type: "object", properties: {}, required: [] },
     },
   },
@@ -1485,7 +1498,7 @@ export const JARVIS_TOOLS = [
     type: "function",
     function: {
       name: "integration_call",
-      description: "Вызвать внешний API через MBOX: ключ подставляется автоматически. service — код из integration_list (topvisor, yandex_webmaster, yandex_metrica, …). Для Topvisor path — имя метода API v2 (например get/projects_2/projects), параметры — в body. Для остальных — method GET/POST…, path относительно адреса API, параметры адреса в query. Только чтение, пока человек явно не попросил изменить данные во внешнем сервисе.",
+      description: "Вызвать внешний API через MBOX: ключ подставляется автоматически. service — код из integration_list (topvisor, yandex_webmaster, yandex_metrica, yandex_wordstat, …). Для Topvisor path — имя метода API v2 (например get/projects_2/projects), параметры — в body. Для Wordstat все методы POST с JSON в body (v1/topRequests, v1/dynamics, v1/regions). Для Вебмастера id пользователя даёт path user, дальше user/{id}/hosts/{host_id}/…. Для остальных — method GET/POST…, path относительно адреса API, параметры адреса в query. Только чтение, пока человек явно не попросил изменить данные во внешнем сервисе.",
       parameters: {
         type: "object",
         properties: {
@@ -1889,8 +1902,8 @@ export const TOOL_GROUPS = {
     tools: ["gdoc_search", "gdoc_read", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import"],
   },
   integrations: {
-    label: "внешние API с ключами владельца: Topvisor (позиции, проекты, аудит), Яндекс Вебмастер и Метрика, любые добавленные API",
-    match: /(topvisor|топвизор|позици|вебмастер|метрик|api|апи|интеграци|ключевы[ех] (слов|фраз)|seo|сео|трафик|индексац|посетител)/,
+    label: "внешние API с ключами владельца: Topvisor (позиции, проекты, аудит), Яндекс Вебмастер, Метрика и Wordstat (частотность запросов), любые добавленные API",
+    match: /(topvisor|топвизор|позици|вебмастер|метрик|wordstat|вордстат|частотност|api|апи|интеграци|ключевы[ех] (слов|фраз)|seo|сео|трафик|индексац|посетител|конверси)/,
     tools: ["integration_list", "integration_call"],
   },
   browser: {

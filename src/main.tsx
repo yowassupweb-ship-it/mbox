@@ -143,7 +143,11 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
       const goal = liveRunOf(data.runs, working[0].name)?.goal;
       return { state: "working" as const, label: goal ? `${working[0].name}: ${goal}` : `${working[0].name} в работе` };
     }
-    if (working.length > 1) return { state: "working" as const, label: `${working.length} агента в работе: ${working.map((agent) => agent.name).join(", ")}` };
+    if (working.length > 1) {
+      // Одна строка итога для футера. Агенты с одним именем (несколько сессий) считаются один раз; кто именно и что делает — в списке агентов.
+      const names = new Set(working.map((agent) => agent.name));
+      return { state: "working" as const, label: names.size > 1 ? `${names.size} ${plural(names.size, "агент", "агента", "агентов")} в работе` : `${working[0].name} в работе (${working.length} ${plural(working.length, "сессия", "сессии", "сессий")})` };
+    }
 
     if (blocked) return { state: "attention" as const, label: `${blocked} ${plural(blocked, "задача заблокирована", "задачи заблокированы", "задач заблокировано")}` };
     if (onReview) return { state: "attention" as const, label: `${onReview} ${plural(onReview, "задача ждёт", "задачи ждут", "задач ждут")} проверки` };

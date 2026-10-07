@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
+import { seoSchedulerStatus } from "./seo-scheduler.mjs";
 import { recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
 
 const DEFAULT_SITE = "https://www.vs-travel.ru";
@@ -577,6 +579,10 @@ const DEFAULT_SEO_CONFIG = {
   webmaster_host_id: "",
   metrica_counter_id: "",
   metrica_goals: { lead: "", booking: "" },
+  // Счётчики Метрики: [{ id, name, site, goals: [{ id, name, type, role, description }] }]. Цели подтягиваются
+  // из Management API целиком; role: lead | booking — считаются заявками, track — собираются без суммы заявок,
+  // пусто — не собираются. Старые metrica_counter_id/metrica_goals переезжают сюда при чтении (metricaCountersOf).
+  metrica_counters: [],
   wordstat_access: "direct",
   section_roles: {
     "podbor-tura": "",
@@ -589,8 +595,45 @@ const DEFAULT_SEO_CONFIG = {
 
 const SEO_SECRET_FIELDS = ["topvisor_api_key", "webmaster_token", "metrica_token", "wordstat_token"];
 
+const METRICA_GOAL_ROLES = new Set(["", "lead", "booking", "track"]);
+
+/** Счётчики Метрики из настроек; старый формат (один счётчик + ID целей по ролям) превращается в новый. */
+export function metricaCountersOf(config = {}) {
+  const list = Array.isArray(config.metrica_counters) ? config.metrica_counters : [];
+  const counters = [];
+  for (const item of list) {
+    const id = String(item?.id ?? "").trim();
+    if (!/^\d+$/.test(id) || counters.some((counter) => counter.id === id)) continue;
+    const goals = [];
+    for (const goal of Array.isArray(item.goals) ? item.goals : []) {
+      const goalId = String(goal?.id ?? "").trim();
+      if (!/^\d+$/.test(goalId) || goals.some((entry) => entry.id === goalId)) continue;
+      const role = String(goal.role ?? "");
+      goals.push({
+        id: goalId,
+        name: String(goal.name ?? "").slice(0, 300),
+        type: String(goal.type ?? "").slice(0, 60),
+        role: METRICA_GOAL_ROLES.has(role) ? role : "",
+        description: String(goal.description ?? "").slice(0, 2000),
+      });
+    }
+    counters.push({ id, name: String(item.name ?? "").slice(0, 300), site: String(item.site ?? "").slice(0, 300), goals });
+  }
+  const legacyId = String(config.metrica_counter_id ?? "").trim();
+  if (!counters.length && /^\d+$/.test(legacyId)) {
+    const goals = [];
+    for (const role of ["lead", "booking"]) {
+      for (const goalId of String(config.metrica_goals?.[role] || "").split(/[\s,;]+/)) {
+        if (/^\d{3,}$/.test(goalId) && !goals.some((goal) => goal.id === goalId)) goals.push({ id: goalId, name: "", type: "", role, description: "" });
+      }
+    }
+    counters.push({ id: legacyId, name: "", site: "", goals });
+  }
+  return counters;
+}
+
 function mergeConfig(input = {}) {
-  return {
+  const merged = {
     ...DEFAULT_SEO_CONFIG,
     ...(input && typeof input === "object" ? input : {}),
     topvisor_modules: { ...DEFAULT_SEO_CONFIG.topvisor_modules, ...(input?.topvisor_modules || {}) },
@@ -598,6 +641,17 @@ function mergeConfig(input = {}) {
     section_roles: { ...DEFAULT_SEO_CONFIG.section_roles, ...(input?.section_roles || {}) },
     filter_policy: { ...DEFAULT_SEO_CONFIG.filter_policy, ...(input?.filter_policy || {}) },
   };
+  merged.metrica_counters = metricaCountersOf(merged);
+  // Старые поля держим в согласии с первым счётчиком: их читают агенты и прежние версии интерфейса.
+  const first = merged.metrica_counters[0];
+  if (first) {
+    merged.metrica_counter_id = first.id;
+    merged.metrica_goals = {
+      lead: first.goals.filter((goal) => goal.role === "lead").map((goal) => goal.id).join(","),
+      booking: first.goals.filter((goal) => goal.role === "booking").map((goal) => goal.id).join(","),
+    };
+  }
+  return merged;
 }
 
 export async function getSeoSettings(query, includeSecrets = false) {
@@ -755,6 +809,237 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
   };
 }
 
+const WEBMASTER_API = "https://api.webmaster.yandex.net/v4";
+const METRICA_API = "https://api-metrika.yandex.net";
+// Первый сбор добирает историю (дашборд сравнивает 28 дней с предыдущими 28), дальше обновляем недавние дни.
+const SEARCH_HISTORY_DAYS = Number(process.env.SEO_SEARCH_HISTORY_DAYS || 56);
+const SEARCH_REFRESH_DAYS = Number(process.env.SEO_SEARCH_REFRESH_DAYS || 14);
+// Вебмастер отдаёт данные за день с задержкой в 2–3 дня.
+const WEBMASTER_LAG_DAYS = 3;
+const WEBMASTER_PAGE = 500;
+const WEBMASTER_MAX_QUERIES_PER_DAY = 3000;
+
+async function yandexGet(base, path, params, token, timeoutMs = 60000) {
+  const url = new URL(`${base}${path}`);
+  for (const [key, value] of params) url.searchParams.append(key, String(value));
+  const response = await fetch(url, { headers: { authorization: `OAuth ${token}`, accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
+  const text = await response.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch { /* ниже — ошибка с текстом ответа */ }
+  if (!response.ok) throw new Error(`${path.split("/").slice(0, 4).join("/")}: ${data?.error_message || data?.message || text.slice(0, 160) || `HTTP ${response.status}`}`);
+  return data;
+}
+
+function daysBack(count, lag) {
+  const out = [];
+  for (let i = lag; i < lag + count; i += 1) out.push(isoDay(new Date(Date.now() - i * 86400000)));
+  return out;
+}
+
+async function insertChunks(query, sql, items) {
+  for (let i = 0; i < items.length; i += 500) await query(sql, [JSON.stringify(items.slice(i, i + 500))]);
+}
+
+/** Яндекс Вебмастер: показы, клики и позиция по запросам за каждый день. По API нет связки «запрос → страница», url пустой. */
+export async function collectWebmasterSearch(query, token, hostId) {
+  const userId = (await yandexGet(WEBMASTER_API, "/user", [], token))?.user_id;
+  if (!userId) throw new Error("Вебмастер: не вернул user_id, проверьте токен");
+  const host = encodeURIComponent(hostId);
+  const hasHistory = Number((await query("SELECT count(*)::int AS n FROM seo_search_snapshots WHERE source = 'webmaster'")).rows[0]?.n || 0) > 0;
+  const days = daysBack(hasHistory ? SEARCH_REFRESH_DAYS : SEARCH_HISTORY_DAYS, WEBMASTER_LAG_DAYS);
+  const collected = await mapLimit(days, 3, async (day) => {
+    const items = [];
+    for (let offset = 0; offset < WEBMASTER_MAX_QUERIES_PER_DAY; offset += WEBMASTER_PAGE) {
+      const page = await yandexGet(WEBMASTER_API, `/user/${userId}/hosts/${host}/search-queries/popular`, [
+        ["order_by", "TOTAL_SHOWS"], ["query_indicator", "TOTAL_SHOWS"], ["query_indicator", "TOTAL_CLICKS"], ["query_indicator", "AVG_SHOW_POSITION"],
+        ["date_from", day], ["date_to", day], ["limit", WEBMASTER_PAGE], ["offset", offset],
+      ], token);
+      for (const item of page?.queries || []) {
+        const shows = Math.round(Number(item.indicators?.TOTAL_SHOWS || 0));
+        const clicks = Math.round(Number(item.indicators?.TOTAL_CLICKS || 0));
+        const text = String(item.query_text || "").trim();
+        if (!text || (!shows && !clicks)) continue;
+        const position = Number(item.indicators?.AVG_SHOW_POSITION);
+        items.push({ captured_at: `${day}T12:00:00Z`, query: text, impressions: shows, clicks, ctr: shows ? clicks / shows : null, position: Number.isFinite(position) && position > 0 ? position : null, raw: { query_id: item.query_id } });
+      }
+      if ((page?.queries || []).length < WEBMASTER_PAGE || offset + WEBMASTER_PAGE >= Number(page?.count || 0)) break;
+    }
+    return { day, items };
+  });
+  const withData = collected.filter((entry) => entry.items.length);
+  const rowsOut = withData.flatMap((entry) => entry.items);
+  if (withData.length) {
+    // Дни, за которые Вебмастер что-то вернул, заменяются целиком: данные за последние дни он досчитывает.
+    await query("DELETE FROM seo_search_snapshots WHERE source = 'webmaster' AND captured_at::date = ANY($1::date[])", [withData.map((entry) => entry.day)]);
+    await insertChunks(query,
+      `INSERT INTO seo_search_snapshots(captured_at, source, query, url, impressions, clicks, ctr, position, raw)
+       SELECT r.captured_at, 'webmaster', r.query, '', r.impressions, r.clicks, r.ctr, r.position, r.raw
+       FROM jsonb_to_recordset($1::jsonb) AS r(captured_at TIMESTAMPTZ, query TEXT, impressions INT, clicks INT, ctr DOUBLE PRECISION, position DOUBLE PRECISION, raw JSONB)`,
+      rowsOut);
+  }
+  const summary = await yandexGet(WEBMASTER_API, `/user/${userId}/hosts/${host}/summary`, [], token).catch(() => null);
+  return {
+    host_id: hostId,
+    days: withData.length,
+    rows: rowsOut.length,
+    last_day: withData.map((entry) => entry.day).sort().pop() || null,
+    clicks: rowsOut.reduce((sum, row) => sum + row.clicks, 0),
+    searchable_pages: summary?.searchable_pages_count ?? null,
+    excluded_pages: summary?.excluded_pages_count ?? null,
+    sqi: summary?.sqi ?? null,
+  };
+}
+
+// Метрика принимает до 20 метрик в запросе: 4 базовые + до 16 целей на счётчик.
+const METRICA_MAX_GOALS = 16;
+
+function trackedGoals(counter) {
+  return counter.goals.filter((goal) => goal.role).slice(0, METRICA_MAX_GOALS);
+}
+
+/** Origin для адресов входа счётчика: основной сайт — как в реестре (с www), чужой сайт — свой адрес. */
+function counterOrigin(counter, origin) {
+  const host = (value) => { try { return new URL(/^https?:/i.test(value) ? value : `https://${value}`).hostname.replace(/^www\./, ""); } catch { return ""; } };
+  if (!counter.site || host(counter.site) === host(origin)) return origin;
+  return /^https?:/i.test(counter.site) ? counter.site.replace(/\/+$/, "") : `https://${counter.site.replace(/\/+$/, "")}`;
+}
+
+/** Счётчики, доступные токену, и все цели выбранных счётчиков — для карточки «Metrica API». */
+export async function metricaCatalog(query, counterIds = []) {
+  const settings = await getSeoSettings(query, true);
+  const token = process.env.YANDEX_METRICA_TOKEN || settings.secrets?.metrica_token;
+  if (!token) return { ok: false, error: "Не указан токен Метрики" };
+  try {
+    const list = await yandexGet(METRICA_API, "/management/v1/counters", [["per_page", 1000]], token);
+    const counters = (list?.counters || []).map((counter) => ({ id: String(counter.id), name: String(counter.name || ""), site: String(counter.site2?.site || counter.site || "") }));
+    const wanted = [...new Set(counterIds.map(String).filter((id) => /^\d+$/.test(id)))];
+    const goals = {};
+    const errors = {};
+    await mapLimit(wanted, 3, async (id) => {
+      try {
+        const data = await yandexGet(METRICA_API, `/management/v1/counter/${id}/goals`, [], token);
+        // Составная цель: у шагов свои ID, их достижения тоже можно собирать — показываем шаги отдельными строками.
+        goals[id] = (data?.goals || []).flatMap((goal) => [
+          { id: String(goal.id), name: String(goal.name || ""), type: String(goal.type || "") },
+          ...(Array.isArray(goal.steps) ? goal.steps.map((step) => ({ id: String(step.id), name: `${goal.name || "Составная цель"} → ${step.name || "шаг"}`, type: `step:${step.type || ""}` })) : []),
+        ]);
+      } catch (error) {
+        errors[id] = error instanceof Error ? error.message : String(error);
+      }
+    });
+    return { ok: true, counters, goals, errors };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Яндекс Метрика: посещения из поиска по посадочным страницам и дням; цели «заявка» и «бронирование» суммируются по ролям. */
+const TRACKING_PARAMS = /^(utm_[a-z_]+|yclid|ysclid|gclid|fbclid|_openstat|from|ref|roistat\w*|etext|frommarket|clid)$/i;
+
+// Метрика отдаёт адрес входа без www и с метками рекламы; в реестре адреса с origin сайта и без меток.
+function landingUrl(value, origin) {
+  try {
+    const url = new URL(String(value || ""));
+    for (const key of [...url.searchParams.keys()]) if (TRACKING_PARAMS.test(key)) url.searchParams.delete(key);
+    return normalizeUrl(`${url.pathname}${url.search}`, origin);
+  } catch {
+    return "";
+  }
+}
+
+/** Один счётчик: строки «день × адрес входа» из поиска; заявки — сумма целей с ролями lead/booking, все собираемые цели — в raw. */
+async function collectMetricaCounter(token, counter, days, origin) {
+  const goals = trackedGoals(counter);
+  const date1 = days[days.length - 1];
+  const date2 = days[0];
+  const metrics = ["ym:s:visits", "ym:s:bounceRate", "ym:s:pageDepth", "ym:s:avgVisitDurationSeconds", ...goals.map((goal) => `ym:s:goal${goal.id}reaches`)];
+  const limit = 10000;
+  const rowsOut = [];
+  const reachedTotal = {};
+  for (let offset = 1; offset < 200000; offset += limit) {
+    const page = await yandexGet(METRICA_API, "/stat/v1/data", [
+      ["ids", counter.id], ["metrics", metrics.join(",")], ["dimensions", "ym:s:date,ym:s:startURL"],
+      ["filters", "ym:s:trafficSourceName=='Search engine traffic'"], ["date1", date1], ["date2", date2],
+      ["accuracy", "full"], ["sort", "-ym:s:visits"], ["limit", limit], ["offset", offset],
+    ], token, 120000);
+    for (const item of page?.data || []) {
+      const day = String(item.dimensions?.[0]?.name || "");
+      const url = landingUrl(item.dimensions?.[1]?.name, origin);
+      const [visits, bounceRate, depth, duration, ...reached] = item.metrics || [];
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !url || !visits) continue;
+      const byRole = {};
+      const byGoal = {};
+      goals.forEach((goal, index) => {
+        const value = reached[index];
+        if (!value) return;
+        byGoal[goal.id] = value;
+        reachedTotal[goal.id] = (reachedTotal[goal.id] || 0) + value;
+        if (goal.role === "lead" || goal.role === "booking") byRole[goal.role] = (byRole[goal.role] || 0) + value;
+      });
+      rowsOut.push({
+        captured_on: day,
+        url,
+        visits: Math.round(visits),
+        bounces: Math.round((visits * (bounceRate || 0)) / 100),
+        page_depth: Number.isFinite(depth) ? depth : null,
+        visit_duration: Number.isFinite(duration) ? duration : null,
+        goals: byRole,
+        raw: { counter_id: counter.id, goals: byGoal },
+      });
+    }
+    if ((page?.data || []).length < limit || offset + limit > Number(page?.total_rows || 0)) break;
+  }
+  return {
+    rows: rowsOut,
+    summary: {
+      counter_id: counter.id,
+      name: counter.name,
+      rows: rowsOut.length,
+      visits: rowsOut.reduce((sum, row) => sum + row.visits, 0),
+      goals: goals.map((goal) => ({ id: goal.id, name: goal.name, role: goal.role, reaches: Math.round(reachedTotal[goal.id] || 0) })),
+      skipped_goals: Math.max(0, counter.goals.filter((goal) => goal.role).length - goals.length),
+    },
+  };
+}
+
+/**
+ * Яндекс Метрика: посещения из поиска по посадочным страницам и дням по всем счётчикам из настроек.
+ * Строки разных счётчиков различаются raw.counter_id; дни перезаписываются целиком, если хоть один счётчик что-то вернул.
+ */
+export async function collectMetricaTraffic(query, token, counters, origin) {
+  // 'organic' — метка нового формата строк (полный адрес входа); без неё история пересобирается за весь период.
+  const hasHistory = Number((await query("SELECT count(*)::int AS n FROM seo_traffic_snapshots WHERE source = 'metrica' AND search_engine = 'organic'")).rows[0]?.n || 0) > 0;
+  const days = daysBack(hasHistory ? SEARCH_REFRESH_DAYS : SEARCH_HISTORY_DAYS, 1);
+  const results = [];
+  const errors = [];
+  for (const counter of counters) {
+    try {
+      results.push(await collectMetricaCounter(token, counter, days, counterOrigin(counter, origin)));
+    } catch (error) {
+      errors.push({ counter_id: counter.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (!results.length && errors.length) throw new Error(errors.map((item) => `${item.counter_id}: ${item.error}`).join("; "));
+  const rowsOut = results.flatMap((result) => result.rows);
+  if (rowsOut.length) {
+    await query("DELETE FROM seo_traffic_snapshots WHERE source = 'metrica' AND captured_on = ANY($1::date[])", [days]);
+    await insertChunks(query,
+      `INSERT INTO seo_traffic_snapshots(captured_on, source, url, search_engine, visits, bounces, page_depth, visit_duration, goals, raw)
+       SELECT r.captured_on, 'metrica', r.url, 'organic', r.visits, r.bounces, r.page_depth, r.visit_duration, r.goals, COALESCE(r.raw, '{}'::jsonb)
+       FROM jsonb_to_recordset($1::jsonb) AS r(captured_on DATE, url TEXT, visits INT, bounces INT, page_depth DOUBLE PRECISION, visit_duration DOUBLE PRECISION, goals JSONB, raw JSONB)`,
+      rowsOut);
+  }
+  return {
+    counter_id: counters[0]?.id || "",
+    counters: results.map((result) => result.summary),
+    errors,
+    days: days.length,
+    rows: rowsOut.length,
+    visits: rowsOut.reduce((sum, row) => sum + row.visits, 0),
+    goals: results.flatMap((result) => result.summary.goals),
+  };
+}
+
 /** Проверка подключения для страницы инструмента: ключ, User-Id и проект — без записи позиций. */
 export async function checkTopvisor(query) {
   const settings = await getSeoSettings(query, true);
@@ -805,7 +1090,9 @@ async function runExternalAdapters(query) {
   const wordstatToken = process.env.YANDEX_WORDSTAT_TOKEN || secrets.wordstat_token;
   const topvisorProjectId = process.env.TOPVISOR_PROJECT_ID || cfg.topvisor_project_id;
   const webmasterHostId = process.env.YANDEX_WEBMASTER_HOST_ID || cfg.webmaster_host_id;
-  const metricaCounterId = process.env.YANDEX_METRICA_COUNTER_ID || cfg.metrica_counter_id;
+  const envCounter = process.env.YANDEX_METRICA_COUNTER_ID;
+  const metricaCounters = metricaCountersOf(cfg);
+  if (envCounter && !metricaCounters.some((counter) => counter.id === envCounter)) metricaCounters.unshift(...metricaCountersOf({ metrica_counter_id: envCounter, metrica_goals: cfg.metrica_goals }));
   const topvisorUserId = process.env.TOPVISOR_USER_ID || cfg.topvisor_user_id;
   const modules = cfg.topvisor_modules || {};
   // Позиции собираем, если включён модуль «позиции» или не включено ни одного — иначе ключ лежит впустую.
@@ -823,15 +1110,20 @@ async function runExternalAdapters(query) {
       topvisor = { status: "error", error: error instanceof Error ? error.message : String(error), modules, updated_at: new Date().toISOString(), source: "topvisor_audit" };
     }
   }
+  const collected = async (name, missing, collect) => {
+    if (missing) return configuredSource(name, false, { reason: missing });
+    try {
+      return await configuredSource(name, true, await collect());
+    } catch (error) {
+      return { status: "error", error: error instanceof Error ? error.message : String(error), updated_at: new Date().toISOString(), source: name };
+    }
+  };
   return {
     topvisor_audit: topvisor,
-    webmaster: await configuredSource("webmaster", Boolean(webmasterToken && webmasterHostId), {
-      reason: webmasterToken ? "host_id_missing_or_step_2" : "webmaster_token missing",
-    }),
-    metrica: await configuredSource("metrica", Boolean(metricaToken && metricaCounterId), {
-      reason: metricaToken ? "counter_id_missing_or_step_3" : "metrica_token missing",
-      goals: cfg.metrica_goals || {},
-    }),
+    webmaster: await collected("webmaster", !webmasterToken ? "webmaster_token missing" : !webmasterHostId ? "webmaster_host_id missing" : "",
+      () => collectWebmasterSearch(query, webmasterToken, webmasterHostId)),
+    metrica: await collected("metrica", !metricaToken ? "metrica_token missing" : !metricaCounters.length ? "metrica_counter_id missing" : "",
+      () => collectMetricaTraffic(query, metricaToken, metricaCounters, siteOrigin())),
     wordstat: await configuredSource("wordstat", Boolean(wordstatToken), {
       reason: wordstatToken ? "step_4" : "wordstat_token missing",
       access: cfg.wordstat_access || "direct",
@@ -1046,9 +1338,54 @@ async function saveLinks(query, snapshot) {
   );
 }
 
-export async function runSeoWizardCollection(query, { scenario = "step1", buildPackage = true } = {}) {
+// Сбор идёт минуты (sitemap в несколько мегабайт и тысяча страниц), а браузер и обратный прокси ждут ответа секунды:
+// раньше кнопка «Собрать данные» держала один запрос 100–240 с и падала с request_failed:500/504. Теперь запуск
+// возвращает сразу (run_id), сбор продолжается в процессе, а экран спрашивает состояние (/api/mbox/seo/run/status).
+let liveRun = null;
+
+export function liveSeoRun() {
+  return liveRun ? { ...liveRun, elapsed_sec: Math.round((Date.now() - Date.parse(liveRun.started_at)) / 1000) } : null;
+}
+
+/** Запустить сбор в фоне. Второй запуск при идущем первом не создаёт новый прогон, а возвращает идущий. */
+export function startSeoRun(query, { scenario = "step1", buildPackage = true } = {}) {
+  if (liveRun) return Promise.resolve({ ...liveSeoRun(), already_running: true });
+  return new Promise((resolve, reject) => {
+    const current = { run_id: "", scenario, started_at: new Date().toISOString(), stage: "запуск", done: null, total: null };
+    liveRun = current;
+    runSeoWizardCollection(query, {
+      scenario,
+      buildPackage,
+      onStart: (runId) => { current.run_id = runId; resolve({ ...liveSeoRun(), already_running: false }); },
+      onStage: ({ stage, done, total }) => { current.stage = stage; current.done = done; current.total = total; },
+    })
+      .catch((error) => {
+        console.error(`[seo] сбор ${current.run_id || "?"} (${scenario}) упал: ${error instanceof Error ? error.message : error}`);
+        if (!current.run_id) reject(error);
+      })
+      .finally(() => { if (liveRun === current) liveRun = null; });
+  });
+}
+
+export async function seoRunStatus(query) {
+  await ensureSeoWizardSchema(query);
+  // Строка «идёт» без живого сбора в этом процессе — след перезапуска сервера: закрываем, чтобы экран не ждал вечно.
+  if (!liveRun) {
+    await query(
+      `UPDATE seo_runs SET status = 'aborted', finished_at = now(), errors = errors || $1::jsonb WHERE status = 'running' AND started_at < now() - interval '2 minutes'`,
+      [JSON.stringify([{ message: "сбор прерван: процесс сервера перезапускался", at: new Date().toISOString() }])],
+    );
+  }
+  const last = (await query("SELECT id::text, scenario, status, started_at::text, finished_at::text, stats, errors FROM seo_runs ORDER BY started_at DESC LIMIT 1")).rows[0] || null;
+  return { live: liveSeoRun(), last };
+}
+
+export async function runSeoWizardCollection(query, { scenario = "step1", buildPackage = true, onStart = null, onStage = null } = {}) {
   await ensureSeoWizardSchema(query);
   const runId = await startRun(query, scenario);
+  const stage = (name, done = null, total = null) => { try { onStage?.({ stage: name, done, total }); } catch { /* прогресс не должен ронять сбор */ } };
+  try { onStart?.(runId); } catch { /* то же */ }
+  stage("источники");
   const origin = siteOrigin();
   const deadlineAt = Date.now() + MAX_RUN_MS;
   const errors = [];
@@ -1057,6 +1394,7 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
   try {
     const settings = await getSeoSettings(query, true).catch(() => ({ config: DEFAULT_SEO_CONFIG }));
     sources = await runExternalAdapters(query);
+    stage("sitemap");
     const sitemapUrl = normalizeUrl(process.env.SEO_SITEMAP_URL || settings.config?.sitemap_url || "/sitemap.xml", origin);
     let sitemapUrls = [];
     try {
@@ -1072,7 +1410,15 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
     for (const item of sitemapUrls) {
       await upsertUrl(query, { ...item, in_sitemap: true, source_flags: { sitemap: true, sitemap_source: item.source } });
     }
-    const snapshots = await mapLimit(probeUrls, 8, async (url) => crawlPage(url, deadlineAt));
+    let crawled = 0;
+    stage("обход страниц", 0, probeUrls.length);
+    const snapshots = await mapLimit(probeUrls, 8, async (url) => {
+      const page = await crawlPage(url, deadlineAt);
+      crawled += 1;
+      if (crawled % 25 === 0 || crawled === probeUrls.length) stage("обход страниц", crawled, probeUrls.length);
+      return page;
+    });
+    stage("запись результатов");
     // Страницы, до которых не дошли из-за лимита времени прогона, — не «ошибка сайта», их не пишем и не судим.
     const checked = snapshots.filter((item) => item.meta?.error !== "run deadline exceeded");
     for (const snapshot of checked) {
@@ -1102,6 +1448,7 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
       });
       await saveLinks(query, snapshot);
     }
+    stage("детекторы");
     const tourIds = await loadTourIds(query);
     const sitemapOk = sources.sitemap?.status === "ok" && sitemapUrls.length > 0;
     const issues = await detectIssues(query, runId, sitemapUrls, checked, tourIds, sitemapOk);
@@ -1137,6 +1484,7 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
       site_origin: origin,
     };
     await finishRun(query, runId, "ok", sources, stats, errors);
+    stage("пакет");
     const pkg = buildPackage ? await buildSeoPackage(query, { scenario: scenario === "step1" ? "monday" : scenario, runId }) : null;
     return { run_id: runId, status: "ok", sources, stats, package_id: pkg?.id || null };
   } catch (error) {
@@ -1368,7 +1716,20 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
   try {
     if (url.pathname === "/api/mbox/seo/run" && req.method === "POST") {
       const body = await readBody(req);
-      return reply(200, await runSeoWizardCollection(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
+      // Синхронный режим (wait: true) остаётся для скриптов и тестов; экран запускает в фоне и опрашивает состояние.
+      if (body.wait === true) return reply(200, await runSeoWizardCollection(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
+      return reply(202, await startSeoRun(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
+    }
+    if (url.pathname === "/api/mbox/seo/scenario" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      return reply(200, await seoScenarioState(query, await getSeoSettings(query), { autorun: seoSchedulerStatus() }));
+    }
+    if (url.pathname === "/api/mbox/seo/strategy" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      return reply(200, await seoStrategy(query, await getSeoSettings(query)));
+    }
+    if (url.pathname === "/api/mbox/seo/run/status" && req.method === "GET") {
+      return reply(200, await seoRunStatus(query));
     }
     if (url.pathname === "/api/mbox/seo/package" && req.method === "POST") {
       const body = await readBody(req);
@@ -1409,6 +1770,9 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     }
     if (url.pathname === "/api/mbox/seo/changes" && req.method === "POST") {
       return reply(201, { change: await recordChange(query, await readBody(req)) });
+    }
+    if (url.pathname === "/api/mbox/seo/metrica/catalog" && req.method === "GET") {
+      return reply(200, await metricaCatalog(query, url.searchParams.getAll("counter")));
     }
     if (url.pathname === "/api/mbox/seo/topvisor/check" && req.method === "GET") {
       return reply(200, await checkTopvisor(query));

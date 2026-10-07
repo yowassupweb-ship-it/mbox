@@ -1,0 +1,30 @@
+{
+  "onlyDev": [
+    "GET /api/mbox/status"
+  ],
+  "onlyProd": [
+    "DELETE /api/mbox/agents/:param",
+    "GET /api/mbox/admin/skills",
+    "GET /api/mbox/admin/skills/:param",
+    "GET /api/mbox/gdocs/read",
+    "GET /api/mbox/gdocs/search",
+    "GET /api/mbox/gmail/message",
+    "GET /api/mbox/gmail/search",
+    "GET /api/mbox/gmail/status",
+    "GET /api/mbox/integrations",
+    "GET /api/mbox/integrations/:param/:param",
+    "GET /api/mbox/oauth/google/callback",
+    "GET /api/mbox/telegram-posts",
+    "GET /api/mbox/todos/:param/claim",
+    "PATCH /api/mbox/agents/:param",
+    "POST /api/mbox/gdocs/append",
+    "POST /api/mbox/gdocs/create",
+    "POST /api/mbox/gdocs/import",
+    "POST /api/mbox/gdocs/replace",
+    "POST /api/mbox/gmail/connect",
+    "POST /api/mbox/gmail/disconnect",
+    "POST /api/mbox/gmail/draft",
+    "POST /api/mbox/gmail/send",
+    "PUT /api/mbox/gmail/client"
+  ]
+}

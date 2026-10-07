@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { warmUpEditors } from "./warmup";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RotateCcw, Trash2, X } from "lucide-react";
+import { useVisualViewport } from "../../hooks/useVisualViewport";
+import { usageOf, useAgentUsage } from "../../hooks/useAgentUsage";
+import { UsageRing } from "../../components/UsageRing";
+import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
+import { TasksPanel } from "../../features/planner/tasks/TasksPanel";
+import { CalendarPanel } from "../../features/planner/calendar/CalendarPanel";
 import type { ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf, CLOUD_AGENTS, isCloudAgent } from "../../lib/agents";
@@ -21,6 +26,7 @@ import { ConsoleArea, ConsolePaneDocument, PANE_MIME, TERMINAL_TAB, type ChatDeb
 import { chatPeer, consoleLayout } from "./consoleLayout";
 import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
+import { mboxTabOfUrl } from "../../lib/mboxLinks";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { LocalImageDocument } from "./LocalImageDocument";
 import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail, type BrowserState } from "./BrowserDocument";
@@ -34,7 +40,9 @@ import { LocalFoldersView } from "./LocalFolders";
 import { createNoteAndOpen, NoteDocument, NotesView } from "./Notes";
 import { createTableAndOpen, TableDocument, TablesView } from "./TablesView";
 import { DocDocument } from "./DocDocument";
-import { Spotlight, type SpotlightCommand } from "./Spotlight";
+import { Spotlight, type SpotlightCommand, type SpotlightScope } from "./Spotlight";
+import { DomFind } from "../../components/DomFind";
+import { requestFind } from "../../hooks/useFindRequest";
 import { createDocAndOpen } from "./docsStore";
 import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
@@ -60,7 +68,21 @@ import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 
 type Activity = "explorer" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
-type PanelTab = "console" | "attention" | "journal";
+
+/** Телефон: из какого списка открыт документ — туда ведёт «Назад» в шапке модального окна. */
+function phoneListOf(key: string): Activity | null {
+  const kind = key.split(":")[0];
+  if (kind === "note") return "notes";
+  if (kind === "table" || kind === "doc" || kind === "s3sheet") return "tables";
+  if (kind === "file") return "files";
+  if (kind === "local" || kind === "gitdiff") return "local";
+  if (kind === "skill" || kind === "skillpage" || kind === "skillblocks") return "skills";
+  if (kind === "tool") return "tools";
+  if (kind === "project" || kind === "todos" || kind === "todo" || kind === "memory" || kind === "folder") return "explorer";
+  return null;
+}
+const PHONE_LIST_LABEL: Partial<Record<Activity, string>> = { explorer: "Проекты", notes: "Заметки", tables: "Таблицы", local: "Папки", files: "Файлы", search: "Поиск", storage: "Хранилище", agents: "Агенты", skills: "Навыки", tools: "Инструменты", browser: "Браузер", ssh: "SSH" };
+type PanelTab = "console" | "attention" | "journal" | "tasks" | "calendar";
 
 const ACTIVITY_ICONS = "/assets/icons/navigation";
 const SYSTEM_ICONS = "/assets/icons/system";
@@ -202,6 +224,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     };
   }, []);
   useEffect(() => { installScrollMemory(); }, []);
+  useVisualViewport();
   const [activity, setActivity] = usePersistentState<Activity>("mbox.wb.activity", "explorer");
   const [sidebarOpen, setSidebarOpen] = usePersistentState("mbox.wb.sidebarOpen", true);
   const [sidebarWidth, setSidebarWidth] = usePersistentState("mbox.wb.sidebarWidth", 300);
@@ -229,6 +252,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     return () => media.removeEventListener("change", listener);
   }, []);
   const consoleVisibleRef = useRef(false);
+  const phoneKeepListRef = useRef(false);
 
   // История переходов между документами, как «Назад / Вперёд» в VS Code (Alt+← / Alt+→, боковые кнопки мыши).
   // Открыли память проекта, из неё запись — «Назад» возвращает к списку, даже если его вкладку уже заменили.
@@ -322,7 +346,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     if (tabs.active) setVisited((current) => (current.has(tabs.active) ? current : new Set(current).add(tabs.active)));
     if (splitActive) setVisited((current) => (current.has(splitActive) ? current : new Set(current).add(splitActive)));
     // На телефоне панели перекрывают документ целиком: открыли вкладку — показываем её.
-    if (window.matchMedia("(max-width: 720px)").matches) { setSidebarOpen(false); setPanelOpen(false); }
+    // Кроме закрытия документа крестиком: тогда остаёмся в списке, а не открываем соседнюю вкладку.
+    if (phoneKeepListRef.current) phoneKeepListRef.current = false;
+    else if (window.matchMedia("(max-width: 720px)").matches) { setSidebarOpen(false); setPanelOpen(false); }
   }, [tabs.active, splitActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -369,6 +395,24 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const RAIL_TABS: Partial<Record<RailItemId, string>> = { history: "history" };
   const hasBrowser = Boolean(browserBridge());
   const railHidden = useRailHidden();
+
+  // Ссылки на сам MBOX (/?tab=…, в том числе абсолютные на mbox.shar-os.ru) из чата, заметок и документов
+  // открывают вкладку здесь же. Раньше в Desktop они уходили во встроенный браузер (страница живёт на
+  // mbox://app, и боевой адрес считался чужим сайтом), а в Safari — перезагружали всё приложение.
+  useEffect(() => {
+    const onMboxLink = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor || anchor.hasAttribute("download")) return;
+      const key = mboxTabOfUrl(anchor.getAttribute("href") || "");
+      if (!key) return;
+      event.preventDefault();
+      event.stopPropagation();
+      tabsState.open(key, true);
+    };
+    document.addEventListener("click", onMboxLink, true);
+    return () => document.removeEventListener("click", onMboxLink, true);
+  }, [tabsState]);
 
   // HTTP(S)-ссылки из заметок, чата и остальных документов MBOX остаются в рабочем
   // пространстве. Служебные ссылки текущего origin и загрузки продолжают работать
@@ -431,6 +475,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
   /** Главный поиск (Ctrl+K, шапка): по всему MBOX, тексту заметок, таблицам и файлам. */
   const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [spotlightScope, setSpotlightScope] = useState<SpotlightScope>("all");
+  // Ctrl+F: поиск по тексту открытой вкладки; n растёт при повторном нажатии — поле снова берёт фокус.
+  const [domFind, setDomFind] = useState<{ root: HTMLElement; n: number } | null>(null);
+  useEffect(() => { setDomFind(null); }, [tabs.active]);
   const openSearch = useCallback(() => setSpotlightOpen(true), []);
 
   /** Консоль живёт либо во вкладке нижней панели, либо отдельной колонкой справа — как чат в VS Code. */
@@ -515,11 +563,12 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, []);
 
   async function closeTab(key: string) {
-    if (dirty[key] && !(await askConfirm({ title: "Во вкладке несохранённые правки. Закрыть?", confirmLabel: "Закрыть без сохранения", danger: true }))) return;
+    if (dirty[key] && !(await askConfirm({ title: "Во вкладке несохранённые правки. Закрыть?", confirmLabel: "Закрыть без сохранения", danger: true }))) return false;
     const nextSplitTabs = splitTabs.filter((item) => item !== key);
     setSplitTabs(nextSplitTabs);
     if (key === splitActive) setSplitActive(nextSplitTabs[0] || "");
     tabs.close(key);
+    return true;
   }
 
   // Вкладка, открытая из браузера справа, остаётся в правой группе. Через ref —
@@ -589,7 +638,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     function onKey(event: KeyboardEvent) {
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
-      if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); setSpotlightOpen((value) => !value); }
+      if (mod && !event.shiftKey && (key === "k" || key === "p")) { event.preventDefault(); setSpotlightScope("all"); setSpotlightOpen((value) => !value); }
+      // Ctrl+F — быстрый поиск по заметкам, документам и таблицам. Редактор, у которого есть свой поиск, сам гасит событие — тогда не вмешиваемся.
+      else if (mod && !event.shiftKey && !event.altKey && (key === "f" || event.code === "KeyF")) { if (event.defaultPrevented) return; event.preventDefault(); if (requestFind()) return; const root = findScope(); if (root) setDomFind((current) => ({ root, n: (current?.n ?? 0) + 1 })); else { setSpotlightScope("content"); setSpotlightOpen((value) => !value); } }
       else if (mod && event.shiftKey && (key === "f" || event.code === "KeyF")) { event.preventDefault(); openMemorySearch(); }
       else if (mod && event.code === "Backslash") { event.preventDefault(); if (splitOpen) collapseSplit(); else splitTab(tabs.active); }
       else if (mod && event.shiftKey && event.code === "KeyE") { event.preventDefault(); setActivity("explorer"); setSidebarOpen(true); }
@@ -897,8 +948,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     { id: "theme-black", title: "Тема: Чёрная", hint: "Чёрное оформление", keywords: "тема оформление black oled", run: () => window.dispatchEvent(new CustomEvent("mbox:set-theme", { detail: "black" })) },
   ] : [];
 
+  // Телефон: открытый документ — модальное окно на весь экран без нижнего меню, с одной шапкой
+  // «‹ список · название · поиск · чат · закрыть». «Назад» возвращает к списку, откуда документ открыли.
+  const phoneDoc = isPhone && Boolean(tabs.active) && tabs.tabs.length > 0 && !sidebarOpen && !consoleVisible;
+  const phoneListActivity = phoneListOf(tabs.active) ?? activity;
+  const phoneBack = () => { setActivity(phoneListActivity); setSidebarOpen(true); };
+
   return (
-    <div className={["wb", sidebarOpen ? "has-sidebar" : "", panelOpen ? "has-panel" : "", consoleDock === "right" && rightOpen ? "has-right" : ""].filter(Boolean).join(" ")} style={layoutStyle}>
+    <div className={["wb", sidebarOpen ? "has-sidebar" : "", panelOpen ? "has-panel" : "", consoleDock === "right" && rightOpen ? "has-right" : "", phoneDoc ? "is-phone-doc" : ""].filter(Boolean).join(" ")} style={layoutStyle}>
       <div className="wb-titlebar">{titleBar({
         openSearch,
         openTodo: (todoId) => tabs.open(`todo:${todoId}`, true),
@@ -965,6 +1022,18 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       <div className="wb-center" ref={centerRef}>
         <div className={splitOpen ? "wb-groups is-split" : "wb-groups"} ref={groupsRef} style={{ ["--wb-split" as string]: `${Math.round(splitRatio * 100)}%` }}>
         <section className="wb-editor" aria-label="Вкладки">
+          {phoneDoc && (
+            <header className="wb-phone-docbar">
+              <button type="button" className="wb-phone-back" onClick={phoneBack} aria-label={`Назад: ${PHONE_LIST_LABEL[phoneListActivity] ?? "список"}`}>
+                <ChevronLeft size={22} />
+                <span>{PHONE_LIST_LABEL[phoneListActivity] ?? "Назад"}</span>
+              </button>
+              <strong className="wb-phone-title">{dirty[tabs.active] ? "● " : ""}{activeTabMeta.title}</strong>
+              <button type="button" onClick={openSearch} aria-label="Поиск"><Search size={19} /></button>
+              <button type="button" onClick={() => toggleConsole(true)} aria-label="Чат с агентами"><img src="/icons/dialog.png" width={26} height={26} alt="" /></button>
+              <button type="button" onClick={async () => { phoneKeepListRef.current = true; if (await closeTab(tabs.active)) phoneBack(); else phoneKeepListRef.current = false; }} aria-label={`Закрыть ${activeTabMeta.title}`}><X size={20} /></button>
+            </header>
+          )}
           <div
             className={draggedTab && splitKeys.has(draggedTab) ? "wb-tabs is-tab-drop-target" : "wb-tabs"}
             role="tablist"
@@ -1038,6 +1107,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
             {tabs.tabs.length === 0 && (
               <div className="wb-watermark">
                 <img src="/assets/icons/icons/logo.png" width={72} height={72} alt="" />
+                <p className="wb-watermark-touch">Откройте раздел в меню внизу экрана</p>
                 <dl>
                   <dt>Поиск по памяти</dt><dd><kbd>Ctrl</kbd>+<kbd>K</kbd></dd>
                   <dt>Проекты</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></dd>
@@ -1122,15 +1192,19 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               {consoleDock === "bottom" && <PanelTabButton active={effectivePanelTab === "console"} onClick={() => setPanelTab("console")} label="Чат" badge={working.length ? "●" : undefined} />}
               <PanelTabButton active={effectivePanelTab === "attention"} onClick={() => setPanelTab("attention")} label="Внимание" badge={attentionCount || undefined} warn={needsHuman.length > 0} />
               <PanelTabButton active={effectivePanelTab === "journal"} onClick={() => setPanelTab("journal")} label="Журнал" />
+              {/* «Задачи» и «Календарь» открываются из футера; во вкладках панели виден только открытый из них. */}
+              {effectivePanelTab === "tasks" && <PanelTabButton active onClick={() => setPanelTab("tasks")} label="Задачи" />}
+              {effectivePanelTab === "calendar" && <PanelTabButton active onClick={() => setPanelTab("calendar")} label="Календарь" />}
             </div>
             <span className="wb-panel-fill" />
             {consoleDock === "bottom" && effectivePanelTab === "console" && (
               <button type="button" className="wb-icon-btn" onClick={() => dockConsole("right")} title="Перенести чат вправо"><PanelRight size={15} /></button>
             )}
+            <button type="button" className="wb-icon-btn wb-panel-refresh" onClick={() => void data.reload()} title="Обновить" aria-label="Обновить"><RefreshCw size={15} /></button>
             <button type="button" className="wb-icon-btn" onClick={() => setPanelMaximized((value) => !value)} title={panelMaximized ? "Восстановить" : "Развернуть"}>
               {panelMaximized ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
             </button>
-            <button type="button" className="wb-icon-btn" onClick={() => setPanelOpen(false)} title="Скрыть панель (Ctrl+J)"><X size={15} /></button>
+            <button type="button" className="wb-icon-btn wb-panel-close" onClick={() => setPanelOpen(false)} title="Скрыть панель (Ctrl+J)" aria-label="Закрыть"><X size={15} /></button>
           </div>
           <div className="wb-panel-body">
             {consoleDock === "bottom" && <div className="wb-panel-pane is-console" hidden={effectivePanelTab !== "console"}>{chat}</div>}
@@ -1163,6 +1237,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               </div>
             )}
             {effectivePanelTab === "journal" && <div className="wb-panel-pane is-journal" data-scroll-scope="panel:journal">{renderers.history()}</div>}
+            {effectivePanelTab === "tasks" && <div className="wb-panel-pane"><TasksPanel /></div>}
+            {effectivePanelTab === "calendar" && <div className="wb-panel-pane"><CalendarPanel /></div>}
           </div>
         </section>
       </div>
@@ -1181,9 +1257,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <i className="wb-state-dot" />{status.label}
         </button>
         <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
-          <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />{working.length > 0 ? ` ${working.length} ${plural(working.length, "агент", "агента", "агентов")} в работе` : ""}
+          <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
         </button>
         <span className="wb-status-fill" />
+        <button type="button" className={panelOpen && panelTab === "tasks" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => showPanel("tasks")} title="Личные задачи"><CheckSquare size={12} /> Задачи</button>
+        <button type="button" className={panelOpen && panelTab === "calendar" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => showPanel("calendar")} title="Календарь"><CalendarDays size={12} /> Календарь</button>
         {attentionCount > 0 && (
           <button type="button" className={needsHuman.length ? "wb-status-item is-warn" : "wb-status-item"} onClick={() => showPanel("attention")} title="Требует внимания">
             <AlertTriangle size={12} /> {attentionCount}
@@ -1236,12 +1314,22 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <button type="button" role="menuitem" onClick={() => { tabs.open(browserBlankTabKey(), true); setRailMenu(null); }}>Новая вкладка</button>
         </WbMenu>
       )}
-      {spotlightOpen && <Spotlight open onClose={() => setSpotlightOpen(false)} tabs={tabs} commands={spotlightCommands} />}
+      {domFind && <DomFind root={domFind.root} focusKey={domFind.n} onClose={() => setDomFind(null)} />}
+      {spotlightOpen && <Spotlight open scope={spotlightScope} onClose={() => setSpotlightOpen(false)} tabs={tabs} commands={spotlightCommands} />}
     </div>
   );
 }
 
 /** Полоса разделов прокручивается и обрезала бы подсказку — она стоит от окна, по месту кнопки (hig.css). */
+/** Где искать по Ctrl+F: в нижней панели, если фокус в ней (чат, журнал), иначе на странице открытой вкладки. */
+function findScope(): HTMLElement | null {
+  const active = document.activeElement;
+  const panel = active?.closest<HTMLElement>(".wb-panel");
+  if (panel) return panel;
+  const pages = Array.from(document.querySelectorAll<HTMLElement>(".wb-doc:not([hidden])"));
+  return pages.find((page) => page.contains(active)) ?? pages[0] ?? null;
+}
+
 function placeActivityTip(event: { currentTarget: HTMLElement }) {
   const rect = event.currentTarget.getBoundingClientRect();
   event.currentTarget.style.setProperty("--tip-left", `${Math.round(rect.right + 8)}px`);
@@ -1289,6 +1377,7 @@ function ArtifactsTab({ data }: { data: MboxData }) {
 const STALE_AGENT_MS = 24 * 60 * 60 * 1000;
 
 function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
+  const usage = useAgentUsage();
   const [showStale, setShowStale] = usePersistentState("mbox.agents.showStale", false);
   const [busy, setBusy] = useState("");
   const desktop = useDesktopSessions();
@@ -1388,7 +1477,10 @@ function AgentsView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
                   <AgentAvatar name={agent.name} status={status} live={live} size={28} />
                   <div className="wb-agent-main">
                     <strong><AgentName name={agent.name} /><small>{isCloudAgent(agent.name) ? "сервер MBOX" : agentClientLabel(agent.client || agent.kind)}</small></strong>
-                    <span className={live ? "is-live" : status === "active" ? "is-ok" : undefined}>{stateText}</span>
+                    <div className="wb-agent-statusline">
+                      <span className={live ? "is-live" : status === "active" ? "is-ok" : undefined}>{stateText}</span>
+                      <UsageRing usage={usageOf(usage, agent.name)} />
+                    </div>
                   </div>
                   <div className="wb-agent-actions">
                     <button type="button" onClick={() => openChat(agent.name)} title="Открыть чат">

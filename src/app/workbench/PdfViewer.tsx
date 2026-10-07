@@ -1,3 +1,4 @@
+import { useFindRequest } from "../../hooks/useFindRequest";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Download, Highlighter, Moon, PanelLeft, Pencil, Redo2, RotateCw, Save, Search, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 // Сборка legacy: MBOX Desktop работает на Chromium 130, а обычная сборка pdf.js 6 требует более новых методов Map.
@@ -223,12 +224,14 @@ export default function PdfViewer({ source, version, name, memoryKey, onSave, on
     bus.current?.dispatch("find", { source: null, type: again ? "again" : "", query: query_, caseSensitive: false, entireWord: false, highlightAll: true, findPrevious: previous, matchDiacritics: false });
   }
 
-  // Горячие клавиши: Ctrl+F — поиск, Ctrl+S — сохранить.
+  // Ctrl+F — поиск по PDF, если он на виду (вкладка не скрыта).
+  useFindRequest(() => !!containerRef.current?.checkVisibility?.(), () => { setFindOpen(true); window.setTimeout(() => findInput.current?.select(), 0); });
+
+  // Горячие клавиши: Ctrl+S — сохранить, Esc — закрыть поиск.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const inside = containerRef.current?.closest(".wb-pdf-viewer")?.contains(document.activeElement) || document.activeElement === document.body;
       if (!inside) return;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") { event.preventDefault(); setFindOpen(true); window.setTimeout(() => findInput.current?.select(), 0); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && onSave) { event.preventDefault(); void save(); }
       if (event.key === "Escape" && findOpen) { setFindOpen(false); runFind("", false); }
     };

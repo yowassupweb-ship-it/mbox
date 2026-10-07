@@ -65,6 +65,19 @@ const BUILTIN = {
     headers: (values) => ({ authorization: `OAuth ${values.token}` }),
     test: { method: "GET", path: "management/v1/counters", query: { per_page: 1 } },
   },
+  yandex_wordstat: {
+    label: "Яндекс Wordstat",
+    base: "https://api.wordstat.yandex.net",
+    docs: "https://yandex.ru/support/wordstat/ru/content/api-structure",
+    defaultMethod: "POST",
+    hint: "Частотность запросов. Все методы — POST с JSON в body: v1/topRequests {phrase, numPhrases, regions}, v1/dynamics {phrase, period: daily|weekly|monthly, fromDate}, v1/regions {phrase, regionType}, v1/getRegionsTree (без квоты). Лимит 10 запросов в секунду и 1000 в сутки. OAuth-токен с правом wordstat:api.",
+    fields: [
+      { key: "token", label: "OAuth-токен", secret: true, secretName: "wordstat_token", env: "YANDEX_WORDSTAT_TOKEN" },
+    ],
+    required: ["token"],
+    headers: (values) => ({ authorization: `Bearer ${values.token}` }),
+    test: { method: "POST", path: "v1/getRegionsTree", body: {} },
+  },
 };
 
 /** API Google с входом владельца (карточка «Google» в настройках): ключ не нужен, токен подставляется по OAuth. */

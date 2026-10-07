@@ -15,3 +15,12 @@ export function handleDocumentsApi(input: {
   scope?: { all?: boolean; projectIds?: string[]; userId?: string };
   broadcast?: (type: string, payload: Record<string, unknown>) => void;
 }): Promise<boolean>;
+export function handleSharedDocumentApi(input: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  query: Query;
+  readBody: (req: IncomingMessage) => Promise<any>;
+  sendJson: (res: ServerResponse, status: number, body: unknown) => void;
+  broadcast?: (type: string, payload: Record<string, unknown>) => void;
+}): Promise<boolean>;

@@ -2066,3 +2066,16 @@
 .cli-auth-row button:hover:not(:disabled),
 .cli-auth-link:hover { background: var(--surface-hover); }
 .cli-auth-row button:disabled { opacity: .68; cursor: default; }
+
+/* Выпадающие списки поверх всего: портал в .wb и координаты окна (см. components/AnchoredPopover.tsx).
+   Высоту и положение считает компонент по свободному месту, поэтому прежние absolute-правила снимаются. */
+.anchored-popover { position: fixed; z-index: 300; overflow: auto; max-width: calc(100vw - 16px); overscroll-behavior: contain; }
+.console-picker-menu.anchored-popover { bottom: auto; right: auto; max-height: none; }
+.console-picker-note { margin: 4px 0 0; padding: 6px 8px 4px; border-top: 1px solid var(--border-color); color: var(--text-muted); font-size: var(--text-xs); line-height: 1.35; white-space: normal; }
+/* Меню переписок как всплывающее поверх всего: вне .console-threads прежнее правило не действует, оформление то же. */
+.console-thread-menu.anchored-popover { padding: 4px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-raised); box-shadow: var(--float); max-height: none; min-width: 240px; max-width: min(420px, calc(100vw - 16px)); }
+
+/* Ответ агента сдвинут на ширину аватара (margin-left 26px), поэтому его потолок — колонка минус этот сдвиг.
+   С max-width: 100% таблицы, код и длинные ссылки выталкивали ответ за правый край телефона. */
+.console-log-line.in .console-bubble { max-width: min(calc(100% - 26px), 760px); }
+.console-log-line.in .console-bubble > * { max-width: 100%; }

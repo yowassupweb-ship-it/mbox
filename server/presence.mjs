@@ -19,6 +19,21 @@ const ALLOWED_STATE = ["sheet", "cell", "range", "anchor", "head", "field", "typ
 const PALETTE = ["#e5484d", "#f76b15", "#ca8a04", "#30a46c", "#12a594", "#0091ff", "#6e56cf", "#d6409f"];
 const colorOf = (key) => PALETTE[[...String(key)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 7) % PALETTE.length];
 
+export async function resolveSharedPresence(query, kind, token) {
+  if (!/^(note|table|doc)$/.test(String(kind)) || !/^[A-Za-z0-9_-]{24,64}$/.test(String(token))) return null;
+  const specs = {
+    note: ["note_shares", "notes", "note_id"],
+    table: ["table_shares", "tables", "table_id"],
+    doc: ["document_link_shares", "documents", "document_id"],
+  };
+  const [shares, entities, idColumn] = specs[kind];
+  const row = (await query(
+    `SELECT s.mode, e.id::text AS entity_id FROM ${shares} s JOIN ${entities} e ON e.id = s.${idColumn} WHERE s.token = $1`,
+    [token],
+  )).rows[0];
+  return row ? { doc: `${kind}:${row.entity_id}`, mode: row.mode } : null;
+}
+
 function cleanState(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const state = {};
@@ -36,6 +51,7 @@ export function createPresenceHub({ query, scopeFor }) {
   let counter = 0;
 
   async function allowed(socket, doc) {
+    if (socket.shareDoc) return socket.shareDoc === doc;
     const [, kind, id] = doc.match(DOC_KEY);
     const user = socket.mboxUser;
     if (!user) return false;
@@ -52,7 +68,7 @@ export function createPresenceHub({ query, scopeFor }) {
     if (!room) return [];
     return [...room]
       .filter((socket) => socket !== receiver && socket.readyState === 1)
-      .map((socket) => ({ id: socket.presenceId, user_id: socket.mboxUserId, name: socket.mboxName || "Участник", color: colorOf(socket.mboxUserId), state: socket.presenceStates.get(doc) ?? {} }));
+      .map((socket) => ({ id: socket.presenceId, user_id: socket.mboxUserId || socket.presenceId, name: socket.mboxName || "Участник", color: colorOf(socket.mboxUserId || socket.presenceId), state: socket.presenceStates.get(doc) ?? {} }));
   }
 
   function broadcast(doc) {
@@ -99,13 +115,30 @@ export function createPresenceHub({ query, scopeFor }) {
   }
 
   return {
-    attach(socket) {
+    attach(socket, share = null) {
       socket.presenceId = `p${(counter += 1).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      if (share) {
+        socket.shareDoc = share.doc;
+        socket.shareToken = share.token;
+        socket.shareKind = share.kind;
+        const names = new Set([...(rooms.get(share.doc) || [])].filter((item) => item.shareDoc).map((item) => item.mboxName));
+        let guestNumber = 1;
+        while (names.has(`Гость ${guestNumber}`)) guestNumber += 1;
+        socket.mboxName = `Гость ${guestNumber}`;
+        socket.mboxUserId = socket.presenceId;
+        socket.shareTimer = setInterval(async () => {
+          try {
+            const current = await resolveSharedPresence(query, socket.shareKind, socket.shareToken);
+            if (!current || current.doc !== socket.shareDoc) socket.close(1008, "share_revoked");
+          } catch { socket.close(1011, "share_check_failed"); }
+        }, 5000);
+        socket.shareTimer.unref?.();
+      }
       socket.presenceStates = new Map();
       socket.presenceWindow = 0;
       socket.presenceCount = 0;
       socket.on("message", (data) => { void onMessage(socket, data); });
-      socket.on("close", () => drop(socket));
+      socket.on("close", () => { if (socket.shareTimer) clearInterval(socket.shareTimer); drop(socket); });
     },
     /** Правка агента: уходит только тем, кто сейчас в этом документе. */
     announce(payload) {

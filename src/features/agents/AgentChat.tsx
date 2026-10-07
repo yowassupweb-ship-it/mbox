@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { AnchoredPopover } from "../../components/AnchoredPopover";
 import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, Check, ChevronDown, ChevronRight, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, Star, StickyNote, Table2, Wrench, X } from "lucide-react";
 import { describeStep, isAccessError, stepsDigest } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
@@ -6,6 +7,7 @@ import { NeedsAnswer } from "./NeedsAnswer";
 import { CliAuthBanner } from "./CliAuthBanner";
 import { agentFamily, effectiveStatus, liveRunOf, CLOUD_AGENTS, agentDisplayName, isCloudAgent } from "../../lib/agents";
 import { fetchJson } from "../../lib/api";
+import { mboxTabOfUrl } from "../../lib/mboxLinks";
 import { formatSince, plural } from "../../lib/format";
 import type { AgentActivity, AgentInboxItem, AgentRun, Artifact, Project } from "../../types";
 import { scopedStorageKey, usePersistentState } from "../../app/workbench/tabs";
@@ -13,7 +15,6 @@ import { useDraft } from "../../app/workbench/uiMemory";
 import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { AGENT_INBOX_ITEM_EVENT, AGENT_STEP_EVENT } from "../../hooks/useRealtime";
-import { markOverlay } from "../../app/workbench/BrowserDocument";
 import { formatBytes } from "../../lib/format";
 import type { ChatDebug } from "../../app/workbench/ConsoleArea";
 import { ChatHeadSlot } from "../../app/workbench/chatHeadSlot";
@@ -120,20 +121,8 @@ function parseMention(raw: string): string {
 }
 
 // Ссылки идут первыми: внутри URL бывают «_» и «*», которые иначе съел бы курсив.
-const MARKDOWN_TOKEN = /(\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?»"'`]|\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|(?<!\w)_[^_\n]+_(?!\w))/g;
+const MARKDOWN_TOKEN = /(\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?»"'`]|\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\p{L}\p{N}_*])\*[^*\n]+\*(?![\p{L}\p{N}_*])|(?<![\p{L}\p{N}_])_[^_\n]+_(?![\p{L}\p{N}_]))/gu;
 const MARKDOWN_LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
-
-/** Ключ вкладки рабочего места из ссылки на MBOX: «/?tab=file:9» или «https://<сервер MBOX>/?tab=file:9». */
-function workbenchTabOf(href: string) {
-  try {
-    const url = new URL(href, serverOrigin());
-    const sameServer = url.origin === serverOrigin() || url.origin === window.location.origin;
-    const tab = url.searchParams.get("tab");
-    return sameServer && tab && url.pathname === "/" ? tab : null;
-  } catch {
-    return null;
-  }
-}
 
 /** Локальный путь из markdown-ссылки, file:// URL или `инлайн-кода`. */
 function localPathOf(href: string) {
@@ -150,7 +139,7 @@ function localPathOf(href: string) {
 function ChatLink({ href, children }: { href: string; children: ReactNode }) {
   const localPath = localPathOf(href);
   if (!localPath && !/^(https?:\/\/|\/)/i.test(href)) return <>{children}</>;
-  const tab = workbenchTabOf(href);
+  const tab = mboxTabOfUrl(href);
   const absolute = href.startsWith("/") ? `${serverOrigin()}${href}` : href;
   return (
     <a
@@ -493,7 +482,20 @@ type JarvisCatalog = {
   defaultModel: string;
   defaults: Record<string, string>;
   defaultEffort: string;
+  /** Откуда взят набор моделей каждого агента: live — прислал его CLI, иначе запасной список из кода сервера. */
+  sources: Record<string, { source?: string; fetched_at?: string; live?: boolean }>;
 };
+
+/** Подпись под списком моделей: свежий ли каталог и что делать, если нет. */
+function catalogNote(info?: { fetched_at?: string; live?: boolean }) {
+  if (!info) return "";
+  if (!info.live) return "Запасной список: агент ещё не присылал свои модели. Запустите агента — список обновится сам.";
+  const at = info.fetched_at ? new Date(info.fetched_at) : null;
+  if (!at || Number.isNaN(at.getTime())) return "";
+  const when = at.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const stale = Date.now() - at.getTime() > 36 * 3600_000;
+  return stale ? `Список от ${when} давно не обновлялся. Запустите агента, чтобы подтянуть новые модели.` : `Список из CLI агента, ${when}.`;
+}
 
 /** Один шаг работы агента: вызов инструмента с аргументами и результатом либо реплика между шагами. */
 type ChainStep = {
@@ -575,7 +577,7 @@ type PickerOption = { value: string; label: string; hint?: string };
  * подписи-пояснения и markOverlay, который убирает страницу браузера, пока список открыт.
  * Раскрывается вверх — поле ввода стоит у нижнего края.
  */
-function ComposerPicker({ label, value, onChange, options, placeholder, defaultValue = "" }: {
+function ComposerPicker({ label, value, onChange, options, placeholder, defaultValue = "", footnote = "" }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -583,33 +585,20 @@ function ComposerPicker({ label, value, onChange, options, placeholder, defaultV
   placeholder: string;
   /** Вариант, который сработает сам собой: он и есть строка «по умолчанию», в списке не повторяется. */
   defaultValue?: string;
+  /** Пояснение под списком (например, свежесть каталога моделей). */
+  footnote?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const current = options.find((item) => item.value === value);
   const rest = options.filter((item) => item.value !== defaultValue);
-
-  useEffect(() => {
-    if (!open) return;
-    markOverlay(true);
-    const onDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); } };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      markOverlay(false);
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
 
   const pick = (next: string) => { onChange(next); setOpen(false); };
 
   return (
-    <div className="console-picker" ref={rootRef}>
+    <div className="console-picker">
       <button
+        ref={buttonRef}
         type="button"
         className={open ? "console-picker-btn is-open" : "console-picker-btn"}
         onClick={() => setOpen((value) => !value)}
@@ -622,7 +611,7 @@ function ComposerPicker({ label, value, onChange, options, placeholder, defaultV
         <ChevronDown size={12} />
       </button>
       {open && (
-        <div className="console-picker-menu" role="listbox" aria-label={label}>
+        <AnchoredPopover anchorRef={buttonRef} onClose={() => setOpen(false)} align="end" prefer="auto" className="console-picker-menu" label={label}>
           <button type="button" role="option" aria-selected={!value} className={!value ? "is-current" : undefined} onClick={() => pick("")}>
             <span>
               <strong>{placeholder}</strong>
@@ -646,7 +635,8 @@ function ComposerPicker({ label, value, onChange, options, placeholder, defaultV
               {item.value === value && <Check size={13} />}
             </button>
           ))}
-        </div>
+          {footnote && <p className="console-picker-note">{footnote}</p>}
+        </AnchoredPopover>
       )}
     </div>
   );
@@ -1117,13 +1107,15 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [mutedFocus, setMutedFocus] = useState<string[]>([]);
   const composerFocus = useMemo(() => uniqueFocus(focus), [focus]);
   const sharedFocus = composerFocus.filter((item) => !mutedFocus.includes(item.key));
-  const [catalog, setCatalog] = useState<JarvisCatalog>({ models: [], efforts: [], effortLabels: {}, defaultModel: "", defaults: {}, defaultEffort: "" });
+  const [catalog, setCatalog] = useState<JarvisCatalog>({ models: [], efforts: [], effortLabels: {}, defaultModel: "", defaults: {}, defaultEffort: "", sources: {} });
   // Текущий чат у каждого собеседника свой; пусто — старый общий чат без thread.
   const [thread, setThread] = usePersistentState(peer ? `mbox.chat.thread:${peer}` : "mbox.chat.thread", "");
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadMenu, setThreadMenu] = useState(false);
   // Выбор «локальный / в облаке» у кнопки «Новый чат» — только когда облачный агент на связи.
   const [newChatMenu, setNewChatMenu] = useState(false);
+  const threadButtonRef = useRef<HTMLButtonElement | null>(null);
+  const newChatButtonRef = useRef<HTMLButtonElement | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   // Сообщения выбранного чата, которых нет среди 200 последних в общем inbox (старый чат).
   const [threadInbox, setThreadInbox] = useState<AgentInboxItem[]>([]);
@@ -1141,7 +1133,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     // Каталог публикуют наблюдатели при старте — перечитываем при возврате в окно и раз в 5 минут,
     // иначе чат, открытый раньше публикации, так и показывал бы запасной список.
     const load = () => fetchJson<Partial<JarvisCatalog> & { default_model?: string; default_effort?: string; effort_labels?: JarvisCatalog["effortLabels"] }>("/api/mbox/agent/models")
-      .then((data) => { if (alive) setCatalog({ models: data.models || [], efforts: data.efforts || [], effortLabels: data.effort_labels || {}, defaultModel: data.default_model || "", defaults: data.defaults || {}, defaultEffort: data.default_effort || "" }); })
+      .then((data) => { if (alive) setCatalog({ models: data.models || [], efforts: data.efforts || [], effortLabels: data.effort_labels || {}, defaultModel: data.default_model || "", defaults: data.defaults || {}, defaultEffort: data.default_effort || "", sources: data.sources || {} }); })
       .catch(() => { /* старый сервер без этой ручки — просто нет выбора, как раньше */ });
     void load();
     const timer = window.setInterval(load, 5 * 60_000);
@@ -1990,7 +1982,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 }}
               />
             ) : (
-              <button type="button" className="console-thread-current" onClick={() => (threadsAside ? thread && setRenaming(thread) : setThreadMenu((value) => !value))} onDoubleClick={() => thread && setRenaming(thread)} aria-expanded={threadsAside ? undefined : threadMenu} title={threadsAside ? "Переименовать чат" : "Все чаты · двойной щелчок — переименовать"}>
+              <button ref={threadButtonRef} type="button" className="console-thread-current" onClick={() => (threadsAside ? thread && setRenaming(thread) : setThreadMenu((value) => !value))} onDoubleClick={() => thread && setRenaming(thread)} aria-expanded={threadsAside ? undefined : threadMenu} title={threadsAside ? "Переименовать чат" : "Все чаты · двойной щелчок — переименовать"}>
                 <span className="console-thread-title">{thread ? currentThread?.title || "Новый чат" : "Старая переписка"}</span>
                 {cloudChat && <Cloud className="agent-cloud-mark" size={12} strokeWidth={2.2} aria-label="в облаке" />}
                 {!threadsAside && <ChevronDown size={13} />}
@@ -2006,6 +1998,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               </div>
             )}
             <button
+              ref={newChatButtonRef}
               type="button"
               className={newChatMenu ? "console-thread-icon is-on" : "console-thread-icon"}
               onClick={() => (cloudOnline ? setNewChatMenu((value) => !value) : startNewChat("local"))}
@@ -2016,14 +2009,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               <MessageSquarePlus size={15} />
             </button>
             {newChatMenu && cloudOnline && (
-              <div className="console-thread-menu console-new-chat-menu" role="menu">
+              <AnchoredPopover anchorRef={newChatButtonRef} onClose={() => setNewChatMenu(false)} align="end" prefer="down" className="console-thread-menu console-new-chat-menu" role="menu" label="Новый чат">
                 <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("local")}>
                   <Monitor size={14} /> Локальный · на этом компьютере
                 </button>
                 <button type="button" role="menuitem" className="console-thread-menu-new" onClick={() => startNewChat("cloud")}>
                   <Cloud size={14} /> В облаке · работает без компьютера
                 </button>
-              </div>
+              </AnchoredPopover>
             )}
             {debug && (
               <button
@@ -2039,9 +2032,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               </button>
             )}
             {threadMenu && !threadsAside && (
-              <div className="console-thread-menu" role="menu">
+              <AnchoredPopover anchorRef={threadButtonRef} onClose={() => setThreadMenu(false)} align="start" prefer="down" minWidth={260} className="console-thread-menu" role="menu" label="Все чаты">
                 {threadList}
-              </div>
+              </AnchoredPopover>
             )}
           </div>)}
 
@@ -2303,6 +2296,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                       placeholder={defaultModelLabel}
                       defaultValue={shownDefaultModel}
                       options={shownModels.map((item) => ({ value: item.id, label: item.label }))}
+                      footnote={catalogNote(Object.entries(catalog.sources).find(([agent]) => agent.toLowerCase() === (addressee === "codex" ? "chatgpt" : addressee))?.[1])}
                     />
                   )}
                   {shownEfforts.length > 0 && (

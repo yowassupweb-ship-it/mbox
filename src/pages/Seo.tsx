@@ -1,6 +1,9 @@
 import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Download, ExternalLink, Play, Plus, RefreshCw, Search, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchJson, fetchOr } from "../lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ApiError, fetchJson, fetchOr } from "../lib/api";
+import { SeoFlow } from "./seo/SeoFlow";
+import { SeoStrategyView } from "./seo/SeoStrategy";
+import type { LiveRun, RunStatus, ScenarioState, Strategy } from "./seo/seoTypes";
 import { OctopusSpinner } from "../components/OctopusSpinner";
 
 /**
@@ -31,6 +34,7 @@ type SeoSettings = {
     webmaster_host_id: string;
     metrica_counter_id: string;
     metrica_goals: { lead: string; booking: string };
+    metrica_counters?: MetricaCounter[];
     wordstat_access: string;
     section_roles: Record<string, string>;
     filter_policy: { indexed: string; closed: string };
@@ -39,6 +43,10 @@ type SeoSettings = {
   };
   has_secrets: Record<string, boolean>;
 };
+type MetricaGoalRole = "" | "lead" | "booking" | "track";
+type MetricaGoal = { id: string; name: string; type: string; role: MetricaGoalRole; description: string; missing?: boolean };
+type MetricaCounter = { id: string; name: string; site: string; goals: MetricaGoal[] };
+type MetricaCatalog = { ok: boolean; error?: string; counters?: Array<{ id: string; name: string; site: string }>; goals?: Record<string, Array<{ id: string; name: string; type: string }>>; errors?: Record<string, string> };
 type FilterParam = { param: string; example: string; own_url: string; index: string; canonical: string; link: string };
 
 const EMPTY_SETTINGS: SeoSettings = {
@@ -68,6 +76,8 @@ type Tab = { id: string; label: string; views?: Array<{ id: string; label: strin
 
 /** Вкладки — по направлениям презентации (01–07) и ритму недели/месяца из стратегии. */
 const TABS: Tab[] = [
+  { id: "scenario", label: "Сценарий" },
+  { id: "strategy", label: "Стратегия" },
   { id: "overview", label: "Обзор" },
   { id: "week", label: "Неделя", views: [{ id: "queue", label: "Очередь недели" }, { id: "decisions", label: "Решения" }, { id: "changes", label: "Журнал изменений" }] },
   { id: "architecture", label: "Архитектура", views: [{ id: "registry", label: "Реестр URL" }, { id: "index", label: "Состав индекса" }, { id: "filters", label: "Query и фильтры" }, { id: "links", label: "Внутренние ссылки" }] },
@@ -142,6 +152,12 @@ function downloadCsv(section: Section) {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+/** Текст ошибки для человека: код из ответа сервера, а не безликое «request_failed:500». */
+function errorText(cause: unknown) {
+  if (cause instanceof ApiError) return cause.code ? `Сервер ответил ошибкой ${cause.status}: ${cause.code}` : `Сервер ответил ошибкой ${cause.status}`;
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 export function SeoBoard({ toolId = "topvisor-api", mode = "tool" }: { toolId?: string; mode?: "tool" | "dashboard" }) {
   if (mode === "dashboard") return <SeoWizard />;
   const tool = (toolId in TOOL_META ? toolId : "topvisor-api") as SeoToolId;
@@ -151,7 +167,7 @@ export function SeoBoard({ toolId = "topvisor-api", mode = "tool" }: { toolId?: 
 // ─── Рабочее место ────────────────────────────────────────────────────────────
 
 function SeoWizard() {
-  const [tab, setTab] = useState(() => localStorage.getItem("mbox.seo.tab") || "overview");
+  const [tab, setTab] = useState(() => localStorage.getItem("mbox.seo.tab") || "scenario");
   const [views, setViews] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem("mbox.seo.views") || "{}"); } catch { return {}; }
   });
@@ -162,6 +178,9 @@ function SeoWizard() {
   const [cache, setCache] = useState<Record<string, ViewData>>({});
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<SeoSettings>(EMPTY_SETTINGS);
+  const [scenarioState, setScenarioState] = useState<ScenarioState | null>(null);
+  const [strategy, setStrategy] = useState<Strategy | null>(null);
+  const [live, setLive] = useState<LiveRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState("");
   const [error, setError] = useState("");
@@ -174,10 +193,21 @@ function SeoWizard() {
 
   const loadView = useCallback(async (id: string, force = false) => {
     setError("");
+    if (id === "scenario") {
+      setLoading(true);
+      try { setScenarioState(await fetchJson<ScenarioState>("/api/mbox/seo/scenario")); } catch (cause) { setError(errorText(cause)); } finally { setLoading(false); }
+      return;
+    }
+    if (id === "strategy") {
+      if (strategy && !force) return;
+      setLoading(true);
+      try { setStrategy(await fetchJson<Strategy>("/api/mbox/seo/strategy")); } catch (cause) { setError(errorText(cause)); } finally { setLoading(false); }
+      return;
+    }
     if (id === "overview") {
       if (dashboard && !force) return;
       setLoading(true);
-      try { setDashboard(await fetchJson<Dashboard>("/api/mbox/seo/dashboard")); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setLoading(false); }
+      try { setDashboard(await fetchJson<Dashboard>("/api/mbox/seo/dashboard")); } catch (cause) { setError(errorText(cause)); } finally { setLoading(false); }
       return;
     }
     if (id === "settings" || id === "data") return;
@@ -187,11 +217,11 @@ function SeoWizard() {
       const data = await fetchJson<ViewData>(`/api/mbox/seo/view/${id}`);
       setCache((value) => ({ ...value, [id]: data }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorText(cause));
     } finally {
       setLoading(false);
     }
-  }, [cache, dashboard]);
+  }, [cache, dashboard, strategy]);
 
   useEffect(() => { void loadView(viewId); }, [viewId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void fetchOr<SeoSettings>("/api/mbox/seo/settings", EMPTY_SETTINGS).then(setSettings); }, []);
@@ -199,21 +229,57 @@ function SeoWizard() {
   const refresh = () => {
     setCache({});
     setDashboard(null);
+    setStrategy(null);
     void loadView(viewId, true);
   };
 
+  // Сбор идёт минуты, поэтому сервер отвечает сразу (202), а экран опрашивает состояние: страницу можно закрыть,
+  // сбор продолжится, а при возвращении экран подхватит идущий.
+  const finishRef = useRef<() => void>(() => undefined);
+  const pollNow = useRef<() => void>(() => undefined);
+  const refreshAfterRun = useCallback(() => {
+    setCache({});
+    setDashboard(null);
+    setStrategy(null);
+    void loadView(viewId, true);
+  }, [loadView, viewId]);
+  finishRef.current = refreshAfterRun;
+
+  useEffect(() => {
+    let stopped = false;
+    let timer = 0;
+    let wasLive = false;
+    const poll = async () => {
+      try {
+        const status = await fetchJson<RunStatus>("/api/mbox/seo/run/status");
+        if (stopped) return;
+        setLive(status.live);
+        setRunning(status.live ? status.live.scenario : "");
+        if (status.live) wasLive = true;
+        else if (wasLive) {
+          wasLive = false;
+          if (status.last?.status === "error") setError(`Сбор закончился ошибкой: ${status.last.errors?.[0]?.message || "см. прогоны на вкладке «Сервер»"}`);
+          finishRef.current();
+        }
+        timer = window.setTimeout(poll, status.live ? 2000 : 15000);
+      } catch {
+        if (!stopped) timer = window.setTimeout(poll, 15000);
+      }
+    };
+    pollNow.current = () => { window.clearTimeout(timer); void poll(); };
+    void poll();
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, []);
+
   async function runScenario(scenario: string) {
-    setRunning(scenario);
     setError("");
     try {
-      await fetchJson("/api/mbox/seo/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario, buildPackage: true }) });
-      setCache({});
-      setDashboard(null);
-      await loadView(viewId, true);
+      const started = await fetchJson<LiveRun>("/api/mbox/seo/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario, buildPackage: true }) });
+      setLive(started);
+      setRunning(started.scenario);
+      pollNow.current();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setRunning("");
+      setError(errorText(cause));
     }
   }
 
@@ -224,7 +290,7 @@ function SeoWizard() {
       await work();
       await loadView(reload, true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorText(cause));
     } finally {
       setBusy("");
     }
@@ -256,7 +322,7 @@ function SeoWizard() {
     running,
   };
 
-  const data = viewId !== "overview" ? cache[viewId] : undefined;
+  const data = viewId !== "overview" && viewId !== "scenario" && viewId !== "strategy" ? cache[viewId] : undefined;
   const tableTabs = data ? [
     ...data.sections.map((item) => ({ id: item.id, label: tableLabel(item) })),
     ...(viewId === "scenarios" ? [{ id: SOURCES_TABLE, label: "Источники данных" }] : []),
@@ -272,7 +338,7 @@ function SeoWizard() {
             <RefreshCw size={15} className={loading ? "is-spinning" : undefined} /> Обновить
           </button>
           <button type="button" className="is-primary" onClick={() => void runScenario("step1")} disabled={Boolean(running)} title="Сервер скачает sitemap, проверит страницы и соберёт пакет понедельника">
-            <Play size={15} /> {running === "step1" ? "Сбор идёт…" : "Собрать данные"}
+            <Play size={15} /> {running ? "Сбор идёт…" : "Собрать данные"}
           </button>
         </div>
       </header>
@@ -304,13 +370,15 @@ function SeoWizard() {
       )}
 
       {error && <p className="seo-error" role="alert">{error}</p>}
-      {running && <p className="seo-running" role="status">Сервер собирает данные: sitemap, проверка страниц, детекторы, пакет. Это до четырёх минут.</p>}
+
 
       <div className="seo-body">
+        {viewId === "scenario" && (scenarioState ? <SeoFlow state={scenarioState} running={live} onRun={(scenario) => void runScenario(scenario)} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
+        {viewId === "strategy" && (strategy ? <SeoStrategyView data={strategy} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
         {viewId === "overview" && (dashboard ? <SeoDashboard data={dashboard} actions={actions} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
         {viewId === "settings" && <SeoScenarioSettings settings={settings} onSave={saveConfig} />}
         {viewId === "data" && <SeoRawData />}
-        {viewId !== "overview" && viewId !== "settings" && viewId !== "data" && (data ? (
+        {viewId !== "scenario" && viewId !== "strategy" && viewId !== "overview" && viewId !== "settings" && viewId !== "data" && (data ? (
           <>
             {viewId === "outreach" && <OutreachForm onSaved={() => loadView("outreach", true)} />}
             {viewId === "changes" && <ChangeForm onSaved={() => loadView("changes", true)} />}
@@ -779,6 +847,14 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
       setSaving(false);
     }
   };
+  // Перед запросом к Метрике сохраняется только новый токен: счётчики и цели остаются в форме до «Сохранить»,
+  // иначе ответ сервера перезаписал бы только что добавленный счётчик.
+  const saveSecrets = async () => {
+    if (!Object.values(secrets).some((value) => value.trim())) return;
+    const data = await fetchJson<SeoSettings>("/api/mbox/seo/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ config: {}, secrets }) });
+    setSettings((value) => ({ ...value, has_secrets: data.has_secrets }));
+    setSecrets({});
+  };
   const c = settings.config;
   return (
     <div className="seo-board">
@@ -812,15 +888,13 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
           </>}
           {tool === "metrica-api" && <>
             <SecretField label="Токен Метрики" name="metrica_token" secrets={secrets} has={settings.has_secrets.metrica_token} onChange={setSecrets} />
-            <Field label="Номер счётчика" value={c.metrica_counter_id} onChange={(metrica_counter_id) => patch({ metrica_counter_id })} />
-            <Field label="Цель «заявка»" value={c.metrica_goals.lead} onChange={(lead) => patch({ metrica_goals: { ...c.metrica_goals, lead } })} />
-            <Field label="Цель «бронирование»" value={c.metrica_goals.booking} onChange={(booking) => patch({ metrica_goals: { ...c.metrica_goals, booking } })} />
           </>}
           {tool === "webmaster-api" && <>
             <SecretField label="Токен Вебмастера" name="webmaster_token" secrets={secrets} has={settings.has_secrets.webmaster_token} onChange={setSecrets} />
             <Field label="ID хоста" value={c.webmaster_host_id} onChange={(webmaster_host_id) => patch({ webmaster_host_id })} />
           </>}
         </div>
+        {tool === "metrica-api" && <MetricaCounters counters={c.metrica_counters || []} onChange={(metrica_counters) => patch({ metrica_counters })} saveFirst={saveSecrets} />}
         {tool === "topvisor-api" && (
           <fieldset className="seo-checks">
             <legend>Модули на тарифе</legend>
@@ -843,6 +917,125 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
         </div>
       </form>
     </div>
+  );
+}
+
+const GOAL_ROLES: Array<{ value: MetricaGoalRole; label: string }> = [
+  { value: "", label: "не собирать" },
+  { value: "lead", label: "заявка" },
+  { value: "booking", label: "бронирование" },
+  { value: "track", label: "собирать, не заявка" },
+];
+const METRICA_MAX_GOALS = 16;
+
+/** Цели счётчика из Метрики поверх сохранённых: роль и описание сохраняются по ID, пропавшие из Метрики помечаются. */
+function mergeGoals(saved: MetricaGoal[], fresh: Array<{ id: string; name: string; type: string }>): MetricaGoal[] {
+  const byId = new Map(saved.map((goal) => [goal.id, goal]));
+  const merged = fresh.map((goal) => ({ id: goal.id, name: goal.name, type: goal.type, role: byId.get(goal.id)?.role ?? "", description: byId.get(goal.id)?.description ?? "" }));
+  const freshIds = new Set(fresh.map((goal) => goal.id));
+  return [...merged, ...saved.filter((goal) => !freshIds.has(goal.id)).map((goal) => ({ ...goal, missing: true }))];
+}
+
+/**
+ * Счётчики Метрики и их цели. Список счётчиков и целей приходит из Management API по токену; человек отмечает,
+ * какие цели собирать и считать заявкой, и пишет, что каждая значит — описание читают агенты SEO Wizard.
+ */
+function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaCounter[]; onChange: (next: MetricaCounter[]) => void; saveFirst: () => Promise<void> }) {
+  const [catalog, setCatalog] = useState<MetricaCatalog | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [manual, setManual] = useState("");
+  const countersRef = useRef(counters);
+  countersRef.current = counters;
+
+  const load = async (ids: string[]) => {
+    setLoading(true);
+    try {
+      await saveFirst();
+      const params = ids.map((id) => `counter=${encodeURIComponent(id)}`).join("&");
+      const data = await fetchJson<MetricaCatalog>(`/api/mbox/seo/metrica/catalog${params ? `?${params}` : ""}`);
+      setCatalog((current) => ({ ...data, goals: { ...(current?.goals || {}), ...(data.goals || {}) } }));
+      if (data.ok) {
+        onChange(countersRef.current.map((counter) => {
+          const info = data.counters?.find((item) => item.id === counter.id);
+          const fresh = data.goals?.[counter.id];
+          return { ...counter, name: info?.name || counter.name, site: info?.site || counter.site, goals: fresh ? mergeGoals(counter.goals, fresh) : counter.goals };
+        }));
+      }
+    } catch (cause) {
+      setCatalog({ ok: false, error: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addCounter = (id: string, name = "", site = "") => {
+    const clean = id.trim();
+    if (!/^\d+$/.test(clean) || counters.some((counter) => counter.id === clean)) return;
+    countersRef.current = [...counters, { id: clean, name, site, goals: [] }];
+    onChange(countersRef.current);
+    void load(countersRef.current.map((counter) => counter.id));
+  };
+  const removeCounter = (id: string) => onChange(counters.filter((counter) => counter.id !== id));
+  const patchGoal = (counterId: string, goalId: string, change: Partial<MetricaGoal>) => onChange(counters.map((counter) => counter.id !== counterId ? counter : { ...counter, goals: counter.goals.map((goal) => goal.id === goalId ? { ...goal, ...change } : goal) }));
+
+  const available = (catalog?.counters || []).filter((item) => !counters.some((counter) => counter.id === item.id));
+  return (
+    <section className="seo-settings-block seo-metrica">
+      <h2>Счётчики и цели</h2>
+      <p className="seo-form-hint">Счётчики и все их цели берутся из Метрики по токену. Отметьте, какие цели собирать: «заявка» и «бронирование» складываются в заявки по страницам, «собирать» — только для отчёта. Описание объясняет агентам, что значит цель. В одном запросе Метрики помещается до {METRICA_MAX_GOALS} целей на счётчик.</p>
+      <div className="seo-form-actions">
+        <button type="button" disabled={loading} onClick={() => void load(counters.map((counter) => counter.id))}><RefreshCw size={14} aria-hidden="true" /> {loading ? "Загружаю…" : counters.length ? "Обновить счётчики и цели" : "Загрузить счётчики из Метрики"}</button>
+        <input className="seo-metrica-manual" value={manual} inputMode="numeric" placeholder="номер счётчика" aria-label="Номер счётчика" onChange={(event) => setManual(event.currentTarget.value)} />
+        <button type="button" disabled={!/^\d+$/.test(manual.trim()) || loading} onClick={() => { addCounter(manual); setManual(""); }}><Plus size={14} aria-hidden="true" /> Добавить</button>
+        {catalog && !catalog.ok && <span className="seo-error" role="alert">{catalog.error}</span>}
+      </div>
+      {available.length > 0 && (
+        <div className="seo-metrica-available">
+          <span>Доступны по токену:</span>
+          {available.map((item) => (
+            <button key={item.id} type="button" onClick={() => addCounter(item.id, item.name, item.site)} title={`Добавить счётчик ${item.id}`}>
+              <Plus size={13} aria-hidden="true" /> {item.name || item.id}{item.site ? ` · ${item.site}` : ""}
+            </button>
+          ))}
+        </div>
+      )}
+      {counters.length === 0 && <p className="seo-form-hint">Счётчиков нет: загрузите их из Метрики или добавьте номер вручную.</p>}
+      {counters.map((counter) => {
+        const collected = counter.goals.filter((goal) => goal.role).length;
+        const error = catalog?.errors?.[counter.id];
+        return (
+          <div key={counter.id} className="seo-metrica-counter">
+            <header>
+              <div>
+                <strong>{counter.name || `Счётчик ${counter.id}`}</strong>
+                <span>{[counter.site, `№ ${counter.id}`, `целей ${counter.goals.length}`, `собирается ${collected}`].filter(Boolean).join(" · ")}</span>
+              </div>
+              <button type="button" className="seo-metrica-remove" onClick={() => removeCounter(counter.id)} aria-label={`Убрать счётчик ${counter.id}`} title="Убрать счётчик"><X size={15} /></button>
+            </header>
+            {error && <p className="seo-error" role="alert">Цели не загрузились: {error}</p>}
+            {collected > METRICA_MAX_GOALS && <p className="seo-error" role="alert">Отмечено {collected} целей, соберутся первые {METRICA_MAX_GOALS}.</p>}
+            {counter.goals.length === 0 ? (
+              <p className="seo-form-hint">Целей пока нет — нажмите «Обновить счётчики и цели».</p>
+            ) : (
+              <ul className="seo-metrica-goals">
+                {counter.goals.map((goal) => (
+                  <li key={goal.id} className={goal.role ? "is-on" : undefined}>
+                    <div className="seo-metrica-goal-head">
+                      <span className="seo-metrica-goal-name">{goal.name || `Цель ${goal.id}`}{goal.missing && <em> · нет в Метрике</em>}</span>
+                      <span className="seo-metrica-goal-meta">№ {goal.id}{goal.type ? ` · ${goal.type}` : ""}</span>
+                    </div>
+                    <select value={goal.role} aria-label={`Что делать с целью «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { role: event.currentTarget.value as MetricaGoalRole })}>
+                      {GOAL_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                    </select>
+                    <textarea rows={1} value={goal.description} placeholder="Что значит цель: где срабатывает, что считать" aria-label={`Описание цели «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { description: event.currentTarget.value })} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </section>
   );
 }
 

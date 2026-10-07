@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Copy, Download, FolderClosed, Globe2, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, Save, Share2, Table2, Trash2, Upload, Users, X } from "lucide-react";
+import { ShareButton } from "./ShareLinks";
+import { AlertCircle, Check, ChevronDown, Download, FolderClosed, Globe2, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, Save, Table2, Trash2, Upload, Users, X } from "lucide-react";
 import type { Workbook } from "exceljs";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
@@ -199,13 +200,14 @@ function TablesList({ tabs, defaultProjectId = null, onOpen, mode, onMode }: { t
   return (
     <div className="wb-view wb-tables-view">
       <header className="wb-view-head">
-        <SheetsDocsSwitch mode={mode} onMode={onMode} />
+        <span className="wb-tables-heading">Таблицы и документы</span>
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importRef.current?.click()} title={canCreate ? "Импорт Excel (.xlsx)" : "Нет доступных проектов для таблиц"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createTableAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая таблица" : "Нет доступных проектов для таблиц"}><Plus size={14} /></button>
           <input ref={importRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importTable(file); event.target.value = ""; }} />
         </div>
       </header>
+      <SheetsDocsSwitch mode={mode} onMode={onMode} count={tablesStore.list.length} />
       <div className="wb-filter">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти в таблицах" onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
         {query && <button type="button" onClick={() => setQuery("")} aria-label="Очистить"><X size={13} /></button>}
@@ -244,67 +246,6 @@ function TablesList({ tabs, defaultProjectId = null, onOpen, mode, onMode }: { t
   );
 }
 
-type TableShare = { token: string; mode: "view" | "edit"; last_used_at?: string | null };
-
-function TableShareButton({ tableId, onSharedChange }: { tableId: string; onSharedChange: (shared: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const [shares, setShares] = useState<TableShare[]>([]);
-  const [busy, setBusy] = useState<"" | "view" | "edit">("");
-  const [copied, setCopied] = useState<"" | "view" | "edit">("");
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  const load = useCallback(async () => {
-    const next = (await fetchJson<{ shares: TableShare[] }>(`/api/mbox/tables/${tableId}/shares`)).shares;
-    setShares(next);
-    onSharedChange(next.length > 0);
-  }, [onSharedChange, tableId]);
-
-  useEffect(() => { void load().catch(() => { setShares([]); onSharedChange(false); }); }, [load, onSharedChange]);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => { if (!boxRef.current?.contains(event.target as Node)) setOpen(false); };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [open]);
-
-  const linkOf = (share: TableShare) => `${serverOrigin()}/t/${share.token}`;
-  async function copy(share: TableShare) {
-    try { await navigator.clipboard.writeText(linkOf(share)); } catch { /* ссылка остаётся в поле */ }
-    setCopied(share.mode);
-    window.setTimeout(() => setCopied(""), 1600);
-  }
-  async function create(mode: "view" | "edit", regenerate = false) {
-    setBusy(mode);
-    try {
-      const { share } = await fetchJson<{ share: TableShare }>(`/api/mbox/tables/${tableId}/shares`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode, regenerate }) });
-      await load();
-      await copy(share);
-    } finally { setBusy(""); }
-  }
-  async function revoke(mode: "view" | "edit") {
-    if (!(await askConfirm({ title: mode === "edit" ? "Отозвать ссылку на правку?" : "Отозвать ссылку на просмотр?", confirmLabel: "Отозвать", danger: true }))) return;
-    setBusy(mode);
-    try { await fetchJson(`/api/mbox/tables/${tableId}/shares/${mode}`, { method: "DELETE" }); await load(); } finally { setBusy(""); }
-  }
-  const rows: Array<{ mode: "view" | "edit"; label: string; hint: string }> = [
-    { mode: "view", label: "Просмотр", hint: "Открыть без входа в MBOX" },
-    { mode: "edit", label: "Редактирование", hint: "Менять ячейки без входа" },
-  ];
-  return <div className="wb-share" ref={boxRef}>
-    <button type="button" className={shares.length ? "is-on" : undefined} onClick={() => setOpen((value) => !value)} title="Поделиться ссылкой" aria-expanded={open}><Share2 size={14} /></button>
-    {open && <div className="wb-share-panel" role="dialog" aria-label="Ссылки на таблицу">
-      {rows.map((row) => {
-        const share = shares.find((item) => item.mode === row.mode);
-        return <div key={row.mode} className="wb-share-row">
-          <div className="wb-share-head"><b>{row.label}</b><span>{row.hint}</span></div>
-          {share ? <>
-            <div className="wb-share-link"><input readOnly value={linkOf(share)} onFocus={(event) => event.currentTarget.select()} aria-label={`Ссылка: ${row.label}`} /><button type="button" onClick={() => void copy(share)} title="Скопировать">{copied === row.mode ? <Check size={13} /> : <Copy size={13} />}</button></div>
-            <div className="wb-share-actions"><span>{share.last_used_at ? `открывали ${formatSince(share.last_used_at)}` : "ещё не открывали"}</span><button type="button" disabled={busy === row.mode} onClick={() => void create(row.mode, true)}><RefreshCw size={12} /> Перевыпустить</button><button type="button" className="is-danger" disabled={busy === row.mode} onClick={() => void revoke(row.mode)}><X size={12} /> Отозвать</button></div>
-          </> : <button type="button" className="wb-share-create" disabled={busy === row.mode} onClick={() => void create(row.mode)}><Link2 size={13} /> Создать ссылку</button>}
-        </div>;
-      })}
-    </div>}
-  </div>;
-}
 
 export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }: {
   tableId: string;
@@ -510,7 +451,7 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
             ) : dirty ? (
               <span className="wb-note-save is-busy">Есть несохранённые правки</span>
             ) : (
-              <span className="wb-note-save"><Check size={13} aria-hidden="true" /> Изменено {formatSince(table.updated_at)}</span>
+              <span className="wb-note-save"><Check size={13} aria-hidden="true" /><span className="wb-note-save-text">Изменено {formatSince(table.updated_at)}</span></span>
             )}
             {table.pinned && <span className="wb-note-flag" title="Закреплена сверху списка"><Pin size={11} aria-hidden="true" /> Закреплена</span>}
             {shared && <span className="wb-note-flag" title="Есть ссылка для доступа без входа"><Link2 size={11} aria-hidden="true" /> По ссылке</span>}
@@ -538,7 +479,7 @@ export function TableDocument({ tableId, data, tabs, tabKey, visible, onDirty }:
             <button type="button" className="wb-note-icon" onClick={() => void downloadExcel()} title="Экспорт в Excel (.xlsx)" aria-label="Экспорт в Excel"><Download size={14} /></button>
             <button type="button" className="wb-note-icon" onClick={() => importRef.current?.click()} title="Импорт из Excel (.xlsx)" aria-label="Импорт из Excel"><Upload size={14} /></button>
             <input ref={importRef} type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importExcel(file); event.target.value = ""; }} />
-            <TableShareButton tableId={tableId} onSharedChange={setShared} />
+            <ShareButton kind="table" id={tableId} onSharedChange={setShared} />
             <button type="button" className={`wb-note-icon${menu ? " is-on" : ""}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ x: rect.right - 220, y: rect.bottom + 4 }); }} aria-haspopup="menu" aria-expanded={Boolean(menu)} title="Ещё" aria-label="Ещё действия"><MoreHorizontal size={15} /></button>
           </div>
           {menu && (

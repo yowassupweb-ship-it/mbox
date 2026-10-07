@@ -122,6 +122,9 @@
 
 .seo-tabs {
   border-bottom: var(--border-width) solid var(--border-color);
+  /* Двенадцать разделов не помещаются в одну строку: раньше правый край (Настройки) был обрезан и достижим только прокруткой. */
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .seo-tabs button {
@@ -2676,3 +2679,90 @@ time {
 .login-server .login-link { padding: 0; border: 0; background: none; cursor: pointer; font-size: var(--text-xs); color: var(--text-muted); }
 .login-server .login-link:hover { color: var(--accent-color); }
 .login-server-form { display: grid; gap: var(--space-2); width: 100%; }
+
+/* Metrica API: счётчики и цели. Строка цели — название, что с ней делать, описание для агентов. */
+.seo-metrica-manual {
+  width: 160px;
+  height: 32px;
+  padding: 0 10px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--element-bg);
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.seo-metrica-available { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--text-xs); }
+.seo-metrica-available button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: var(--border-width) dashed var(--border-color);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.seo-metrica-available button:hover { border-style: solid; background: var(--surface-hover); }
+.seo-metrica-counter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--container-bg);
+}
+.seo-metrica-counter > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+.seo-metrica-counter > header > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.seo-metrica-counter > header strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.seo-metrica-counter > header span { color: var(--text-muted); font-size: var(--text-xs); }
+.seo-metrica-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.seo-metrica-remove:hover { background: var(--surface-hover); color: var(--state-danger); }
+.seo-metrica-goals { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.seo-metrica-goals li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) 170px minmax(0, 1.5fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+.seo-metrica-goals li:nth-child(odd) { background: color-mix(in srgb, var(--text-main) 3%, transparent); }
+.seo-metrica-goals li.is-on { box-shadow: inset 2px 0 0 var(--accent-color); }
+.seo-metrica-goal-head { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.seo-metrica-goal-name { overflow-wrap: anywhere; color: var(--text-main); font-size: var(--text-sm); }
+.seo-metrica-goal-name em { color: var(--state-warn); font-style: normal; }
+.seo-metrica-goal-meta { color: var(--text-muted); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+.seo-metrica-goals select,
+.seo-metrica-goals textarea {
+  min-width: 0;
+  padding: 6px 8px;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--element-bg);
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.seo-metrica-goals select { height: 32px; }
+.seo-metrica-goals textarea { min-height: 32px; resize: vertical; field-sizing: content; line-height: 1.4; }
+@media (max-width: 720px) {
+  .seo-metrica-goals li { grid-template-columns: minmax(0, 1fr) 150px; }
+  .seo-metrica-goals textarea { grid-column: 1 / -1; }
+}

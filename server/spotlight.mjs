@@ -13,10 +13,10 @@ const EXCERPT = 700;
 const SNIPPET = 170;
 
 /** Условие «каждое слово встречается в одном из столбцов» с параметрами $from, $from+1, … (по слову на параметр). */
-function termsWhere(terms, columns, from) {
+function termsWhere(terms, columns, from, joiner = " AND ") {
   if (!terms.length) return { sql: "TRUE", values: [] };
   const clauses = terms.map((_, index) => `(${columns.map((column) => `${column} ILIKE $${from + index} ESCAPE '\\'`).join(" OR ")})`);
-  return { sql: clauses.join(" AND "), values: terms.map((term) => `%${term.replace(/[\\%_]/g, (char) => `\\${char}`)}%`) };
+  return { sql: `(${clauses.join(joiner)})`, values: terms.map((term) => `%${term.replace(/[\\%_]/g, (char) => `\\${char}`)}%`) };
 }
 
 const flat = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
@@ -65,15 +65,20 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
   const terms = raw ? (searchTerms(raw).length ? searchTerms(raw) : [raw.toLowerCase()]) : [];
   const phrase = raw.toLowerCase();
   const recent = !raw;
+  // kinds=note,doc,table — искать только по этим видам (быстрый поиск по Ctrl+F); пусто — по всем.
+  const kinds = new Set(String(url.searchParams.get("kinds") || "").split(",").map((item) => item.trim()).filter(Boolean));
+  const want = (kind) => !kinds.size || kinds.has(kind);
+  // mode=any: подходит запись с ЛЮБЫМ из слов; ранжирование всё равно ставит выше те, где слов больше.
+  const joiner = url.searchParams.get("mode") === "any" ? " OR " : " AND ";
   const projectIds = Array.isArray(scope.projectIds) ? scope.projectIds : [];
   const all = Boolean(scope.all);
 
   const sources = [];
 
   // Заметки: заголовок, основной текст, ВСЕ вкладки и теги.
-  {
+  if (want("note")) {
     const scoped = noteScopeWhere(scope, "notes");
-    const match = termsWhere(terms, ["notes.title", "notes.content", "notes.tabs::text", "array_to_string(notes.tags, ' ')"], scoped.values.length + 1);
+    const match = termsWhere(terms, ["notes.title", "notes.content", "notes.tabs::text", "array_to_string(notes.tags, ' ')"], scoped.values.length + 1, joiner);
     sources.push(query(
       `SELECT notes.id::text, notes.title, notes.content, notes.tabs, notes.pinned, notes.project_id::text, p.name AS project, notes.updated_at::text
        FROM notes LEFT JOIN projects p ON p.id = notes.project_id
@@ -90,9 +95,9 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
   }
 
   // Документы.
-  {
+  if (want("doc")) {
     const scoped = documentScopeWhere(scope, "documents");
-    const match = termsWhere(terms, ["documents.title", "documents.text_content"], scoped.values.length + 1);
+    const match = termsWhere(terms, ["documents.title", "documents.text_content"], scoped.values.length + 1, joiner);
     sources.push(query(
       `SELECT documents.id::text, documents.title, documents.text_content, documents.pinned, p.name AS project, documents.updated_at::text
        FROM documents LEFT JOIN projects p ON p.id = documents.project_id
@@ -103,9 +108,9 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
   }
 
   // Таблицы: название и текст ячеек (индекс строится в фоне после записи).
-  {
+  if (want("table")) {
     const scoped = tableScopeWhere(scope, "tables");
-    const match = termsWhere(terms, ["tables.title", "tables.text_content"], scoped.values.length + 1);
+    const match = termsWhere(terms, ["tables.title", "tables.text_content"], scoped.values.length + 1, joiner);
     sources.push(query(
       `SELECT tables.id::text, tables.title, tables.text_content, tables.pinned, p.name AS project, tables.updated_at::text
        FROM tables LEFT JOIN projects p ON p.id = tables.project_id
@@ -115,10 +120,10 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
     ).then(({ rows }) => rows.map((row) => ({ kind: "table", id: row.id, key: `table:${row.id}`, title: row.title || "Таблица", project: row.project, updated_at: row.updated_at, pinned: row.pinned, text: row.text_content }))));
   }
 
-  if (!recent) {
+  if (!recent && !kinds.size) {
     // Проекты, задачи, память и артефакты — только при поиске: в «недавнем» они шумят.
     {
-      const match = termsWhere(terms, ["projects.name", "projects.props::text"], 3);
+      const match = termsWhere(terms, ["projects.name", "projects.props::text"], 3, joiner);
       sources.push(query(
         `SELECT projects.id::text, projects.name, projects.props::text AS props, projects.updated_at::text
          FROM projects WHERE ($1::boolean OR projects.id = ANY($2::bigint[])) AND ${match.sql}
@@ -127,7 +132,7 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
       ).then(({ rows }) => rows.map((row) => ({ kind: "project", id: row.id, key: `project:${row.id}`, title: row.name, project: "", updated_at: row.updated_at, text: row.props }))));
     }
     {
-      const match = termsWhere(terms, ["todos.title", "todos.note"], 3);
+      const match = termsWhere(terms, ["todos.title", "todos.note"], 3, joiner);
       sources.push(query(
         `SELECT todos.id::text, todos.title, todos.note, todos.status, p.name AS project, todos.updated_at::text
          FROM todos JOIN projects p ON p.id = todos.project_id
@@ -137,7 +142,7 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
       ).then(({ rows }) => rows.map((row) => ({ kind: "todo", id: row.id, key: `todo:${row.id}`, title: row.title, project: row.project, updated_at: row.updated_at, text: row.note, status: row.status }))));
     }
     {
-      const match = termsWhere(terms, ["memories.title", "memories.content", "array_to_string(memories.tags, ' ')"], 3);
+      const match = termsWhere(terms, ["memories.title", "memories.content", "array_to_string(memories.tags, ' ')"], 3, joiner);
       sources.push(query(
         `SELECT memories.id::text, memories.title, memories.content, p.name AS project, memories.updated_at::text
          FROM memories LEFT JOIN projects p ON p.id = memories.project_id
@@ -147,7 +152,7 @@ export async function handleSpotlightApi({ req, res, url, query, sendJson, scope
       ).then(({ rows }) => rows.map((row) => ({ kind: "memory", id: row.id, key: `memory:${row.id}`, title: row.title || `Запись #${row.id}`, project: row.project, updated_at: row.updated_at, text: row.content }))));
     }
     {
-      const match = termsWhere(terms, ["artifacts.name", "artifacts.content"], 3);
+      const match = termsWhere(terms, ["artifacts.name", "artifacts.content"], 3, joiner);
       sources.push(query(
         `SELECT artifacts.id::text, artifacts.name, artifacts.content, p.name AS project, artifacts.updated_at::text
          FROM artifacts LEFT JOIN projects p ON p.id = artifacts.project_id

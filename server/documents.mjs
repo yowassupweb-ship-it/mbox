@@ -2,6 +2,7 @@
 // доступ тот же: владелец, участники проекта, все. Содержимое — снимок Univer (JSON); text_content — тот же
 // текст чистым Markdown-подобным видом для поиска и для агентов, которым снимок читать незачем.
 
+import { randomBytes } from "node:crypto";
 import mammoth from "mammoth";
 import { announceAgentEdit } from "./presence.mjs";
 import { appendMarkdown, markdownToSnapshot, snapshotToMarkdown, snapshotToText } from "./doc-snapshot.mjs";
@@ -36,6 +37,16 @@ CREATE TABLE IF NOT EXISTS document_shares (
   PRIMARY KEY (document_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_document_shares_user ON document_shares(user_id);
+-- Ссылки «по ссылке» (открываются без входа): по одной на режим view/edit у документа, как note_shares у заметок.
+CREATE TABLE IF NOT EXISTS document_link_shares (
+  token TEXT PRIMARY KEY,
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL CHECK (mode IN ('view', 'edit')),
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_link_shares_mode ON document_link_shares(document_id, mode);
 CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(pinned DESC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_user_id);
 `;
@@ -191,6 +202,37 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
       return true;
     }
 
+    // Ссылки на документ: список, создать (или выдать существующую; regenerate — новый токен), отозвать. Только владелец:
+    // ссылка открывает документ людям без входа.
+    const linksMatch = url.pathname.match(/^\/api\/mbox\/documents\/(\d+)\/links(?:\/(view|edit))?$/);
+    if (linksMatch) {
+      const [, documentId, modeInPath] = linksMatch;
+      if (!(await owns(query, documentId, scope))) { sendJson(res, 403, { error: "only_owner_shares" }); return true; }
+      if (req.method === "GET") {
+        sendJson(res, 200, { links: (await query("SELECT token, mode, created_by, created_at::text, last_used_at::text FROM document_link_shares WHERE document_id = $1 ORDER BY mode", [documentId])).rows });
+        return true;
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        const mode = body.mode === "edit" ? "edit" : "view";
+        if (body.regenerate) await query("DELETE FROM document_link_shares WHERE document_id = $1 AND mode = $2", [documentId, mode]);
+        const existing = (await query("SELECT token, mode, created_by, created_at::text, last_used_at::text FROM document_link_shares WHERE document_id = $1 AND mode = $2", [documentId, mode])).rows[0];
+        if (existing) { sendJson(res, 200, { link: existing }); return true; }
+        const row = (await query(
+          "INSERT INTO document_link_shares(token, document_id, mode, created_by) VALUES ($1, $2, $3, $4) RETURNING token, mode, created_by, created_at::text, last_used_at::text",
+          [randomBytes(24).toString("base64url"), documentId, mode, String(actor || "")],
+        )).rows[0];
+        sendJson(res, 201, { link: row });
+        return true;
+      }
+      if (req.method === "DELETE" && modeInPath) {
+        await query("DELETE FROM document_link_shares WHERE document_id = $1 AND mode = $2", [documentId, modeInPath]);
+        sendJson(res, 200, { ok: true });
+        return true;
+      }
+      return false;
+    }
+
     const sharesMatch = url.pathname.match(/^\/api\/mbox\/documents\/(\d+)\/shares$/);
     if (sharesMatch) {
       if (!(await owns(query, sharesMatch[1], scope))) { sendJson(res, 403, { error: "only_owner_shares" }); return true; }
@@ -315,6 +357,53 @@ export async function handleDocumentsApi({ req, res, url, query, readBody, sendJ
       await query("DELETE FROM documents WHERE id = $1", [match[1]]);
       notify("delete", `#${match[1]}`, match[1]);
       sendJson(res, 200, { ok: true });
+      return true;
+    }
+  } catch (error) {
+    sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    return true;
+  }
+  return false;
+}
+
+const SHARE_TOKEN = /^[A-Za-z0-9_-]{24,64}$/;
+const UNIVER_DOCUMENT_MIME = "application/vnd.mbox.univer-doc+json";
+
+/**
+ * Документ по ссылке (/d/<токен>, страница SharedDocumentPage): без входа в MBOX. GET отдаёт снимок документа и режим,
+ * PATCH (только у ссылки на правку) сохраняет снимок из редактора. Токен — единственное, что даёт доступ.
+ */
+export async function handleSharedDocumentApi({ req, res, url, query, readBody, sendJson, broadcast }) {
+  const match = url.pathname.match(/^\/api\/share\/documents\/([^/]+)$/);
+  if (!match) return false;
+  const token = match[1];
+  try {
+    if (!SHARE_TOKEN.test(token)) { sendJson(res, 404, { error: "Ссылка недействительна" }); return true; }
+    const link = (await query("SELECT document_id::text AS document_id, mode FROM document_link_shares WHERE token = $1", [token])).rows[0];
+    if (!link) { sendJson(res, 404, { error: "Ссылка отозвана или документ удалён" }); return true; }
+    const shaped = (row) => ({ id: row.id, title: row.title, content: row.content, mime_type: UNIVER_DOCUMENT_MIME, updated_at: row.updated_at });
+    const columns = "id::text, title, content, updated_at::text";
+
+    if (req.method === "GET") {
+      await query("UPDATE document_link_shares SET last_used_at = now() WHERE token = $1", [token]).catch(() => {});
+      const row = (await query(`SELECT ${columns} FROM documents WHERE id = $1`, [link.document_id])).rows[0];
+      if (!row) { sendJson(res, 404, { error: "Документ удалён" }); return true; }
+      sendJson(res, 200, { mode: link.mode, document: shaped(row) });
+      return true;
+    }
+
+    if (req.method === "PATCH") {
+      if (link.mode !== "edit") { sendJson(res, 403, { error: "Ссылка только для просмотра" }); return true; }
+      const body = await readBody(req);
+      if (!has(body, "content")) { sendJson(res, 400, { error: "content_required" }); return true; }
+      const prepared = prepareContent(body.content);
+      const row = (await query(
+        `UPDATE documents SET content = $1, text_content = $2, title = COALESCE($3, title), updated_at = now() WHERE id = $4 RETURNING ${columns}`,
+        [prepared.content, prepared.text, has(body, "title") ? String(body.title || "").trim().slice(0, 200) || "Документ" : null, link.document_id],
+      )).rows[0];
+      if (!row) { sendJson(res, 404, { error: "Документ удалён" }); return true; }
+      broadcast?.("entity_changed", { entity: "documents", action: "update", actor: "ссылка", id: row.id, silent: true });
+      sendJson(res, 200, { document: shaped(row) });
       return true;
     }
   } catch (error) {

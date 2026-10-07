@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { syncSkills } from "./sync-skills.mjs";
 import { createInboxWake } from "./inbox-wake.mjs";
 import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
+import { claudeWindowFromEvent, postUsage } from "./usage-report.mjs";
+import { enrichFocus } from "./focus-excerpt.mjs";
 import { chatRules, clipError, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -712,10 +714,11 @@ async function runClaude(item) {
 }
 
 async function runClaudeTurn(item, resumeId) {
+  const message = await enrichFocus(item, mboxFetch);
   // Правила — в системном промпте (rulesPath), в сообщение идёт только сам запрос; в первом ходе сессии — с историей чата.
   const prompt = [
     resumeId ? "" : await recentConversationContext(item),
-    messageBlock(item),
+    messageBlock(message),
     item.imageDir ? imageLine(item.imageDir) : "",
   ].filter(Boolean).join("\n\n");
 
@@ -824,6 +827,9 @@ function spawnStreaming(command, args, options, input = "", inboxId = "", warm =
       }
       if (event.type === "rate_limit_event" && event.rate_limit_info) {
         state.rateLimit = event.rate_limit_info;
+        // Любое событие лимита — в кружок usage у агента (не только когда окно почти выбрано).
+        const window = agentKind === "cloud_agent" ? null : claudeWindowFromEvent(event.rate_limit_info);
+        if (window) void postUsage((body) => mboxFetch("/api/mbox/agent/usage", { method: "POST", body: JSON.stringify(body) }), "Claude", [window], (message) => console.log(`${logPrefix} ${message}`));
         return;
       }
       if (event.type === "assistant" && event.message?.usage) {
