@@ -6,6 +6,7 @@ import { onSessionReveal, sshStatus, useDesktopSessions, useNow, type Session } 
 import { usePersistentState, type TabsApi } from "./tabs";
 import { ChatHeadSlot } from "./chatHeadSlot";
 import { agentPrefsLoaded, useAgentPrefs } from "../../lib/agentPrefs";
+import { showToast } from "../../features/planner/ui/Toast";
 // xterm — треть всего бандла (~325 КБ), а нужен только в SSH-панели приложения: грузим по требованию.
 const TerminalView = lazy(() => import("./TerminalView").then((module) => ({ default: module.TerminalView })));
 
@@ -373,7 +374,7 @@ function PaneActions({ paneId, session, desktop }: { paneId: string; session?: S
 }
 
 function reconnectSsh(session: Session, desktop: DesktopApi) {
-  void desktop.startSsh(session.title.replace(/^SSH · /, ""), { direct: session.direct }).catch(() => undefined);
+  void desktop.startSsh(session.title.replace(/^SSH · /, ""), { direct: session.direct }).catch(() => showToast("SSH не переподключился — проверьте сервер и ключ", "error"));
 }
 
 function SshPaneActions({ session, desktop }: { session: Session; desktop: DesktopApi }) {

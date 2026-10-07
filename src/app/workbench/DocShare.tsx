@@ -19,12 +19,12 @@ export function DocShareExtra({ doc, onUpdate }: { doc: DocRecord; onUpdate: (pa
   const [error, setError] = useState("");
   const mode = doc.access_mode === "view" ? "view" : "edit";
 
-  const loadShares = () => fetchJson<{ shares: Share[] }>(`/api/mbox/documents/${doc.id}/shares`).then((result) => setShares(result.shares)).catch(() => {});
+  const loadShares = () => fetchJson<{ shares: Share[] }>(`/api/mbox/documents/${doc.id}/shares`).then((result) => setShares(result.shares)).catch(() => setError("Не удалось загрузить, у кого есть доступ"));
 
   useEffect(() => {
     if (!owner) return;
     void loadShares();
-    fetchJson<{ users: Person[] }>("/api/mbox/directory").then((result) => setPeople(result.users.filter((person) => !person.self))).catch(() => {});
+    fetchJson<{ users: Person[] }>("/api/mbox/directory").then((result) => setPeople(result.users.filter((person) => !person.self))).catch(() => setError("Не удалось загрузить список людей"));
   }, [doc.id, owner]);
 
   async function setShare(userId: string, next: "view" | "edit" | null) {

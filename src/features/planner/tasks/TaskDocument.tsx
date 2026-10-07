@@ -89,7 +89,10 @@ export default function TaskDocument({ task, onBack, onGone }: {
   // StrictMode вызывает эту очистку сразу после монтирования, и новая задача удалялась бы на глазах.
   useEffect(() => () => {
     const cur = latest.current;
-    if (cur.title !== saved.current.title || cur.md !== saved.current.md) void saveText(task.id, cur.title.trim(), cur.md).catch(() => {});
+    if (cur.title === saved.current.title && cur.md === saved.current.md) return;
+    const save = (): Promise<unknown> => saveText(task.id, cur.title.trim(), cur.md);
+    // Раньше ошибка глоталась: задача закрывалась, а текст тихо терялся.
+    void save().catch(() => showToast('Задача не сохранилась', 'error', { label: 'Повторить', run: () => { void save().catch(() => showToast('Задача снова не сохранилась — проверьте связь', 'error')); } }));
   }, [task.id]);
 
   // Чужая правка текста (агент, канбан проекта): без своих несохранённых — берём.

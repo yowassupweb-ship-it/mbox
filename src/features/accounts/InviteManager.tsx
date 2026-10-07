@@ -33,7 +33,7 @@ export function InviteManager({ projects }: { projects: Project[] }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
-  const load = useCallback(() => fetchJson<{ invites: Invite[] }>("/api/mbox/admin/invites").then((result) => setInvites(result.invites)).catch(() => {}), []);
+  const load = useCallback(() => fetchJson<{ invites: Invite[] }>("/api/mbox/admin/invites").then((result) => setInvites(result.invites)).catch(() => setError("Не удалось загрузить приглашения")), []);
   useEffect(() => { void load(); }, [load]);
 
   async function create(event: FormEvent) {

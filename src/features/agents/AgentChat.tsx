@@ -19,6 +19,7 @@ import { formatBytes } from "../../lib/format";
 import type { ChatDebug } from "../../app/workbench/ConsoleArea";
 import { ChatHeadSlot } from "../../app/workbench/chatHeadSlot";
 import { createPortal } from "react-dom";
+import { showToast } from "../planner/ui/Toast";
 
 const JARVIS_NAME = "Джарвис";
 const CHAT_HISTORY_LIMIT = 50;
@@ -1353,7 +1354,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     switchThread(id);
     fetchJson("/api/mbox/agent/threads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, peer: owner }) })
       .then(refreshThreads)
-      .catch(() => {});
+      .catch(() => { refreshThreads(); showToast("Чат не создался на сервере", "error"); });
   }, [peer, cloudPeer, refreshThreads, switchThread]);
   const renameThread = useCallback((id: string, title: string) => {
     setRenaming(null);
@@ -1362,14 +1363,14 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     setThreads((current) => current.map((item) => item.id === id ? { ...item, title: clean, custom_title: true } : item));
     fetchJson(`/api/mbox/agent/threads/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: clean }) })
       .then(refreshThreads)
-      .catch(() => {});
+      .catch(() => { refreshThreads(); showToast("Чат не переименовался", "error"); });
   }, [refreshThreads]);
   const archiveThread = useCallback((id: string) => {
     setThreads((current) => current.filter((item) => item.id !== id));
     if (id === thread) switchThread("");
     fetchJson(`/api/mbox/agent/threads/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ archived: true }) })
       .then(refreshThreads)
-      .catch(() => {});
+      .catch(() => { refreshThreads(); showToast("Чат не убрался в архив", "error"); });
   }, [thread, refreshThreads, switchThread]);
   // Нагрузка контекста: последний ответ агента, у которого наблюдатель знает размер сессии.
   const contextLoad = useMemo<ContextLoad | null>(() => {
@@ -1480,7 +1481,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     setAwaitingJarvisId(null);
     setAwaitingJarvisSince(null);
     setAwaitingJarvisPhase(null);
-    fetchJson(`/api/mbox/agent/inbox/${id}/cancel`, { method: "POST" }).catch(() => {});
+    fetchJson(`/api/mbox/agent/inbox/${id}/cancel`, { method: "POST" }).catch(() => showToast("Не удалось отменить — агент может ещё ответить", "error"));
   }, [awaitingJarvisId]);
 
   const states = useMemo(
