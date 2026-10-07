@@ -389,14 +389,26 @@ function saveSeen() {
   fs.writeFileSync(seenPath, JSON.stringify([...seen].slice(-500)), "utf8");
 }
 
+// Неудачный вход — пауза, а не повтор каждую секунду: после смены пароля наблюдатели со старым паролем
+// долбили /auth/login, сервер запирал вход по логину — и человек тоже не мог войти (07.10.2026).
+let loginBlockedUntil = 0;
 async function login() {
+  if (Date.now() < loginBlockedUntil) throw new Error(`MBOX login paused for ${Math.ceil((loginBlockedUntil - Date.now()) / 1000)}s after a failed attempt`);
   const response = await fetch(`${baseUrl}/api/mbox/auth/login`, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  if (!response.ok) throw new Error(`MBOX login failed: ${response.status} ${await response.text()}`);
+  if (!response.ok) {
+    const text = await response.text();
+    let retry = 0;
+    try { retry = Number(JSON.parse(text).retry_after_seconds) || 0; } catch { /* не JSON — ответ прокси */ }
+    // Неверный пароль сам не исправится — ждём 10 минут; блокировка сервера — сколько он сказал.
+    loginBlockedUntil = Date.now() + (response.status === 401 ? 10 * 60_000 : response.status === 429 ? Math.max(retry, 60) * 1000 : 30_000);
+    throw new Error(`MBOX login failed: ${response.status} ${text}`);
+  }
+  loginBlockedUntil = 0;
   cookie = response.headers.get("set-cookie")?.split(";")[0] || "";
 }
 
