@@ -118,7 +118,8 @@ export const BROWSER_FAVICON_EVENT = "mbox:browser-favicon";
 export type BrowserFaviconDetail = { key?: string; url?: string; favicon: string };
 
 const faviconByOrigin = new Map<string, string>();
-const faviconByKey = new Map<string, string>();
+// По вкладке храним и сайт иконки: вкладка ушла на другой сайт — её прежняя иконка больше не её.
+const faviconByKey = new Map<string, { favicon: string; origin: string }>();
 
 export function browserFaviconOrigin(url: string): string {
   try { return new URL(url).origin; } catch { return ""; }
@@ -126,13 +127,16 @@ export function browserFaviconOrigin(url: string): string {
 
 function rememberFavicon(detail: BrowserFaviconDetail) {
   if (!detail.favicon) return;
-  if (detail.key) faviconByKey.set(detail.key, detail.favicon);
   const origin = detail.url ? browserFaviconOrigin(detail.url) : "";
+  if (detail.key) faviconByKey.set(detail.key, { favicon: detail.favicon, origin });
   if (origin) faviconByOrigin.set(origin, detail.favicon);
 }
 
 export function cachedBrowserFavicon(key?: string, url?: string): string {
-  return (key && faviconByKey.get(key)) || (url && faviconByOrigin.get(browserFaviconOrigin(url))) || "";
+  const origin = url ? browserFaviconOrigin(url) : "";
+  const byKey = key ? faviconByKey.get(key) : undefined;
+  if (byKey && (!origin || byKey.origin === origin)) return byKey.favicon;
+  return (origin && faviconByOrigin.get(origin)) || "";
 }
 
 function publishFavicon(detail: BrowserFaviconDetail) {

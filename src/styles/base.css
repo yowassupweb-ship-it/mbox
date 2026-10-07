@@ -107,3 +107,18 @@ a:focus-visible,
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Иконки и кнопки не выделяются и не тащатся: двойной клик или протяжка по панели
+   закрашивали значки синим, а перетаскивание вытягивало картинку иконки. Картинки внутри
+   текста (редактор, режим чтения, сообщения) по-прежнему выделяются и копируются вместе с текстом. */
+:where(img, svg, [class*="-icon"], [class*="-glyph"], button) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Только сами картинки: user-drag на кнопках и строках перебил бы draggable у вкладок и дерева. */
+:where(img, svg):not([draggable="true"]) { -webkit-user-drag: none; }
+:where([contenteditable="true"], .wb-reading, .md-text, .wb-docx-page) :where(img) {
+  -webkit-user-select: auto;
+  user-select: auto;
+  -webkit-user-drag: auto;
+}

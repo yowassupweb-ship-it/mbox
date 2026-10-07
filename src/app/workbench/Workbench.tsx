@@ -288,7 +288,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const toolsCatalog = useToolsCatalog();
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
-  const [browserFavicons, setBrowserFavicons] = useState<Record<string, string>>({});
+  // Значение не читается: иконка берётся по сайту (cachedBrowserFavicon сверяет сайт иконки вкладки),
+  // состояние только перерисовывает вкладки, когда иконка пришла.
+  const [, setBrowserFavicons] = useState<Record<string, string>>({});
   const [browserOriginFavicons, setBrowserOriginFavicons] = useState<Record<string, string>>({});
   const [visited, setVisited] = useState<Set<string>>(() => new Set([tabs.active]));
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
@@ -1102,7 +1104,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               const isFileTab = tab.key.startsWith("file:") || tab.key.startsWith("local:");
               const browserUrl = tab.key.startsWith("web:") ? browserUrls[tab.key] || browserTabUrl(tab.key) : "";
               const browserFavicon = browserUrl
-                ? browserFavicons[tab.key] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(tab.key, browserUrl)
+                ? browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(tab.key, browserUrl)
                 : "";
               return (
                 <div
@@ -1180,7 +1182,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   const isFileTab = key.startsWith("file:") || key.startsWith("local:");
                   const browserUrl = key.startsWith("web:") ? browserUrls[key] || browserTabUrl(key) : "";
                   const browserFavicon = browserUrl
-                    ? browserFavicons[key] || browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(key, browserUrl)
+                    ? browserOriginFavicons[browserFaviconOrigin(browserUrl)] || cachedBrowserFavicon(key, browserUrl)
                     : "";
                   return (
                     <div

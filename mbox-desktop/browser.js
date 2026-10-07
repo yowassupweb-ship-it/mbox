@@ -80,10 +80,20 @@ function stateOf(key) {
     canGoForward: contents.navigationHistory.canGoForward(),
     error: tab.error || "",
     zoom: Math.round((contents.getZoomFactor() || 1) * 100),
-    favicon: tab.favicon || "",
+    favicon: currentFavicon(tab),
     find: tab.find || null,
     auth: tab.auth ? { id: tab.auth.id, host: tab.auth.host, realm: tab.auth.realm, isProxy: tab.auth.isProxy, failed: tab.auth.failed } : null,
   };
+}
+
+/**
+ * Иконка вкладки — только если она того же сайта, что открыт сейчас. Раньше при переходе на другой
+ * сайт вкладка до прихода новой иконки (а она приходит лишь после разбора <head>) рассылала старую уже
+ * с новым адресом: на вкладке висел значок прошлого сайта, а кэш записывал его новому.
+ */
+function currentFavicon(tab) {
+  const origin = originOf(tab.view.webContents.getURL() || tab.pending);
+  return tab.favicon && tab.faviconOrigin === origin ? tab.favicon : "";
 }
 
 function publish(key) {
@@ -103,7 +113,7 @@ function create(key) {
       spellcheck: false,
     },
   });
-  const tab = { view, bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", auth: null, authTries: 0, find: null };
+  const tab = { view, bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", faviconOrigin: "", auth: null, authTries: 0, find: null };
   pendingBounds.delete(key);
   tabs.set(key, tab);
 
@@ -115,7 +125,26 @@ function create(key) {
 
   contents.on("page-favicon-updated", (_event, favicons) => {
     tab.favicon = Array.isArray(favicons) ? favicons.find(Boolean) || "" : "";
+    tab.faviconOrigin = originOf(contents.getURL());
+    if (tab.favicon && tab.faviconOrigin) faviconCache.set(tab.faviconOrigin, tab.favicon);
     publish(key);
+  });
+  // Иконку нового сайта начинаем искать уже на старте перехода, параллельно с загрузкой страницы:
+  // к коммиту она обычно в кэше и встаёт сразу, а не после разбора страницы.
+  contents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) void favicon(details.url).catch(() => "");
+  });
+  contents.on("did-navigate", (_event, url) => {
+    const origin = originOf(url);
+    if (!origin || tab.faviconOrigin === origin) return;
+    const apply = (icon) => {
+      if (!icon || tab.faviconOrigin === origin || originOf(contents.getURL()) !== origin) return;
+      tab.favicon = icon;
+      tab.faviconOrigin = origin;
+      publish(key);
+    };
+    if (faviconCache.has(origin)) apply(faviconCache.get(origin));
+    else void favicon(url).then(apply).catch(() => undefined);
   });
   // История пишется на сервер — она общая для всех машин (см. server-state.js). Заголовок к моменту
   // did-navigate ещё не пришёл, поэтому отмечаем переход и на смене заголовка: запись одна, по адресу.
@@ -517,10 +546,10 @@ async function favicon(url) {
   if (faviconCache.has(origin)) return faviconCache.get(origin);
 
   for (const tab of tabs.values()) {
-    if (!tab.favicon) continue;
-    if (originOf(tab.view.webContents.getURL()) === origin) {
-      faviconCache.set(origin, tab.favicon);
-      return tab.favicon;
+    const icon = currentFavicon(tab);
+    if (icon && tab.faviconOrigin === origin) {
+      faviconCache.set(origin, icon);
+      return icon;
     }
   }
 
