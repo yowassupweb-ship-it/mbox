@@ -12,7 +12,7 @@ export function taskTabTitle(taskId: string): string {
 }
 
 /**
- * Вкладка задачи «Дел» (task:<id>): документ задачи во всю ширину. Список, из которого её открыли, — в боковой панели;
+ * Вкладка задачи (task:<id>): документ задачи во всю ширину. Список, из которого её открыли, — в боковой панели;
  * пока вкладка на экране, задача подсвечена в списке.
  */
 export function TaskTab({ taskId, visible }: { taskId: string; visible: boolean }) {

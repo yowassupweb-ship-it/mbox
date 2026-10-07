@@ -12,7 +12,6 @@ import './calendar/calendar.css';
 
 export { default as CalendarScreen } from './calendar/CalendarScreen';
 export { PlannerSidebar } from './PlannerSidebar';
-export { PlannerStatus } from './PlannerStatus';
 export { TaskTab, taskTabTitle } from './tasks/TaskTab';
 export { setPlannerNavigator, usePlannerNav, setPlannerMode, type PlannerMode } from './nav';
 

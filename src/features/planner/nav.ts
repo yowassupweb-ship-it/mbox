@@ -1,7 +1,7 @@
 import { create } from './lib';
 
 /**
- * Навигация «Дел»: задачи и календарь — одна сущность, части которой живут в разных местах рабочего места
+ * Навигация раздела «Задачи»: задачи и календарь — одна сущность, части которой живут в разных местах рабочего места
  * (список и мини-месяц — в боковой панели, документ задачи и сетка — вкладками). Workbench регистрирует,
  * как открыть вкладку и боковую панель; экраны планировщика вызывают это, не зная про Workbench.
  */
@@ -38,7 +38,7 @@ export const pinTaskTab = (taskId: string) => navigator.pinTask(taskId);
 const MODE_KEY = 'mbox.planner.mode';
 const readMode = (): PlannerMode => { try { return localStorage.getItem(MODE_KEY) === 'calendar' ? 'calendar' : 'tasks'; } catch { return 'tasks'; } };
 
-/** Режим боковой панели «Дел» и задача, открытая сейчас (подсвечивается в списке). */
+/** Режим боковой панели «Задачи» и задача, открытая сейчас (подсвечивается в списке). */
 export const usePlannerNav = create<{ mode: PlannerMode; activeTask: string | null }>(() => ({ mode: readMode(), activeTask: null }));
 
 export function setPlannerMode(mode: PlannerMode) {

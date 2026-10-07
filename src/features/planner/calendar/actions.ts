@@ -7,7 +7,7 @@ import { askScope, newDraft } from './EventEditor';
 import { addDays, addMinutes, dayIso, localIso, parseLocal, sameDay, startOfDay, type CalEvent } from './model';
 import { openEventEditor, useCalendarUi } from './ui';
 
-/** Действия над событиями — общие для сетки календаря и боковой панели «Дел». Задача в календаре ведёт в «Задачи». */
+/** Действия над событиями — общие для сетки календаря и боковой панели «Задачи». Задача в календаре ведёт в «Задачи». */
 
 export function createAt(start: Date, end?: Date, allDay = false) {
   openEventEditor({ mode: 'new', draft: newDraft(start, end, allDay) });

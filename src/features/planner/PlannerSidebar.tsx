@@ -6,7 +6,7 @@ import { TaskList } from './tasks/TaskList';
 import { openCalendar, setPlannerMode, usePlannerNav, type PlannerMode } from './nav';
 
 /**
- * Боковая панель «Дел»: задачи и календарь — одна сущность с двумя видами, как «Таблицы | Документы».
+ * Боковая панель «Задачи»: задачи и календарь — одна сущность с двумя видами, как «Таблицы | Документы».
  * «Задачи» — список всех задач (личные и проектов), «Календарь» — мини-месяц и выбранный день, где события
  * и задачи со сроком вместе. Документ задачи и сетка календаря открываются вкладками.
  */
@@ -25,7 +25,7 @@ export function PlannerSidebar() {
   return (
     <div className="wb-view wb-planner-view">
       <header className="wb-view-head">
-        <span>Дела</span>
+        <span>Задачи</span>
       </header>
       <div
         className="wb-mode-tabs"

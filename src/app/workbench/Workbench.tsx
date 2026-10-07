@@ -9,7 +9,7 @@ import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
-import { CalendarScreen, PlannerHosts, PlannerSidebar, PlannerStatus, setPlannerMode, setPlannerNavigator, TaskTab } from "../../features/planner";
+import { CalendarScreen, PlannerHosts, PlannerSidebar, setPlannerMode, setPlannerNavigator, TaskTab } from "../../features/planner";
 import type { ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf, CLOUD_AGENTS, isCloudAgent } from "../../lib/agents";
@@ -390,7 +390,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     if (next === "search") setSearchFocus((value) => value + 1);
   }
 
-  // «Дела» живут в боковой панели и вкладках: планировщик открывает их через этот навигатор, не зная про Workbench.
+  // «Задачи» живут в боковой панели и вкладках: планировщик открывает их через этот навигатор, не зная про Workbench.
   const plannerNavRef = useRef({ tabs, closeTab: (_key: string) => {}, split: (_key: string) => {} });
   plannerNavRef.current = { tabs, closeTab: (key: string) => { void closeTab(key); }, split: (key: string) => splitTab(key) };
   useEffect(() => {
@@ -781,8 +781,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "artifacts":
         return <ArtifactsTab data={data} />;
       case "planner":
-        // «planner:tasks» — вкладка прежней версии: список задач теперь в боковой панели «Дел».
-        if (first !== "calendar") return lost("Задачи теперь в боковой панели: «Дела» на полосе слева или внизу.");
+        // «planner:tasks» — вкладка прежней версии: список задач теперь в боковой панели «Задачи».
+        if (first !== "calendar") return lost("Задачи теперь в боковой панели: «Задачи» на полосе слева.");
         return <div className="nx planner-screen"><CalendarScreen visible={documentVisible} /></div>;
       case "task":
         return <div className="nx planner-screen"><TaskTab taskId={first} visible={documentVisible} /></div>;
@@ -1278,15 +1278,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       </aside>
 
       <footer className="wb-statusbar">
-        {/* Вход в «Дела» — под боковой панелью; сводка агентов — справа, рядом с «Вниманием». */}
-        <PlannerStatus active={sidebarOpen && activity === "planner"} onOpen={() => showActivity("planner")} />
+        <button type="button" className={`wb-status-item is-state state-${status.state}`} onClick={() => showActivity("agents")} title="Состояние агентов">
+          <i className="wb-state-dot" />{status.label}
+        </button>
         <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
           <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
         </button>
         <span className="wb-status-fill" />
-        <button type="button" className={`wb-status-item is-state state-${status.state}`} onClick={() => showActivity("agents")} title="Состояние агентов">
-          <i className="wb-state-dot" />{status.label}
-        </button>
         {attentionCount > 0 && (
           <button type="button" className={needsHuman.length ? "wb-status-item is-warn" : "wb-status-item"} onClick={() => showPanel("attention")} title="Требует внимания">
             <AlertTriangle size={12} /> {attentionCount}
