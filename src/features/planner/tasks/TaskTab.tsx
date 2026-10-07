@@ -32,7 +32,7 @@ export function TaskTab({ taskId, visible }: { taskId: string; visible: boolean 
         <div className="nx-state ntd-empty-state" data-tone={phase === 'ready' ? 'danger' : undefined}>
           {phase === 'ready' ? <AlertCircle size={28} aria-hidden="true" /> : <Loader2 size={24} className="nx-spin" aria-hidden="true" />}
           <h2>{phase === 'ready' ? 'Задачи нет' : 'Загружаю задачу'}</h2>
-          {phase === 'ready' && <p>Её удалили или она выполнена давно и в «Дела» не попадает.</p>}
+          {phase === 'ready' && <p>Её удалили или она выполнена давно и в список не попадает.</p>}
         </div>
       </div>
     );
