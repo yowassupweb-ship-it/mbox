@@ -62,3 +62,17 @@ test("поля события: время к локальному виду, пр
 test("локальные даты не сдвигаются на UTC", () => {
   assert.equal(isoLocal(localDate("2026-10-06T09:30:00")), "2026-10-06T09:30:00");
 });
+
+test("автоматизация события: агент и задание обязательны, лишнее отбрасывается", async () => {
+  const { automationOf } = await import("./planner.mjs");
+  assert.deepEqual(automationOf({ agent: " Claude ", prompt: " Собери отчёт ", project_id: "7", junk: 1 }), { agent: "Claude", prompt: "Собери отчёт", project_id: "7" });
+  assert.equal(automationOf({ agent: "Claude", prompt: "  " }), null);
+  assert.equal(automationOf({ prompt: "x" }), null);
+  assert.deepEqual(automationOf({ agent: "Джарвис", prompt: "x", project_id: "abc" }), { agent: "Джарвис", prompt: "x" });
+});
+
+test("стена часов — по поясу человека, а не сервера", async () => {
+  const { wallClock } = await import("./planner.mjs");
+  assert.equal(wallClock(new Date("2026-10-07T12:00:00Z"), "Europe/Moscow"), "2026-10-07T15:00:00");
+  assert.equal(wallClock(new Date("2026-10-07T21:30:00Z"), "Europe/Moscow"), "2026-10-08T00:30:00");
+});

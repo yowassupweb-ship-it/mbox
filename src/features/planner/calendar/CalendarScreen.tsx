@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { AlertCircle, ChevronLeft, ChevronRight, Plus, RotateCw } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, Plus, RotateCw, Zap } from 'lucide-react';
 import type { MenuAnchor } from '../ui/overlay';
 import { loadTasks, useTasks } from '../tasks/api';
 import { loadRange, reload, taskEvents, useCalendar } from './api';
@@ -7,7 +7,7 @@ import { createAt, createDefault, moveEvent, moveEventToDay, openEvent, removeEv
 import { EventMenu } from './EventMenu';
 import { DayAgenda, MonthView } from './MonthViews';
 import TimeGrid from './TimeGrid';
-import { goToday, pickDay, setView, useCalendarUi, type View } from './ui';
+import { goToday, pickDay, setShowSystem, setView, useCalendarUi, type View } from './ui';
 import {
   addDays, byStart, localIso, monthGrid, MONTHS, MONTHS_GEN, startOfDay, startOfWeek, weekdayIndex, WEEKDAYS_FULL, type CalEvent,
 } from './model';
@@ -56,6 +56,8 @@ export default function CalendarScreen({ visible = true }: { visible?: boolean }
   const [evMenu, setEvMenu] = useState<{ event: CalEvent; anchor: MenuAnchor } | null>(null);
   const showMenu = useCallback((event: CalEvent, at: { x: number; y: number }) => setEvMenu({ event, anchor: at }), []);
   const calendarEvents = useCalendar((s) => s.events);
+  const systemEvents = useCalendar((s) => s.system);
+  const showSystem = useCalendarUi((s) => s.showSystem);
   const phase = useCalendar((s) => s.phase);
   const tasks = useTasks((s) => s.tasks);
   useEffect(() => { void loadTasks(); }, []);
@@ -64,7 +66,10 @@ export default function CalendarScreen({ visible = true }: { visible?: boolean }
   const fromIso = localIso(range.from);
   const toIso = localIso(range.to);
   useEffect(() => { void loadRange(fromIso, toIso); }, [fromIso, toIso]);
-  const events = useMemo(() => [...calendarEvents, ...taskEvents(tasks, fromIso, toIso)].sort(byStart), [calendarEvents, tasks, fromIso, toIso]);
+  const events = useMemo(
+    () => [...calendarEvents, ...(showSystem ? systemEvents : []), ...taskEvents(tasks, fromIso, toIso)].sort(byStart),
+    [calendarEvents, systemEvents, showSystem, tasks, fromIso, toIso],
+  );
 
   const step = useCallback((dir: number) => {
     const a = useCalendarUi.getState().anchor;
@@ -115,6 +120,10 @@ export default function CalendarScreen({ visible = true }: { visible?: boolean }
             {!narrow && <button type="button" aria-pressed={view === 'week'} onClick={() => setView('week')} title="Неделя (W)">Неделя</button>}
             <button type="button" aria-pressed={view === 'month'} onClick={() => setView('month')} title="Месяц (M)">Месяц</button>
           </div>
+          <button type="button" className="nx-icon-btn ncal-system-toggle" aria-pressed={showSystem} onClick={() => setShowSystem(!showSystem)}
+            title={showSystem ? 'Скрыть автоматизации MBOX (SEO Wizard)' : 'Показать автоматизации MBOX (SEO Wizard)'} aria-label="Автоматизации MBOX">
+            <Zap size={16} aria-hidden="true" />
+          </button>
           <button type="button" className="nx-primary ncal-new" onClick={createDefault} title="Новое событие (N)">
             <Plus size={15} aria-hidden="true" /> Событие
           </button>

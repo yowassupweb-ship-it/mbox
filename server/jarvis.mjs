@@ -1,3 +1,4 @@
+import { changeEvent as plannerChangeEvent, createEvent as plannerCreateEvent, deleteEvent as plannerDeleteEvent, listAutomations as plannerAutomations, listEvents as plannerListEvents } from "./planner.mjs";
 import { Client } from "pg";
 import { canAccessNote, createNote, listNotes, recordNoteVersion } from "./notes.mjs";
 import { scopeWhere as documentScope } from "./documents.mjs";
@@ -1176,6 +1177,43 @@ export const JARVIS_TOOLS = [
   {
     type: "function",
     function: {
+      name: "calendar_read",
+      description: "Календарь человека на период: его события (с автоматизациями и их запусками) и расписание автоматизаций MBOX (SEO Wizard). Даты местные, YYYY-MM-DD; без дат — сегодня и неделя вперёд. Повторы развёрнуты, id повторения — «серия::начало».",
+      parameters: {
+        type: "object",
+        properties: { from: { type: "string", description: "YYYY-MM-DD, по умолчанию сегодня" }, to: { type: "string", description: "YYYY-MM-DD, по умолчанию +7 дней" } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "calendar_event",
+      description: "Поставить, изменить или убрать событие в календаре человека — он видит это сразу, с пометкой «Джарвис». Без id — новое (title, starts_at, ends_at обязательны; время местное YYYY-MM-DDTHH:MM). С id — меняются только переданные поля; у повторения (id «серия::начало») scope: this / following / all. delete=true — убрать. Автоматизация: automation_agent (Claude, ChatGPT, ClaudeCloud, CodexCloud, Джарвис) и automation_prompt — в момент события агент получит это задание; пустой automation_prompt убирает автоматизацию. Ставь события и автоматизации, только когда человек об этом попросил.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+          starts_at: { type: "string" },
+          ends_at: { type: "string" },
+          description: { type: "string" },
+          location: { type: "string" },
+          all_day: { type: "boolean" },
+          color: { type: "string", description: "blue, green, orange, red, purple, yellow, cyan, gray" },
+          recurrence_rule: { type: "string", description: "RRULE, например FREQ=WEEKLY;BYDAY=MO" },
+          reminder_minutes: { type: "number" },
+          automation_agent: { type: "string" },
+          automation_prompt: { type: "string" },
+          scope: { type: "string", enum: ["this", "following", "all"] },
+          delete: { type: "boolean" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_groq_usage",
       description: "Посмотреть расход токенов ПО ВСЕМ моделям, которыми ты говоришь — и Groq, и Gemini (обе логируются в один и тот же счётчик) — с разбивкой по модели, сегодня/за сутки/всего. Название историческое, но это НЕ только Groq: используй именно этот инструмент, если спросят про расход Gemini, а не отвечай, что не умеешь это узнать.",
       parameters: { type: "object", properties: {} },
@@ -1880,6 +1918,11 @@ export const TOOL_GROUPS = {
     label: "проекты: создать и удалить, стек, git, деплой, свойства карточки, связи проектов, файлы репозитория",
     match: /(проект|стек|git|гит|репозитор|деплой|свойств|карточк|связ|зависит от|файл|путь к)/,
     tools: ["create_project", "delete_project", "update_project_info", "link_projects", "find_file"],
+  },
+  calendar: {
+    label: "календарь человека: события, встречи, планирование дня, автоматизации по расписанию (агент получает задание в момент события), расписание SEO Wizard",
+    match: /(календар|событи|встреч|созвон|расписан|запланир|спланир|напомн|на завтра|на неделю|в понедельник|во вторник|в среду|в четверг|в пятницу|в субботу|в воскресенье|автоматиз|каждый (день|понедельник|вторник|четверг)|по утрам)/,
+    tools: ["calendar_read", "calendar_event"],
   },
   notes: {
     label: "заметки человека: найти, прочитать, создать, дописать или переписать",
@@ -3369,6 +3412,53 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
   // Заметки. Раньше их инструментов не было вовсе, и на просьбу «допиши в заметку» Джарвис находил
   // похоже названную ЗАПИСЬ ПАМЯТИ, правил её и рапортовал об успехе — человек смотрел в заметку и
   // ничего там не видел (todo #318: заметка #6 осталась нетронутой, текст ушёл в память #117).
+  if (name === "calendar_read" || name === "calendar_event") {
+    const q = client.query.bind(client);
+    const userId = viewer?.userId ? String(viewer.userId) : (await q("SELECT id::text FROM users WHERE role = 'owner' ORDER BY id LIMIT 1")).rows[0]?.id;
+    if (!userId) return "не нашёл, чей это календарь";
+    const pad = (n) => String(n).padStart(2, "0");
+    const day = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const line = (e) => `#${e.id} «${e.title}» · ${String(e.starts_at).replace("T", " ").slice(0, 16)}–${String(e.ends_at).slice(11, 16)}${e.all_day ? " · весь день" : ""}${e.recurrence_rule ? ` · повтор ${e.recurrence_rule}` : ""}${e.source ? ` · поставил ${e.source}` : ""}${e.automation ? ` · автоматизация → ${e.automation.agent}: «${String(e.automation.prompt).slice(0, 80)}»${e.run ? (e.run.error ? " (не удалась)" : " (запущена)") : ""}` : ""}`;
+    if (name === "calendar_read") {
+      const from = /^\d{4}-\d{2}-\d{2}/.test(String(args.from || "")) ? String(args.from).slice(0, 10) : day(new Date());
+      const to = /^\d{4}-\d{2}-\d{2}/.test(String(args.to || "")) ? String(args.to).slice(0, 10) : day(new Date(Date.now() + 7 * 86400000));
+      const [events, system] = await Promise.all([plannerListEvents(q, userId, `${from}T00:00:00`, `${to}T23:59:59`), plannerAutomations(q, `${from}T00:00:00`, `${to}T23:59:59`)]);
+      return [
+        `События ${from} … ${to}: ${events.length ? "" : "нет"}`,
+        ...events.map(line),
+        system.length ? `Автоматизации MBOX по расписанию:` : "",
+        ...system.map((item) => `${item.starts_at.replace("T", " ").slice(0, 16)} ${item.title} · ${item.status}`),
+      ].filter(Boolean).join("\n");
+    }
+    const body = {};
+    for (const key of ["title", "description", "location", "all_day", "color", "recurrence_rule", "reminder_minutes"]) if (args[key] !== undefined) body[key] = args[key];
+    if (args.starts_at) body.start = args.starts_at;
+    if (args.ends_at) body.end = args.ends_at;
+    if (args.automation_prompt !== undefined) body.automation = String(args.automation_prompt || "").trim() ? { agent: args.automation_agent || "Claude", prompt: args.automation_prompt } : null;
+    const [master, occurrence = ""] = String(args.id || "").replace(/^#/, "").split("::");
+    const announce = (action, row) => broadcastRealtime?.("entity_changed", { entity: "calendar_events", action, silent: true, actor: JARVIS_NAME, event_id: String(row?.id || master), title: row?.title || "", starts_at: row?.starts_at || "" });
+    try {
+      if (!master) {
+        if (!body.title || !body.start || !body.end) return "для нового события нужны title, starts_at и ends_at";
+        const row = await plannerCreateEvent(q, userId, body, JARVIS_NAME);
+        announce("create", row);
+        return `поставил ${line(row)}`;
+      }
+      if (!/^\d+$/.test(master)) return "id события — число (или «серия::начало» у повторения), возьми его из calendar_read";
+      if (args.delete) {
+        const ok = await plannerDeleteEvent(q, userId, master, occurrence ? String(args.scope || "this") : "all", occurrence);
+        if (ok) announce("delete", { id: master });
+        return ok ? `убрал событие #${master}` : `события #${master} нет`;
+      }
+      const row = await plannerChangeEvent(q, userId, master, { ...body, ...(occurrence ? { scope: args.scope || "this", recurrence_id: occurrence } : {}) }, JARVIS_NAME);
+      if (!row) return `события #${master} нет`;
+      announce("update", row);
+      return `изменил ${line(row)}`;
+    } catch (error) {
+      return `не получилось: ${error.message === "event_time_required" ? "нужно корректное время начала и конца" : error.message}`;
+    }
+  }
+
   if (name === "search_notes") {
     const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
     const rows = await listNotes(client.query.bind(client), String(args.query || "").trim(), limit, viewer?.userId ? viewer : undefined);

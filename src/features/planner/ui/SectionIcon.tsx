@@ -5,7 +5,7 @@ export function SectionIcon({ name, size = 20 }: { name: SectionIconName; size?:
   return (
     <img
       className="nx-sicon"
-      src={`/assets/icons/planner/${name}.png`}
+      src={name === 'calendar' ? '/assets/icons/navigation/calendar.png' : `/assets/icons/planner/${name}.png`}
       alt=""
       aria-hidden="true"
       width={size}

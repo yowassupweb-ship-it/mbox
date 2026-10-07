@@ -14,10 +14,33 @@ function readView(): View {
   try { const v = localStorage.getItem(VIEW_KEY); return v === 'day' || v === 'week' || v === 'month' ? v : 'week'; } catch { return 'week'; }
 }
 
-type CalendarUi = { view: View; anchor: Date; selected: Date; miniMonth: Date; editor: EditorState | null };
+type CalendarUi = {
+  view: View; anchor: Date; selected: Date; miniMonth: Date; editor: EditorState | null;
+  /** Показывать ли системные автоматизации (SEO Wizard) поверх событий. */
+  showSystem: boolean;
+  /** Что только что поменял агент: id событий и задач, подсвечиваются несколько секунд. */
+  fresh: string[];
+  /** Открытый лист системной автоматизации. */
+  systemItem: import('./model').CalEvent | null;
+};
 
 const today = startOfDay(new Date());
-export const useCalendarUi = create<CalendarUi>(() => ({ view: readView(), anchor: today, selected: today, miniMonth: startOfMonth(today), editor: null }));
+const SYSTEM_KEY = 'mbox.planner.showSystem';
+const readShowSystem = () => { try { return localStorage.getItem(SYSTEM_KEY) !== '0'; } catch { return true; } };
+
+export const useCalendarUi = create<CalendarUi>(() => ({ view: readView(), anchor: today, selected: today, miniMonth: startOfMonth(today), editor: null, showSystem: readShowSystem(), fresh: [], systemItem: null }));
+
+export function setShowSystem(showSystem: boolean) {
+  useCalendarUi.setState({ showSystem });
+  try { localStorage.setItem(SYSTEM_KEY, showSystem ? '1' : '0'); } catch { /* без памяти */ }
+}
+
+/** Подсветить то, что поменял агент: на несколько секунд, чтобы было видно, что и где он сделал. */
+export function flash(ids: string[]) {
+  if (!ids.length) return;
+  useCalendarUi.setState((s) => ({ fresh: [...new Set([...s.fresh, ...ids])] }));
+  window.setTimeout(() => useCalendarUi.setState((s) => ({ fresh: s.fresh.filter((id) => !ids.includes(id)) })), 6000);
+}
 
 export function setView(view: View) {
   useCalendarUi.setState({ view });

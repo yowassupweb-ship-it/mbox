@@ -683,3 +683,6 @@
   }
 }
 
+.nx-toast > span { flex: 1; min-width: 0; }
+.nx-toast-action { flex: none; padding: 4px 10px; border: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 16%, transparent); color: var(--accent-color); font: inherit; font-weight: var(--weight-semibold); cursor: pointer; }
+.nx-toast-action:hover { background: color-mix(in srgb, var(--accent-color) 26%, transparent); }

@@ -1,5 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Repeat } from 'lucide-react';
+import { EventMarks } from './EventMarks';
+import { useCalendarUi } from './ui';
+import { rowId } from './model';
 import {
   addDays, colorVar, hhmm, layoutDay, localIso, minutesOfDay, onDay, parseLocal, sameDay, startOfDay, weekdayIndex, WEEKDAYS,
   type CalEvent,
@@ -267,6 +270,7 @@ const EventBlock = memo(function EventBlock({ e, style, dragging, preview, onDow
   onMenu?: (e: CalEvent, at: { x: number; y: number }) => void;
   onDelete?: (e: CalEvent) => void;
 }) {
+  const fresh = useIsFresh(e);
   const s = parseLocal(e.start);
   const short = (parseLocal(e.end).getTime() - s.getTime()) / 60000 <= 30;
   return (
@@ -276,6 +280,8 @@ const EventBlock = memo(function EventBlock({ e, style, dragging, preview, onDow
       tabIndex={0}
       data-short={short ? 'true' : undefined}
       data-dragging={dragging ? 'true' : undefined}
+      data-system={e.system ? 'true' : undefined}
+      data-fresh={fresh ? 'true' : undefined}
       style={{ ...style, '--ev': colorVar(e.color) } as CSSProperties}
       onPointerDown={(ev) => { ev.stopPropagation(); onDown(ev, 'move'); }}
       onContextMenu={(ev) => { if (!onMenu) return; ev.preventDefault(); ev.stopPropagation(); onMenu(e, { x: ev.clientX, y: ev.clientY }); }}
@@ -286,6 +292,7 @@ const EventBlock = memo(function EventBlock({ e, style, dragging, preview, onDow
       <span className="ncal-ev-title">
         {e.title || 'Без названия'}
         {e.masterId && <Repeat size={10} aria-hidden="true" />}
+        <EventMarks e={e} compact />
       </span>
       <span className="ncal-ev-time">{preview || `${hhmm(s)}${short ? '' : `–${hhmm(parseLocal(e.end))}`}`}</span>
       {e.location && !short && <span className="ncal-ev-place">{e.location}</span>}
@@ -306,10 +313,17 @@ function eventKeys(ev: React.KeyboardEvent, e: CalEvent, onOpen: (e: CalEvent) =
   }
 }
 
+/** Только что поменял агент — подсветка на несколько секунд (ui.ts, flash). У задачи ключ — «task:<id>». */
+function useIsFresh(e: CalEvent) {
+  const key = e.taskId ? `task:${e.taskId}` : rowId(e);
+  return useCalendarUi((s) => s.fresh.includes(key));
+}
+
 export function Chip({ e, onOpen, draggable, onMenu, onDelete }: {
   e: CalEvent; onOpen: (e: CalEvent) => void; draggable?: boolean;
   onMenu?: (e: CalEvent, at: { x: number; y: number }) => void; onDelete?: (e: CalEvent) => void;
 }) {
+  const fresh = useIsFresh(e);
   const s = parseLocal(e.start);
   return (
     <button
@@ -317,18 +331,21 @@ export function Chip({ e, onOpen, draggable, onMenu, onDelete }: {
       className="ncal-chip-ev"
       data-allday={e.allDay || spansDays(e) ? 'true' : undefined}
       data-task={e.taskId ? 'true' : undefined}
+      data-system={e.system ? 'true' : undefined}
+      data-fresh={fresh ? 'true' : undefined}
       data-done={e.done ? 'true' : undefined}
       style={{ '--ev': colorVar(e.color) } as CSSProperties}
       onClick={(ev) => { ev.stopPropagation(); onOpen(e); }}
       onDoubleClick={(ev) => ev.stopPropagation()}
       onContextMenu={(ev) => { if (!onMenu) return; ev.preventDefault(); ev.stopPropagation(); onMenu(e, { x: ev.clientX, y: ev.clientY }); }}
       onKeyDown={(ev) => { if (ev.key !== 'Enter') eventKeys(ev, e, onOpen, onMenu, onDelete); }}
-      draggable={draggable}
+      draggable={draggable && !e.system}
       onDragStart={(ev) => { ev.dataTransfer.setData('text/x-ncal', e.id); ev.dataTransfer.effectAllowed = 'move'; }}
       title={e.title}
     >
       {!(e.allDay || spansDays(e)) && <span className="ncal-chip-time">{hhmm(s)}</span>}
       <span className="ncal-chip-title">{e.title || 'Без названия'}</span>
+      <EventMarks e={e} compact />
     </button>
   );
 }

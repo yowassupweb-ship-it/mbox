@@ -174,6 +174,19 @@ function ensurePlannerSchema(query) {
     // Исключённые повторения серии («удалить только это», «изменить только это»).
     await query("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS exdates TEXT[] NOT NULL DEFAULT '{}'");
     await query("CREATE INDEX IF NOT EXISTS idx_todos_personal_owner ON todos ((props->>'owner_user_id')) WHERE project_id IS NULL");
+    // Кто поставил событие: пусто — человек, иначе имя агента (Claude, Джарвис…) — видно на событии.
+    await query("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''");
+    // Автоматизация: в момент каждого повторения агент получает задание — { agent, prompt, project_id }.
+    await query("ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS automation JSONB");
+    // Запуски автоматизаций: одна строка на повторение — не запустить дважды и показать, чем кончилось.
+    await query(`CREATE TABLE IF NOT EXISTS calendar_event_runs (
+      event_id BIGINT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+      occurrence TEXT NOT NULL,
+      fired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      inbox_id BIGINT,
+      error TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (event_id, occurrence)
+    )`);
   })().catch((error) => { schemaReady = null; throw error; });
   return schemaReady;
 }
@@ -259,7 +272,18 @@ async function listPeople(query, userId) {
 // ── События ──────────────────────────────────────────────────────────────────
 
 const EVENT_COLUMNS = `id::text, title, description, to_char(starts_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS starts_at,
-  to_char(ends_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS ends_at, all_day, location, color, reminder_minutes, recurrence_rule, exdates`;
+  to_char(ends_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS ends_at, all_day, location, color, reminder_minutes, recurrence_rule, exdates,
+  source, automation`;
+
+/** Автоматизация события: какой агент и что делает в момент каждого повторения. Пустое задание — автоматизации нет. */
+export function automationOf(value) {
+  if (!value || typeof value !== "object") return null;
+  const agent = String(value.agent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  const prompt = String(value.prompt || "").trim().slice(0, 4000);
+  if (!agent || !prompt) return null;
+  const projectId = /^\d+$/.test(String(value.project_id || "")) ? String(value.project_id) : null;
+  return { agent, prompt, ...(projectId ? { project_id: projectId } : {}) };
+}
 
 /** Поля события из тела запроса; отсутствующее поле — undefined (правка его не трогает). */
 export function eventFields(body) {
@@ -273,25 +297,27 @@ export function eventFields(body) {
   if (body.color !== undefined) out.color = COLORS.has(body.color) ? body.color : "blue";
   if (body.reminder_minutes !== undefined) out.reminder_minutes = body.reminder_minutes == null || body.reminder_minutes === "" ? null : Math.max(0, Math.round(Number(body.reminder_minutes)) || 0);
   if (body.recurrence_rule !== undefined) out.recurrence_rule = body.recurrence_rule ? formatRule(parseRule(body.recurrence_rule)) || null : null;
+  if (body.automation !== undefined) out.automation = automationOf(body.automation);
   return out;
 }
 
+const jsonField = (value) => (value == null ? null : JSON.stringify(value));
+
 async function insertEvent(query, userId, fields) {
-  const row = (await query(
-    `INSERT INTO calendar_events(owner_user_id, title, description, starts_at, ends_at, all_day, location, color, reminder_minutes, recurrence_rule, exdates)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING ${EVENT_COLUMNS}`,
-    [userId, fields.title || "", fields.description || "", fields.starts_at, fields.ends_at, Boolean(fields.all_day), fields.location || "", fields.color || "blue", fields.reminder_minutes ?? null, fields.recurrence_rule || null, fields.exdates || []],
+  return (await query(
+    `INSERT INTO calendar_events(owner_user_id, title, description, starts_at, ends_at, all_day, location, color, reminder_minutes, recurrence_rule, exdates, source, automation)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb) RETURNING ${EVENT_COLUMNS}`,
+    [userId, fields.title || "", fields.description || "", fields.starts_at, fields.ends_at, Boolean(fields.all_day), fields.location || "", fields.color || "blue", fields.reminder_minutes ?? null, fields.recurrence_rule || null, fields.exdates || [], fields.source || "", jsonField(fields.automation)],
   )).rows[0];
-  return row;
 }
 
 async function updateEventRow(query, id, userId, fields) {
   const keys = Object.keys(fields);
   if (!keys.length) return (await query(`SELECT ${EVENT_COLUMNS} FROM calendar_events WHERE id = $1 AND owner_user_id = $2`, [id, userId])).rows[0];
-  const sets = keys.map((key, index) => `${key} = $${index + 3}`);
+  const sets = keys.map((key, index) => (key === "automation" ? `${key} = $${index + 3}::jsonb` : `${key} = $${index + 3}`));
   return (await query(
     `UPDATE calendar_events SET ${sets.join(", ")}, updated_at = now() WHERE id = $1 AND owner_user_id = $2 RETURNING ${EVENT_COLUMNS}`,
-    [id, userId, ...keys.map((key) => fields[key])],
+    [id, userId, ...keys.map((key) => (key === "automation" ? jsonField(fields[key]) : fields[key]))],
   )).rows[0];
 }
 
@@ -301,6 +327,266 @@ function cutRule(rule, at) {
   delete parts.COUNT;
   parts.UNTIL = untilValue(new Date(localDate(at).getTime() - 1000));
   return formatRule(parts);
+}
+
+/** События человека в диапазоне: повторы развёрнуты, у автоматизаций — чем кончился запуск каждого повторения. */
+export async function listEvents(query, userId, from, to) {
+  await ensurePlannerSchema(query);
+  const rows = (await query(
+    `SELECT ${EVENT_COLUMNS} FROM calendar_events
+      WHERE owner_user_id = $1 AND starts_at < $2::timestamp AND (recurrence_rule IS NOT NULL OR ends_at >= $3::timestamp)
+      ORDER BY starts_at`,
+    [userId, to, from],
+  )).rows;
+  const events = rows.flatMap((row) => expandEvent(row, from, to));
+  const automated = rows.filter((row) => row.automation).map((row) => row.id);
+  if (!automated.length) return events;
+  const runs = (await query(
+    "SELECT event_id::text, occurrence, fired_at::text, inbox_id::text, error FROM calendar_event_runs WHERE event_id = ANY($1::bigint[])",
+    [automated],
+  )).rows;
+  const byKey = new Map(runs.map((run) => [`${run.event_id}@${run.occurrence}`, run]));
+  return events.map((event) => {
+    if (!event.automation) return event;
+    const run = byKey.get(`${event.master_id || event.id}@${event.starts_at}`);
+    return run ? { ...event, run: { fired_at: run.fired_at, inbox_id: run.inbox_id, error: run.error } } : event;
+  });
+}
+
+export async function readEvent(query, userId, id) {
+  await ensurePlannerSchema(query);
+  return (await query(`SELECT ${EVENT_COLUMNS} FROM calendar_events WHERE id = $1 AND owner_user_id = $2`, [id, userId])).rows[0] || null;
+}
+
+/** Новое событие. source — кто поставил: пусто — человек, иначе имя агента. */
+export async function createEvent(query, userId, body, source = "") {
+  await ensurePlannerSchema(query);
+  const fields = eventFields(body || {});
+  if (!fields.starts_at || !fields.ends_at) throw Object.assign(new Error("event_time_required"), { status: 400 });
+  if (localDate(fields.ends_at) < localDate(fields.starts_at)) fields.ends_at = fields.starts_at;
+  return insertEvent(query, userId, { ...fields, source });
+}
+
+/**
+ * Правка события. У серии scope: all — вся серия; this — одно повторение (в серии исключение, рядом отдельное событие);
+ * following — это и следующие (прежняя серия кончается перед ним, новая начинается с него).
+ */
+export async function changeEvent(query, userId, id, body, source = "") {
+  const master = await readEvent(query, userId, id);
+  if (!master) return null;
+  const editScope = String(body?.scope || "all");
+  const at = String(body?.recurrence_id || "");
+  const occurrence = master.recurrence_rule && at && valid(localDate(at)) ? isoLocal(localDate(at)) : "";
+  const fields = eventFields(body || {});
+  if (fields.starts_at === null || fields.ends_at === null) throw Object.assign(new Error("event_time_required"), { status: 400 });
+  if (source) fields.source = source;
+  const duration = localDate(master.ends_at) - localDate(master.starts_at);
+  if (occurrence && editScope === "this") {
+    await updateEventRow(query, id, userId, { exdates: [...new Set([...(master.exdates || []), occurrence])] });
+    return insertEvent(query, userId, { ...master, starts_at: occurrence, ends_at: isoLocal(new Date(localDate(occurrence).getTime() + duration)), ...fields, recurrence_rule: null, exdates: [] });
+  }
+  if (occurrence && editScope === "following" && localDate(occurrence) > localDate(master.starts_at)) {
+    await updateEventRow(query, id, userId, { recurrence_rule: cutRule(master.recurrence_rule, occurrence) });
+    const rule = fields.recurrence_rule !== undefined ? fields.recurrence_rule : master.recurrence_rule;
+    return insertEvent(query, userId, {
+      ...master,
+      starts_at: occurrence,
+      ends_at: isoLocal(new Date(localDate(occurrence).getTime() + duration)),
+      ...fields,
+      recurrence_rule: rule,
+      exdates: (master.exdates || []).filter((value) => localDate(value) > localDate(occurrence)),
+    });
+  }
+  if (fields.starts_at && fields.ends_at && localDate(fields.ends_at) < localDate(fields.starts_at)) fields.ends_at = fields.starts_at;
+  return updateEventRow(query, id, userId, fields);
+}
+
+/** Удаление: this — только повторение, following — это и следующие, all — событие или серия целиком. */
+export async function deleteEvent(query, userId, id, editScope = "all", recurrenceId = "") {
+  const master = await readEvent(query, userId, id);
+  if (!master) return false;
+  const occurrence = master.recurrence_rule && recurrenceId && valid(localDate(recurrenceId)) ? isoLocal(localDate(recurrenceId)) : "";
+  if (occurrence && editScope === "this") await updateEventRow(query, id, userId, { exdates: [...new Set([...(master.exdates || []), occurrence])] });
+  else if (occurrence && editScope === "following" && localDate(occurrence) > localDate(master.starts_at)) await updateEventRow(query, id, userId, { recurrence_rule: cutRule(master.recurrence_rule, occurrence) });
+  else await query("DELETE FROM calendar_events WHERE id = $1 AND owner_user_id = $2", [id, userId]);
+  return true;
+}
+
+// ── Системные автоматизации: слой поверх календаря ───────────────────────────
+// То, что MBOX делает сам по расписанию, видно в календаре рядом с делами человека. Сейчас это SEO Wizard:
+// дни сценариев (seo-strategy.mjs, scenariosOnDay) и его реальные прогоны со статусом. Новый источник —
+// ещё одна функция в AUTOMATION_SOURCES.
+
+const MSK_OFFSET_MS = 3 * 3_600_000;
+/** Полдень по Москве этого календарного дня — по нему расписание SEO решает, какие сценарии в этот день. */
+const moscowNoon = (date) => new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12) - MSK_OFFSET_MS);
+/** Момент из базы (timestamptz) → местное время Москвы без зоны, как у событий календаря. */
+function moscowLocal(value) {
+  const at = Date.parse(String(value || "").replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00"));
+  if (!Number.isFinite(at)) return "";
+  const d = new Date(at + MSK_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00`;
+}
+
+const SEO_TITLES = { daily: "SEO: ежедневный сбор", monday: "SEO: понедельник", thursday: "SEO: четверг", architecture: "SEO: архитектура", authority: "SEO: авторитет", monthly: "SEO: итоги месяца" };
+
+async function seoAutomations(query, from, to, now = new Date()) {
+  let seo;
+  try { seo = await import("./seo-strategy.mjs"); } catch { return []; }
+  const views = await import("./seo-views.mjs").catch(() => ({ SCENARIOS: [] }));
+  const scheduler = await import("./seo-scheduler.mjs").catch(() => ({ seoAutorunEnabled: () => false }));
+  const autorun = scheduler.seoAutorunEnabled();
+  const about = Object.fromEntries((views.SCENARIOS || []).map((item) => [item.id, item.server]));
+  const runs = (await query(
+    `SELECT id::text, scenario, status, started_at::text, finished_at::text
+       FROM seo_runs WHERE started_at >= $1::timestamp - interval '1 day' AND started_at < $2::timestamp + interval '1 day'
+      ORDER BY started_at`,
+    [from, to],
+  ).catch(() => ({ rows: [] }))).rows;
+  // Прогоны одного сценария за день — одним пунктом: их бывает по пять подряд (ручные перезапуски),
+  // и отдельные блоки в сетке налезали друг на друга. Статус — последнего прогона, число — в подписи.
+  const groups = new Map();
+  for (const run of runs) {
+    const start = moscowLocal(run.started_at);
+    if (!start || start < from || start >= to) continue;
+    const key = `${run.scenario}@${start.slice(0, 10)}`;
+    const group = groups.get(key) || { scenario: run.scenario, first: start, last: start, lastRun: run, count: 0, failed: 0 };
+    group.count += 1;
+    if (run.status !== "ok" && run.status !== "running") group.failed += 1;
+    if (start >= group.last) { group.last = start; group.lastRun = run; }
+    if (start < group.first) group.first = start;
+    groups.set(key, group);
+  }
+  const items = [];
+  const ranDays = new Set(groups.keys());
+  for (const [key, group] of groups) {
+    const last = group.lastRun;
+    const end = moscowLocal(last.finished_at) || isoLocal(new Date(localDate(group.last).getTime() + 30 * 60_000));
+    const n = group.count;
+    const word = n % 10 === 1 && n % 100 !== 11 ? "прогон" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "прогона" : "прогонов";
+    const times = n > 1 ? `${n} ${word}, последний в ${group.last.slice(11, 16)}` : `прогон в ${group.first.slice(11, 16)}`;
+    items.push({
+      id: `seo-run:${key}`,
+      source: "SEO Wizard",
+      title: SEO_TITLES[group.scenario] || `SEO: прогон «${group.scenario}»`,
+      starts_at: group.first,
+      ends_at: end > group.first ? end : isoLocal(new Date(localDate(group.first).getTime() + 15 * 60_000)),
+      status: last.status === "ok" ? "done" : last.status === "running" ? "running" : "failed",
+      detail: `${times}${group.failed ? `, с ошибкой ${group.failed}` : ""}. ${about[group.scenario] || ""}`.trim(),
+      tab: "seo",
+    });
+  }
+  const today = wallClock(now, "Europe/Moscow").slice(0, 10);
+  for (let cursor = localDate(from.slice(0, 10)); isoLocal(cursor) < to; cursor = addDays(cursor, 1)) {
+    const day = isoDay(cursor);
+    for (const scenario of seo.scenariosOnDay(moscowNoon(cursor))) {
+      if (ranDays.has(`${scenario}@${day}`)) continue;
+      // Ежедневный сбор при выключенном автозапуске — не событие, а шум на каждом дне календаря.
+      if (scenario === "daily" && !autorun) continue;
+      // Ежедневный сбор — в 04:00, сценарии недели и месяца — в 05:00 (с этого часа их берёт расписание).
+      const hour = scenario === "daily" ? 4 : 5;
+      const start = `${day}T${pad(hour)}:00:00`;
+      items.push({
+        id: `seo-plan:${scenario}:${day}`,
+        source: "SEO Wizard",
+        title: SEO_TITLES[scenario] || `SEO: ${scenario}`,
+        starts_at: start,
+        ends_at: `${day}T${pad(hour)}:30:00`,
+        // Автозапуск выключен (SEO_AUTORUN) — день по расписанию есть, но сам сбор не стартует.
+        status: !autorun ? "off" : day < today ? "missed" : "planned",
+        detail: about[scenario] || "",
+        tab: "seo",
+      });
+    }
+  }
+  return items;
+}
+
+const AUTOMATION_SOURCES = [seoAutomations];
+
+/** Системные автоматизации в диапазоне (только чтение): что и когда MBOX запускает сам и чем кончилось. */
+export async function listAutomations(query, from, to) {
+  const lists = await Promise.all(AUTOMATION_SOURCES.map((source) => source(query, from, to).catch(() => [])));
+  return lists.flat().sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+}
+
+// ── Запуск автоматизаций событий ─────────────────────────────────────────────
+
+/** «Сейчас» по стене часового пояса человека (события хранятся в его местном времени без зоны). */
+export function wallClock(now = new Date(), timeZone = process.env.PLANNER_TZ || "Europe/Moscow") {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+    .formatToParts(now).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/** Опоздавший запуск (сервер был выключен) ещё делаем, если с начала прошло не больше этого. */
+const AUTOMATION_GRACE_MS = 15 * 60_000;
+
+/**
+ * Повторения автоматизаций, которым пора: начало наступило, но не раньше чем GRACE назад, и запуска ещё не было.
+ * Возвращает [{ event, occurrence, owner }] — чистая выборка, без записи.
+ */
+export async function dueAutomations(query, nowWall) {
+  await ensurePlannerSchema(query);
+  const to = isoLocal(new Date(localDate(nowWall).getTime() + 1000));
+  const from = isoLocal(new Date(localDate(nowWall).getTime() - AUTOMATION_GRACE_MS));
+  const rows = (await query(
+    `SELECT ${EVENT_COLUMNS}, owner_user_id FROM calendar_events
+      WHERE automation IS NOT NULL AND starts_at <= $1::timestamp AND (recurrence_rule IS NOT NULL OR starts_at >= $2::timestamp)`,
+    [to, from],
+  )).rows;
+  const due = [];
+  for (const row of rows) {
+    for (const occurrence of expandEvent(row, from, to)) {
+      if (occurrence.starts_at < from || occurrence.starts_at > nowWall) continue;
+      due.push({ event: row, occurrence: occurrence.starts_at, owner: String(row.owner_user_id) });
+    }
+  }
+  return due;
+}
+
+/**
+ * Раз в минуту запускать автоматизации календаря: агенту уходит задание (dispatch — от сервера: вопрос во входящие,
+ * у Джарвиса — его ответ). Повторение помечается в calendar_event_runs до отправки — двойного запуска не будет,
+ * даже если тиков два (прод и dev на одной базе: dev расписание не запускает).
+ */
+export function startPlannerAutomations({ query, dispatch, log = console.log, broadcast }) {
+  const tick = async () => {
+    try {
+      const due = await dueAutomations(query, wallClock());
+      for (const item of due) {
+        const claimed = (await query(
+          "INSERT INTO calendar_event_runs(event_id, occurrence) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING event_id",
+          [item.event.id, item.occurrence],
+        )).rows[0];
+        if (!claimed) continue;
+        try {
+          const inboxId = await dispatch({
+            ownerUserId: item.owner,
+            agent: item.event.automation.agent,
+            projectId: item.event.automation.project_id || null,
+            title: item.event.title,
+            prompt: item.event.automation.prompt,
+            eventId: item.event.id,
+            occurrence: item.occurrence,
+          });
+          await query("UPDATE calendar_event_runs SET inbox_id = $3 WHERE event_id = $1 AND occurrence = $2", [item.event.id, item.occurrence, inboxId || null]);
+          log(`[planner] автоматизация «${item.event.title}» (${item.occurrence}) → ${item.event.automation.agent}`);
+        } catch (error) {
+          await query("UPDATE calendar_event_runs SET error = $3 WHERE event_id = $1 AND occurrence = $2", [item.event.id, item.occurrence, String(error?.message || error).slice(0, 500)]);
+          log(`[planner] автоматизация «${item.event.title}» не запустилась: ${error?.message || error}`);
+        }
+        broadcast?.("entity_changed", { entity: "calendar_events", action: "run", silent: true });
+      }
+    } catch (error) {
+      log(`[planner] проверка автоматизаций: ${error?.message || error}`);
+    }
+  };
+  const first = setTimeout(() => void tick(), 20_000);
+  const timer = setInterval(() => void tick(), 60_000);
+  first.unref?.();
+  timer.unref?.();
+  return () => { clearTimeout(first); clearInterval(timer); };
 }
 
 // ── Маршруты ─────────────────────────────────────────────────────────────────
@@ -314,14 +600,30 @@ export async function handlePlannerApi(context) {
   return (await handlePlanner(context)) !== false;
 }
 
-async function handlePlanner({ req, res, url, query, readBody, sendJson, scope = {}, broadcast }) {
+/** Кто правит: агент (заголовок x-mbox-agent) — его имя попадёт на событие; человек — пусто. */
+function sourceOf(actor, userName) {
+  const name = String(actor || "").trim();
+  if (!name || name === "Человек" || name === "Agent" || name === String(userName || "")) return "";
+  return name.slice(0, 60);
+}
+
+async function handlePlanner({ req, res, url, query, readBody, sendJson, scope = {}, broadcast, actor = "", userName = "" }) {
   const userId = String(scope?.userId || "");
   if (!userId || !url.pathname.startsWith("/api/mbox/planner/")) return false;
   await ensurePlannerSchema(query);
-  const changed = (entity, action) => broadcast?.("entity_changed", { entity, action, silent: true });
+  const changed = (entity, action, detail = {}) => broadcast?.("entity_changed", { entity, action, silent: true, ...detail });
+  const source = sourceOf(actor, userName);
+  // Задачу поменял агент — интерфейс покажет, кто и что (как с событиями календаря).
+  const announceTask = (action, task) => changed("todos", action, source && task ? { actor: source, task_id: String(task.id), title: task.title || "", due: task.props?.due || "" } : {});
 
   if (url.pathname === "/api/mbox/planner/people" && req.method === "GET") {
     return sendJson(res, 200, await listPeople(query, userId));
+  }
+
+  if (url.pathname === "/api/mbox/planner/automations" && req.method === "GET") {
+    const from = url.searchParams.get("from") || isoLocal(new Date());
+    const to = url.searchParams.get("to") || isoLocal(addDays(new Date(), 7));
+    return sendJson(res, 200, { items: await listAutomations(query, from, to) });
   }
 
   const taskMatch = url.pathname.match(/^\/api\/mbox\/planner\/tasks(?:\/(\d+))?$/);
@@ -340,16 +642,18 @@ async function handlePlanner({ req, res, url, query, readBody, sendJson, scope =
         `INSERT INTO todos(project_id, title, note, status, priority, props) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`,
         [listId === PERSONAL ? null : listId, String(body.title || "").trim().slice(0, 500), String(body.note || ""), status, priority, JSON.stringify(props)],
       )).rows[0];
-      changed("todos", "create");
-      return sendJson(res, 201, { task: await selectTask(query, row.id) });
+      const created = await selectTask(query, row.id);
+      announceTask("create", created);
+      return sendJson(res, 201, { task: created });
     }
     if (!id) return sendJson(res, 405, { error: "method_not_allowed" });
     const current = await readTask(query, id);
     if (!canTouchTask(current, scope, userId)) return sendJson(res, current ? 403 : 404, { error: current ? "forbidden" : "not_found" });
     if (req.method === "GET") return sendJson(res, 200, { task: await selectTask(query, id) });
     if (req.method === "DELETE") {
+      const gone = await selectTask(query, id);
       await query("DELETE FROM todos WHERE id = $1", [id]);
-      changed("todos", "delete");
+      announceTask("delete", gone);
       return sendJson(res, 200, { ok: true });
     }
     if (req.method !== "PATCH") return sendJson(res, 405, { error: "method_not_allowed" });
@@ -402,77 +706,50 @@ async function handlePlanner({ req, res, url, query, readBody, sendJson, scope =
         closing,
       ],
     );
-    changed("todos", "update");
-    return sendJson(res, 200, { task: await selectTask(query, id), rolled });
+    const updated = await selectTask(query, id);
+    announceTask("update", updated);
+    return sendJson(res, 200, { task: updated, rolled });
   }
 
   const eventMatch = url.pathname.match(/^\/api\/mbox\/planner\/events(?:\/(\d+))?$/);
   if (eventMatch) {
     const id = eventMatch[1];
-    if (!id && req.method === "GET") {
-      const from = url.searchParams.get("from") || "1970-01-01T00:00:00";
-      const to = url.searchParams.get("to") || "2100-01-01T00:00:00";
-      // Серии без конца начинаются когда угодно раньше диапазона — берём всё, что началось до его конца.
-      const rows = (await query(
-        `SELECT ${EVENT_COLUMNS} FROM calendar_events
-          WHERE owner_user_id = $1 AND starts_at < $2::timestamp AND (recurrence_rule IS NOT NULL OR ends_at >= $3::timestamp)
-          ORDER BY starts_at`,
-        [userId, to, from],
-      )).rows;
-      return sendJson(res, 200, { events: rows.flatMap((row) => expandEvent(row, from, to)) });
+    // Агент правит календарь — человек видит это сразу: кто, что и на когда (см. планировщик в интерфейсе).
+    const announce = (action, row) => changed("calendar_events", action, source && row ? { actor: source, event_id: String(row.id || id), title: row.title || "", starts_at: row.starts_at || "" } : {});
+    try {
+      if (!id && req.method === "GET") {
+        const from = url.searchParams.get("from") || "1970-01-01T00:00:00";
+        const to = url.searchParams.get("to") || "2100-01-01T00:00:00";
+        return sendJson(res, 200, { events: await listEvents(query, userId, from, to) });
+      }
+      if (!id && req.method === "POST") {
+        const row = await createEvent(query, userId, await readBody(req), source);
+        announce("create", row);
+        return sendJson(res, 201, { event: row });
+      }
+      if (!id) return sendJson(res, 405, { error: "method_not_allowed" });
+      if (req.method === "GET") {
+        const row = await readEvent(query, userId, id);
+        return sendJson(res, row ? 200 : 404, row ? { event: row } : { error: "not_found" });
+      }
+      if (req.method === "PATCH") {
+        const row = await changeEvent(query, userId, id, await readBody(req), source);
+        if (!row) return sendJson(res, 404, { error: "not_found" });
+        announce("update", row);
+        return sendJson(res, 200, { event: row });
+      }
+      if (req.method === "DELETE") {
+        const before = await readEvent(query, userId, id);
+        const ok = await deleteEvent(query, userId, id, url.searchParams.get("scope") || "all", url.searchParams.get("recurrence_id") || "");
+        if (!ok) return sendJson(res, 404, { error: "not_found" });
+        announce("delete", before);
+        return sendJson(res, 200, { ok: true });
+      }
+      return sendJson(res, 405, { error: "method_not_allowed" });
+    } catch (error) {
+      if (error?.status === 400) return sendJson(res, 400, { error: error.message });
+      throw error;
     }
-    if (!id && req.method === "POST") {
-      const fields = eventFields(await readBody(req));
-      if (!fields.starts_at || !fields.ends_at) return sendJson(res, 400, { error: "event_time_required" });
-      if (localDate(fields.ends_at) < localDate(fields.starts_at)) fields.ends_at = fields.starts_at;
-      const row = await insertEvent(query, userId, fields);
-      changed("calendar_events", "create");
-      return sendJson(res, 201, { event: row });
-    }
-    if (!id) return sendJson(res, 405, { error: "method_not_allowed" });
-    const master = (await query(`SELECT ${EVENT_COLUMNS} FROM calendar_events WHERE id = $1 AND owner_user_id = $2`, [id, userId])).rows[0];
-    if (!master) return sendJson(res, 404, { error: "not_found" });
-    if (req.method === "GET") return sendJson(res, 200, { event: master });
-
-    const body = req.method === "PATCH" ? await readBody(req) : {};
-    const editScope = String((req.method === "DELETE" ? url.searchParams.get("scope") : body.scope) || "all");
-    const at = String((req.method === "DELETE" ? url.searchParams.get("recurrence_id") : body.recurrence_id) || "");
-    const occurrence = master.recurrence_rule && at && valid(localDate(at)) ? isoLocal(localDate(at)) : "";
-    const exdates = [...new Set([...(master.exdates || []), occurrence].filter(Boolean))];
-
-    if (req.method === "DELETE") {
-      if (occurrence && editScope === "this") await updateEventRow(query, id, userId, { exdates });
-      else if (occurrence && editScope === "following" && localDate(occurrence) > localDate(master.starts_at)) await updateEventRow(query, id, userId, { recurrence_rule: cutRule(master.recurrence_rule, occurrence) });
-      else await query("DELETE FROM calendar_events WHERE id = $1 AND owner_user_id = $2", [id, userId]);
-      changed("calendar_events", "delete");
-      return sendJson(res, 200, { ok: true });
-    }
-    if (req.method !== "PATCH") return sendJson(res, 405, { error: "method_not_allowed" });
-
-    const fields = eventFields(body);
-    if (fields.starts_at === null || fields.ends_at === null) return sendJson(res, 400, { error: "event_time_required" });
-    let row;
-    if (occurrence && editScope === "this") {
-      // Одно повторение: в серии — исключение, рядом — самостоятельное событие с правкой.
-      const duration = localDate(master.ends_at) - localDate(master.starts_at);
-      const ownStart = isoLocal(localDate(occurrence));
-      const ownEnd = isoLocal(new Date(localDate(occurrence).getTime() + duration));
-      await updateEventRow(query, id, userId, { exdates });
-      row = await insertEvent(query, userId, { ...master, starts_at: ownStart, ends_at: ownEnd, ...fields, recurrence_rule: null, exdates: [] });
-    } else if (occurrence && editScope === "following" && localDate(occurrence) > localDate(master.starts_at)) {
-      // Это и следующие: прежняя серия кончается перед ним, новая начинается с него.
-      const duration = localDate(master.ends_at) - localDate(master.starts_at);
-      const ownStart = isoLocal(localDate(occurrence));
-      const ownEnd = isoLocal(new Date(localDate(occurrence).getTime() + duration));
-      await updateEventRow(query, id, userId, { recurrence_rule: cutRule(master.recurrence_rule, occurrence) });
-      const rule = fields.recurrence_rule !== undefined ? fields.recurrence_rule : master.recurrence_rule;
-      row = await insertEvent(query, userId, { ...master, starts_at: ownStart, ends_at: ownEnd, ...fields, recurrence_rule: rule, exdates: (master.exdates || []).filter((value) => localDate(value) > localDate(occurrence)) });
-    } else {
-      if (fields.starts_at && fields.ends_at && localDate(fields.ends_at) < localDate(fields.starts_at)) fields.ends_at = fields.starts_at;
-      row = await updateEventRow(query, id, userId, fields);
-    }
-    changed("calendar_events", "update");
-    return sendJson(res, 200, { event: row });
   }
 
   return false;

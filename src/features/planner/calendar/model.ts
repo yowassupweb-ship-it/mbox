@@ -36,7 +36,26 @@ export interface CalEvent {
   /** Не событие, а задача со сроком — рисуется в календаре, открывается в «Задачах». */
   taskId?: string;
   done?: boolean;
+  /** Кто поставил: имя агента; пусто — человек. */
+  source?: string;
+  /** Автоматизация: в момент события агент получает задание. */
+  automation?: Automation | null;
+  /** Чем кончился запуск этого повторения автоматизации. */
+  run?: { fired_at: string; inbox_id: string | null; error: string } | null;
+  /** Системная автоматизация MBOX (SEO Wizard и т.п.) — только чтение. */
+  system?: { source: string; status: SystemStatus; detail: string; tab?: string };
 }
+
+export type Automation = { agent: string; prompt: string; project_id?: string };
+export type SystemStatus = 'planned' | 'running' | 'done' | 'failed' | 'missed' | 'off';
+export const SYSTEM_STATUS: Record<SystemStatus, string> = {
+  planned: 'по расписанию',
+  running: 'идёт сейчас',
+  done: 'выполнено',
+  failed: 'ошибка',
+  missed: 'не запускалось',
+  off: 'автозапуск выключен',
+};
 
 // ── Даты ────────────────────────────────────────────────────────────────────
 
@@ -115,6 +134,30 @@ export function normalize(raw: Raw): CalEvent | null {
     color: str(raw.color) || undefined,
     reminderMinutesBefore: raw.reminder_minutes == null || raw.reminder_minutes === '' ? null : Number(raw.reminder_minutes),
     recurrenceRule: str(raw.recurrence_rule) || null,
+    source: str(raw.source) || undefined,
+    automation: raw.automation && typeof raw.automation === 'object' ? (raw.automation as Automation) : null,
+    run: raw.run && typeof raw.run === 'object' ? (raw.run as CalEvent['run']) : null,
+  };
+}
+
+/** Пункт системной автоматизации (/api/mbox/planner/automations) → событие только для чтения. */
+export function normalizeSystem(raw: Raw): CalEvent | null {
+  const start = parseLocal(str(raw.starts_at));
+  if (Number.isNaN(start.getTime())) return null;
+  let end = parseLocal(str(raw.ends_at));
+  if (Number.isNaN(end.getTime()) || end <= start) end = addMinutes(start, 30);
+  const status = (str(raw.status) || 'planned') as SystemStatus;
+  // В строке «весь день», а не в часовой сетке: автоматизации MBOX — фон, они не должны теснить дела человека.
+  // Время — в начале названия, подробности и статус — в листе по нажатию.
+  return {
+    id: `sys:${str(raw.id)}`,
+    title: `${hhmm(start)} ${str(raw.title)}`,
+    start: localIso(start),
+    end: localIso(end),
+    allDay: true,
+    color: status === 'failed' ? 'red' : status === 'done' ? 'green' : 'gray',
+    recurrenceRule: null,
+    system: { source: str(raw.source), status, detail: str(raw.detail), tab: str(raw.tab) || undefined },
   };
 }
 

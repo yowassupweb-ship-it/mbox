@@ -15,6 +15,7 @@ import {
 import { checklistProgress, plainSnippet } from './markdown';
 import { dueLabel } from './TaskDocument';
 import { closeTaskTab, openTask, usePlannerNav } from '../nav';
+import { useCalendarUi } from '../calendar/ui';
 
 /**
  * Список задач (из shar-2) — в боковой панели: поиск, выбор списка и задачи по статусам. Здесь все задачи разом:
@@ -37,12 +38,13 @@ const Row = memo(function Row({ t, list, active, onOpen, onMenu }: { t: Task; li
   const snippet = plainSnippet(md);
   const press = useLongPress((x, y) => onMenu(t, { x, y }));
   const people = assigneesOf(t);
+  const fresh = useCalendarUi((s) => s.fresh.includes(`task:${t.id}`));
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     void updateTask(t.id, { status: done ? 'open' : 'done' }).catch(() => showToast('Не сохранилось — нет связи с сервером.', 'error'));
   };
   return (
-    <div role="button" tabIndex={0} className="ntl-row" data-task-id={t.id} aria-current={active ? 'true' : undefined} data-done={done ? 'true' : undefined} onClick={() => onOpen(t.id)} onKeyDown={(e) => {
+    <div role="button" tabIndex={0} className="ntl-row" data-task-id={t.id} aria-current={active ? 'true' : undefined} data-done={done ? 'true' : undefined} data-fresh={fresh ? 'true' : undefined} onClick={() => onOpen(t.id)} onKeyDown={(e) => {
         if (e.key === 'Enter') onOpen(t.id);
         if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onMenu(t, { element: e.currentTarget, align: 'start' }); }
       }}

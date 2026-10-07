@@ -21,7 +21,7 @@ import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi }
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
-import { handlePlannerApi } from "./planner.mjs";
+import { handlePlannerApi, startPlannerAutomations } from "./planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
@@ -1297,7 +1297,7 @@ async function handleApiWithContext(req, res, url) {
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
-  if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime, actor: actorFromReq(req), userName: user.username })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleSpotlightApi({ req, res, url, query, sendJson, scope: { ...scope, userId: String(user.id) }, searchTerms })) return;
@@ -3431,6 +3431,38 @@ ensureSkillOverridesSchema(query).catch((error) => console.error(`skill override
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
 // Расписание сборов SEO Wizard — только при SEO_AUTORUN=1 на сервере (иначе сбор запускается кнопкой).
 startSeoScheduler({ query });
+
+/**
+ * Автоматизация из календаря: в момент события агент получает задание — как если бы человек написал ему в чат.
+ * Claude/Codex подхватывают вопрос с props.to своими наблюдателями, Джарвису отвечаем сразу.
+ */
+async function dispatchCalendarAutomation({ ownerUserId, agent, projectId, title, prompt, eventId, occurrence }) {
+  const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [ownerUserId])).rows[0];
+  if (!owner) throw new Error("владелец события не найден");
+  const isOwnerAccount = owner.role === "owner";
+  const props = { to: agent, source: "calendar", calendar_event_id: String(eventId), occurrence, mbox_user_id: owner.id, mbox_owner: isOwnerAccount };
+  const when = occurrence.replace("T", " ").slice(0, 16);
+  const body = `${prompt}
+
+— Задание из календаря: «${title}», ${when}. Это автоматизация, человек сейчас может не смотреть: сделай и коротко отчитайся.`;
+  const row = (await query(
+    `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+     VALUES ($1, 'Человек', 'question', $2, $3, 'open', 'normal', false, $4)
+     RETURNING ${INBOX_COLUMNS}`,
+    [projectId || null, `Календарь: ${title}`.slice(0, 200), body, JSON.stringify(props)],
+  )).rows[0];
+  broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: "Календарь", detail: title, silent: true });
+  broadcastRealtime("agent_inbox_item", { inbox_item: row });
+  if (agent === JARVIS_NAME) {
+    const allowed = isOwnerAccount ? null : (await query("SELECT project_id::text FROM project_memberships WHERE user_id = $1", [owner.id])).rows.map((item) => item.project_id);
+    replyAsJarvis({ id: row.id, project_id: projectId || null, title: row.title, body, props: { ...props, allowed_project_ids: allowed } })
+      .catch((error) => console.error(`Jarvis calendar reply failed: ${error.message}`));
+  }
+  if (agent === "Claude" || agent === "ClaudeCloud") console.log(`[claude-ping] #${row.id} ${row.title}`);
+  if (agent === "ChatGPT" || agent === "Codex" || agent === "CodexCloud") console.log(`[codex-ping] #${row.id} ${row.title}`);
+  return row.id;
+}
+startPlannerAutomations({ query, dispatch: dispatchCalendarAutomation, broadcast: broadcastRealtime });
 
 httpServer.listen(port, host, () => {
   console.log(`MBOX listening on http://${host}:${port}`);

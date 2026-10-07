@@ -583,3 +583,35 @@ button.ncal-line { cursor: pointer; }
 .ncal-sidebar .ncal-agenda-text { flex: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .ncal-agenda-check { margin: 1px 11px 0 22px; }
 .ncal-agenda-row[data-done="true"] .ncal-agenda-title { text-decoration: line-through; color: var(--text-muted); }
+
+/* ── MBOX: агенты и автоматизации в календаре ─────────────────────────── */
+/* Молния — сработает само; робот с именем — поставил агент; у системной автоматизации — статус. */
+.ncal-mark-auto { flex: none; color: var(--state-warn); }
+.ncal-mark-agent { display: inline-flex; align-items: center; gap: 2px; padding: 0 5px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 14%, transparent); color: var(--accent-color); font-size: var(--text-2xs); font-weight: var(--weight-medium); white-space: nowrap; }
+.ncal-mark-agent-icon { flex: none; color: var(--accent-color); }
+.ncal-mark-status { padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-hover); color: var(--text-muted); font-size: var(--text-2xs); font-weight: var(--weight-medium); white-space: nowrap; }
+.ncal-mark-status[data-status="done"] { color: var(--state-ok); background: color-mix(in srgb, var(--state-ok) 14%, transparent); }
+.ncal-mark-status[data-status="failed"] { color: var(--state-danger); background: color-mix(in srgb, var(--state-danger) 14%, transparent); }
+.ncal-mark-status[data-status="running"] { color: var(--accent-color); background: color-mix(in srgb, var(--accent-color) 14%, transparent); }
+
+/* Системная автоматизация — не дело человека: прозрачная заливка, пунктир, не перетаскивается. */
+.ncal-ev[data-system="true"] { background: transparent; border: 1px dashed color-mix(in srgb, var(--ev) 60%, var(--border-color)); box-shadow: none; color: var(--text-2); cursor: pointer; }
+.ncal-ev[data-system="true"] .ncal-ev-resize { display: none; }
+.ncal-chip-ev[data-system="true"] { background: transparent; color: var(--text-muted); font-style: italic; }
+.ncal-agenda-row[data-system="true"] .ncal-agenda-title { color: var(--text-2); font-weight: var(--weight-normal); }
+
+/* Только что поменял агент — короткая пульсация обводки: видно, что и где он сделал. */
+.ncal-ev[data-fresh="true"], .ncal-chip-ev[data-fresh="true"] { animation: ncal-fresh 1.4s var(--ease-out) 3; }
+@keyframes ncal-fresh { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 55%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ncal-ev[data-fresh="true"], .ncal-chip-ev[data-fresh="true"] { animation: none; box-shadow: 0 0 0 2px var(--accent-color); } }
+
+/* Переключатель слоя автоматизаций в шапке календаря. */
+.ncal-system-toggle[aria-pressed="true"] { color: var(--state-warn); }
+
+/* Блок автоматизации в редакторе события: кто сделает и что. */
+.ncal-auto { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--state-warn) 35%, var(--border-color)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--state-warn) 6%, transparent); }
+.ncal-auto-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--text-2); font-size: var(--text-sm); }
+.ncal-auto-prompt { width: 100%; min-height: 84px; padding: var(--space-2) var(--space-3); resize: vertical; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); line-height: 1.45; }
+.ncal-auto-prompt:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ncal-hint[data-tone="danger"] { color: var(--state-danger); }
+.ncal-source { display: flex; align-items: center; gap: 6px; }

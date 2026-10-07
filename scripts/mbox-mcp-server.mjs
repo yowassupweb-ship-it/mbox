@@ -2555,7 +2555,9 @@ const plannerLine = (item, kind) => {
     const list = item.list_id === "personal" ? "personal" : `project ${item.list_id}`;
     return `task #${item.id} [${item.status}] «${item.title}» · ${list}${props.due ? ` · due ${props.due}` : ""}${props.repeat ? ` · repeats ${props.repeat}` : ""}${item.priority && item.priority !== "normal" ? ` · ${item.priority}` : ""}`;
   }
-  return `event #${item.id} «${item.title}» · ${String(item.starts_at).slice(0, 16)} – ${String(item.ends_at).slice(11, 16)}${item.all_day ? " · all day" : ""}${item.location ? ` · ${item.location}` : ""}${item.recurrence_rule ? ` · repeats ${item.recurrence_rule}` : ""}`;
+  if (kind === "system") return `${String(item.starts_at).slice(0, 16)} ${item.title} · ${item.status}${item.source ? ` · ${item.source}` : ""}`;
+  const auto = item.automation ? ` · AUTOMATION → ${item.automation.agent}: «${String(item.automation.prompt).slice(0, 80)}»${item.run ? (item.run.error ? ` (failed: ${item.run.error})` : ` (fired, inbox #${item.run.inbox_id})`) : ""}` : "";
+  return `event #${item.id} «${item.title}» · ${String(item.starts_at).slice(0, 16)} – ${String(item.ends_at).slice(11, 16)}${item.all_day ? " · all day" : ""}${item.location ? ` · ${item.location}` : ""}${item.recurrence_rule ? ` · repeats ${item.recurrence_rule}` : ""}${item.source ? ` · set by ${item.source}` : ""}${auto}`;
 };
 
 server.registerTool(
@@ -2573,9 +2575,11 @@ server.registerTool(
     const day = (offset) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
     const start = from || day(0);
     const end = to || day(14);
-    const [tasks, events] = await Promise.all([
+    const range = `from=${encodeURIComponent(`${start}T00:00:00`)}&to=${encodeURIComponent(`${end}T23:59:59`)}`;
+    const [tasks, events, system] = await Promise.all([
       mboxFetch("/api/mbox/planner/tasks"),
-      mboxFetch(`/api/mbox/planner/events?from=${encodeURIComponent(`${start}T00:00:00`)}&to=${encodeURIComponent(`${end}T23:59:59`)}`),
+      mboxFetch(`/api/mbox/planner/events?${range}`),
+      mboxFetch(`/api/mbox/planner/automations?${range}`).catch(() => ({ items: [] })),
     ]);
     const all = (tasks.tasks || []).filter((item) => include_done || item.status !== "done");
     const personal = all.filter((item) => item.list_id === "personal");
@@ -2589,6 +2593,9 @@ server.registerTool(
       "",
       `Calendar ${start} … ${end} (${(events.events || []).length}):`,
       ...((events.events || []).length ? events.events.map((item) => `- ${plannerLine(item, "event")}`) : ["- none"]),
+      "",
+      `MBOX automations on schedule (read-only, e.g. SEO Wizard) (${(system.items || []).length}):`,
+      ...((system.items || []).length ? system.items.map((item) => `- ${plannerLine(item, "system")}`) : ["- none"]),
     ];
     return textResult(lines.join("\n"));
   },
@@ -2642,8 +2649,8 @@ server.registerTool(
 server.registerTool(
   "planner_event",
   {
-    title: "Create, change or delete a calendar event of the owner",
-    description: "Without id creates an event (title, starts_at and ends_at are required; local time YYYY-MM-DDTHH:MM, all_day events: dates with T00:00). With id changes only the fields you pass. For a recurring event pass the occurrence id «master::start» from planner_read and scope: this (only that occurrence), following (it and later ones) or all (whole series, default). delete=true removes with the same scope. Colors: blue, green, orange, red, purple, yellow, cyan, gray. Recurrence as RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE.",
+    title: "Create, change or delete a calendar event of the owner (also scheduled automations)",
+    description: "Plan the owner's day in the calendar — they see your changes live, marked with your name. Without id creates an event (title, starts_at and ends_at are required; local time YYYY-MM-DDTHH:MM, all_day events: dates with T00:00). With id changes only the fields you pass. For a recurring event pass the occurrence id «master::start» from planner_read and scope: this (only that occurrence), following (it and later ones) or all (whole series, default). delete=true removes with the same scope. Colors: blue, green, orange, red, purple, yellow, cyan, gray. Recurrence as RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE. AUTOMATION: set automation_agent (Claude, ChatGPT, ClaudeCloud, CodexCloud, Джарвис) and automation_prompt — at the start of the event (each occurrence for a series) that agent receives the prompt as a chat task and its answer appears in the chat. Use it for recurring work like weekly reports or checks; automation_prompt empty string removes the automation. Ask the owner before scheduling automations on your own initiative.",
     inputSchema: {
       id: z.string().default(""),
       title: z.string().default(""),
@@ -2654,15 +2661,18 @@ server.registerTool(
       color: z.string().optional(),
       all_day: z.boolean().optional(),
       recurrence_rule: z.string().optional(),
+      automation_agent: z.string().optional().describe("agent that receives the task at event time"),
+      automation_prompt: z.string().optional().describe("what the agent should do; empty string removes the automation"),
       scope: z.enum(["this", "following", "all"]).default("all"),
       delete: z.boolean().default(false),
     },
   },
-  async ({ id, title, starts_at, ends_at, description, location, color, all_day, recurrence_rule, scope, delete: remove }) => {
+  async ({ id, title, starts_at, ends_at, description, location, color, all_day, recurrence_rule, automation_agent, automation_prompt, scope, delete: remove }) => {
     const base = "/api/mbox/planner/events";
+    const automation = automation_prompt === undefined ? undefined : automation_prompt.trim() ? { agent: automation_agent || "Claude", prompt: automation_prompt } : null;
     if (!id) {
       if (!title.trim() || !starts_at || !ends_at) return textResult("Creating an event needs title, starts_at and ends_at.");
-      const { event } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, start: starts_at, end: ends_at, description: description ?? "", location: location ?? "", color: color ?? "blue", all_day: Boolean(all_day), recurrence_rule: recurrence_rule || null }) });
+      const { event } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, start: starts_at, end: ends_at, description: description ?? "", location: location ?? "", color: color ?? "blue", all_day: Boolean(all_day), recurrence_rule: recurrence_rule || null, ...(automation ? { automation } : {}) }) });
       return textResult(`Created ${plannerLine(event, "event")}`);
     }
     const [master, occurrence = ""] = String(id).replace(/^#/, "").split("::");
@@ -2680,6 +2690,7 @@ server.registerTool(
     if (color !== undefined) body.color = color;
     if (all_day !== undefined) body.all_day = all_day;
     if (recurrence_rule !== undefined) body.recurrence_rule = recurrence_rule || null;
+    if (automation !== undefined) body.automation = automation;
     const { event } = await mboxFetch(`${base}/${master}`, { method: "PATCH", body: JSON.stringify(body) });
     return textResult(`Updated ${plannerLine(event, "event")}`);
   },

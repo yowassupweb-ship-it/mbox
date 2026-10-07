@@ -361,3 +361,7 @@
 .planner-screen > .ntd { height: 100%; min-height: 0; }
 .planner-screen .ntd-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 .planner-screen .ntd-back { display: none; }
+/* Задачу только что поменял агент — короткая подсветка строки. */
+.ntl-row[data-fresh="true"] { animation: ntl-fresh 1.4s var(--ease-out) 3; }
+@keyframes ntl-fresh { 40% { background: color-mix(in srgb, var(--accent-color) 18%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ntl-row[data-fresh="true"] { animation: none; background: color-mix(in srgb, var(--accent-color) 12%, transparent); } }

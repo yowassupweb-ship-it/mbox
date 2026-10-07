@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { CheckSquare, ChevronLeft, ChevronRight, MapPin, Repeat } from 'lucide-react';
 import { Chip } from './TimeGrid';
+import { EventMarks } from './EventMarks';
 import {
   addDays, byStart, colorVar, dayIso, monthGrid, MONTHS, onDay, parseLocal, sameDay, startOfDay, startOfMonth, timeRange,
   weekdayIndex, WEEKDAYS, type CalEvent,
@@ -154,6 +155,7 @@ export function DayAgenda({ day, events, onOpen, onCreate, title, onMenu }: {
                   <span className="ncal-agenda-title">
                     {e.title || 'Без названия'}
                     {e.masterId && <Repeat size={11} aria-hidden="true" />}
+                    <EventMarks e={e} />
                     {e.taskId && <CheckSquare size={11} aria-hidden="true" />}
                   </span>
                   {e.location && <span className="ncal-agenda-place"><MapPin size={11} aria-hidden="true" /> {e.location}</span>}

@@ -1,6 +1,6 @@
 import { create, onPlannerChange, plannerFetch } from '../lib';
 import { isDone, type Task } from '../tasks/api';
-import { byStart, localIso, normalize, parseLocal, rowId, type CalEvent } from './model';
+import { byStart, localIso, normalize, normalizeSystem, parseLocal, rowId, type Automation, type CalEvent } from './model';
 
 /**
  * Данные календаря: события видимого диапазона (личный календарь, calendar_events).
@@ -15,11 +15,13 @@ export type Scope = 'this' | 'following' | 'all';
 
 interface State {
   events: CalEvent[];
+  /** Системные автоматизации MBOX в том же диапазоне (SEO Wizard): только чтение. */
+  system: CalEvent[];
   range: { from: string; to: string } | null;
   phase: Phase;
 }
 
-export const useCalendar = create<State>(() => ({ events: [], range: null, phase: 'idle' }));
+export const useCalendar = create<State>(() => ({ events: [], system: [], range: null, phase: 'idle' }));
 
 // ── Кэш: последний диапазон показывается мгновенно ──────────────────────────
 
@@ -50,10 +52,14 @@ export async function loadRange(from: string, to: string): Promise<void> {
   const mine = ++seq;
   try {
     const qs = new URLSearchParams({ from, to });
-    const data = await plannerFetch<{ events?: Record<string, unknown>[] }>(`/api/mbox/planner/events?${qs}`);
+    const [data, automations] = await Promise.all([
+      plannerFetch<{ events?: Record<string, unknown>[] }>(`/api/mbox/planner/events?${qs}`),
+      plannerFetch<{ items?: Record<string, unknown>[] }>(`/api/mbox/planner/automations?${qs}`).catch(() => ({ items: [] })),
+    ]);
     if (mine !== seq) return; // пока ждали, перешли на другой диапазон
     const events = (data.events || []).map(normalize).filter((e): e is CalEvent => Boolean(e)).sort(byStart);
-    useCalendar.setState({ events, phase: 'ready' });
+    const system = (automations.items || []).map(normalizeSystem).filter((e): e is CalEvent => Boolean(e));
+    useCalendar.setState({ events, system, phase: 'ready' });
     writeCache(from, to, events);
   } catch {
     if (mine === seq) useCalendar.setState((s) => ({ phase: s.events.length ? 'ready' : 'error' }));
@@ -111,6 +117,7 @@ export interface Draft {
   color?: string;
   reminderMinutesBefore?: number | null;
   recurrenceRule?: string | null;
+  automation?: Automation | null;
 }
 
 /** Поля для сервера (server/planner.mjs, eventFields). */
@@ -125,6 +132,7 @@ function body(d: Partial<Draft>): Record<string, unknown> {
   if (d.color !== undefined) out.color = d.color;
   if (d.reminderMinutesBefore !== undefined) out.reminder_minutes = d.reminderMinutesBefore;
   if (d.recurrenceRule !== undefined) out.recurrence_rule = d.recurrenceRule;
+  if (d.automation !== undefined) out.automation = d.automation;
   return out;
 }
 

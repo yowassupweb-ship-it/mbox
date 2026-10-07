@@ -53,7 +53,7 @@ export const RAIL_GROUPS: Array<{ id: string; title: string; items: RailItem[] }
   {
     id: "planner",
     title: "Задачи",
-    items: [{ id: "planner", label: "Задачи и календарь", short: "Задачи", icon: "/assets/icons/planner/calendar.png" }],
+    items: [{ id: "planner", label: "Задачи и календарь", short: "Задачи", icon: `${NAVIGATION}/calendar.png` }],
   },
   {
     id: "documents",

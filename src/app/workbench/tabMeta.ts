@@ -31,7 +31,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: "Артефакты", hint: "Файлы и документы", icon: `${NAVIGATION}/artifacts.png` };
     case "planner":
       return first === "calendar"
-        ? { title: "Календарь", hint: "Календарь и задачи со сроком", icon: "/assets/icons/planner/calendar.png" }
+        ? { title: "Календарь", hint: "Календарь и задачи со сроком", icon: `${NAVIGATION}/calendar.png` }
         : { title: "Задачи", hint: "Задачи", icon: "/assets/icons/planner/todo.png" };
     case "task":
       return { title: taskTabTitle(first), hint: `Задача #${first}`, icon: "/assets/icons/planner/todo.png" };

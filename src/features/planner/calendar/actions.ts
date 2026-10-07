@@ -24,11 +24,14 @@ export function createDefault() {
 }
 
 export function openEvent(e: CalEvent) {
-  if (e.taskId) openTask(e.taskId);
+  if (e.system) useCalendarUi.setState({ systemItem: e });
+  else if (e.taskId) openTask(e.taskId);
   else openEventEditor({ mode: 'edit', event: e });
 }
 
 export async function moveEvent(e: CalEvent, start: Date, end: Date) {
+  // Системную автоматизацию двигает её расписание, а не человек.
+  if (e.system) return;
   if (e.taskId) {
     updateTask(e.taskId, { dueDate: dayIso(start) }).catch(() => showToast('Срок не перенёсся — нет связи с сервером.', 'error'));
     return;
@@ -55,7 +58,7 @@ export function moveEventToDay(e: CalEvent, day: Date) {
 
 /** Удалить: у серии — спросить, что именно; обычное — подтвердить. Задачу отсюда не удаляем. */
 export async function removeEvent(e: CalEvent) {
-  if (e.taskId) return;
+  if (e.taskId || e.system) return;
   let scope: Scope = 'all';
   if (e.masterId) {
     const picked = await askScope('delete');
@@ -71,7 +74,7 @@ export async function removeEvent(e: CalEvent) {
 export function duplicateEvent(e: CalEvent) {
   openEventEditor({ mode: 'new', draft: {
     title: e.title, description: e.description, start: e.start, end: e.end, allDay: e.allDay, location: e.location,
-    color: e.color, reminderMinutesBefore: e.reminderMinutesBefore ?? null, recurrenceRule: null,
+    color: e.color, reminderMinutesBefore: e.reminderMinutesBefore ?? null, recurrenceRule: null, automation: e.automation ?? null,
   } });
 }
 

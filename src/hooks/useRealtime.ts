@@ -16,6 +16,8 @@ export const AGENT_INBOX_ITEM_EVENT = "mbox:agent-inbox-item";
 export const PRESENCE_EVENT = "mbox:presence";
 /** Сокет (пере)подключился — комнаты присутствия надо занять заново. */
 export const REALTIME_OPEN_EVENT = "mbox:realtime-open";
+/** Агент поменял календарь или задачу планировщика: detail — сообщение сервера (actor, entity, action, title, starts_at/due). */
+export const PLANNER_AGENT_EVENT = "mbox:planner-agent-change";
 
 let activeSocket: WebSocket | null = null;
 
@@ -112,6 +114,7 @@ export function useRealtime(onEntityChanged: (entity?: string) => void) {
           }
           if (message.type === "entity_changed") {
             scheduleReload(message.entity);
+            if ((message.entity === "calendar_events" || message.entity === "todos") && message.actor) window.dispatchEvent(new CustomEvent(PLANNER_AGENT_EVENT, { detail: message }));
             // silent — правка человека (автосохранение): открытые окна обновятся, но писать «Агент изменил…» незачем.
             if (!message.silent) announce(message.notification || `Агент ${message.actor || "Agent"} изменил ${message.detail || message.entity || "MBOX"}`);
           }

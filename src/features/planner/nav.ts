@@ -16,6 +16,7 @@ type Navigator = {
   showSidebar: (mode: PlannerMode) => void;
   closeTask: (taskId: string) => void;
   pinTask: (taskId: string) => void;
+  openTab: (key: string) => void;
 };
 
 let navigator: Navigator = {
@@ -24,6 +25,7 @@ let navigator: Navigator = {
   showSidebar: () => {},
   closeTask: () => {},
   pinTask: () => {},
+  openTab: () => {},
 };
 
 export function setPlannerNavigator(next: Navigator) { navigator = next; }
@@ -34,6 +36,8 @@ export const showPlannerSidebar = (mode: PlannerMode) => navigator.showSidebar(m
 export const closeTaskTab = (taskId: string) => navigator.closeTask(taskId);
 /** Задачу начали править — вкладка-превью закрепляется, следующий клик в списке её не заменит. */
 export const pinTaskTab = (taskId: string) => navigator.pinTask(taskId);
+/** Любая вкладка MBOX по ключу — например, SEO Wizard из системной автоматизации в календаре. */
+export const openTabKey = (key: string) => navigator.openTab(key);
 
 const MODE_KEY = 'mbox.planner.mode';
 const readMode = (): PlannerMode => { try { return localStorage.getItem(MODE_KEY) === 'calendar' ? 'calendar' : 'tasks'; } catch { return 'tasks'; } };

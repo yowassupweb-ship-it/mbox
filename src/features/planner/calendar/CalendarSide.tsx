@@ -5,10 +5,11 @@ import { onPlannerChange, plannerFetch } from '../lib';
 import { loadTasks, useTasks } from '../tasks/api';
 import { openCalendar } from '../nav';
 import { taskEvents } from './api';
+import { EventMarks } from './EventMarks';
 import { createDefault, openEvent, toggleTaskDone } from './actions';
 import { EventMenu } from './EventMenu';
 import { MiniMonth } from './MonthViews';
-import { addDays, byStart, colorVar, localIso, monthGrid, normalize, onDay, sameDay, startOfDay, timeRange, type CalEvent } from './model';
+import { addDays, byStart, colorVar, localIso, monthGrid, normalize, normalizeSystem, onDay, sameDay, startOfDay, timeRange, type CalEvent } from './model';
 import { pickDay, setMiniMonth, useCalendarUi } from './ui';
 
 /**
@@ -21,6 +22,8 @@ export function CalendarSide() {
   const selected = useCalendarUi((s) => s.selected);
   const tasks = useTasks((s) => s.tasks);
   const [events, setEvents] = useState<CalEvent[]>([]);
+  const [system, setSystem] = useState<CalEvent[]>([]);
+  const showSystem = useCalendarUi((s) => s.showSystem);
   const [menu, setMenu] = useState<{ event: CalEvent; anchor: MenuAnchor } | null>(null);
 
   const grid = useMemo(() => monthGrid(month), [month]);
@@ -29,16 +32,22 @@ export function CalendarSide() {
 
   const load = useCallback(async () => {
     try {
-      const data = await plannerFetch<{ events?: Record<string, unknown>[] }>(`/api/mbox/planner/events?${new URLSearchParams({ from, to })}`);
+      const qs = new URLSearchParams({ from, to });
+      const [data, automations] = await Promise.all([
+        plannerFetch<{ events?: Record<string, unknown>[] }>(`/api/mbox/planner/events?${qs}`),
+        plannerFetch<{ items?: Record<string, unknown>[] }>(`/api/mbox/planner/automations?${qs}`).catch(() => ({ items: [] })),
+      ]);
       setEvents((data.events || []).map(normalize).filter((e): e is CalEvent => Boolean(e)));
+      setSystem((automations.items || []).map(normalizeSystem).filter((e): e is CalEvent => Boolean(e)));
     } catch { /* без связи — остаются прежние */ }
   }, [from, to]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => onPlannerChange(['calendar_events'], () => void load()), [load]);
   useEffect(() => { void loadTasks(); }, []);
 
+  // Точки мини-месяца — только свои события и задачи: ежедневный сбор SEO отметил бы каждый день.
   const all = useMemo(() => [...events, ...taskEvents(tasks, from, to)].sort(byStart), [events, tasks, from, to]);
-  const day = useMemo(() => all.filter((e) => onDay(e, selected)), [all, selected]);
+  const day = useMemo(() => [...all, ...(showSystem ? system : [])].filter((e) => onDay(e, selected)).sort(byStart), [all, system, showSystem, selected]);
   const today = startOfDay(new Date());
   const heading = sameDay(selected, today) ? 'Сегодня' : sameDay(selected, addDays(today, 1)) ? 'Завтра'
     : selected.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -59,7 +68,7 @@ export function CalendarSide() {
           <ul className="ncal-agenda-list">
             {day.map((e) => (
               <li key={e.id}>
-                <div className="ncal-agenda-row" data-task={e.taskId ? 'true' : undefined} data-done={e.done ? 'true' : undefined} style={{ '--ev': colorVar(e.color) } as CSSProperties}
+                <div className="ncal-agenda-row" data-task={e.taskId ? 'true' : undefined} data-done={e.done ? 'true' : undefined} data-system={e.system ? 'true' : undefined} style={{ '--ev': colorVar(e.color) } as CSSProperties}
                   onContextMenu={(ev) => { ev.preventDefault(); setMenu({ event: e, anchor: { x: ev.clientX, y: ev.clientY } }); }}>
                   {e.taskId ? (
                     <button type="button" className="ntl-check ncal-agenda-check" aria-pressed={Boolean(e.done)} aria-label={e.done ? 'Вернуть в работу' : 'Отметить выполненной'} onClick={() => toggleTaskDone(e)}>
@@ -69,7 +78,7 @@ export function CalendarSide() {
                     <span className="ncal-agenda-time">{e.allDay ? 'весь день' : timeRange(e).replace('–', '\n')}</span>
                   )}
                   <button type="button" className="ncal-agenda-text" onClick={() => { if (!e.taskId) openCalendar(); openEvent(e); }}>
-                    <span className="ncal-agenda-title">{e.title || 'Без названия'}</span>
+                    <span className="ncal-agenda-title">{e.title || 'Без названия'}<EventMarks e={e} /></span>
                     {e.location && <span className="ncal-agenda-place">{e.location}</span>}
                   </button>
                 </div>

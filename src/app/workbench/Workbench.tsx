@@ -407,6 +407,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       showSidebar: (mode) => { setPlannerMode(mode); setActivity("planner"); setSidebarOpen(true); },
       closeTask: (taskId) => plannerNavRef.current.closeTab(`task:${taskId}`),
       pinTask: (taskId) => plannerNavRef.current.tabs.pin(`task:${taskId}`),
+      openTab: (key) => plannerNavRef.current.tabs.open(key, true),
     });
   }, [setActivity, setSidebarOpen]);
 

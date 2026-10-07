@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, CalendarDays, Check, MapPin, Repeat, Trash2 } from 'lucide-react';
+import { Bell, Bot, CalendarDays, Check, ChevronDown, MapPin, Repeat, Trash2, Zap } from 'lucide-react';
 import { create, overlayRoot } from '../lib';
 import { showToast } from '../ui/Toast';
 import { DatePicker } from '../ui/DatePicker';
 import { Menu, MenuItem, Sheet, type MenuAnchor } from '../ui/overlay';
 import { createEvent, deleteEvent, updateEvent, type Draft, type Scope } from './api';
+import { loadPeople, usePeople } from '../people';
 import {
   addDays, addMinutes, COLORS, colorVar, dayIso, dayLabel, hhmm, isRecurring, parseLocal, reminderLabel, REMINDERS, repeatOf,
   REPEATS, type CalEvent,
@@ -84,7 +85,10 @@ export function newDraft(start: Date, end?: Date, allDay = false): Draft {
 const draftOf = (e: CalEvent): Draft => ({
   title: e.title, description: e.description, start: e.start, end: e.end, allDay: e.allDay, location: e.location,
   color: e.color, reminderMinutesBefore: e.reminderMinutesBefore ?? null, recurrenceRule: e.recurrenceRule ?? null,
+  automation: e.automation ?? null,
 });
+
+const runFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 function withDate(iso: string, day: string) { return `${day}${iso.slice(10)}`; }
 function withTime(iso: string, time: string) { return `${iso.slice(0, 10)}T${time}:00`; }
@@ -99,8 +103,15 @@ export default function EventEditor({ state, onClose }: { state: EditorState; on
     return [src.title, src.description].filter((x) => x && x.trim()).join('\n');
   });
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState<{ kind: 'repeat' | 'remind' | 'startDate' | 'endDate' | 'color'; anchor: MenuAnchor } | null>(null);
+  const [menu, setMenu] = useState<{ kind: 'repeat' | 'remind' | 'startDate' | 'endDate' | 'color' | 'agent'; anchor: MenuAnchor } | null>(null);
   const [showPlace, setShowPlace] = useState(() => Boolean(state.mode === 'edit' && state.event.location));
+  // Автоматизация: в момент события агент получает задание. Пока выключена — поля не мешают обычному событию.
+  const [autoOn, setAutoOn] = useState(() => Boolean(state.mode === 'edit' ? state.event.automation : state.draft.automation));
+  const [autoAgent, setAutoAgent] = useState(() => (state.mode === 'edit' ? state.event.automation?.agent : state.draft.automation?.agent) || 'Claude');
+  const [autoPrompt, setAutoPrompt] = useState(() => (state.mode === 'edit' ? state.event.automation?.prompt : state.draft.automation?.prompt) || '');
+  const people = usePeople((s) => s.users);
+  const agents = Object.values(people).filter((p) => p.kind === 'agent').map((p) => p.name);
+  useEffect(() => { void loadPeople(); }, []);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -126,8 +137,10 @@ export default function EventEditor({ state, onClose }: { state: EditorState; on
   const save = async () => {
     if (busy || endBeforeStart) return;
     const [first, ...rest] = text.trim().split('\n');
+    if (autoOn && !autoPrompt.trim()) { showToast('Напишите, что агенту сделать, — или выключите автоматизацию.', 'error'); return; }
     const draft: Draft = {
       ...d,
+      automation: autoOn ? { agent: autoAgent, prompt: autoPrompt.trim(), ...(d.automation?.project_id ? { project_id: d.automation.project_id } : {}) } : null,
       title: (first || '').trim() || 'Событие',
       description: rest.join('\n').trim() || undefined,
       // Весь день: храним с полуночи до полуночи дня окончания.
@@ -231,7 +244,29 @@ export default function EventEditor({ state, onClose }: { state: EditorState; on
           {!showPlace && (
             <button type="button" className="ncal-pill" onClick={() => setShowPlace(true)}><MapPin size={14} aria-hidden="true" /> Место</button>
           )}
+          <button type="button" className="ncal-pill" data-on={autoOn ? 'true' : undefined} aria-pressed={autoOn} onClick={() => setAutoOn(!autoOn)}
+            title="В момент события агент получит задание — как будто вы написали ему в чат">
+            <Zap size={14} aria-hidden="true" /> Автоматизация
+          </button>
         </div>
+
+        {autoOn && (
+          <section className="ncal-auto" aria-label="Автоматизация">
+            <div className="ncal-auto-head">
+              <span>Кто сделает</span>
+              <button type="button" className="ncal-pill" onClick={pop('agent')} aria-haspopup="menu"><Bot size={14} aria-hidden="true" /> {autoAgent} <ChevronDown size={13} aria-hidden="true" /></button>
+            </div>
+            <textarea className="ncal-auto-prompt" value={autoPrompt} onChange={(e) => setAutoPrompt(e.target.value)} rows={4}
+              placeholder={'Что сделать в момент события. Например: «Собери сводку SEO за неделю и положи отчётом в проект»'} aria-label="Задание агенту" />
+            <p className="ncal-hint">{repeat.id !== 'none' ? 'Задание уйдёт агенту в начале каждого повторения.' : 'Задание уйдёт агенту в начале события.'} Ответ придёт в чат.</p>
+            {original?.run && (
+              <p className="ncal-hint" data-tone={original.run.error ? 'danger' : undefined}>
+                {original.run.error ? `Последний запуск не удался: ${original.run.error}` : `Запущено ${runFmt.format(new Date(original.run.fired_at.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00')))}${original.run.inbox_id ? ` · сообщение #${original.run.inbox_id}` : ''}`}
+              </p>
+            )}
+          </section>
+        )}
+        {original?.source && <p className="ncal-hint ncal-source"><Bot size={13} aria-hidden="true" /> Поставил {original.source}</p>}
 
         {showPlace && (
           <label className="ncal-place">
@@ -253,6 +288,13 @@ export default function EventEditor({ state, onClose }: { state: EditorState; on
         <Menu anchor={menu.anchor} label="Напоминание" onClose={() => setMenu(null)} compact>
           {REMINDERS.map((r) => (
             <MenuItem key={String(r.value)} icon={(d.reminderMinutesBefore ?? null) === r.value ? <Check size={14} /> : <span className="ncal-menu-pad" />} onSelect={() => { set({ reminderMinutesBefore: r.value }); setMenu(null); }}>{r.label}</MenuItem>
+          ))}
+        </Menu>
+      )}
+      {menu?.kind === 'agent' && (
+        <Menu anchor={menu.anchor} label="Агент" onClose={() => setMenu(null)} compact>
+          {(agents.length ? agents : ['Claude', 'ChatGPT', 'Джарвис']).map((name) => (
+            <MenuItem key={name} icon={autoAgent === name ? <Check size={14} /> : <span className="ncal-menu-pad" />} onSelect={() => { setAutoAgent(name); setMenu(null); }}>{name}</MenuItem>
           ))}
         </Menu>
       )}

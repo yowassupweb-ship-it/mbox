@@ -2,7 +2,10 @@ import { useEffect } from 'react';
 import { plannerFetch } from './lib';
 import { normalize, parseLocal } from './calendar/model';
 import EventEditor, { ScopeHost } from './calendar/EventEditor';
-import { closeEventEditor, useCalendarUi } from './calendar/ui';
+import { closeEventEditor, flash, pickDay, useCalendarUi } from './calendar/ui';
+import { SystemSheet } from './calendar/SystemSheet';
+import { openCalendar, openTask } from './nav';
+import { PLANNER_AGENT_EVENT } from '../../hooks/useRealtime';
 import { dayIso } from './calendar/model';
 import { OverlayHost } from './ui/overlay';
 import ToastHost, { showToast } from './ui/Toast';
@@ -99,13 +102,54 @@ function useEventReminders() {
   }, []);
 }
 
+// ── Правки агентов — на глазах ──────────────────────────────────────────────
+// Агент поставил или перенёс событие, создал или закрыл задачу — человек сразу видит, кто и что сделал,
+// может одним нажатием посмотреть, а само изменённое несколько секунд подсвечено в календаре и списке.
+
+type AgentChange = { actor?: string; entity?: string; action?: string; title?: string; event_id?: string; starts_at?: string; task_id?: string; due?: string };
+
+const VERBS: Record<string, [string, string]> = {
+  create: ['поставил', 'создал'],
+  update: ['изменил', 'изменил'],
+  delete: ['убрал', 'удалил'],
+};
+const whenFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const dayFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
+
+function useAgentChanges() {
+  useEffect(() => {
+    const onChange = (raw: Event) => {
+      const change = (raw as CustomEvent<AgentChange>).detail || {};
+      const actor = change.actor || 'Агент';
+      const isEvent = change.entity === 'calendar_events';
+      const verb = (VERBS[change.action || 'update'] || VERBS.update)[isEvent ? 0 : 1];
+      const title = change.title ? `«${change.title}»` : isEvent ? 'событие' : 'задачу';
+      if (isEvent) {
+        const start = change.starts_at ? parseLocal(change.starts_at) : null;
+        const when = start && !Number.isNaN(start.getTime()) ? ` · ${whenFmt.format(start)}` : '';
+        if (change.event_id) flash([change.event_id]);
+        showToast(`${actor} ${verb} ${title}${when}`, 'info', change.action !== 'delete' && start ? { label: 'Показать', run: () => { pickDay(start); openCalendar(); } } : undefined);
+      } else {
+        const due = change.due ? ` · срок ${dayFmt.format(new Date(`${change.due}T12:00:00`))}` : '';
+        if (change.task_id) flash([`task:${change.task_id}`]);
+        const taskId = change.task_id;
+        showToast(`${actor} ${verb} задачу ${title}${due}`, 'info', change.action !== 'delete' && taskId ? { label: 'Открыть', run: () => openTask(taskId) } : undefined);
+      }
+    };
+    window.addEventListener(PLANNER_AGENT_EVENT, onChange);
+    return () => window.removeEventListener(PLANNER_AGENT_EVENT, onChange);
+  }, []);
+}
+
 /** Один раз на окно MBOX: редактор события, подтверждения, вопрос «это / следующие / вся серия», сообщения и напоминания. */
 export function PlannerHosts() {
   useEventReminders();
+  useAgentChanges();
   const editor = useCalendarUi((s) => s.editor);
   return (
     <>
       {editor && <EventEditor key={editor.mode === 'edit' ? editor.event.id : dayIso(parseLocal(editor.draft.start))} state={editor} onClose={closeEventEditor} />}
+      <SystemSheet />
       <OverlayHost />
       <ScopeHost />
       <ToastHost />
