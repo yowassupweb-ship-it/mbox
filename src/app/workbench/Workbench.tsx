@@ -9,8 +9,7 @@ import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
-import { TasksPanel } from "../../features/planner/tasks/TasksPanel";
-import { CalendarPanel } from "../../features/planner/calendar/CalendarPanel";
+import { CalendarScreen, PlannerHosts, rememberActiveTask, TasksScreen } from "../../features/planner";
 import type { ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { agentFamily, effectiveStatus, isAgentWorking, liveRunOf, CLOUD_AGENTS, isCloudAgent } from "../../lib/agents";
@@ -82,7 +81,7 @@ function phoneListOf(key: string): Activity | null {
   return null;
 }
 const PHONE_LIST_LABEL: Partial<Record<Activity, string>> = { explorer: "Проекты", notes: "Заметки", tables: "Таблицы", local: "Папки", files: "Файлы", search: "Поиск", storage: "Хранилище", agents: "Агенты", skills: "Навыки", tools: "Инструменты", browser: "Браузер", ssh: "SSH" };
-type PanelTab = "console" | "attention" | "journal" | "tasks" | "calendar";
+type PanelTab = "console" | "attention" | "journal";
 
 const ACTIVITY_ICONS = "/assets/icons/navigation";
 const SYSTEM_ICONS = "/assets/icons/system";
@@ -709,7 +708,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const activeProjectId = projectIdOfTab(tabs.active);
   const currentProjectName = data.projects.find((project) => project.id === activeProjectId)?.name;
   const attentionCount = needsHuman.length + attentionTodos.length;
-  const effectivePanelTab: PanelTab = consoleDock === "right" && panelTab === "console" ? "attention" : panelTab;
+  // Раньше в панели жили «Задачи» и «Календарь» — сохранённая вкладка могла остаться от них.
+  const knownPanelTab: PanelTab = panelTab === "console" || panelTab === "attention" || panelTab === "journal" ? panelTab : "attention";
+  const effectivePanelTab: PanelTab = consoleDock === "right" && knownPanelTab === "console" ? "attention" : knownPanelTab;
 
   const catalogTitles = useMemo(() => {
     const map: Record<string, string> = { ...titles };
@@ -759,6 +760,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <Overview data={data} onOpenProject={(projectId) => tabs.open(`todos:${projectId}`, true)} />;
       case "artifacts":
         return <ArtifactsTab data={data} />;
+      case "planner":
+        return (
+          <div className="nx planner-screen">
+            {first === "calendar"
+              ? <CalendarScreen onOpenTask={(taskId) => { rememberActiveTask(taskId); tabs.open("planner:tasks", true); }} />
+              : <TasksScreen />}
+          </div>
+        );
       case "abilities":
         return <AbilitiesBoard />;
       case "history":
@@ -955,6 +964,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const phoneBack = () => { setActivity(phoneListActivity); setSidebarOpen(true); };
 
   return (
+    <>
+    <PlannerHosts />
     <div className={["wb", sidebarOpen ? "has-sidebar" : "", panelOpen ? "has-panel" : "", consoleDock === "right" && rightOpen ? "has-right" : "", phoneDoc ? "is-phone-doc" : ""].filter(Boolean).join(" ")} style={layoutStyle}>
       <div className="wb-titlebar">{titleBar({
         openSearch,
@@ -1192,9 +1203,6 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               {consoleDock === "bottom" && <PanelTabButton active={effectivePanelTab === "console"} onClick={() => setPanelTab("console")} label="Чат" badge={working.length ? "●" : undefined} />}
               <PanelTabButton active={effectivePanelTab === "attention"} onClick={() => setPanelTab("attention")} label="Внимание" badge={attentionCount || undefined} warn={needsHuman.length > 0} />
               <PanelTabButton active={effectivePanelTab === "journal"} onClick={() => setPanelTab("journal")} label="Журнал" />
-              {/* «Задачи» и «Календарь» открываются из футера; во вкладках панели виден только открытый из них. */}
-              {effectivePanelTab === "tasks" && <PanelTabButton active onClick={() => setPanelTab("tasks")} label="Задачи" />}
-              {effectivePanelTab === "calendar" && <PanelTabButton active onClick={() => setPanelTab("calendar")} label="Календарь" />}
             </div>
             <span className="wb-panel-fill" />
             {consoleDock === "bottom" && effectivePanelTab === "console" && (
@@ -1237,8 +1245,6 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               </div>
             )}
             {effectivePanelTab === "journal" && <div className="wb-panel-pane is-journal" data-scroll-scope="panel:journal">{renderers.history()}</div>}
-            {effectivePanelTab === "tasks" && <div className="wb-panel-pane"><TasksPanel /></div>}
-            {effectivePanelTab === "calendar" && <div className="wb-panel-pane"><CalendarPanel /></div>}
           </div>
         </section>
       </div>
@@ -1260,8 +1266,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
         </button>
         <span className="wb-status-fill" />
-        <button type="button" className={panelOpen && panelTab === "tasks" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => showPanel("tasks")} title="Личные задачи"><CheckSquare size={12} /> Задачи</button>
-        <button type="button" className={panelOpen && panelTab === "calendar" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => showPanel("calendar")} title="Календарь"><CalendarDays size={12} /> Календарь</button>
+        {/* Планировщик (из shar-2) — вкладками во всю ширину: список задач и неделя календаря в панели не помещались. */}
+        <button type="button" className={tabs.active === "planner:tasks" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => tabs.open("planner:tasks", true)} title="Задачи: личные и всех проектов"><CheckSquare size={12} /> Задачи</button>
+        <button type="button" className={tabs.active === "planner:calendar" ? "wb-status-item is-on" : "wb-status-item"} onClick={() => tabs.open("planner:calendar", true)} title="Календарь"><CalendarDays size={12} /> Календарь</button>
         {attentionCount > 0 && (
           <button type="button" className={needsHuman.length ? "wb-status-item is-warn" : "wb-status-item"} onClick={() => showPanel("attention")} title="Требует внимания">
             <AlertTriangle size={12} /> {attentionCount}
@@ -1317,6 +1324,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       {domFind && <DomFind root={domFind.root} focusKey={domFind.n} onClose={() => setDomFind(null)} />}
       {spotlightOpen && <Spotlight open scope={spotlightScope} onClose={() => setSpotlightOpen(false)} tabs={tabs} commands={spotlightCommands} />}
     </div>
+    </>
   );
 }
 

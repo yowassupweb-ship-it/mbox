@@ -2550,15 +2550,19 @@ server.registerTool(
 // а у агента к ним доступа не было: он видел только задачи проектов. Здесь — те же ручки, что у интерфейса.
 
 const plannerLine = (item, kind) => {
-  if (kind === "task") return `task #${item.id} ${item.completed_at ? "[done]" : "[open]"} «${item.title}»${item.due_at ? ` · due ${String(item.due_at).slice(0, 16)}` : ""}${item.recurrence_rule ? ` · repeats ${item.recurrence_rule}` : ""}`;
+  if (kind === "task") {
+    const props = item.props || {};
+    const list = item.list_id === "personal" ? "personal" : `project ${item.list_id}`;
+    return `task #${item.id} [${item.status}] «${item.title}» · ${list}${props.due ? ` · due ${props.due}` : ""}${props.repeat ? ` · repeats ${props.repeat}` : ""}${item.priority && item.priority !== "normal" ? ` · ${item.priority}` : ""}`;
+  }
   return `event #${item.id} «${item.title}» · ${String(item.starts_at).slice(0, 16)} – ${String(item.ends_at).slice(11, 16)}${item.all_day ? " · all day" : ""}${item.location ? ` · ${item.location}` : ""}${item.recurrence_rule ? ` · repeats ${item.recurrence_rule}` : ""}`;
 };
 
 server.registerTool(
   "planner_read",
   {
-    title: "Read the owner's personal tasks and calendar",
-    description: "The owner's PERSONAL tasks (bottom panel «Задачи») and calendar events («Календарь») — not project todos (those are get_next_task / get_task). Without dates returns open personal tasks and events for the next 14 days; pass from/to (YYYY-MM-DD) to look at another period. Recurring events are expanded into occurrences.",
+    title: "Read the owner's planner: personal tasks, dated tasks and calendar",
+    description: "The owner's planner (footer «Задачи» and «Календарь»). Returns open PERSONAL tasks, any project task whose due date falls in the period, and calendar events. Without dates the period is today … +14 days; pass from/to (YYYY-MM-DD) for another one. Recurring events are expanded into occurrences (id «master::start»).",
     inputSchema: {
       from: z.string().default("").describe("YYYY-MM-DD, default today"),
       to: z.string().default("").describe("YYYY-MM-DD, default today + 14 days"),
@@ -2570,13 +2574,18 @@ server.registerTool(
     const start = from || day(0);
     const end = to || day(14);
     const [tasks, events] = await Promise.all([
-      mboxFetch("/api/mbox/personal-tasks"),
-      mboxFetch(`/api/mbox/calendar-events?from=${encodeURIComponent(`${start}T00:00:00`)}&to=${encodeURIComponent(`${end}T23:59:59`)}`),
+      mboxFetch("/api/mbox/planner/tasks"),
+      mboxFetch(`/api/mbox/planner/events?from=${encodeURIComponent(`${start}T00:00:00`)}&to=${encodeURIComponent(`${end}T23:59:59`)}`),
     ]);
-    const openTasks = (tasks.tasks || []).filter((item) => include_done || !item.completed_at);
+    const all = (tasks.tasks || []).filter((item) => include_done || item.status !== "done");
+    const personal = all.filter((item) => item.list_id === "personal");
+    const dated = all.filter((item) => item.list_id !== "personal" && item.props?.due && item.props.due >= start && item.props.due <= end);
     const lines = [
-      `Personal tasks (${openTasks.length}):`,
-      ...(openTasks.length ? openTasks.map((item) => `- ${plannerLine(item, "task")}`) : ["- none"]),
+      `Personal tasks (${personal.length}):`,
+      ...(personal.length ? personal.map((item) => `- ${plannerLine(item, "task")}`) : ["- none"]),
+      "",
+      `Project tasks due ${start} … ${end} (${dated.length}):`,
+      ...(dated.length ? dated.map((item) => `- ${plannerLine(item, "task")}`) : ["- none"]),
       "",
       `Calendar ${start} … ${end} (${(events.events || []).length}):`,
       ...((events.events || []).length ? events.events.map((item) => `- ${plannerLine(item, "event")}`) : ["- none"]),
@@ -2588,41 +2597,45 @@ server.registerTool(
 server.registerTool(
   "planner_task",
   {
-    title: "Create, change, complete or delete a personal task of the owner",
-    description: "Without id creates a personal task. With id changes only the fields you pass (title, description, due_at, done) and keeps the rest. delete=true removes it. Dates are local, YYYY-MM-DD or YYYY-MM-DDTHH:MM. Ask the owner first before creating tasks for them on your own initiative.",
+    title: "Create, change, complete or delete a task in the owner's planner",
+    description: "Without id creates a task: personal by default, or in a project with list_id = project id. With id changes only the fields you pass. done=true completes it (a repeating task moves its due date to the next time instead). delete=true removes it. due is a local date YYYY-MM-DD, empty string clears it. repeat: daily, weekdays, weekly, monthly, yearly or empty. Ask the owner first before creating tasks for them on your own initiative.",
     inputSchema: {
       id: z.string().default(""),
       title: z.string().default(""),
-      description: z.string().optional(),
-      due_at: z.string().optional().describe("empty string clears the due date"),
+      note: z.string().optional().describe("markdown text of the task"),
+      list_id: z.string().optional().describe("personal or a project id"),
+      due: z.string().optional(),
+      repeat: z.string().optional(),
+      priority: z.enum(["urgent", "high", "normal", "low"]).optional(),
+      status: z.enum(["open", "next", "doing", "review", "done"]).optional(),
       done: z.boolean().optional(),
       delete: z.boolean().default(false),
     },
   },
-  async ({ id, title, description, due_at, done, delete: remove }) => {
-    const base = "/api/mbox/personal-tasks";
+  async ({ id, title, note, list_id, due, repeat, priority, status, done, delete: remove }) => {
+    const base = "/api/mbox/planner/tasks";
+    const props = {};
+    if (due !== undefined) props.due = due ? due.slice(0, 10) : null;
+    if (repeat !== undefined) props.repeat = repeat || null;
+    const nextStatus = done === true ? "done" : done === false && !status ? "open" : status;
     if (!id) {
       if (!title.trim()) return textResult("A title is required to create a task.");
-      const { task } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, description: description ?? "", due_at: due_at || null, completed: Boolean(done) }) });
-      // Ответ записи отдаёт время в UTC, список — местное: показываем то, что владелец увидит в панели.
-      return textResult(`Created ${plannerLine({ ...task, due_at: due_at || task.due_at }, "task")}`);
+      const { task } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, note: note ?? "", list_id: list_id || "personal", priority, status: nextStatus, props }) });
+      return textResult(`Created ${plannerLine(task, "task")}`);
     }
     const cleanId = String(id).replace(/^#/, "");
     if (remove) {
       await mboxFetch(`${base}/${cleanId}`, { method: "DELETE" });
-      return textResult(`Deleted personal task #${cleanId}`);
+      return textResult(`Deleted task #${cleanId}`);
     }
-    const current = ((await mboxFetch(base)).tasks || []).find((item) => String(item.id) === cleanId);
-    if (!current) return textResult(`No personal task #${cleanId}. List them with planner_read.`);
-    const body = {
-      title: title || current.title,
-      description: description ?? current.description ?? "",
-      due_at: due_at === undefined ? current.due_at : due_at || null,
-      recurrence_rule: current.recurrence_rule || null,
-      completed: done === undefined ? Boolean(current.completed_at) : done,
-    };
-    const { task } = await mboxFetch(`${base}/${cleanId}`, { method: "PATCH", body: JSON.stringify(body) });
-    return textResult(`Updated ${plannerLine({ ...task, due_at: body.due_at ?? task.due_at }, "task")}`);
+    const body = { props };
+    if (title) body.title = title;
+    if (note !== undefined) body.note = note;
+    if (list_id) body.list_id = list_id;
+    if (priority) body.priority = priority;
+    if (nextStatus) body.status = nextStatus;
+    const { task, rolled } = await mboxFetch(`${base}/${cleanId}`, { method: "PATCH", body: JSON.stringify(body) });
+    return textResult(`Updated ${plannerLine(task, "task")}${rolled ? ` · repeating: next due ${rolled.to}` : ""}`);
   },
 );
 
@@ -2630,7 +2643,7 @@ server.registerTool(
   "planner_event",
   {
     title: "Create, change or delete a calendar event of the owner",
-    description: "Without id creates an event (title, starts_at and ends_at are required; local time YYYY-MM-DDTHH:MM, all_day events: dates with T00:00). With id changes only the fields you pass. delete=true removes it (a recurring event is removed entirely). Colors: blue, green, orange, red, purple, yellow, cyan, gray. Recurrence as RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE.",
+    description: "Without id creates an event (title, starts_at and ends_at are required; local time YYYY-MM-DDTHH:MM, all_day events: dates with T00:00). With id changes only the fields you pass. For a recurring event pass the occurrence id «master::start» from planner_read and scope: this (only that occurrence), following (it and later ones) or all (whole series, default). delete=true removes with the same scope. Colors: blue, green, orange, red, purple, yellow, cyan, gray. Recurrence as RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE.",
     inputSchema: {
       id: z.string().default(""),
       title: z.string().default(""),
@@ -2641,38 +2654,34 @@ server.registerTool(
       color: z.string().optional(),
       all_day: z.boolean().optional(),
       recurrence_rule: z.string().optional(),
+      scope: z.enum(["this", "following", "all"]).default("all"),
       delete: z.boolean().default(false),
     },
   },
-  async ({ id, title, starts_at, ends_at, description, location, color, all_day, recurrence_rule, delete: remove }) => {
-    const base = "/api/mbox/calendar-events";
+  async ({ id, title, starts_at, ends_at, description, location, color, all_day, recurrence_rule, scope, delete: remove }) => {
+    const base = "/api/mbox/planner/events";
     if (!id) {
       if (!title.trim() || !starts_at || !ends_at) return textResult("Creating an event needs title, starts_at and ends_at.");
-      const { event } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, starts_at, ends_at, description: description ?? "", location: location ?? "", color: color ?? "blue", all_day: Boolean(all_day), recurrence_rule: recurrence_rule || null }) });
-      return textResult(`Created ${plannerLine({ ...event, starts_at, ends_at }, "event")}`);
+      const { event } = await mboxFetch(base, { method: "POST", body: JSON.stringify({ title, start: starts_at, end: ends_at, description: description ?? "", location: location ?? "", color: color ?? "blue", all_day: Boolean(all_day), recurrence_rule: recurrence_rule || null }) });
+      return textResult(`Created ${plannerLine(event, "event")}`);
     }
-    const cleanId = String(id).replace(/^#/, "").split("::")[0];
+    const [master, occurrence = ""] = String(id).replace(/^#/, "").split("::");
     if (remove) {
-      await mboxFetch(`${base}/${cleanId}`, { method: "DELETE" });
-      return textResult(`Deleted calendar event #${cleanId}`);
+      const qs = new URLSearchParams({ scope: occurrence ? scope : "all", ...(occurrence ? { recurrence_id: occurrence } : {}) });
+      await mboxFetch(`${base}/${master}?${qs}`, { method: "DELETE" });
+      return textResult(`Deleted calendar event #${master}${occurrence && scope !== "all" ? ` (${scope}, from ${occurrence})` : ""}`);
     }
-    const wide = await mboxFetch(`${base}?from=1970-01-01T00:00:00&to=2100-01-01T00:00:00`);
-    // Повторяющееся событие приходит развёрнутым на вхождения; исходные поля — у самого раннего вхождения.
-    const source = (wide.events || []).filter((item) => String(item.master_id || item.id) === cleanId).sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))[0];
-    if (!source) return textResult(`No calendar event #${cleanId}. Find it with planner_read.`);
-    const body = {
-      title: title || source.title,
-      description: description ?? source.description ?? "",
-      starts_at: starts_at || source.starts_at,
-      ends_at: ends_at || source.ends_at,
-      all_day: all_day === undefined ? Boolean(source.all_day) : all_day,
-      location: location ?? source.location ?? "",
-      color: color ?? source.color ?? "blue",
-      reminder_minutes: source.reminder_minutes ?? null,
-      recurrence_rule: recurrence_rule === undefined ? source.recurrence_rule || null : recurrence_rule || null,
-    };
-    const { event } = await mboxFetch(`${base}/${cleanId}`, { method: "PATCH", body: JSON.stringify(body) });
-    return textResult(`Updated ${plannerLine({ ...event, starts_at: body.starts_at, ends_at: body.ends_at }, "event")}`);
+    const body = { scope: occurrence ? scope : "all", ...(occurrence ? { recurrence_id: occurrence } : {}) };
+    if (title) body.title = title;
+    if (starts_at) body.start = starts_at;
+    if (ends_at) body.end = ends_at;
+    if (description !== undefined) body.description = description;
+    if (location !== undefined) body.location = location;
+    if (color !== undefined) body.color = color;
+    if (all_day !== undefined) body.all_day = all_day;
+    if (recurrence_rule !== undefined) body.recurrence_rule = recurrence_rule || null;
+    const { event } = await mboxFetch(`${base}/${master}`, { method: "PATCH", body: JSON.stringify(body) });
+    return textResult(`Updated ${plannerLine(event, "event")}`);
   },
 );
 

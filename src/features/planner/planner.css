@@ -1,0 +1,685 @@
+/*
+ * Планировщик (из shar-2): корень, токены, которых нет в MBOX, и общие правила nx-* — кнопки, меню, листы, состояния.
+ * Значения — токенами MBOX (tokens.css): палитра и шкалы у shar-2 и MBOX общие.
+ */
+
+/* ── Корни: экран во вкладке и общий корень оверлеев ───────────────────── */
+.nx {
+  --control-h: 30px;
+  --control-icon: 32px;
+  --control-round: 34px;
+  --control-field: 42px;
+  --nx-avatar: 40px;
+  --nx-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --nx-nav-space: 0px;
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent);
+  --on-media: #ffffff;
+  --border-strong: rgba(255, 255, 255, .28);
+  --scrim: rgba(0, 0, 0, .36);
+  --icon-shadow: none;
+  --success-fill: var(--state-ok);
+  --ring-bg: color-mix(in srgb, var(--text-main) 14%, transparent);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+:root[data-theme="light"] .nx {
+  --border-strong: rgba(22, 24, 29, .30);
+  --icon-shadow: drop-shadow(0 1px 1.5px rgba(22, 24, 29, .22)) drop-shadow(0 2px 5px rgba(22, 24, 29, .10));
+}
+
+/* Экран — во всю площадь вкладки, прокручиваются только его области. */
+.nx.planner-screen {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-color);
+}
+
+/* Корень оверлеев: сам ничего не занимает, меню и листы внутри — fixed. */
+#planner-overlays { position: static; width: 0; height: 0; }
+
+/* Сообщения планировщика — сверху по центру. */
+.nx-toasts { position: fixed; z-index: 400; top: 48px; left: 50%; display: grid; gap: 8px; width: min(420px, calc(100vw - 24px)); transform: translateX(-50%); pointer-events: none; }
+.nx-toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: var(--surface-panel); box-shadow: var(--float); color: var(--text-main); font-size: var(--text-sm); pointer-events: auto; animation: nx-fade var(--duration-base) var(--ease-out); }
+.nx-toast svg { flex: none; color: var(--accent-color); }
+.nx-toast[data-tone="error"] svg, .nx-toast[data-tone="warning"] svg { color: var(--state-danger); }
+.nx-toast[data-tone="success"] svg { color: var(--state-ok); }
+
+.nx *,
+.nx *::before,
+.nx *::after { box-sizing: border-box; }
+
+/* Сброс — с нулевой специфичностью (:where): любой класс компонента
+   (.nx-primary, .nx-ghost, ссылка-действие) сильнее него. С «.nx button» было
+   наоборот: он перебивал одиночные классы, и в светлой теме белый текст
+   основной кнопки становился тёмным на синем. */
+:where(.nx) :where(button) { font: inherit; color: inherit; }
+:where(.nx) :where(a) { color: inherit; }
+
+/* Нажатие. В globals.css всем кнопкам задано scale(.94) правилом с высокой
+   специфичностью — оно же перебивало переходы наших кнопок (подсветку,
+   возврат строки после свайпа). Внутри .nx нажатие и переходы кнопок задаются
+   переменными: --press (во что сжимается) и --btn-transition. */
+.nx button:not(:disabled):not([data-no-press]) {
+  transition: var(--btn-transition, transform 0.08s ease);
+}
+.nx button:not(:disabled):not([data-no-press]):active {
+  transform: var(--press, scale(.97));
+}
+
+/* Фокус с клавиатуры — одно кольцо на весь интерфейс (§11). Мышь его не видит. */
+.nx :focus { outline: none; }
+.nx :focus-visible { box-shadow: var(--focus-ring); }
+
+.nx-sr {
+  /* Подписи для экранного диктора не должны попадать в скопированный текст. */
+  user-select: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Полосы прокрутки как в macOS: без дорожки и стрелок, тонкий ползунок
+   появляется, только когда курсор над прокручиваемой областью.
+   Chromium 121+ при заданных scrollbar-width/scrollbar-color игнорирует
+   ::-webkit-scrollbar и рисует системную полосу — на Windows со стрелками.
+   Поэтому стандартные свойства — только там, где нет ::-webkit-scrollbar (Firefox). */
+.nx ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+.nx ::-webkit-scrollbar-track,
+.nx ::-webkit-scrollbar-corner { background: transparent; }
+.nx ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.nx ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: content-box;
+  background-color: transparent;
+}
+.nx :hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text-main) 24%, transparent); }
+.nx ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text-main) 40%, transparent); }
+@supports not selector(::-webkit-scrollbar) {
+  .nx,
+  .nx * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text-main) 22%, transparent) transparent;
+  }
+}
+
+/* Прокрутка — тонкая, без собственного фона */
+.nx-scroll-y {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+/* ── Кнопки (§10.1) ───────────────────────────────────────────────────── */
+.nx-icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-icon);
+  height: var(--control-icon);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  text-decoration: none;
+  --btn-transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform 0.08s ease;
+}
+@media (hover: hover) { .nx-icon-btn:hover { background: var(--surface-hover); color: var(--text-main); } }
+.nx-icon-btn[aria-pressed="true"],
+.nx-icon-btn[aria-expanded="true"] { background: var(--surface-selected); color: var(--accent-color); }
+.nx-icon-btn:disabled { opacity: .68; cursor: default; background: transparent; transform: none; }
+
+.nx-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--element-bg);
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  cursor: pointer;
+  --btn-transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), transform 0.08s ease;
+}
+@media (hover: hover) { .nx-ghost:hover { background: color-mix(in srgb, var(--text-main) 6%, var(--element-bg)); } }
+.nx-ghost:disabled { opacity: .68; cursor: default; transform: none; }
+
+.nx-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--control-h);
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  box-shadow: var(--chin-shadow);
+  cursor: pointer;
+  --btn-transition: background var(--duration-fast) var(--ease-out), transform 0.08s ease;
+}
+@media (hover: hover) { .nx-primary:hover { background: var(--accent-fill-hover); } }
+.nx-primary:disabled { opacity: .68; cursor: default; background: var(--accent-fill); transform: none; }
+.nx-primary[data-tone="danger"] { background: var(--danger-fill); }
+@media (hover: hover) { .nx-primary[data-tone="danger"]:hover { background: var(--danger-fill-hover); } }
+
+.nx-primary-round {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-round);
+  height: var(--control-round);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  box-shadow: var(--chin-shadow);
+  cursor: pointer;
+  --btn-transition: background var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), transform 0.08s ease;
+}
+@media (hover: hover) { .nx-primary-round:hover { background: var(--accent-fill-hover); } }
+.nx-primary-round:disabled { opacity: .68; cursor: default; background: var(--accent-fill); transform: none; box-shadow: none; }
+
+/* ── Поля (§10.2) ─────────────────────────────────────────────────────── */
+.nx-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-field);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--element-bg);
+  color: var(--text-muted);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+.nx-field:focus-within {
+  border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+.nx-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  font-size: var(--text-md);
+}
+.nx-field input::placeholder { color: var(--text-muted); }
+.nx-field input:focus-visible { box-shadow: none; }
+
+/* Фильтр в панели — как поиск в Finder: подложка без рамки */
+.nx-field[data-variant="filter"] {
+  min-height: var(--control-h);
+  border-color: transparent;
+  background: var(--surface-hover);
+}
+.nx-field[data-variant="filter"] input { font-size: var(--text-sm); }
+
+/* ── Счётчик, аватар, чип ─────────────────────────────────────────────── */
+.nx-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.nx-count[data-muted="true"] {
+  background: color-mix(in srgb, var(--text-main) 14%, transparent);
+  color: var(--text-main);
+}
+
+.nx-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--size, var(--nx-avatar));
+  height: var(--size, var(--nx-avatar));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--tint, var(--note-gray)) 24%, var(--container-bg));
+  color: color-mix(in srgb, var(--tint, var(--note-gray)) 55%, var(--text-main));
+  font-size: calc(var(--size, var(--nx-avatar)) * .38);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  user-select: none;
+}
+.nx-avatar > img,
+.nx-avatar > svg { border-radius: inherit; }
+/* Фото всегда ровно по кругу аватара. В globals.css мобильное правило задаёт
+   всем img height:auto; чанки вложенного layout могут подключиться раньше него,
+   поэтому без явного приоритета портретное фото вылезает из квадратного слота. */
+.nx .nx-avatar > img {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 100%;
+  min-height: 100%;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: cover;
+}
+.nx-avatar[data-shape="square"] { border-radius: var(--radius-md); }
+.nx-avatar[data-kind] { color: var(--on-accent); }
+/* Новые служебные иконки уже содержат круглую подложку и занимают аватар целиком. */
+.nx-avatar[data-kind="favorites"] {
+  background: transparent;
+  box-shadow: none;
+}
+.nx-avatar[data-kind="notifications"] {
+  background: transparent;
+  box-shadow: none;
+}
+/* Готовая круглая картинка без второй подложки и внутренних полей. */
+.nx .nx-avatar > img.nx-avatar-glyph {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  filter: none;
+}
+/* В картинках вокруг круга прозрачные поля (izb — 9 из 160 px, uved — 11–12):
+   без поправки круг выходил меньше соседних аватаров. Увеличиваем ровно на поля. */
+.nx .nx-avatar[data-kind="favorites"] > img.nx-avatar-glyph { transform: scale(1.127); }
+.nx .nx-avatar[data-kind="notifications"] > img.nx-avatar-glyph { transform: scale(1.16); }
+.nx-avatar[data-kind="request"] { background: color-mix(in srgb, var(--note-purple) 80%, var(--accent-fill)); }
+
+/* Точка присутствия и значок комнаты на аватаре */
+.nx-presence {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--state-ok);
+  box-shadow: 0 0 0 2px var(--ring-bg, var(--surface-panel));
+}
+.nx-presence[data-kind="room"] {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--on-accent);
+}
+
+/* ── Меню и поповеры (§10.8): стекло, наведение — заливка акцентом ─────── */
+.nx-menu {
+  position: fixed;
+  /* Выше листов и диалогов (200): меню, открытое из листа (повтор, напоминание,
+     дата в редакторе события), пряталось под его затемнением. */
+  z-index: 240;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 2 * var(--space-4)));
+  padding: 6px;
+  border-radius: var(--radius-md);
+  background: var(--glass);
+  box-shadow: 0 0 0 1px var(--glass-brd), var(--glass-shadow);
+  animation: nx-pop var(--duration-base) var(--ease-spring);
+  transform-origin: var(--origin, top left);
+  /* Длинное меню не растягивается на весь экран — прокручивается внутри. */
+  max-height: min(440px, calc(var(--nx-vvh, 100dvh) - 2 * var(--space-4)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.nx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nx-menu-item svg { flex: none; color: var(--text-2); }
+.nx-menu-item:focus-visible {
+  /* Приглушённая синяя подложка вместо сплошной заливки акцентом. */
+  background: color-mix(in srgb, var(--accent-fill) 22%, transparent);
+  box-shadow: none;
+}
+@media (hover: hover) { .nx-menu-item:hover {
+    /* Приглушённая синяя подложка вместо сплошной заливки акцентом. */
+    background: color-mix(in srgb, var(--accent-fill) 22%, transparent);
+    box-shadow: none;
+  } }
+.nx-menu-item:focus-visible svg { color: var(--accent-color); }
+@media (hover: hover) { .nx-menu-item:hover svg { color: var(--accent-color); } }
+.nx-menu-item[data-tone="danger"] { color: var(--state-danger); }
+.nx-menu-item[data-tone="danger"] svg { color: currentColor; }
+.nx-menu-item[data-tone="danger"]:focus-visible { background: color-mix(in srgb, var(--state-danger) 16%, transparent); }
+@media (hover: hover) { .nx-menu-item[data-tone="danger"]:hover { background: color-mix(in srgb, var(--state-danger) 16%, transparent); } }
+.nx-menu-item:disabled { opacity: .68; cursor: default; background: transparent; color: var(--text-main); }
+.nx-menu-note {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.nx-menu-note b { color: var(--text-main); font-weight: var(--weight-medium); font-size: var(--text-sm); }
+/* Короткое меню (1–3 коротких пункта): по ширине содержимого, а не 220px+. */
+.nx-menu[data-size="compact"] { min-width: 0; width: max-content; max-width: min(240px, calc(100vw - 2 * var(--space-4))); }
+.nx-menu-sep { height: 1px; margin: 5px 6px; background: var(--border-color); }
+
+/* ── Диалог и лист (§10.9) ────────────────────────────────────────────── */
+.nx-scrim {
+  /* Внутри корня .nx, а не окна: на телефоне корень — видимая область над
+     клавиатурой, и лист с полем поиска остаётся над ней целиком. */
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: var(--scrim);
+  animation: nx-fade var(--duration-base) var(--ease-out);
+}
+.nx-dialog {
+  display: grid;
+  gap: var(--space-2);
+  width: min(400px, 100%);
+  padding: 20px 20px var(--space-4);
+  border-radius: var(--radius-xl);
+  background: var(--surface-panel);
+  box-shadow: var(--float);
+  animation: nx-pop var(--duration-base) var(--ease-spring);
+}
+.nx-dialog h2 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.nx-dialog p { margin: 0; font-size: var(--text-sm); color: var(--text-2); }
+.nx-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+
+.nx-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+  max-height: min(640px, 86dvh);
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: var(--surface-panel);
+  box-shadow: var(--float);
+  animation: nx-pop var(--duration-base) var(--ease-spring);
+}
+.nx-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-3) var(--space-3) var(--space-2) var(--space-5);
+}
+.nx-sheet-head h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+.nx-sheet-body { flex: 1; min-height: 0; padding: var(--space-1) var(--space-3) var(--space-3); }
+.nx-sheet-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-color);
+}
+/* Телефон: лист выезжает снизу во всю ширину, с ручкой — как в iOS. */
+@media (max-width: 640px) {
+  .nx-scrim[data-kind="sheet"] {
+    grid-template-rows: minmax(0, 1fr);
+    place-items: end stretch;
+    padding: max(var(--space-6), env(safe-area-inset-top)) 0 0;
+  }
+  .nx-sheet {
+    position: relative;
+    width: 100%;
+    max-height: 100%;
+    padding-bottom: var(--nx-safe-bottom);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    animation: nx-sheet-up .34s var(--ease-spring);
+  }
+  .nx-sheet-head { padding-top: var(--space-5); touch-action: none; }
+  .nx-sheet-head::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 36px;
+    height: 5px;
+    margin-left: -18px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--text-main) 22%, transparent);
+  }
+  .nx-sheet-foot { padding-bottom: var(--space-3); }
+}
+@keyframes nx-sheet-up { from { transform: translateY(100%); } }
+
+.nx-hint { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: var(--text-xs); color: var(--text-muted); }
+.nx-error { margin: 0; padding: var(--space-2); font-size: var(--text-sm); color: var(--state-danger); }
+
+/* Строка выбора в листе (пользователь, отдел) */
+.nx-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: 6px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  --btn-transition: background var(--duration-fast) var(--ease-out), transform 0.08s ease;
+}
+@media (hover: hover) { .nx-pick:hover { background: var(--surface-hover); } }
+.nx-pick[aria-checked="true"],
+.nx-pick[aria-selected="true"] { background: var(--surface-selected); }
+.nx-pick:disabled { opacity: .68; cursor: default; }
+.nx-pick-text { display: grid; flex: 1; min-width: 0; }
+.nx-pick-text span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-medium); }
+.nx-pick-text span + span { font-size: var(--text-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--on-accent);
+}
+[aria-checked="true"] > .nx-check { border-color: var(--accent-fill); background: var(--accent-fill); }
+
+/* Сегмент (§10.3) — как в macOS: вкладки по ширине содержимого, свободное
+   место делится между ними; активная — приподнятая пилюля. Без прокрутки:
+   прокручиваемый контейнер обрезал бы тень активной вкладки. */
+.nx-segment {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: auto;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-main) 7%, transparent);
+}
+.nx-segment button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  --btn-transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  --press: none;
+}
+@media (hover: hover) { .nx-segment button:hover { color: var(--text-main); } }
+.nx-segment button[aria-pressed="true"] {
+  background: var(--bg-raised);
+  color: var(--text-main);
+  font-weight: var(--weight-semibold);
+  box-shadow: 0 0 0 0.5px var(--border-color), var(--chin-shadow);
+}
+
+/* ── Граница между панелями (Splitter) ────────────────────────────────── */
+.nx-splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 25;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.nx-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--duration-fast) var(--ease-out), width var(--duration-fast) var(--ease-out);
+}
+.nx-splitter:focus-visible::after,
+[data-resizing="true"] > .nx-splitter::after {
+  left: 3px;
+  width: 3px;
+  background: color-mix(in srgb, var(--accent-color) 70%, transparent);
+}
+@media (hover: hover) { .nx-splitter:hover::after {
+    left: 3px;
+    width: 3px;
+    background: color-mix(in srgb, var(--accent-color) 70%, transparent);
+  } }
+.nx-splitter:focus-visible { box-shadow: none; }
+[data-resizing="true"] { cursor: col-resize; user-select: none; }
+[data-resizing="true"] * { pointer-events: none; }
+[data-resizing="true"] > .nx-splitter { pointer-events: auto; }
+
+/* ── Состояния области: пусто, загрузка, ошибка ───────────────────────── */
+.nx-state {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  height: 100%;
+  min-height: 160px;
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.nx-state h2 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--text-main); }
+.nx-state p { margin: 0 0 var(--space-2); max-width: 320px; }
+.nx-state svg { color: var(--text-muted); }
+.nx-state[data-tone="danger"] svg { color: var(--state-danger); }
+
+.nx-skel-row {
+  display: grid;
+  grid-template-columns: var(--nx-avatar) 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 10px;
+}
+.nx-skel-lines { display: grid; gap: 6px; }
+.nx-skel-avatar { width: var(--nx-avatar); height: var(--nx-avatar); }
+.nx-skel-line { width: var(--w, 60%); height: 10px; }
+.nx-skel-line + .nx-skel-line { height: 8px; }
+.nx-skel {
+  border-radius: var(--radius-pill);
+  background: var(--surface-hover);
+  animation: nx-pulse 1.4s var(--ease-out) infinite;
+}
+
+.nx-spin { animation: nx-spin 0.9s linear infinite; }
+
+/* Знак ШАР (SharMark) */
+.nx-mark { position: relative; display: inline-block; flex: none; }
+.nx-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+/* Слово «ШАР» рядом со знаком — набрано Inter Bold, не картинкой. */
+.nx-wordmark {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--text-main);
+}
+
+/* ── Движение (§8) ────────────────────────────────────────────────────── */
+@keyframes nx-pulse { 50% { opacity: .45; } }
+@keyframes nx-spin { to { transform: rotate(360deg); } }
+@keyframes nx-fade { from { opacity: 0; } }
+@keyframes nx-pop { from { opacity: 0; transform: scale(.96); } }
+@keyframes nx-rise { from { opacity: 0; transform: translateY(6px); } }
+
+@media (pointer: coarse) {
+  .nx { --control-icon: 44px; --control-h: 40px; }
+  /* Пункты меню под палец (§11: цель не меньше 44px). */
+  .nx-menu { min-width: 240px; }
+  .nx-menu-item { min-height: 44px; font-size: var(--text-md); }
+  /* iOS увеличивает страницу при фокусе на поле мельче 16px. */
+  .nx input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .nx textarea,
+  .nx [contenteditable="true"] { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx *,
+  .nx *::before,
+  .nx *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+

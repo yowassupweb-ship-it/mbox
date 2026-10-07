@@ -28,6 +28,10 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: "Обзор", hint: "Сводка по всем проектам", icon: `${NAVIGATION}/overview.png` };
     case "artifacts":
       return { title: "Артефакты", hint: "Файлы и документы", icon: `${NAVIGATION}/artifacts.png` };
+    case "planner":
+      return first === "calendar"
+        ? { title: "Календарь", hint: "Личный календарь и задачи со сроком", icon: "/assets/icons/planner/calendar.png" }
+        : { title: "Задачи", hint: "Личные задачи и задачи всех проектов", icon: "/assets/icons/planner/todo.png" };
     case "abilities":
       return { title: "Умения", hint: "Навыки и инструменты", icon: `${NAVIGATION}/skills.png` };
     case "history":
