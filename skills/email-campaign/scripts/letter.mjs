@@ -173,7 +173,7 @@ const LEARNINGS = 'learnings.md';
 const LEARNINGS_HEAD = '# Опыт навыка email-campaign\n\nЖурнал наблюдений для самоулучшения. Пишут конструктор (library.html) и агент. По кнопке «Улучшить навык» агент разбирает «Открытые»: правит компоненты, реестр, style-guide и SKILL.md, затем переносит пункт в «Сделано» с тем, что изменено.\n\n## Открытые\n\n## Сделано\n';
 async function learn(line) {
   let text = '';
-  try { text = await readSkillFile(LEARNINGS); } catch { text = ''; }
+  try { text = (await readSkillFile(LEARNINGS)).replace(/\r\n/g, '\n'); } catch { text = ''; }
   if (!/## Открытые/.test(text)) text = LEARNINGS_HEAD;
   const entry = `- ${new Date().toISOString().slice(0, 10)} · ${line}`;
   text = text.replace(/## Открытые\n\n?/, (head) => `${head.trimEnd()}\n\n${entry}\n`);

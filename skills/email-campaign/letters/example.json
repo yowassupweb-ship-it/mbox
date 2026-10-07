@@ -2,7 +2,7 @@
   "id": "example",
   "version": 1,
   "status": "local-checked",
-  "updated_at": "2026-10-07T16:58:31.703Z",
+  "updated_at": "2026-10-07T17:11:50.384Z",
   "brief": {
     "type": "подборка",
     "subject": "Зимние выходные по Золотому кольцу",
@@ -124,7 +124,7 @@
     "questions": []
   },
   "check": {
-    "at": "2026-10-07T16:58:31.702Z",
+    "at": "2026-10-07T17:11:50.383Z",
     "by": "letter.mjs",
     "ok": false,
     "external_ok": false,

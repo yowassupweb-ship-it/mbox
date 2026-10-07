@@ -26,6 +26,19 @@ import { parseAttachments, withoutAttachmentList, attachmentsBlock, AttachmentLi
 import { parseActions, parsePostBuilder, PostBuilderCard } from "./PostBuilder";
 
 const JARVIS_NAME = "Джарвис";
+
+/** Ссылка на объект, перетащенный в чат со страницы навыка: { label } — готовый текст для сообщения. */
+const MBOX_REF_TYPE = "application/x-mbox-ref";
+function dropReference(data: DataTransfer): string {
+  try {
+    const parsed = JSON.parse(data.getData(MBOX_REF_TYPE) || "null") as { label?: unknown } | null;
+    const label = String(parsed?.label ?? "").trim();
+    if (label) return label.slice(0, 300);
+  } catch { /* не ссылка MBOX */ }
+  // Тип ссылки мог не дойти из песочницы — номер компонента в text/plain тоже понятен агенту.
+  const plain = data.getData("text/plain").trim();
+  return /^C\d{3}$/.test(plain) ? `блок ${plain} из библиотеки навыка` : "";
+}
 const CHAT_HISTORY_LIMIT = 50;
 const CHAT_RENDER_LIMIT = 70;
 
@@ -903,6 +916,22 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     requestAnimationFrame(() => composerRef.current?.setSelectionRange(start + 1, start + 1));
   }
 
+  /** Вставить ссылку на перетащенный объект в место курсора, с пробелами по краям. */
+  function insertReference(reference: string) {
+    const el = composerRef.current;
+    const value = el?.value ?? text;
+    const start = el ? el.selectionStart : value.length;
+    const end = el ? el.selectionEnd : value.length;
+    const before = value.slice(0, start);
+    const after = value.slice(end);
+    const piece = `${before && !/\s$/.test(before) ? " " : ""}${reference}${after && !/^\s/.test(after) ? " " : " "}`;
+    const next = `${before}${piece}${after}`;
+    const cursor = before.length + piece.length;
+    setText(next);
+    setCursor(cursor);
+    requestAnimationFrame(() => { composerRef.current?.focus(); composerRef.current?.setSelectionRange(cursor, cursor); });
+  }
+
   function startReply(line: LogLine) {
     if (!line.inboxId) return;
     setReplyTo({ id: line.inboxId, actor: line.actor, text: line.text });
@@ -1303,9 +1332,18 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
               hidden={!peer && !jarvisEnabled}
               className={dragFiles ? "console-input-row is-drop" : "console-input-row"}
               onSubmit={(event) => { event.preventDefault(); void send(); }}
-              onDragOver={(event) => { if ([...event.dataTransfer.types].includes("Files")) { event.preventDefault(); setDragFiles(true); } }}
+              onDragOver={(event) => { const types = [...event.dataTransfer.types]; if (types.includes("Files") || types.includes(MBOX_REF_TYPE) || types.includes("text/plain")) { event.preventDefault(); setDragFiles(true); } }}
               onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragFiles(false); }}
-              onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); setDragFiles(false); void attachFiles([...event.dataTransfer.files]); } }}
+              onDrop={(event) => {
+                if (event.dataTransfer.files.length) { event.preventDefault(); setDragFiles(false); void attachFiles([...event.dataTransfer.files]); return; }
+                // Блок из библиотеки навыка (страница навыка кладёт ссылку в dataTransfer) — вставляем ссылку на него в текст:
+                // «поправь вот это» агент поймёт без поиска, о каком компоненте речь.
+                const reference = dropReference(event.dataTransfer);
+                if (!reference) return;
+                event.preventDefault();
+                setDragFiles(false);
+                insertReference(reference);
+              }}
             >
               <button type="button" className="console-attach-btn" onClick={() => fileInputRef.current?.click()} aria-label="Приложить файл" title="Приложить файл — или вставьте из буфера, перетащите сюда">
                 <Paperclip size={16} />

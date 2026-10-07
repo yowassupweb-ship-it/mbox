@@ -430,7 +430,8 @@
    * по структуре тегов (score — доля совпавшего неизменяемого текста шаблона, нужно не меньше 0.5).
    */
   function matchBlock(blockHtml, kit, rows) {
-    var components = ((kit.registry && kit.registry.components) || []).filter(function (component) { return kit.templates && kit.templates[component.id]; });
+    // Удалённые из библиотеки (archived) не узнаём: их место заняли другие блоки, в новые письма они не идут.
+    var components = ((kit.registry && kit.registry.components) || []).filter(function (component) { return !component.archived && kit.templates && kit.templates[component.id]; });
     var row = normalizeHtml(blockHtml);
     var best = null;
     components.forEach(function (component) {
@@ -513,7 +514,7 @@
 
   function firstOf(registry, type) {
     var list = (registry && registry.components) || [];
-    for (var i = 0; i < list.length; i += 1) if (list[i].type === type) return list[i].id;
+    for (var i = 0; i < list.length; i += 1) if (list[i].type === type && !list[i].archived) return list[i].id;
     return null;
   }
 

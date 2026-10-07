@@ -200,6 +200,11 @@
     .comp-cover { position: absolute; inset: 0 0 auto 0; z-index: 1; height: 104px; }
     .comp-add { z-index: 2; position: absolute; top: 6px; right: 6px; opacity: 0; box-shadow: var(--shadow-sm); transition: opacity .12s; }
     .comp:hover .comp-add, .comp:focus-within .comp-add { opacity: 1; }
+    .comp-del { position: absolute; z-index: 2; top: 6px; right: 40px; opacity: 0; background: var(--raised); box-shadow: var(--shadow-sm); transition: opacity .12s; }
+    .comp:hover .comp-del, .comp:focus-within .comp-del { opacity: 1; }
+    .comp.archived .comp-thumb { opacity: .45; filter: grayscale(1); }
+    .comp.archived { cursor: default; }
+    .comp-restore { position: absolute; z-index: 2; top: 6px; right: 6px; box-shadow: var(--shadow-sm); }
     .comp .used { position: absolute; z-index: 2; top: 6px; left: 6px; }
 
     /* Блоки письма */
@@ -497,7 +502,8 @@
     // ── Опыт навыка (learnings.md): то, из чего навык улучшает себя ──────────────────────
     const LEARNINGS = 'learnings.md';
     const LEARNINGS_HEAD = '# Опыт навыка email-campaign\n\nЖурнал наблюдений для самоулучшения. Пишут конструктор (library.html) и агент. По кнопке «Улучшить навык» агент разбирает «Открытые»: правит компоненты, реестр, style-guide и SKILL.md, затем переносит пункт в «Сделано» с тем, что изменено.\n\n## Открытые\n\n## Сделано\n';
-    async function readLearnings() { try { return await readFile(LEARNINGS); } catch { return LEARNINGS_HEAD; } }
+    // CRLF (файл правили в Windows) ломал поиск «## Открытые» — заметка молча не вставлялась.
+    async function readLearnings() { try { return (await readFile(LEARNINGS)).replace(/\r\n/g, '\n'); } catch { return LEARNINGS_HEAD; } }
     function openLearnings(text) {
       const part = (text.split(/## Открытые/)[1] || '').split(/\n## /)[0];
       return part.split('\n').filter((line) => /^- /.test(line)).map((line) => line.slice(2));
@@ -847,7 +853,7 @@
       const counts = usageCounts();
       showPop(event.currentTarget, {
         placeholder: 'Блок: номер или название',
-        rows: [...state.kit.registry.components].map((c) => ({ id: c.id, num: c.id, label: c.name, meta: counts[c.id] ? `в письме ×${counts[c.id]}` : c.category })),
+        rows: state.kit.registry.components.filter((c) => !c.archived).map((c) => ({ id: c.id, num: c.id, label: c.name, meta: counts[c.id] ? `в письме ×${counts[c.id]}` : c.category })),
         onPick: (id) => addToLetter(id),
       });
     });
@@ -1132,17 +1138,21 @@
         card.className = 'comp';
         card.dataset.id = component.id;
         card.draggable = true;
-        card.title = `${component.name}${component.description ? ` — ${component.description}` : ''}\nПеретащите в письмо или нажмите «+»`;
+        card.title = `${component.name}${component.description ? ` — ${component.description}` : ''}\nПеретащите в письмо — поставить, в чат агенту — обсудить или поправить`;
         // Над iframe превью — прозрачная крышка: в Electron нажатие уходило прямо в iframe миниатюры (несмотря на
         // pointer-events: none), и перетаскивание карточки не начиналось.
         card.innerHTML = `<div class="comp-thumb"><iframe loading="lazy" tabindex="-1" title="${component.id}"></iframe></div><span class="comp-cover" aria-hidden="true"></span>
           <div class="comp-meta"><div class="comp-title"><span class="num">${component.id}</span><span class="name">${esc(component.name)}</span></div><small>${esc(component.category)}</small></div>
           <span class="chip accent used" data-used hidden></span>
-          <button class="btn icon sm primary comp-add" type="button" title="Вставить после выбранного блока">${icon('plus', 'sm')}</button>`;
+          <button class="btn icon sm primary comp-add" type="button" title="Вставить после выбранного блока">${icon('plus', 'sm')}</button>
+          <button class="btn icon sm ghost danger comp-del" type="button" title="Удалить из библиотеки">${icon('trash', 'sm')}</button>
+          <button class="btn sm comp-restore" type="button" title="Вернуть в библиотеку">${icon('reset', 'sm')}Вернуть</button>`;
         $('iframe', card).srcdoc = previewDoc(state.kit.templates[component.id], component);
         $('.comp-add', card).addEventListener('click', (event) => { event.stopPropagation(); addToLetter(component.id); });
-        card.addEventListener('dblclick', () => addToLetter(component.id));
-        card.addEventListener('dragstart', (event) => { state.drag = component.id; state.lastDrag = { id: component.id, at: Date.now() }; event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', component.id); $('#stage').classList.add('dragging'); });
+        $('.comp-del', card).addEventListener('click', (event) => { event.stopPropagation(); archiveComponent(component.id, true); });
+        $('.comp-restore', card).addEventListener('click', (event) => { event.stopPropagation(); archiveComponent(component.id, false); });
+        card.addEventListener('dblclick', () => { if (!componentOf(component.id)?.archived) addToLetter(component.id); });
+        card.addEventListener('dragstart', (event) => { if (componentOf(component.id)?.archived) { event.preventDefault(); return; } state.drag = component.id; state.lastDrag = { id: component.id, at: Date.now() }; event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', component.id); event.dataTransfer.setData('application/x-mbox-ref', JSON.stringify({ label: `блок ${component.id} «${component.name}» (навык email-campaign, ${component.file})` })); $('#stage').classList.add('dragging'); });
         card.addEventListener('dragend', () => { state.drag = null; $('#stage').classList.remove('dragging', 'drop'); $('#letter-frame').contentWindow?.postMessage({ type: 'letter:drag-end' }, '*'); });
         return card;
       }));
@@ -1152,10 +1162,13 @@
       if (!state.kit) return;
       const registry = state.kit.registry;
       if (libBuiltFor !== registry.components) buildLibrary();
-      $('#count-components').textContent = registry.components.length;
-      const categories = [...new Set(registry.components.map((c) => c.category))];
+      const live = registry.components.filter((c) => !c.archived);
+      const archivedCount = registry.components.length - live.length;
+      if (state.category === ARCHIVED && !archivedCount) state.category = '';
+      $('#count-components').textContent = live.length;
+      const categories = [...new Set(live.map((c) => c.category))];
       $('#c-categories').innerHTML = categories.map((c) => `<option value="${esc(c)}">`).join('');
-      $('#c-cats').innerHTML = ['', ...categories].map((c) => `<button type="button" data-cat="${esc(c)}" class="${state.category === c ? 'on' : ''}" aria-pressed="${state.category === c}">${esc(c || 'Все')}</button>`).join('');
+      $('#c-cats').innerHTML = ['', ...categories, ...(archivedCount ? [ARCHIVED] : [])].map((c) => `<button type="button" data-cat="${esc(c)}" class="${state.category === c ? 'on' : ''}" aria-pressed="${state.category === c}">${esc(c || 'Все')}${c === ARCHIVED ? ` · ${archivedCount}` : ''}</button>`).join('');
       $$('#c-cats [data-cat]').forEach((button) => button.addEventListener('click', () => { state.category = button.dataset.cat; renderLibraryState(); }));
       const needle = $('#c-search').value.trim().toLowerCase();
       const exact = /^c?\d{1,3}$/.test(needle) ? pad(Number(needle.replace(/\D/g, ''))) : '';
@@ -1163,7 +1176,13 @@
       let visible = 0;
       $$('#lib .comp').forEach((card) => {
         const c = componentOf(card.dataset.id);
-        const show = (!state.category || c.category === state.category) && (!needle || (exact ? c.id === exact : `${c.id} ${c.name} ${c.category} ${c.type} ${c.description}`.toLowerCase().includes(needle)));
+        const inView = state.category === ARCHIVED ? c.archived : !c.archived && (!state.category || c.category === state.category);
+        card.classList.toggle('archived', Boolean(c.archived));
+        $('.comp-add', card).hidden = Boolean(c.archived);
+        $('.comp-del', card).hidden = Boolean(c.archived);
+        $('.comp-restore', card).hidden = !c.archived;
+        card.draggable = !c.archived;
+        const show = inView && (!needle || (exact ? c.id === exact : `${c.id} ${c.name} ${c.category} ${c.type} ${c.description}`.toLowerCase().includes(needle)));
         card.hidden = !show;
         if (show) visible += 1;
         const used = $('[data-used]', card);
@@ -1175,6 +1194,31 @@
       requestAnimationFrame(fitThumbs);
     }
     $('#c-search').addEventListener('input', renderLibraryState);
+
+    // Удаление из библиотеки: компонент помечается archived в реестре и пропадает из библиотеки и меню «+ Блок».
+    // Файл и номер остаются — письма, где блок уже стоит, собираются как прежде; номер не переиспользуется.
+    const ARCHIVED = 'Удалённые';
+    async function archiveComponent(id, archived) {
+      const component = componentOf(id); if (!component) return;
+      if (archived) {
+        const letters = state.letters.filter((l) => (l.letter?.items || []).some((item) => item.component === id));
+        const where = letters.length ? `\n\nОн стоит в письмах: ${letters.slice(0, 5).map((l) => letterName(l) || l.id).join(', ')}${letters.length > 5 ? ' и других' : ''} — там он останется.` : '';
+        if (!confirm(`Удалить ${id} «${component.name}» из библиотеки?${where}\n\nВернуть можно в категории «${ARCHIVED}».`)) return;
+      }
+      try {
+        const registry = JSON.parse(await readFile('components/registry.json'));
+        const entry = registry.components.find((c) => c.id === id);
+        if (!entry) throw new Error(`${id} нет в реестре`);
+        if (archived) { entry.archived = true; entry.archived_at = new Date().toISOString(); }
+        else { delete entry.archived; delete entry.archived_at; }
+        await writeFile('components/registry.json', `${JSON.stringify(registry, null, 2)}\n`, `${archived ? 'Удалён из библиотеки' : 'Возвращён в библиотеку'}: ${id} «${entry.name}»`);
+        // Шаблоны уже загружены — меняем только реестр, карточки остаются те же.
+        state.kit.registry.components.forEach((c) => { if (c.id === id) { if (archived) { c.archived = true; c.archived_at = entry.archived_at; } else { delete c.archived; delete c.archived_at; } } });
+        renderLibraryState();
+        setStatus(archived ? `${id} удалён из библиотеки` : `${id} снова в библиотеке`, 'ok');
+        if (archived) learn(`${id} «${entry.name}» удалён из библиотеки человеком — если у него были похожие варианты, проверить, не дублируются ли они`);
+      } catch (error) { setStatus(`Не сохранилось: ${error.message}`, 'err'); }
+    }
     new ResizeObserver(() => fitThumbs()).observe($('#pane-library'));
 
     // Новый компонент из HTML: поля из {{ключей}} шаблона, номер — registry.next.
