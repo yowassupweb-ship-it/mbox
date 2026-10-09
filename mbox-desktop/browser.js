@@ -122,6 +122,8 @@ function create(key) {
     contents.on(event, () => publish(key));
   }
   contents.on("did-start-loading", () => { tab.error = ""; });
+  // Переход на другую страницу уничтожает курсор агента (он живёт в DOM): возвращаем его на прежнее место, пока агент работает.
+  contents.on("dom-ready", () => { restoreCursor(contents); });
 
   contents.on("page-favicon-updated", (_event, favicons) => {
     tab.favicon = Array.isArray(favicons) ? favicons.find(Boolean) || "" : "";
@@ -619,6 +621,59 @@ async function inPage(contents, call) {
   return contents.executeJavaScript(`(async () => window.__mboxAgent.${call})()`, true);
 }
 
+// ─── Курсор агента: виден всегда, пока агент работает с вкладкой ───────────────────────────────────────────────────────
+// Сам курсор рисуется в странице (agent-kit.js) и пропадает при каждом переходе. Здесь помним, где он стоял и под каким именем,
+// и ставим обратно: перед любым действием (в том числе чтением) и после загрузки новой страницы.
+const CURSOR_KEEP_MS = 5 * 60 * 1000;
+const cursorMemory = new WeakMap();
+
+async function cursorTo(contents, x, y, who, click) {
+  cursorMemory.set(contents, { x, y, who, at: Date.now() });
+  return inPage(contents, `cursor(${x}, ${y}, ${who}, ${click})`);
+}
+
+function restoreCursor(contents) {
+  const memory = cursorMemory.get(contents);
+  if (!memory || Date.now() - memory.at > CURSOR_KEEP_MS) return;
+  inPage(contents, `placeCursor(${memory.x}, ${memory.y}, ${memory.who})`).catch(() => {});
+}
+
+/** Курсор на экране даже при чтении страницы: если агент ещё нигде не был — ставим в видимую часть окна. */
+async function showCursor(target, contents, who) {
+  let memory = cursorMemory.get(contents);
+  if (!memory) {
+    const bounds = target.tab.view.getBounds();
+    const zoom = contents.getZoomFactor?.() || 1;
+    memory = { x: Math.round(bounds.width / zoom * 0.5), y: Math.round(bounds.height / zoom * 0.4), who };
+  }
+  cursorMemory.set(contents, { ...memory, who, at: Date.now() });
+  await inPage(contents, `placeCursor(${memory.x}, ${memory.y}, ${who})`).catch(() => {});
+}
+
+/** После клика или перехода страница может ещё грузиться: ждём конец загрузки (не дольше cap), иначе следующий снимок увидит старую. */
+async function settle(contents, cap = 6000) {
+  await sleep(120);
+  if (!contents.isLoading()) return;
+  await new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); contents.removeListener("did-stop-loading", done); resolve(); };
+    const timer = setTimeout(done, cap);
+    contents.on("did-stop-loading", done);
+  });
+}
+
+/** Скриншот через отладчик Chromium, когда capturePage отказывает («display surface not available»: окно свёрнуто или перекрыто). */
+async function captureViaDebugger(contents) {
+  const dbg = contents.debugger;
+  const attachedHere = !dbg.isAttached();
+  if (attachedHere) dbg.attach("1.3");
+  try {
+    const shot = await dbg.sendCommand("Page.captureScreenshot", { format: "jpeg", quality: 72 });
+    return `data:image/jpeg;base64,${shot.data}`;
+  } finally {
+    if (attachedHere) { try { dbg.detach(); } catch { /* уже отсоединён */ } }
+  }
+}
+
 // ─── Управление агентом человеком: пауза, продолжить, стоп ───────────────────────────────────────────────────────────
 // Пока вкладка на паузе, действия агента, меняющие страницу, ждут (до 20 с) и затем возвращают paused_by_human; «Стоп» отвечает
 // stopped_by_human, пока человек сам не снимет остановку. Чтение (снимок, вкладки) работает всегда.
@@ -700,7 +755,7 @@ async function pointOf(contents, args, who, key) {
 async function pointerAction(contents, args, who, kind) {
   const spot = await pointOf(contents, args, who);
   if (!spot.ok) return spot;
-  await inPage(contents, `cursor(${spot.x}, ${spot.y}, ${who}, ${kind !== "hover"})`);
+  await cursorTo(contents, spot.x, spot.y, who, kind !== "hover");
   contents.focus?.();
   if (kind === "hover") { mouse(contents, "mouseMove", spot.x, spot.y); await sleep(200); return { ok: true, hovered: spot.label }; }
   const button = kind === "right_click" ? "right" : "left";
@@ -713,7 +768,8 @@ async function pointerAction(contents, args, who, kind) {
     mouse(contents, "mouseDown", spot.x, spot.y, { button, clickCount: 2 });
     mouse(contents, "mouseUp", spot.x, spot.y, { button, clickCount: 2 });
   }
-  await sleep(350);
+  await sleep(250);
+  await settle(contents);
   return { ok: true, clicked: spot.label, url: contents.getURL() };
 }
 
@@ -735,11 +791,15 @@ async function waitFor(contents, args) {
 }
 
 /** Действие агента во вкладке. key пустой — вкладка, которую человек видит сейчас. */
-async function agentAction(key, action, args = {}, actor = "Агент", note = "") {
+async function runAgentAction(key, action, args = {}, actor = "Агент", note = "") {
   if (action === "tabs") {
     return { ok: true, active: agentTab("")?.key || "", tabs: [...tabs.keys()].map((item) => ({ ...stateOf(item), visible: tabs.get(item).visible, agent: { ...controlOf(item) } })) };
   }
   // Без вкладки браузера navigate тоже вернёт no_tab: новую вкладку открывает страница MBOX (browserAgent.ts).
+  // Явный ключ несуществующей вкладки (закрыта, устарел) не подменяем видимой: раньше действие молча уходило в чужую вкладку.
+  if (key && tabs.size && !tabs.has(key)) {
+    return { ok: false, error: "tab_not_found", message: `Вкладки ${key} нет: она закрыта или ключ устарел. Вызовите browser_tabs и возьмите актуальный ключ (или не передавайте tab — тогда это вкладка, на которую смотрит человек).`, tabs: [...tabs.keys()] };
+  }
   const target = agentTab(key);
   if (!target) return { ok: false, error: "no_tab", message: "В MBOX не открыта ни одна вкладка браузера. Откройте страницу (browser_navigate) или попросите человека." };
   const contents = target.tab.view.webContents;
@@ -752,9 +812,14 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
   }
   emit({ type: "agent", key: target.key, actor: String(actor || "Агент"), action, note: String(note || "") });
   try {
+    // Курсор виден всегда, пока агент работает: и при чтении страницы тоже. Переход на другой адрес вернёт его сам (dom-ready).
+    if (!["navigate", "back", "forward", "reload", "new_tab"].includes(action)) await showCursor(target, contents, who);
     if (action === "navigate") {
       open(target.key, args.url);
-      return { ok: true, key: target.key, url: normalizeUrl(args.url) };
+      // Раньше ответ уходил сразу, и следующий снимок читал ещё прежнюю страницу (или страницу входа вместо открытой).
+      await sleep(150);
+      await settle(contents, 8000);
+      return { ok: true, key: target.key, url: normalizeUrl(args.url), final_url: contents.getURL(), loading: contents.isLoading() };
     }
     if (action === "back" || action === "forward" || action === "reload") {
       const history = contents.navigationHistory;
@@ -770,7 +835,14 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
     }
     if (action === "snapshot") {
       if (contents.isLoading()) await new Promise((resolve) => { contents.once("did-stop-loading", resolve); setTimeout(resolve, 8000); });
-      return { ok: true, key: target.key, ...(await inPage(contents, `snapshot(${Number(args.max_text) || 6000})`)) };
+      const snapshot = await inPage(contents, `snapshot(${Number(args.max_text) || 6000})`);
+      // Узкое окно включает мобильную вёрстку сайта: меню прячется, элементы «пропадают». Предупреждаем и подсказываем, что делать.
+      const width = snapshot?.viewport?.width || 0;
+      const height = snapshot?.viewport?.height || 0;
+      const narrow = width && (width < NARROW_WIDTH || height < NARROW_HEIGHT)
+        ? { narrow_viewport: { width, height, hint: `Окно браузера узкое (${width}×${height}): сайт мог переключиться на мобильную вёрстку — меню и кнопки спрятаны. Не борись с ней: вызови browser_ask_help с просьбой растянуть окно MBOX или панель браузера (нужно хотя бы ${NARROW_WIDTH}×${NARROW_HEIGHT}) и после «Готово» возьми новый снимок.` } }
+        : {};
+      return { ok: true, key: target.key, ...snapshot, ...narrow };
     }
     if (action === "blockers") return { ok: true, key: target.key, blockers: await inPage(contents, "blockers()") };
     if (action === "extract") return { key: target.key, ...(await inPage(contents, `extract(${JSON.stringify(String(args.kind || "text"))}, ${JSON.stringify(String(args.ref || ""))}, ${Number(args.max) || 100})`)) };
@@ -788,7 +860,7 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
     if (action === "move_cursor") {
       const spot = await pointOf(contents, args, who);
       if (!spot.ok) return spot;
-      await inPage(contents, `cursor(${spot.x}, ${spot.y}, ${who}, false)`);
+      await cursorTo(contents, spot.x, spot.y, who, false);
       mouse(contents, "mouseMove", spot.x, spot.y);
       return { ok: true, key: target.key, at: { x: spot.x, y: spot.y }, over: spot.label };
     }
@@ -797,7 +869,7 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
       if (!from.ok) return from;
       const to = await pointOf(contents, args.to || {}, who);
       if (!to.ok) return to;
-      await inPage(contents, `cursor(${from.x}, ${from.y}, ${who}, true)`);
+      await cursorTo(contents, from.x, from.y, who, true);
       contents.focus?.();
       mouse(contents, "mouseMove", from.x, from.y);
       mouse(contents, "mouseDown", from.x, from.y, { button: "left", clickCount: 1 });
@@ -806,7 +878,7 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
         const x = from.x + ((to.x - from.x) * step) / steps;
         const y = from.y + ((to.y - from.y) * step) / steps;
         mouse(contents, "mouseMove", x, y, { button: "left" });
-        if (step === 1 || step === steps) await inPage(contents, `cursor(${x}, ${y}, ${who}, false)`);
+        if (step === 1 || step === steps) await cursorTo(contents, x, y, who, false);
         await sleep(25);
       }
       mouse(contents, "mouseUp", to.x, to.y, { button: "left", clickCount: 1 });
@@ -826,19 +898,21 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
       if (args.slow) {
         for (const char of [...text].slice(0, 400)) { contents.insertText(char); await sleep(25 + Math.random() * 45); }
       } else contents.insertText(text);
-      if (args.submit) { await sleep(120); await pressKey(contents, "Enter"); }
+      if (args.submit) { await sleep(120); await pressKey(contents, "Enter"); await settle(contents, 4000); }
       await sleep(150);
       return { ok: true, key: target.key, typed: text.length };
     }
     if (action === "press") {
       const list = (Array.isArray(args.keys) ? args.keys : [args.key || args.keys]).filter(Boolean).slice(0, 20);
       for (const spec of list) { if (!(await pressKey(contents, spec))) return { ok: false, error: "bad_key", key: spec }; await sleep(70); }
+      if (list.some((spec) => /^(enter|return)$/i.test(String(spec)))) await settle(contents, 4000);
       return { ok: true, key: target.key, pressed: list };
     }
     if (action === "wait") return { key: target.key, ...(await waitFor(contents, args)) };
     if (action === "highlight") {
       if (args.clear) return { key: target.key, ...(await inPage(contents, "clear()")) };
       const refs = (Array.isArray(args.refs) ? args.refs : [args.ref]).filter(Boolean).map(String).slice(0, 40);
+      if (!refs.length) return { ok: false, error: "refs_required", message: "Не передан ни один ref: подсвечивать нечего. Возьмите ref из browser_snapshot (b7, f12) или browser_find." };
       return { key: target.key, ...(await inPage(contents, `highlight(${JSON.stringify(refs)}, ${who}, ${say}, ${Number(args.ms ?? 8000)})`)) };
     }
     if (action === "scroll") {
@@ -852,15 +926,52 @@ async function agentAction(key, action, args = {}, actor = "Агент", note = 
     }
     if (action === "screenshot") {
       if (!target.tab.visible) return { ok: false, error: "tab_hidden", message: "Вкладка сейчас не на экране — снимок был бы пустым." };
-      const image = await contents.capturePage();
-      const size = image.getSize();
-      const scaled = size.width > 1280 ? image.resize({ width: 1280 }) : image;
-      return { ok: true, key: target.key, url: contents.getURL(), image: `data:image/jpeg;base64,${scaled.toJPEG(72).toString("base64")}` };
+      try {
+        const image = await contents.capturePage();
+        const size = image.getSize();
+        const scaled = size.width > 1280 ? image.resize({ width: 1280 }) : image;
+        return { ok: true, key: target.key, url: contents.getURL(), image: `data:image/jpeg;base64,${scaled.toJPEG(72).toString("base64")}` };
+      } catch {
+        // capturePage отказывает, когда окно свёрнуто или перекрыто («display surface not available»): снимаем через отладчик.
+        return { ok: true, key: target.key, url: contents.getURL(), image: await captureViaDebugger(contents), via: "debugger" };
+      }
     }
     return { ok: false, error: `unknown_action:${action}` };
   } catch (error) {
     return { ok: false, error: String(error?.message || error) };
   }
+}
+
+// Окно уже этого размера считается «узким»: сайты переключаются на мобильную вёрстку, и агент не находит меню и кнопки.
+const NARROW_WIDTH = 1000;
+const NARROW_HEIGHT = 500;
+// Сколько неудач подряд на одной вкладке агент может пережить молча. Дальше ответ несёт stuck с требованием позвать человека:
+// без этого агент крутился по «элемент не найден» десятки раз и ни разу не попросил помощи.
+const STUCK_AFTER = 3;
+const failStreak = new Map();
+
+/** Действие агента во вкладке + учёт неудач подряд. */
+async function agentAction(key, action, args = {}, actor = "Агент", note = "") {
+  const result = await runAgentAction(key, action, args, actor, note);
+  if (!result || action === "tabs" || action === "status") return result;
+  const id = result.key || agentTab(key)?.key || String(key || "");
+  if (result.ok !== false) { failStreak.delete(id); return result; }
+  // Пауза и стоп — решение человека, а не застревание.
+  if (result.error === "paused_by_human" || result.error === "stopped_by_human") return result;
+  const failures = (failStreak.get(id) || 0) + 1;
+  failStreak.set(id, failures);
+  if (failures < STUCK_AFTER) return result;
+  const target = agentTab(key);
+  const bounds = target?.tab.view.getBounds?.();
+  const narrow = bounds && (bounds.width < NARROW_WIDTH || bounds.height < NARROW_HEIGHT);
+  return {
+    ...result,
+    stuck: {
+      failures,
+      hint: `${failures} неудачи подряд. Хватит повторять: вызови browser_ask_help — коротко скажи, что не получается, и что именно должен сделать человек.`
+        + (narrow ? ` Возможная причина — узкое окно браузера (${bounds.width}×${bounds.height}): сайт в мобильной вёрстке, часть элементов спрятана. Попроси растянуть окно MBOX.` : ""),
+    },
+  };
 }
 
 /**

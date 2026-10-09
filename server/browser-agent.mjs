@@ -28,15 +28,32 @@ function sendToUser(clients, userId, message) {
   return delivered;
 }
 
+// Окна с мостом к браузеру присылают browser_window раз в ~20 с и при смене фокуса (src/app/workbench/browserAgent.ts).
+// Свежее объявление — окно живо. Команду получает ровно одно: то, на которое смотрят, иначе то, что смотрели последним.
+// Окна старых версий не объявляются и команд больше не получают, пока есть хоть одно объявившееся (раньше они кликали наравне).
+const WINDOW_FRESH_MS = 60_000;
+
+function sendBrowserOp(clients, userId, message) {
+  const mine = [...clients].filter((client) => client.readyState === 1 && client.mboxUserId === String(userId));
+  const announced = mine
+    .filter((client) => client.browserWindow && Date.now() - client.browserWindow.at < WINDOW_FRESH_MS)
+    .sort((a, b) => Number(b.browserWindow.focused) - Number(a.browserWindow.focused) || b.browserWindow.focusedAt - a.browserWindow.focusedAt || b.browserWindow.at - a.browserWindow.at);
+  if (announced.length) {
+    announced[0].send(JSON.stringify(message));
+    return 1;
+  }
+  return sendToUser(clients, userId, message);
+}
+
 /** Одно действие в браузере пользователя; ждёт ответа окна до 25 с. Общая часть для HTTP-ручки (MCP) и Джарвиса. */
 export async function runBrowserOp({ clients, userId, action, tab = "", args = {}, actor = "Агент", note = "" }) {
   if (!BROWSER_AGENT_ACTIONS.includes(action)) return { ok: false, error: `unknown_action:${action}` };
   const id = randomUUID();
   const result = new Promise((resolve) => {
     const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "timeout" }); }, WAIT_MS);
-    pending.set(id, { resolve, timer });
+    pending.set(id, { resolve, timer, claimedBy: "" });
   });
-  const delivered = sendToUser(clients, userId, { type: "browser_op", id, action, tab: String(tab || ""), args: args && typeof args === "object" ? args : {}, actor: String(actor).slice(0, 60), note: String(note).slice(0, 300) });
+  const delivered = sendBrowserOp(clients, userId, { type: "browser_op", id, action, tab: String(tab || ""), args: args && typeof args === "object" ? args : {}, actor: String(actor).slice(0, 60), note: String(note).slice(0, 300) });
   if (!delivered) {
     const entry = pending.get(id);
     if (entry) { clearTimeout(entry.timer); pending.delete(id); }
@@ -50,12 +67,30 @@ export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson,
   if (!url.pathname.startsWith("/api/mbox/browser/agent")) return false;
   if (!owner) { sendJson(res, 403, { error: "owner_required" }); return true; }
 
+  // Действие уходит во все окна владельца, а исполнить его должно ровно одно: иначе два окна MBOX Desktop (установленное и
+  // dev, разные размеры и разные входы на сайты) оба кликают и навигируют, а ответ берётся от того, кто успел первым —
+  // отсюда «элемент не найден» при сработавшем клике, снимки чужой страницы и 401 вместо вошедшей сессии.
+  // Окно с мостом к браузеру перед исполнением просит право (claim); первое получает его, остальные молчат.
+  const claimMatch = url.pathname.match(/^\/api\/mbox\/browser\/agent\/([0-9a-f-]{36})\/claim$/);
+  if (claimMatch && req.method === "POST") {
+    const entry = pending.get(claimMatch[1]);
+    const body = await readBody(req);
+    const windowId = String(body.window || "").slice(0, 80) || "unknown";
+    if (!entry) { sendJson(res, 200, { ok: true, won: false, reason: "gone" }); return true; }
+    if (!entry.claimedBy) entry.claimedBy = windowId;
+    sendJson(res, 200, { ok: true, won: entry.claimedBy === windowId });
+    return true;
+  }
+
   const resultMatch = url.pathname.match(/^\/api\/mbox\/browser\/agent\/([0-9a-f-]{36})\/result$/);
   if (resultMatch && req.method === "POST") {
     const entry = pending.get(resultMatch[1]);
     const body = await readBody(req);
-    // Окно без моста к браузеру (сайт в обычном браузере, телефон) отвечает skip — ждём настоящее.
-    if (entry && !body.skip) {
+    // Окно без моста к браузеру (сайт в обычном браузере, телефон) отвечает skip — ждём настоящее. Если право на
+    // действие уже взято, принимаем ответ только от его владельца (окна старых версий не просят право и не шлют window).
+    const answeredBy = String(url.searchParams.get("window") || "");
+    const foreign = Boolean(entry?.claimedBy) && entry.claimedBy !== answeredBy;
+    if (entry && !body.skip && !foreign) {
       pending.delete(resultMatch[1]);
       clearTimeout(entry.timer);
       entry.resolve(body);
@@ -71,9 +106,9 @@ export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson,
     const id = randomUUID();
     const result = new Promise((resolve) => {
       const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "timeout" }); }, WAIT_MS);
-      pending.set(id, { resolve, timer });
+      pending.set(id, { resolve, timer, claimedBy: "" });
     });
-    const delivered = sendToUser(clients, user.id, {
+    const delivered = sendBrowserOp(clients, user.id, {
       type: "browser_op",
       id,
       action,

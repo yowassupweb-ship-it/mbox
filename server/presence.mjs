@@ -95,6 +95,11 @@ export function createPresenceHub({ query, scopeFor }) {
   async function onMessage(socket, raw) {
     let message;
     try { message = JSON.parse(String(raw)); } catch { return; }
+    // Окно MBOX Desktop с мостом к браузеру сообщает о себе: команды агента в браузер уходят одному такому окну (browser-agent.mjs).
+    if (message?.type === "browser_window") {
+      socket.browserWindow = { id: String(message.id || "").slice(0, 80), focused: Boolean(message.focused), focusedAt: Number(message.focusedAt) || 0, at: Date.now() };
+      return;
+    }
     if (message?.type !== "presence") return;
     const doc = String(message.doc || "");
     if (!DOC_KEY.test(doc)) return;

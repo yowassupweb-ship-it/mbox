@@ -103,7 +103,16 @@ module.exports = String.raw`(() => {
     if (cursorEl && cursorEl.isConnected) return cursorEl;
     cursorEl = document.createElement("div");
     cursorEl.id = "__mbox-cursor";
-    cursorEl.innerHTML = '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 2 L3 17 L7.2 13.2 L10 19.5 L12.6 18.4 L9.9 12.2 L15.5 12 Z" fill="#0a84ff" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg><span></span>';
+    // Без innerHTML: Google Docs и другие сайты с Trusted Types запрещают присваивать строку разметки, и клик падал на создании курсора.
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("width", "22"); svg.setAttribute("height", "22"); svg.setAttribute("viewBox", "0 0 22 22");
+    const arrow = document.createElementNS(NS, "path");
+    arrow.setAttribute("d", "M3 2 L3 17 L7.2 13.2 L10 19.5 L12.6 18.4 L9.9 12.2 L15.5 12 Z");
+    arrow.setAttribute("fill", "#0a84ff"); arrow.setAttribute("stroke", "#fff"); arrow.setAttribute("stroke-width", "1.5"); arrow.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(arrow);
+    cursorEl.appendChild(svg);
+    cursorEl.appendChild(document.createElement("span"));
     cursorEl.style.transform = "translate(" + cursorAt.x + "px," + cursorAt.y + "px)";
     (document.body || document.documentElement).appendChild(cursorEl);
     return cursorEl;
@@ -117,9 +126,30 @@ module.exports = String.raw`(() => {
     el.style.opacity = "1";
     el.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
     cursorAt = { x, y };
-    clearTimeout(cursorHide);
-    cursorHide = setTimeout(() => { if (cursorEl) cursorEl.style.opacity = "0"; }, 7000);
+    armCursorHide();
     await sleep(440);
+  };
+  // Курсор виден, пока агент работает с вкладкой: гаснет только после долгой тишины (раньше — через 7 с, и человек не понимал, где агент).
+  const CURSOR_IDLE_MS = 5 * 60 * 1000;
+  const armCursorHide = () => {
+    clearTimeout(cursorHide);
+    cursorHide = setTimeout(() => { if (cursorEl) cursorEl.style.opacity = "0"; }, CURSOR_IDLE_MS);
+  };
+  // Показать курсор на месте без полёта из угла: для чтения страницы, после перехода на другой адрес.
+  const placeCursor = (x, y, label) => {
+    const el = ensureCursor();
+    const span = el.querySelector("span");
+    span.textContent = label || "";
+    span.style.display = label ? "block" : "none";
+    if (el.style.opacity !== "1") {
+      el.style.transition = "none";
+      el.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
+      cursorAt = { x, y };
+      el.getBoundingClientRect();
+      el.style.transition = "";
+    }
+    el.style.opacity = "1";
+    armCursorHide();
   };
   const ripple = (x, y) => {
     const dot = document.createElement("div");
@@ -158,6 +188,10 @@ module.exports = String.raw`(() => {
     async cursor(x, y, label, click) {
       await moveCursor(x, y, label);
       if (click) { ripple(x, y); await sleep(120); }
+      return { ok: true };
+    },
+    placeCursor(x, y, label) {
+      placeCursor(x, y, label);
       return { ok: true };
     },
     focusEl(ref, clear) {

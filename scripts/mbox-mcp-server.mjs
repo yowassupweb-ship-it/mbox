@@ -88,6 +88,8 @@ async function login() {
  * а не когда вспомнит заглянуть в ящик. Прочитанное помечается сразу, чтобы не повторяться.
  */
 let lastPushCheck = 0;
+const pushShownAt = new Map();
+const REPEAT_FULL_MS = 10 * 60_000;
 
 // Под наблюдателем (claude-inbox-watcher, codex-chat-watcher) сообщение уже доставлено промптом — пуш
 // в каждом ответе инструмента только повторял его текст и сжигал токены на каждом вызове.
@@ -130,13 +132,27 @@ async function pendingMessages() {
     const stillOpen = mine.filter((item) => !responded(item));
     if (!stillOpen.length) return "";
 
-    const lines = stillOpen.map((item) => `- #${item.id} from ${item.agent_name || "unknown"}: ${item.body || item.title}`).join("\n");
+    // Полный текст сообщения — один раз, потом раз в REPEAT_FULL_MS; между этими показами — короткая строка с номерами.
+    // Раньше те же четыре сообщения целиком шли в ответе каждого вызова: сотни вызовов подряд забивали контекст одним и тем же.
+    const full = [];
+    const brief = [];
+    for (const item of stillOpen) {
+      const shown = pushShownAt.get(item.id);
+      if (!shown || now - shown > REPEAT_FULL_MS) {
+        full.push(`- #${item.id} from ${item.agent_name || "unknown"}: ${item.body || item.title}`);
+        pushShownAt.set(item.id, now);
+      } else brief.push(`#${item.id}`);
+    }
+    if (!full.length) {
+      return ["", "", `MBOX synapse: ${brief.length} addressed message(s) still unanswered (${brief.join(", ")}), full text shown earlier. Reply with create_inbox_item (props.in_reply_to) to clear.`].join("\n");
+    }
     return [
       "", "",
       "🔴 MBOX SYNAPSE: ADDRESSED MESSAGE REQUIRES ATTENTION (" + stillOpen.length + ") 🔴",
-      lines,
+      ...full,
+      ...(brief.length ? [`- also still unanswered, shown earlier: ${brief.join(", ")}`] : []),
       "Respond or intervene before continuing the current task. Use create_inbox_item with props.in_reply_to set to the source id and to set to the sender when a reply is needed.",
-      "This reminder repeats on every MBOX tool call until you create a later inbox item.",
+      "This reminder repeats on every MBOX tool call until you create a later inbox item (full text again every 10 minutes, a one-line reminder in between).",
       "=== end MBOX synapse ===",
     ].join("\n");
   } catch {
@@ -2005,14 +2021,22 @@ function browserText(data) {
     const reason = data.message || ({ timeout: "MBOX Desktop did not answer in 25 s", no_window: "MBOX is not open in any window of the owner", no_tab: "no browser tab is open in MBOX" })[data.error] || data.error;
     return textResult(`Browser action failed: ${reason}`);
   }
-  return textResult(JSON.stringify(data, null, 1));
+  // stuck и narrow_viewport выносим отдельной строкой: внутри длинного JSON их легко не заметить.
+  const warnings = [
+    data?.stuck ? `STUCK: ${data.stuck.hint} Call browser_ask_help now.` : "",
+    data?.narrow_viewport ? `NARROW WINDOW: ${data.narrow_viewport.hint}` : "",
+  ].filter(Boolean);
+  return textResult(`${JSON.stringify(data, null, 1)}${warnings.length ? `\n\n${warnings.join("\n")}` : ""}`);
 }
 
 server.registerTool(
   "browser_tabs",
   {
     title: "List the owner's MBOX browser tabs",
-    description: "Browser tabs open in MBOX Desktop with url, title and which one the owner is looking at (active). The chat message's <open_tabs> usually already names the page — call this only when unsure.",
+    description: [
+      "Browser tabs open in MBOX Desktop with url, title and which one the owner is looking at (active). The chat message's <open_tabs> usually already names the page — call this only when unsure.",
+      "Working rules for every browser_* tool: after navigate/click wait for the result (they now return when the page has settled) and then take a browser_snapshot; if an action fails 3 times in a row the result carries `stuck` — stop and call browser_ask_help; if a snapshot carries `narrow_viewport` the window is too small (mobile layout), ask the owner to widen it instead of hunting for hidden menus.",
+    ].join("\n"),
     inputSchema: {},
   },
   async () => browserText(await browserOp("tabs")),
@@ -2209,6 +2233,7 @@ server.registerTool(
       "Use when you are stuck: captcha, login, one-time code, a form you do not understand, a page that does not respond, an irreversible choice that is not yours. A bar «Агент просит помощи» appears above the page (and a notification / inbox item), the owner fixes it by hand on the live page and presses «Готово, продолжай» — or «Остановить».",
       "reason = one line (what blocks you); need = what exactly the owner should do. The call waits up to 40 s for the answer; if it returns «still waiting», call browser_wait_help with the id (you may do so repeatedly). After «DONE» take a fresh browser_snapshot — the page changed.",
       "Ask EARLY: a captcha or login wall is not something to retry five times. Do not ask for things you can do yourself.",
+      "Ask as soon as ANY of these appears: a result with `stuck` (3 failures in a row); a snapshot with `narrow_viewport` (window too small — ask the owner to widen the MBOX window or the browser panel, say the size you need); the same element «not found» twice after a fresh snapshot; a page that keeps showing the login or a different account than expected; a permission/consent dialog (e.g. a VK or Google «allow access» screen) that grants access to a third party.",
     ].join("\n"),
     inputSchema: { reason: z.string(), need: z.string().default(""), tab: BROWSER_TAB },
   },
