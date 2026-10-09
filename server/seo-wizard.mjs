@@ -987,6 +987,7 @@ async function saveJob(query, name, result) {
 
 
 const msk = (date) => `${isoDay(date)}T00:00:00.000+03:00`;
+const num = (value) => { const n = Number(value); return Number.isFinite(n) ? n : 0; };
 
 /**
  * «Яндекс видит»: собирает то, что Яндекс сообщает о сайте (сводка, диагностика, история индексации, страницы в поиске,
