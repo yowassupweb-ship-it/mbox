@@ -2,6 +2,7 @@ import { BookOpenCheck, CalendarCheck, ChevronRight, Database, ListChecks, Play,
 import type { ReactNode } from "react";
 import type { FlowStatus, FlowStep, LiveRun, RhythmItem, ScenarioState } from "./seoTypes";
 import { SeoCalendar } from "./SeoCalendar";
+import { useSeoAccess } from "./seoAccess";
 import "../../styles/seo-flow.css";
 
 const STEP_ICONS: Record<FlowStep["id"], ReactNode> = {
@@ -48,6 +49,7 @@ export function nextAction(state: ScenarioState): Next {
 
 export function SeoFlow({ state, running, onRun, onOpen }: { state: ScenarioState; running: LiveRun | null; onRun: (scenario: string) => void; onOpen: (tab: string, view?: string) => void }) {
   const next = nextAction(state);
+  const access = useSeoAccess();
   const live = running || state.live;
   const percent = live?.total ? Math.min(100, Math.round(((live.done ?? 0) / live.total) * 100)) : null;
 
@@ -62,7 +64,7 @@ export function SeoFlow({ state, running, onRun, onOpen }: { state: ScenarioStat
             <span style={{ width: `${percent ?? 8}%` }} className={percent === null ? "is-indeterminate" : undefined} />
           </div>
         )}
-        {!live && next.button && (
+        {!live && next.button && !(next.button.run && access.readOnly) && (
           <div className="seo-hero-actions">
             <button type="button" className="seo-hero-btn" onClick={() => (next.button?.run ? onRun(next.button.run) : onOpen(next.button?.tab || "overview", next.button?.view))}>
               {next.button.run ? <Play size={15} aria-hidden="true" /> : null}{next.button.label}{!next.button.run ? <ChevronRight size={15} aria-hidden="true" /> : null}
@@ -105,6 +107,7 @@ export function SeoFlow({ state, running, onRun, onOpen }: { state: ScenarioStat
 }
 
 function RhythmRow({ item, busy, onRun }: { item: RhythmItem; busy: boolean; onRun: (scenario: string) => void }) {
+  const access = useSeoAccess();
   return (
     <div className={item.today ? "seo-rhythm-row is-today" : "seo-rhythm-row"}>
       <div className="seo-rhythm-name">
@@ -114,7 +117,7 @@ function RhythmRow({ item, busy, onRun }: { item: RhythmItem; busy: boolean; onR
       <div className="seo-rhythm-cell"><span>Следующий</span><b>{item.today ? "сегодня" : formatDay(item.next_day)}</b></div>
       <div className="seo-rhythm-cell"><span>Последний пакет</span><b>{formatStamp(item.last_package_at)}</b></div>
       <div className="seo-rhythm-cell"><span>Кандидатов</span><b>{item.candidates ?? "—"}</b></div>
-      {item.id !== "daily" ? (
+      {item.id !== "daily" && !access.readOnly ? (
         <button type="button" className="seo-row-btn" disabled={busy} onClick={() => onRun(item.id)} title="Собрать пакет этого сценария сейчас"><CalendarCheck size={13} aria-hidden="true" /> Собрать сейчас</button>
       ) : <span />}
     </div>

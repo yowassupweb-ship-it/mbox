@@ -1299,6 +1299,10 @@ const SharedNotePage = lazy(() => import("./pages/SharedNotePage").then((module)
 const sharedNoteToken = window.location.pathname.match(/^\/n\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 const SharedTablePage = lazy(() => import("./pages/SharedTablePage").then((module) => ({ default: module.SharedTablePage })));
 const sharedTableToken = window.location.pathname.match(/^\/t\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+// SEO Wizard по ссылке (/s/<токен>) и по логину с паролем (/seo-access): без входа в MBOX, только SEO Wizard.
+const SharedSeoPage = lazy(() => import("./pages/SharedSeoPage").then((module) => ({ default: module.SharedSeoPage })));
+const sharedSeoToken = window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+const sharedSeoLogin = /^\/seo-access\/?$/.test(window.location.pathname);
 const SharedDocumentPage = lazy(() => import("./pages/SharedDocumentPage").then((module) => ({ default: module.SharedDocumentPage })));
 const sharedDocumentToken = window.location.pathname.match(/^\/d\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 
@@ -1311,6 +1315,10 @@ createRoot(document.getElementById("root")!).render(
     ) : sharedTableToken ? (
       <Suspense fallback={null}>
         <SharedTablePage token={sharedTableToken} />
+      </Suspense>
+    ) : sharedSeoToken || sharedSeoLogin ? (
+      <Suspense fallback={null}>
+        <SharedSeoPage token={sharedSeoToken ?? null} />
       </Suspense>
     ) : sharedDocumentToken ? (
       <Suspense fallback={null}>

@@ -1,10 +1,12 @@
-import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Download, ExternalLink, Play, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Download, ExternalLink, Play, Plus, RefreshCw, Search, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, fetchJson, fetchOr } from "../lib/api";
+import { ApiError, apiPath, fetchJson, fetchOr } from "../lib/api";
 import { SeoFlow } from "./seo/SeoFlow";
 import { SeoPageCard } from "./seo/SeoPageCard";
 import { SeoHelp } from "./seo/SeoHelp";
 import { SeoAlerts } from "./seo/SeoAlerts";
+import { SeoShareDialog } from "./seo/SeoShareDialog";
+import { accessFor, OWNER_ACCESS, SeoAccessProvider, useSeoAccess } from "./seo/seoAccess";
 import { SeoStrategyView } from "./seo/SeoStrategy";
 import type { LiveRun, RunStatus, ScenarioState, Strategy } from "./seo/seoTypes";
 import { OctopusSpinner } from "../components/OctopusSpinner";
@@ -40,7 +42,6 @@ type SeoSettings = {
     metrica_counters?: MetricaCounter[];
     wordstat_access: string;
     wordstat_folder_id?: string;
-    section_roles: Record<string, string>;
     filter_policy: { indexed: string; closed: string };
     filter_params?: FilterParam[];
     index_decisions?: Record<string, string>;
@@ -63,7 +64,6 @@ const EMPTY_SETTINGS: SeoSettings = {
     metrica_counter_id: "",
     metrica_goals: { lead: "", booking: "" },
     wordstat_access: "direct",
-    section_roles: { "podbor-tura": "", odnodnevnye: "", "tury-po-rossii": "", "tury-zarubezh": "" },
     filter_policy: { indexed: "", closed: "" },
   },
   has_secrets: {},
@@ -172,7 +172,13 @@ export function SeoBoard({ toolId = "topvisor-api", mode = "tool" }: { toolId?: 
 
 // ─── Рабочее место ────────────────────────────────────────────────────────────
 
-function SeoWizard() {
+/** Кто открыл SEO Wizard не из MBOX: по ссылке или паролю. */
+export type SeoSharedInfo = { mode: "view" | "manage"; label: string; kind: "link" | "login" };
+
+export function SeoWizard({ shared }: { shared?: SeoSharedInfo | null } = {}) {
+  const access = shared ? accessFor(shared.mode) : OWNER_ACCESS;
+  const [sharing, setSharing] = useState(false);
+  const visibleTabs = shared ? TABS.filter((item) => item.id !== "settings") : TABS;
   const [tab, setTab] = useState(() => localStorage.getItem("mbox.seo.tab") || "scenario");
   const [views, setViews] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem("mbox.seo.views") || "{}"); } catch { return {}; }
@@ -195,7 +201,7 @@ function SeoWizard() {
   const [pageTarget, setPageTarget] = useState("");
   const [detailError, setDetailError] = useState("");
 
-  const current = TABS.find((item) => item.id === tab) ?? TABS[0];
+  const current = visibleTabs.find((item) => item.id === tab) ?? visibleTabs[0];
   const viewId = current.views ? (current.views.some((item) => item.id === views[current.id]) ? views[current.id] : current.views[0].id) : current.id;
 
   useEffect(() => { try { localStorage.setItem("mbox.seo.tab", tab); localStorage.setItem("mbox.seo.views", JSON.stringify(views)); localStorage.setItem("mbox.seo.tables", JSON.stringify(tables)); } catch { /* приватный режим */ } }, [tab, views, tables]);
@@ -344,21 +350,23 @@ function SeoWizard() {
   const tableId = tableTabs.some((item) => item.id === tables[viewId]) ? tables[viewId] : tableTabs[0]?.id;
 
   return (
+    <SeoAccessProvider value={access}>
     <div className="seo-board">
       <header className="seo-head">
         <h1>SEO Wizard</h1>
         <div className="seo-actions">
+          {!shared && <button type="button" onClick={() => setSharing(true)} title="Дать доступ к SEO Wizard по ссылке или по логину и паролю"><Share2 size={15} /> Поделиться</button>}
           <button type="button" onClick={refresh} disabled={loading || Boolean(running)} title="Перечитать данные">
             <RefreshCw size={15} className={loading ? "is-spinning" : undefined} /> Обновить
           </button>
-          <button type="button" className="is-primary" onClick={() => void runScenario("step1")} disabled={Boolean(running)} title="Сервер скачает sitemap, проверит страницы и соберёт пакет понедельника">
+          <button type="button" className="is-primary" onClick={() => void runScenario("step1")} disabled={Boolean(running) || access.readOnly} title="Сервер скачает sitemap, проверит страницы и соберёт пакет понедельника">
             <Play size={15} /> {running ? "Сбор идёт…" : "Собрать данные"}
           </button>
         </div>
       </header>
 
       <nav className="seo-tabs" role="tablist" aria-label="Разделы SEO Wizard">
-        {TABS.map((item) => (
+        {visibleTabs.map((item) => (
           <button key={item.id} type="button" role="tab" aria-selected={item.id === current.id} className={item.id === current.id ? "is-active" : undefined} onClick={() => setTab(item.id)}>
             {item.label}
           </button>
@@ -397,8 +405,8 @@ function SeoWizard() {
         {viewId === "page" && <SeoPageCard initial={pageTarget} origin={settings.config.site_origin} />}
         {viewId !== "scenario" && viewId !== "strategy" && viewId !== "overview" && viewId !== "settings" && viewId !== "data" && viewId !== "page" && (data ? (
           <>
-            {viewId === "outreach" && <OutreachForm onSaved={() => loadView("outreach", true)} />}
-            {viewId === "changes" && <ChangeForm onSaved={() => loadView("changes", true)} />}
+            {viewId === "outreach" && !access.readOnly && <OutreachForm onSaved={() => loadView("outreach", true)} />}
+            {viewId === "changes" && !access.readOnly && <ChangeForm onSaved={() => loadView("changes", true)} />}
             {data.sections.filter((item) => item.id === tableId).map((item) => <SeoTable key={item.id} section={item} options={data.options} actions={actions} />)}
             {tableId === SOURCES_TABLE && <SourcesTable sources={data.sources} />}
           </>
@@ -406,7 +414,9 @@ function SeoWizard() {
       </div>
       {detailError && <p className="seo-error" role="alert">{detailError}</p>}
       {detail && <IssueDetailPanel data={detail} onClose={() => setDetail(null)} />}
+      {sharing && <SeoShareDialog onClose={() => setSharing(false)} />}
     </div>
+    </SeoAccessProvider>
   );
 }
 
@@ -723,8 +733,12 @@ function Chip({ tone = "neutral", children }: { tone?: "neutral" | "ok" | "warn"
 }
 
 function Cell({ column, row, options, actions }: { column: Column; row: Row; options?: ViewData["options"]; actions?: RowActions }) {
+  const access = useSeoAccess();
   const value = row[column.key];
   const empty = value === null || value === undefined || value === "";
+  // Режим просмотра: поля, которые что-то меняют, показываются текстом, кнопки действий не показываются (сервер всё равно ответит 403).
+  if (access.readOnly && ["decision", "bucket_decision", "edit", "outreach_status"].includes(column.type)) return <>{empty ? "—" : (options?.decisions?.[String(value)] || options?.statuses?.[String(value)] || cellText(value))}</>;
+  if (access.readOnly && column.type === "run_scenario") return null;
   switch (column.type) {
     case "int": return <>{formatNumber(value)}</>;
     case "num": return <>{formatNumber(value, 2)}</>;
@@ -816,7 +830,7 @@ function Cell({ column, row, options, actions }: { column: Column; row: Row; opt
     case "issue_actions": {
       const busy = Boolean(actions?.busy);
       const more = <button type="button" onClick={() => actions?.issueDetail(row)} title="Что это, почему важно, примеры адресов, как проверить и что делать">Подробнее</button>;
-      if (!["open", "review"].includes(String(row.status))) return <span className="seo-row-actions">{more}</span>;
+      if (!["open", "review"].includes(String(row.status)) || access.readOnly) return <span className="seo-row-actions">{more}</span>;
       return (
         <span className="seo-row-actions">
           {more}
@@ -953,7 +967,7 @@ function SeoScenarioSettings({ settings, onSave }: { settings: SeoSettings; onSa
   const save = async () => {
     setSaving(true);
     setSaved(false);
-    try { await onSave({ site_origin: draft.site_origin, sitemap_url: draft.sitemap_url, section_roles: draft.section_roles }); setSaved(true); } finally { setSaving(false); }
+    try { await onSave({ site_origin: draft.site_origin, sitemap_url: draft.sitemap_url }); setSaved(true); } finally { setSaving(false); }
   };
   return (
     <form className="seo-settings" onSubmit={(event) => { event.preventDefault(); void save(); }}>
@@ -962,15 +976,6 @@ function SeoScenarioSettings({ settings, onSave }: { settings: SeoSettings; onSa
         <div className="seo-settings-grid">
           <Field label="Адрес сайта" value={draft.site_origin} onChange={(site_origin) => setDraft({ ...draft, site_origin })} />
           <Field label="Sitemap" value={draft.sitemap_url} onChange={(sitemap_url) => setDraft({ ...draft, sitemap_url })} />
-        </div>
-      </section>
-      <section className="seo-settings-block">
-        <h2>Роль разделов</h2>
-        <p className="seo-form-hint">Одна строка на раздел: какой запрос ведёт именно сюда. Структура адресов плоская и не меняется — каннибализация решается интентами, canonical и перелинковкой.</p>
-        <div className="seo-settings-grid">
-          {Object.entries(draft.section_roles).map(([key, value]) => (
-            <Field key={key} label={`/${key}/`} value={value} onChange={(next) => setDraft({ ...draft, section_roles: { ...draft.section_roles, [key]: next } })} wide />
-          ))}
         </div>
       </section>
       <p className="seo-form-hint">Правила фильтров — вкладка «Архитектура → Query и фильтры». Подключение Вебмастера, Topvisor, Метрики и Wordstat — карточки инструментов группы SEO Wizard.</p>
@@ -1159,7 +1164,7 @@ function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaC
         <input className="seo-metrica-manual" value={manual} inputMode="numeric" placeholder="номер счётчика" aria-label="Номер счётчика" onChange={(event) => setManual(event.currentTarget.value)} />
         <button type="button" disabled={!/^\d+$/.test(manual.trim()) || loading} onClick={() => { addCounter(manual); setManual(""); }}><Plus size={14} aria-hidden="true" /> Добавить</button>
         {counters.length > 0 && (
-          <a className="seo-button-link" href={`/api/mbox/seo/metrica/goals?format=csv&days=28${counters.map((counter) => `&counter=${encodeURIComponent(counter.id)}`).join("")}`} download title="Все цели всех счётчиков с достижениями и конверсией за 28 дней, весь трафик и поиск, динамика к прошлому периоду">
+          <a className="seo-button-link" href={apiPath(`/api/mbox/seo/metrica/goals?format=csv&days=28${counters.map((counter) => `&counter=${encodeURIComponent(counter.id)}`).join("")}`)} download title="Все цели всех счётчиков с достижениями и конверсией за 28 дней, весь трафик и поиск, динамика к прошлому периоду">
             <Download size={14} aria-hidden="true" /> Выгрузить все цели (CSV)
           </a>
         )}

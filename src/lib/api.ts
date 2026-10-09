@@ -19,8 +19,13 @@ export class ApiError extends Error {
 
 export const apiErrorCode = (cause: unknown) => (cause instanceof ApiError ? cause.code : "");
 
+// Страница SEO Wizard по ссылке или паролю обращается к тем же адресам, но через /api/share/seo/…: подмена в одном месте.
+let apiRewrite: ((path: string) => string) | null = null;
+export function setApiRewrite(next: ((path: string) => string) | null) { apiRewrite = next; }
+export const apiPath = (path: string) => (apiRewrite ? apiRewrite(path) : path);
+
 export async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, init);
+  const res = await fetch(typeof input === "string" ? apiPath(input) : input, init);
   if (res.status === 401) throw new AuthError();
   if (!res.ok) {
     const code = await res.json().then((body) => String(body?.error || ""), () => "");

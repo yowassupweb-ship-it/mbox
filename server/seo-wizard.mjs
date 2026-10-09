@@ -7,6 +7,7 @@ import { collectWordstatDemand, topUpDemand, wordstatDynamics, wordstatTargets }
 import { pageCard } from "./seo-page-card-db.mjs";
 import { explainIssue } from "./seo-explain.mjs";
 import { conclude, pathForExample, spread } from "./seo-verify.mjs";
+import { handleSeoShareAdmin } from "./seo-share.mjs";
 import { extractMarkup } from "./seo-markup.mjs";
 import { fetchWithRetry } from "./net-retry.mjs";
 import { activityFeed, healthAlerts, logActivity } from "./seo-activity.mjs";
@@ -689,12 +690,6 @@ const DEFAULT_SEO_CONFIG = {
   metrica_counters: [],
   wordstat_access: "direct",
   wordstat_folder_id: "",
-  section_roles: {
-    "podbor-tura": "",
-    odnodnevnye: "",
-    "tury-po-rossii": "",
-    "tury-zarubezh": "",
-  },
   filter_policy: { indexed: "", closed: "" },
 };
 
@@ -744,7 +739,6 @@ function mergeConfig(input = {}) {
     ...(input && typeof input === "object" ? input : {}),
     topvisor_modules: { ...DEFAULT_SEO_CONFIG.topvisor_modules, ...(input?.topvisor_modules || {}) },
     metrica_goals: { ...DEFAULT_SEO_CONFIG.metrica_goals, ...(input?.metrica_goals || {}) },
-    section_roles: { ...DEFAULT_SEO_CONFIG.section_roles, ...(input?.section_roles || {}) },
     filter_policy: { ...DEFAULT_SEO_CONFIG.filter_policy, ...(input?.filter_policy || {}) },
   };
   merged.metrica_counters = metricaCountersOf(merged);
@@ -2261,6 +2255,8 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     return true;
   };
   try {
+    // Выдача ссылок и логинов для доступа к SEO Wizard (только владелец: сюда попадает лишь он).
+    if (await handleSeoShareAdmin({ req, res, url, query, readBody, sendJson, actor: "владелец" })) return true;
     if (url.pathname === "/api/mbox/seo/run" && req.method === "POST") {
       const body = await readBody(req);
       // Синхронный режим (wait: true) остаётся для скриптов и тестов; экран запускает в фоне и опрашивает состояние.

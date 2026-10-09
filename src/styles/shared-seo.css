@@ -1,0 +1,44 @@
+/* SEO Wizard по ссылке и паролю: отдельная страница без шапки MBOX. */
+.shared-seo { min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg-color); color: var(--text-main); }
+.shared-seo-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-4); border-bottom: var(--border-width) solid var(--border-color); background: var(--bg-color); }
+.shared-seo-name { font-weight: var(--weight-semibold); }
+.shared-seo-badge { padding: 1px 10px; border: var(--border-width) solid var(--border-color); border-radius: 999px; font-size: var(--text-xs); color: var(--text-muted); }
+.shared-seo-space { flex: 1; }
+.shared-seo-bar button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.shared-seo-bar button:hover { background: var(--surface-hover); }
+.shared-seo-bar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.shared-seo > .seo-board { flex: 1; padding: var(--space-4); max-width: 1500px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.shared-seo-center { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--space-4); }
+.shared-seo-card { display: grid; gap: var(--space-3); width: min(420px, 100%); padding: var(--space-5); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--element-bg); }
+.shared-seo-card h1 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-lg); }
+.shared-seo-card p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+.shared-seo-card label { display: grid; gap: 4px; font-size: var(--text-xs); color: var(--text-muted); }
+.shared-seo-card input { min-height: 40px; padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.shared-seo-card input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.shared-seo-card button { min-height: 40px; border: 0; border-radius: var(--radius-sm); background: var(--accent-fill); color: #fff; font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer; }
+.shared-seo-card button:disabled { opacity: .68; cursor: default; }
+.shared-seo-card button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.shared-seo-error { color: var(--state-danger) !important; }
+
+/* Окно «Поделиться» у владельца. */
+.seo-share { width: min(640px, 100%); }
+.seo-share h3 { display: flex; align-items: center; gap: 6px; margin: var(--space-4) 0 var(--space-1); color: var(--text-main); }
+.seo-share code { padding: 1px 5px; border-radius: var(--radius-2xs); background: var(--bg-raised, var(--bg-color)); font-size: var(--text-xs); }
+.seo-share-row { display: grid; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); }
+.seo-share-head { display: grid; gap: 2px; }
+.seo-share-head span, .seo-share small { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.45; }
+.seo-share-row input, .seo-share-form input, .seo-share-form select, .seo-share-logins select { min-height: 32px; padding: 0 var(--space-2); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.seo-share-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.seo-share button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.seo-share button:disabled { opacity: .68; cursor: default; }
+.seo-share button:hover:not(:disabled) { background: var(--surface-hover); }
+.seo-share button:focus-visible, .seo-share input:focus-visible, .seo-share select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.seo-share button.is-primary { background: var(--accent-fill); border-color: transparent; color: #fff; }
+.seo-share-fresh { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: var(--border-width) solid color-mix(in srgb, var(--state-ok) 34%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--state-ok) 12%, var(--element-bg)); font-size: var(--text-sm); }
+.seo-share-fresh pre { margin: 0; padding: var(--space-2); border-radius: var(--radius-sm); background: var(--bg-color); font: inherit; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.seo-share-fresh button { justify-self: start; }
+.seo-share-logins { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: 0; list-style: none; }
+.seo-share-logins li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); }
+.seo-share-logins li > div { flex: 1; min-width: 180px; display: grid; gap: 2px; font-size: var(--text-sm); }
+.seo-share-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); align-items: end; margin-top: var(--space-2); }
+.seo-share-form label { display: grid; gap: 4px; font-size: var(--text-xs); color: var(--text-muted); }

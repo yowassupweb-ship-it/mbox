@@ -36,6 +36,7 @@ import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { createHelp, handleBrowserAgentApi, handleBrowserHelpApi, runBrowserOp, waitHelp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
+import { handleSharedSeoApi } from "./seo-share.mjs";
 import { startSeoScheduler } from "./seo-scheduler.mjs";
 import { commitsForTodos, recordCommit } from "./todo-commits.mjs";
 import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
@@ -3336,6 +3337,8 @@ const httpServer = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/api/mbox/")) return await handleApi(req, res, url);
     // Заметка по ссылке (/n/<токен>) — без входа в MBOX, доступ определяет только токен.
     if (url.pathname.startsWith("/api/share/")) {
+      // SEO Wizard по ссылке или паролю: белый список вызовов внутри (server/seo-share.mjs), настройки и ключи недоступны.
+      if (await handleSharedSeoApi({ req, res, url, query, readBody, sendJson, seoApi: handleSeoWizardApi })) return;
       const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
       const handled = await handleSharedNoteApi({
         req, res, url, query, readBody, sendJson,

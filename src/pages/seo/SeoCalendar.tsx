@@ -1,6 +1,7 @@
 import { AlertTriangle, CalendarCheck, Check, ChevronLeft, ChevronRight, CircleDashed, Minus, Play, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { fetchJson } from "../../lib/api";
+import { useSeoAccess } from "./seoAccess";
 import "../../styles/seo-calendar.css";
 
 /**
@@ -167,6 +168,7 @@ export function SeoCalendar({ onRun, busy, onOpen, refreshKey }: { onRun: (scena
 }
 
 function DayPanel({ day, busy, onRun, onOpen, todayMonth }: { day: Day; busy: boolean; onRun: (scenario: string) => void; onOpen: (tab: string, view?: string) => void; todayMonth: string }) {
+  const access = useSeoAccess();
   const items = day.items.filter((item) => item.kind !== "daily" || item.state !== "none" || day.is_past || day.is_today);
   void todayMonth;
   return (
@@ -175,7 +177,7 @@ function DayPanel({ day, busy, onRun, onOpen, todayMonth }: { day: Day; busy: bo
       {items.length === 0 ? <p className="seo-cal-muted">В этот день ничего не запланировано.</p> : (
         <ul>
           {items.map((item) => {
-            const canRun = !busy && day.date <= new Date().toISOString().slice(0, 10) && (item.state === "today" || item.state === "missed" || item.state === "failed") && (item.kind === "scenario" || item.id === "daily");
+            const canRun = !busy && !access.readOnly && day.date <= new Date().toISOString().slice(0, 10) && (item.state === "today" || item.state === "missed" || item.state === "failed") && (item.kind === "scenario" || item.id === "daily");
             return (
               <li key={item.id} className={`seo-cal-event s-${item.state}`}>
                 <div className="seo-cal-event-head">
