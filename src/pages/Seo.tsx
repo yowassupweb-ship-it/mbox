@@ -45,7 +45,7 @@ type SeoSettings = {
   };
   has_secrets: Record<string, boolean>;
 };
-type MetricaGoalRole = "" | "lead" | "booking" | "track";
+type MetricaGoalRole = "" | "lead" | "booking" | "track" | "skip";
 type MetricaGoal = { id: string; name: string; type: string; role: MetricaGoalRole; description: string; missing?: boolean };
 type MetricaCounter = { id: string; name: string; site: string; goals: MetricaGoal[] };
 type MetricaCatalog = { ok: boolean; error?: string; counters?: Array<{ id: string; name: string; site: string }>; goals?: Record<string, Array<{ id: string; name: string; type: string }>>; errors?: Record<string, string> };
@@ -1006,10 +1006,10 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
 }
 
 const GOAL_ROLES: Array<{ value: MetricaGoalRole; label: string }> = [
-  { value: "", label: "не собирать" },
+  { value: "", label: "собирать" },
   { value: "lead", label: "заявка" },
   { value: "booking", label: "бронирование" },
-  { value: "track", label: "собирать, не заявка" },
+  { value: "skip", label: "не собирать" },
 ];
 const METRICA_MAX_GOALS = 160;
 
@@ -1067,7 +1067,7 @@ function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaC
   return (
     <section className="seo-settings-block seo-metrica">
       <h2>Счётчики и цели</h2>
-      <p className="seo-form-hint">Счётчики и все их цели берутся из Метрики по токену. Отметьте, какие цели собирать: «заявка» и «бронирование» складываются в заявки по страницам, «собирать» — только для отчёта. Описание объясняет агентам, что значит цель. Целей можно отмечать много: они собираются пачками, до {METRICA_MAX_GOALS} на счётчик. «Выгрузить все цели» отдаёт таблицу по всем целям, а не только отмеченным.</p>
+      <p className="seo-form-hint">Счётчики и все их цели берутся из Метрики по токену. Собираются все цели, кроме отмеченных «не собирать»: «заявка» и «бронирование» ещё и складываются в заявки по страницам. Описание объясняет агентам, что значит цель. Целей можно отмечать много: они собираются пачками, до {METRICA_MAX_GOALS} на счётчик. «Выгрузить все цели» отдаёт таблицу по всем целям, а не только отмеченным.</p>
       <div className="seo-form-actions">
         <button type="button" disabled={loading} onClick={() => void load(counters.map((counter) => counter.id))}><RefreshCw size={14} aria-hidden="true" /> {loading ? "Загружаю…" : counters.length ? "Обновить счётчики и цели" : "Загрузить счётчики из Метрики"}</button>
         <input className="seo-metrica-manual" value={manual} inputMode="numeric" placeholder="номер счётчика" aria-label="Номер счётчика" onChange={(event) => setManual(event.currentTarget.value)} />
@@ -1091,7 +1091,7 @@ function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaC
       )}
       {counters.length === 0 && <p className="seo-form-hint">Счётчиков нет: загрузите их из Метрики или добавьте номер вручную.</p>}
       {counters.map((counter) => {
-        const collected = counter.goals.filter((goal) => goal.role).length;
+        const collected = counter.goals.filter((goal) => goal.role !== "skip").length;
         const error = catalog?.errors?.[counter.id];
         return (
           <div key={counter.id} className="seo-metrica-counter">
@@ -1109,12 +1109,12 @@ function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaC
             ) : (
               <ul className="seo-metrica-goals">
                 {counter.goals.map((goal) => (
-                  <li key={goal.id} className={goal.role ? "is-on" : undefined}>
+                  <li key={goal.id} className={goal.role === "lead" || goal.role === "booking" ? "is-on" : undefined}>
                     <div className="seo-metrica-goal-head">
                       <span className="seo-metrica-goal-name">{goal.name || `Цель ${goal.id}`}{goal.missing && <em> · нет в Метрике</em>}</span>
                       <span className="seo-metrica-goal-meta">№ {goal.id}{goal.type ? ` · ${goal.type}` : ""}</span>
                     </div>
-                    <select value={goal.role} aria-label={`Что делать с целью «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { role: event.currentTarget.value as MetricaGoalRole })}>
+                    <select value={goal.role === "track" ? "" : goal.role} aria-label={`Что делать с целью «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { role: event.currentTarget.value as MetricaGoalRole })}>
                       {GOAL_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
                     </select>
                     <label className="seo-metrica-note">

@@ -662,7 +662,8 @@ const DEFAULT_SEO_CONFIG = {
 
 const SEO_SECRET_FIELDS = ["topvisor_api_key", "webmaster_token", "metrica_token", "wordstat_token", "wordstat_api_key"];
 
-const METRICA_GOAL_ROLES = new Set(["", "lead", "booking", "track"]);
+// "" и "track" — собирать как обычную цель; lead/booking — ещё и суммируются в заявки; "skip" — владелец явно отключил цель.
+const METRICA_GOAL_ROLES = new Set(["", "lead", "booking", "track", "skip"]);
 
 /** Счётчики Метрики из настроек; старый формат (один счётчик + ID целей по ролям) превращается в новый. */
 export function metricaCountersOf(config = {}) {
@@ -1046,7 +1047,9 @@ const METRICA_GOALS_PER_REQUEST = 16;
 const METRICA_MAX_GOALS = 160;
 
 function trackedGoals(counter) {
-  return counter.goals.filter((goal) => goal.role).slice(0, METRICA_MAX_GOALS);
+  // Собираются все цели, кроме отключённых владельцем; заявки и бронирования идут первыми, чтобы потолок их не отрезал.
+  const rank = (goal) => (goal.role === "lead" || goal.role === "booking" ? 0 : 1);
+  return counter.goals.filter((goal) => goal.role !== "skip").sort((a, b) => rank(a) - rank(b)).slice(0, METRICA_MAX_GOALS);
 }
 
 function chunked(list, size) {
@@ -1247,7 +1250,7 @@ async function collectMetricaCounter(token, counter, days, origin) {
       rows: rowsOut.length,
       visits: rowsOut.reduce((sum, row) => sum + row.visits, 0),
       goals: goals.map((goal) => ({ id: goal.id, name: goal.name, role: goal.role, reaches: Math.round(reachedTotal[goal.id] || 0) })),
-      skipped_goals: Math.max(0, counter.goals.filter((goal) => goal.role).length - goals.length),
+      skipped_goals: Math.max(0, counter.goals.filter((goal) => goal.role !== "skip").length - goals.length),
     },
   };
 }
@@ -1262,6 +1265,13 @@ export async function collectMetricaTraffic(query, token, counters, origin) {
   const days = daysBack(hasHistory ? SEARCH_REFRESH_DAYS : SEARCH_HISTORY_DAYS, 1);
   const results = [];
   const errors = [];
+  // Цели в настройках могут быть неполными (список обновляют кнопкой): добавляем недостающие из каталога Метрики.
+  const catalog = await metricaCatalog(query, counters.map((counter) => counter.id)).catch(() => null);
+  for (const counter of counters) {
+    const fresh = catalog?.ok ? catalog.goals?.[counter.id] || [] : [];
+    const known = new Set(counter.goals.map((goal) => goal.id));
+    counter.goals = [...counter.goals, ...fresh.filter((goal) => !known.has(goal.id)).map((goal) => ({ id: goal.id, name: goal.name, type: goal.type, role: "", description: "" }))];
+  }
   for (const counter of counters) {
     try {
       results.push(await collectMetricaCounter(token, counter, days, counterOrigin(counter, origin)));
