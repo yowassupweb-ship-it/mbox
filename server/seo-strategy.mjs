@@ -23,7 +23,8 @@ const parseAt = (value) => {
 };
 const daysAgo = (value, now) => {
   const at = parseAt(value);
-  return at === null ? null : Math.floor((now.getTime() - at) / DAY);
+  // Позиции Topvisor записываются на полдень дня проверки: утром это «из будущего», возраст не бывает отрицательным.
+  return at === null ? null : Math.max(0, Math.floor((now.getTime() - at) / DAY));
 };
 
 /** Какие сценарии на этот день: по расписанию из стратегии (заметка #27). Чистая функция — проверяется тестом. */

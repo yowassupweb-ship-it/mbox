@@ -3,12 +3,13 @@ import { scenariosOnDay, seoScenarioState, seoStrategy } from "./seo-strategy.mj
 import { seoCalendarData } from "./seo-calendar.mjs";
 import { seoSchedulerStatus } from "./seo-scheduler.mjs";
 import { ctrCurve, recordChange, saveOutreach, SCENARIOS, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
-import { collectWordstatDemand, topUpDemand, wordstatDynamics } from "./seo-wordstat.mjs";
+import { collectWordstatDemand, topUpDemand, wordstatDynamics, wordstatTargets } from "./seo-wordstat.mjs";
 import { pageCard } from "./seo-page-card-db.mjs";
 import { explainIssue } from "./seo-explain.mjs";
 import { conclude, pathForExample, spread } from "./seo-verify.mjs";
 import { extractMarkup } from "./seo-markup.mjs";
 import { fetchWithRetry } from "./net-retry.mjs";
+import { activityFeed, healthAlerts, logActivity } from "./seo-activity.mjs";
 import { parseCompetitorCells, parseOwnCells } from "./seo-competitors.mjs";
 import { collectPageQueries, collectPageTotals, topPagePaths } from "./seo-webmaster-pages.mjs";
 import { diffSnapshots, pathOfUrl } from "./seo-page-card.mjs";
@@ -158,6 +159,20 @@ CREATE TABLE IF NOT EXISTS seo_demand_snapshots (
   raw JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_seo_demand_snapshots_query ON seo_demand_snapshots(query, captured_at DESC);
+
+-- История действий: что сервер и люди делали с SEO Wizard и чем кончилось. Прогоны, пакеты и проверки позиций ведут свои таблицы,
+-- сюда пишется остальное (расписание, перепроверка, добор спроса, ручные запуски).
+CREATE TABLE IF NOT EXISTS seo_activity (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ok',
+  detail TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'scheduler',
+  props JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_seo_activity_created ON seo_activity(created_at DESC);
 
 -- Конкуренты из Topvisor: список проекта и их позиции по нашим запросам (по проверкам). Хранится история, Topvisor отдаёт только выбранные даты.
 CREATE TABLE IF NOT EXISTS seo_competitors (
@@ -1403,6 +1418,10 @@ export async function verifyTopIssues(query, runId, { limit = 8 } = {}) {
     await query("UPDATE seo_issues SET evidence = evidence || $2::jsonb WHERE id = $1", [id, JSON.stringify({ verification: summary })]);
     done.push({ id, verdict: verified.verdict });
   }
+  if (done.length) {
+    const count = (verdict) => done.filter((item) => item.verdict === verdict).length;
+    await logActivity(query, { kind: "verify", title: "Перепроверены главные находки", detail: `Подтверждено ${count("confirmed")}, частично ${count("partly")}, не подтверждено ${count("not_confirmed")} из ${done.length}`, props: { run_id: runId } });
+  }
   return done;
 }
 
@@ -2246,7 +2265,19 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
       const body = await readBody(req);
       // Синхронный режим (wait: true) остаётся для скриптов и тестов; экран запускает в фоне и опрашивает состояние.
       if (body.wait === true) return reply(200, await runSeoWizardCollection(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
-      return reply(202, await startSeoRun(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
+      const startedRun = await startSeoRun(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false });
+      if (!startedRun.already_running) await logActivity(query, { kind: "run", title: `Сбор «${body.scenario || "step1"}» запущен вручную`, source: "user", detail: `Прогон ${startedRun.run_id}` });
+      return reply(202, startedRun);
+    }
+    if (url.pathname === "/api/mbox/seo/activity" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      return reply(200, { items: await activityFeed(query, { limit: Math.min(500, Number(url.searchParams.get("limit")) || 200) }) });
+    }
+    if (url.pathname === "/api/mbox/seo/health" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      const scheduler = seoSchedulerStatus();
+      const targets = await wordstatTargets(query, new Date().toISOString().slice(0, 7)).catch(() => null);
+      return reply(200, { alerts: await healthAlerts(query, { autorun: Boolean(scheduler.enabled), tickAt: scheduler.last_tick_at, demandTargets: targets }), checked_at: new Date().toISOString() });
     }
     if (url.pathname === "/api/mbox/seo/calendar" && req.method === "GET") {
       await ensureSeoWizardSchema(query);

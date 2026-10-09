@@ -6,6 +6,7 @@
 import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
 import { adviceFor, classifyTarget, cleanAnchor, priorityOf } from "./seo-links-kind.mjs";
 import { bySection, groupByDate, movers, trendByCheck, urlFlapping } from "./seo-rank-stats.mjs";
+import { activityFeed } from "./seo-activity.mjs";
 import { buildBoard, gaps as rivalGaps, rivalMovers, rivalPages, summary as rivalSummary, trendMatrix, wins as rivalWins } from "./seo-competitors.mjs";
 import { pageKind } from "./seo-wizard.mjs";
 
@@ -1180,6 +1181,22 @@ async function viewIssues(query) {
   };
 }
 
+const ACTIVITY_STATUS = { ok: "Сделано", failed: "Ошибка", partial: "Частично", skipped: "Пропущено", running: "Идёт", info: "Заметка" };
+const ACTIVITY_SOURCE = { scheduler: "расписание", user: "вручную", run: "сбор", package: "пакет", agent: "агент" };
+
+async function viewActivity(query) {
+  const items = await activityFeed(query, { limit: 300 });
+  return {
+    sections: [section("activity", "История действий: что делал сервер и чем кончилось", [
+      col("at", "Когда", "datetime"), col("title", "Что"), col("status_label", "Результат"), col("detail", "Подробности"), col("source_label", "Кто"),
+    ], items.map((item) => ({ ...item, status_label: ACTIVITY_STATUS[item.status] || item.status, source_label: ACTIVITY_SOURCE[item.source] || item.source })), {
+      empty: "Пока ничего не записано: история начинается с первого действия расписания.",
+      source: "расписание, прогоны, пакеты, проверки позиций",
+      note: "Здесь видно всё, что SEO Wizard делает сам и по кнопке. Если нужного действия в ленте нет, значит механизм не сработал: предупреждения о пропущенном сервер показывает сверху над вкладками.",
+    })],
+  };
+}
+
 export const SCENARIOS = [
   { id: "daily", when: "Каждый день", server: "Снимки Вебмастера и Метрики; сторожевые проверки: падения, массовые 404, смена canonical/robots, критичные ошибки аудита. Позиции Topvisor — раз в неделю: сервер заказывает проверку (без платных снимков выдачи), забирает позиции, спрос Wordstat и пересчитывает статистику", session: "не запускается", notify: "только при критике" },
   { id: "monday", when: "Понедельник", server: "Снимки выдачи по кластерам-кандидатам; детекторы 03, 05 (CTR, сниппеты, выдача), позиции, поведение, потенциал → пакет недели", session: "«SEO: понедельник» — очередь недели 3–5 задач, решения человеку, отчёт", notify: "сводка недели" },
@@ -1259,6 +1276,7 @@ const VIEWS = {
   cannibal: viewCannibal,
   quality: viewQuality,
   competitors: viewCompetitors,
+  activity: viewActivity,
   ctr: viewCtr,
   opportunities: viewOpportunities,
   positions: viewPositions,

@@ -20,3 +20,21 @@
 .seo-help-how ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .seo-help-tip { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--state-warn); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--state-warn) 10%, transparent); }
 @media (prefers-reduced-motion: reduce) { .seo-help-head, .seo-help-head svg:last-child { transition: none; } }
+
+/* Сторож над вкладками: что не сработало по расписанию. */
+.seo-alerts { display: grid; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.seo-alerts ul { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.seo-alerts li { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3); border: var(--border-width) solid color-mix(in srgb, var(--state-warn) 34%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--state-warn) 12%, var(--element-bg)); font-size: var(--text-sm); }
+.seo-alerts li[data-level="high"] { border-color: color-mix(in srgb, var(--state-danger) 34%, transparent); background: color-mix(in srgb, var(--state-danger) 12%, var(--element-bg)); }
+.seo-alerts li > svg { flex: none; margin-top: 2px; color: var(--state-warn); }
+.seo-alerts li[data-level="high"] > svg { color: var(--state-danger); }
+.seo-alerts li > div { flex: 1; min-width: 0; }
+.seo-alerts li p { margin: 2px 0 0; line-height: 1.5; }
+.seo-alerts li b { margin-right: 6px; font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--text-muted); }
+.seo-alerts li button, .seo-alerts-more { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 32px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.seo-alerts-more { justify-self: start; }
+.seo-alerts-more svg.is-open { transform: rotate(180deg); }
+.seo-alerts li button:hover, .seo-alerts-more:hover { background: var(--surface-hover); }
+.seo-alerts li button:focus-visible, .seo-alerts-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.seo-alerts-ok, .seo-alerts-note { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--text-muted); }
+.seo-alerts-ok svg { color: var(--state-ok); }

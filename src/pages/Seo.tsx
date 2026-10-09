@@ -4,6 +4,7 @@ import { ApiError, fetchJson, fetchOr } from "../lib/api";
 import { SeoFlow } from "./seo/SeoFlow";
 import { SeoPageCard } from "./seo/SeoPageCard";
 import { SeoHelp } from "./seo/SeoHelp";
+import { SeoAlerts } from "./seo/SeoAlerts";
 import { SeoStrategyView } from "./seo/SeoStrategy";
 import type { LiveRun, RunStatus, ScenarioState, Strategy } from "./seo/seoTypes";
 import { OctopusSpinner } from "../components/OctopusSpinner";
@@ -92,7 +93,7 @@ const TABS: Tab[] = [
   { id: "demand", label: "Спрос и трафик", views: [{ id: "demand", label: "Потенциал и спрос" }, { id: "traffic", label: "Трафик и заявки" }] },
   { id: "authority", label: "Авторитет", views: [{ id: "outreach", label: "Link Outreach" }] },
   { id: "reports", label: "Отчёты", views: [{ id: "report10", label: "10 число" }, { id: "report20", label: "20 число" }, { id: "report25", label: "25 число" }, { id: "sessions", label: "Сессии" }] },
-  { id: "server", label: "Сервер", views: [{ id: "scenarios", label: "Сценарии" }, { id: "issues", label: "Находки" }, { id: "packages", label: "Пакеты" }, { id: "runs", label: "Прогоны" }, { id: "data", label: "Данные" }] },
+  { id: "server", label: "Сервер", views: [{ id: "activity", label: "История" }, { id: "scenarios", label: "Сценарии" }, { id: "issues", label: "Находки" }, { id: "packages", label: "Пакеты" }, { id: "runs", label: "Прогоны" }, { id: "data", label: "Данные" }] },
   { id: "settings", label: "Настройки" },
 ];
 
@@ -385,6 +386,7 @@ function SeoWizard() {
       {error && <p className="seo-error" role="alert">{error}</p>}
 
 
+      <SeoAlerts onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} refreshKey={`${dashboard ? "d" : ""}${Object.keys(cache).length}${live ? "l" : ""}`} />
       <div className="seo-body">
         <SeoHelp viewId={viewId} />
         {viewId === "scenario" && (scenarioState ? <SeoFlow state={scenarioState} running={live} onRun={(scenario) => void runScenario(scenario)} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
@@ -543,6 +545,7 @@ const TABLE_LABELS: Record<string, string> = {
   positions_movers: "Изменения",
   positions_sections: "По разделам",
   positions_flapping: "Гуляют страницы",
+  activity: "История",
   links_summary: "По типам",
   links: "Каждая ссылка",
   competitors_summary: "Кто сильнее",
