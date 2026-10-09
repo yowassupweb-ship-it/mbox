@@ -194,7 +194,7 @@ export function SeoPageCard({ initial, origin }: { initial: string; origin: stri
               <h3>Цели Метрики на странице (поисковые визиты, 28 дн.)</h3>
               <div className="seo-card-table">
                 <table>
-                  <thead><tr><th>Цель</th><th>Достижений</th><th>Конверсия, %</th><th>Польза цели</th></tr></thead>
+                  <thead><tr><th>Цель</th><th>Достижений</th><th>Достижений на 100 визитов</th><th>Польза цели</th></tr></thead>
                   <tbody>{card.metrica.goals.map((goal) => <tr key={goal.goal_id}><td>{goal.goal || `Цель ${goal.goal_id}`}</td><td>{fmt(goal.reaches)}</td><td>{fmt(goal.conversion, 2)}</td><td>{goal.note || "—"}</td></tr>)}</tbody>
                 </table>
               </div>

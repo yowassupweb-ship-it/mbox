@@ -130,12 +130,13 @@ export async function pageCard(query, input, deps = {}) {
   // Сезонность по помесячному спросу Wordstat для главных запросов страницы.
   const seasonQueries = queries.filter((item) => item.demand !== null).sort((a, b) => num(b.demand) - num(a.demand)).slice(0, 3).map((item) => item.query);
   let season = null;
+  let dynamicsError = "";
   if (seasonQueries.length) {
     const series = [];
     for (const text of seasonQueries) {
       let rows = (await query("SELECT month, demand FROM seo_demand_history WHERE query = $1 ORDER BY month", [text]).catch(() => ({ rows: [] }))).rows;
       if (!rows.length && deps.fetchDynamics) {
-        const fetched = await deps.fetchDynamics(text).catch(() => null);
+        const fetched = await deps.fetchDynamics(text).catch((error) => { dynamicsError = String(error?.message || error); return null; });
         if (fetched?.length) {
           for (const item of fetched) await query("INSERT INTO seo_demand_history(query, month, demand) VALUES ($1, $2, $3) ON CONFLICT (query, month) DO UPDATE SET demand = EXCLUDED.demand, fetched_at = now()", [text, item.month, item.value]);
           rows = fetched.map((item) => ({ month: item.month, demand: item.value }));
@@ -145,7 +146,12 @@ export async function pageCard(query, input, deps = {}) {
     }
     const total = sumSeries(series.filter((rows) => rows.length));
     season = { ...seasonality(total), queries: seasonQueries, series: total };
-    if (!season.enough) gaps.push(`Сезонность: ${season.note}`);
+    if (!season.enough) {
+      if (dynamicsError) {
+        season = { ...season, note: `История спроса Wordstat не получена: ${dynamicsError}` };
+        gaps.push(`Сезонность не посчитана: история спроса Wordstat не получена (${dynamicsError}). Повторите позже, запрос подтянется сам.`);
+      } else gaps.push(`Сезонность: ${season.note}`);
+    }
   } else {
     gaps.push("Сезонность не оценить: нет запросов с известным спросом.");
   }

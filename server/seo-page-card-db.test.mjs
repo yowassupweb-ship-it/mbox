@@ -72,3 +72,10 @@ test("сезонность: историю спроса докачивает fet
   assert.equal(card.seasonality.seasonal, true);
   assert.deepEqual(card.seasonality.peak, ["июль"]);
 });
+
+test("сезонность: если история спроса не получена из-за ошибки, карточка называет причину, а не «мало истории»", async () => {
+  const card = await pageCard(fakeQuery(base), "/odnodnevnye/zolotoe-koltso", { now: NOW, fetchDynamics: async () => { throw new Error("Wordstat 429: квота"); } });
+  assert.match(card.seasonality.note, /не получена: Wordstat 429/);
+  assert.ok(card.gaps.some((text) => /не получена/.test(text)));
+  assert.ok(!card.gaps.some((text) => /Мало истории/.test(text)));
+});

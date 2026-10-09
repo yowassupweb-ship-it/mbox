@@ -3,8 +3,8 @@
 import { demandFromTop, isStaleQuery } from "./seo-potential.mjs";
 
 const ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/wordstat/topRequests";
-// Квота Wordstat API — 100 запросов в час (search-api.wordstatRequestsPerHour): порция с запасом, остаток добирается следующими часами.
-const MAX_PER_RUN = 90;
+// Квота Wordstat API — 100 запросов в час (search-api.wordstatRequestsPerHour): порция с запасом (20 запросов остаётся карточке страницы для динамики спроса), остаток добирается следующими часами.
+const MAX_PER_RUN = 80;
 const CONCURRENCY = 3;
 // Лимит Wordstat API — 10 запросов в секунду (search-api.wordstatRequestsPerSecond). Держим 8 с запасом и ждём,
 // если всё же получили 429 по секундной квоте; суточная и прочие квоты останавливают сбор до следующего прогона.
