@@ -87,22 +87,6 @@
 .seo-autorun { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
 .seo-autorun.is-on { color: var(--state-ok); }
 
-.seo-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
-.seo-month-dow { padding: 2px 0; color: var(--text-muted); font-size: var(--text-xs); text-align: center; text-transform: uppercase; }
-.seo-month-day { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 52px; padding: 6px 8px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--element-bg); font-size: var(--text-xs); }
-.seo-month-day b { font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
-.seo-month-day.is-empty { border-color: transparent; background: transparent; }
-.seo-month-day.is-past { color: var(--text-muted); background: transparent; }
-.seo-month-day.is-today { border-color: var(--accent-color); box-shadow: 0 0 0 1px var(--accent-color); }
-.seo-month-day.is-today b { color: var(--accent-color); }
-.seo-month-marks { display: flex; flex-wrap: wrap; gap: 3px; }
-.seo-mark { display: inline-flex; align-items: center; min-height: 16px; padding: 0 5px; border-radius: var(--radius-2xs); font-size: var(--text-2xs); font-style: normal; font-weight: var(--weight-semibold); line-height: 16px; }
-.seo-month-marks .seo-mark span { display: inline; }
-.seo-mark.m-monday, .seo-mark.m-thursday { background: color-mix(in srgb, var(--accent-color) 22%, transparent); color: var(--text-main); }
-.seo-mark.m-architecture, .seo-mark.m-authority, .seo-mark.m-monthly { background: color-mix(in srgb, var(--state-warn) 22%, transparent); color: var(--text-main); }
-.seo-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: 0; padding: 0; list-style: none; color: var(--text-muted); font-size: var(--text-xs); }
-.seo-legend li { display: inline-flex; align-items: center; gap: 6px; }
-.seo-legend .seo-mark { width: 12px; min-height: 12px; padding: 0; }
 
 .seo-rhythm-list { display: flex; flex-direction: column; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; }
 .seo-rhythm-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(110px, 1fr)) auto; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--element-bg); }

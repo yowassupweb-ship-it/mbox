@@ -27,3 +27,12 @@ test("неизвестный детектор не ломает разбор", (
   assert.equal(out.what, "что-то нашли");
   assert.deepEqual(out.examples, []);
 });
+
+test("ссылки на ?параметр: затронутые адреса — цели ссылок, с числом страниц-источников", () => {
+  const out = examplesOf("02_internal_query_links", { param: "favorites", links: [
+    { from: "/a", to: "/x?favorites=1" }, { from: "/b", to: "/x?favorites=1" }, { from: "/a", to: "/y?favorites=1" },
+  ] });
+  assert.deepEqual(out.map((item) => item.path), ["/x?favorites=1", "/y?favorites=1"]);
+  assert.match(out[0].note, /ссылок с 2 страниц: \/a, \/b/);
+  assert.equal(examplesOf("02", { param: "p", sample_targets: ["/t"] })[0].note, "адрес с параметром");
+});

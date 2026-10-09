@@ -1,6 +1,7 @@
 // Сбор спроса из Wordstat (Yandex Search API) для отслеживаемых запросов. Частотность месячная, поэтому запрос
 // спрашиваем один раз в календарный месяц: повторный прогон в том же месяце не тратит квоту.
 import { demandFromTop, isStaleQuery } from "./seo-potential.mjs";
+import { fetchWithRetry } from "./net-retry.mjs";
 
 const ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/wordstat/topRequests";
 // Квота Wordstat API — 100 запросов в час (search-api.wordstatRequestsPerHour): порция с запасом (20 запросов остаётся карточке страницы для динамики спроса), остаток добирается следующими часами.
@@ -13,7 +14,8 @@ const SECOND_LIMIT_RETRIES = 3;
 const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function wordstatTop({ apiKey, folderId = "" }, phrase, fetchImpl = fetch) {
-  const response = await fetchImpl(ENDPOINT, {
+  const send = (url, init) => fetchWithRetry(url, init, { fetchImpl });
+  const response = await send(ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Api-Key ${apiKey}` },
     body: JSON.stringify({ phrase, numPhrases: 20, ...(folderId ? { folderId } : {}) }),
@@ -131,8 +133,9 @@ export async function wordstatDynamics({ apiKey, folderId = "" }, phrase, { mont
     { fromDate: `${start.toISOString().slice(0, 10)}T00:00:00Z`, toDate: `${end.toISOString().slice(0, 10)}T23:59:59Z` },
   ];
   let lastError = null;
+  const send = (url, init) => fetchWithRetry(url, init, { fetchImpl });
   for (const range of attempts) {
-    const response = await fetchImpl(DYNAMICS_ENDPOINT, {
+    const response = await send(DYNAMICS_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Api-Key ${apiKey}` },
       body: JSON.stringify({ phrase, period: "PERIOD_MONTHLY", ...range, ...(folderId ? { folderId } : {}) }),

@@ -5,6 +5,7 @@
 // Цифр не выдумываем: пока источник не подключён, раздел отвечает empty с именем источника.
 import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
 import { bySection, groupByDate, movers, trendByCheck, urlFlapping } from "./seo-rank-stats.mjs";
+import { buildBoard, gaps as rivalGaps, rivalMovers, rivalPages, summary as rivalSummary, trendMatrix, wins as rivalWins } from "./seo-competitors.mjs";
 import { pageKind } from "./seo-wizard.mjs";
 
 const OUR_DOMAIN = /(^|\.)vs-travel\.ru$/i;
@@ -523,7 +524,81 @@ async function viewQuality(query) {
   };
 }
 
-async function viewCompetitors(query, sources) {
+async function viewCompetitors(query, sources, settings) {
+  const ours = hostOf(settings?.config?.site_origin || "") || "vs-travel.ru";
+  const [rivalRows, ownRows, demandRows, curve, listed] = await Promise.all([
+    rows(query, `SELECT r.captured_on::text AS date, c.name AS domain, r.query, r.position, r.url
+                   FROM seo_competitor_ranks r JOIN seo_competitors c ON c.id = r.competitor_id WHERE r.captured_on > current_date - 400`).catch(() => []),
+    rows(query, `SELECT captured_at::date::text AS date, query, url, position FROM seo_rank_snapshots
+                  WHERE source = 'topvisor' AND region = (SELECT region FROM seo_rank_snapshots WHERE source = 'topvisor' ORDER BY captured_at DESC LIMIT 1)
+                    AND captured_at > now() - interval '400 days'`).catch(() => []),
+    rows(query, "SELECT DISTINCT ON (query) query, demand FROM seo_demand_snapshots ORDER BY query, captured_at DESC").catch(() => []),
+    ctrCurve(query).catch(() => null),
+    rows(query, "SELECT name, site, tracking, updated_at::text AS updated_at FROM seo_competitors ORDER BY name").catch(() => []),
+  ]);
+  const ctr = curve && curve(1) > 0 ? curve : fallbackCtr;
+  const demandBy = new Map(demandRows.map((item) => [item.query, num(item.demand)]));
+  const weight = (text, position) => (demandBy.get(text) || 0) * ctr(Math.round(position));
+  const board = buildBoard([
+    ...ownRows.map((item) => ({ date: item.date, domain: ours, query: item.query, position: item.position, url: item.url ? pathOf(item.url) : "" })),
+    ...rivalRows.map((item) => ({ date: item.date, domain: item.domain, query: item.query, position: item.position, url: item.url })),
+  ]);
+  const last = board.dates[board.dates.length - 1];
+  const empty = listed.length
+    ? "Позиции конкурентов ещё не собраны: они приходят вместе с позициями Topvisor (кнопка «Собрать» или расписание)."
+    : "В проекте Topvisor нет конкурентов: добавьте их в настройках проекта Topvisor, и они появятся здесь после ближайшего сбора.";
+  const demandNote = demandBy.size ? `Спрос Wordstat собран у ${demandBy.size} запросов; видимость считается только по ним.` : "Спрос Wordstat ещё не собран: видимость и потери кликов не посчитаны.";
+
+  const summaryRows = rivalSummary(board, ours, demandBy.size ? weight : undefined).map((item) => ({
+    domain: item.domain, ours: item.is_ours,
+    status: item.is_ours ? "мы" : item.stale ? "нет данных на последней проверке" : "",
+    visibility: item.now ? item.now.visibility : null, share: item.share,
+    top3: item.now?.top3 ?? null, top10: item.now?.top10 ?? null, top20: item.now?.top20 ?? null,
+    found: item.now?.found ?? null, avg: item.now?.avg_position ?? null,
+    delta_top10: item.delta_top10, delta_visibility: item.delta_visibility, last_seen: item.last_seen,
+  }));
+  const disabled = listed.filter((item) => !item.tracking).length;
+  const trend = trendMatrix(board, demandBy.size ? weight : undefined);
+  const domains = board.domains.sort((a, b) => (a === ours ? -1 : b === ours ? 1 : a.localeCompare(b)));
+  const gapRows = rivalGaps(board, ours, { demandBy, ctr }).map((item) => ({ ...item, rival_path: item.rival_url }));
+  const winRows = rivalWins(board, ours, { demandBy });
+  const moved = rivalMovers(board, ours);
+  const pages = rivalPages(board, ours);
+  const date = last ? last.split("-").reverse().join(".") : "";
+
+  return {
+    sections: [
+      section("competitors_summary", "Кто сильнее: наш сайт и конкуренты", [
+        col("domain", "Сайт"), col("status", "Примечание"), col("visibility", "Видимость, кл./мес", "int"), col("share", "Доля, %", "num"),
+        col("top3", "Топ-3", "int"), col("top10", "Топ-10", "int"), col("top20", "Топ-20", "int"), col("found", "Найден по запросам", "int"), col("avg", "Средняя поз", "num"),
+        col("delta_top10", "Топ-10 к прошлой", "delta"), col("delta_visibility", "Видимость к прошлой", "delta"),
+      ], summaryRows, {
+        empty, source: "Topvisor · позиции конкурентов",
+        note: `${last ? `Проверка от ${date}. ` : ""}Видимость — сумма «спрос × CTR позиции» по запросам: чем выше, тем больше кликов сайт может получать. Доля — наша видимость среди всех отслеживаемых сайтов. ${demandNote}${disabled ? ` В Topvisor слежение выключено у ${disabled} из ${listed.length} конкурентов: если новые проверки не обновят их позиции, включите слежение в настройках проекта Topvisor.` : ""}`,
+      }),
+      section("competitors_gaps", "Где нас обходят", [
+        col("query", "Запрос"), col("demand", "Спрос / мес", "int"), col("ours", "Мы", "num"), col("rival", "Лучший конкурент"), col("rival_position", "Его поз", "num"),
+        col("rivals_ahead", "Конкурентов выше", "int"), col("lost", "Теряем кликов / мес", "int"), col("rival_path", "Его страница", "url"),
+      ], gapRows, { empty: board.dates.length ? "По всем запросам мы не ниже лучшего конкурента" : empty, source: "Topvisor · позиции конкурентов", note: `Запросы, где лучший конкурент выше нас или нас нет в проверенной глубине. «Теряем» = спрос × (CTR его позиции − CTR нашей). ${demandNote}` }),
+      section("competitors_wins", "Где мы впереди", [
+        col("query", "Запрос"), col("demand", "Спрос / мес", "int"), col("ours", "Мы", "num"), col("rival", "Ближайший конкурент"), col("rival_position", "Его поз", "num"),
+      ], winRows, { empty: board.dates.length ? "Нет запросов, где мы в топ-10 выше всех конкурентов" : empty, source: "Topvisor · позиции конкурентов", note: "Запросы, которые надо защищать: мы в топ-10 и выше всех отслеживаемых конкурентов." }),
+      section("competitors_movers", `Кто двигался${moved.from ? `: ${moved.from.split("-").reverse().join(".")} → ${moved.to.split("-").reverse().join(".")}` : ""}`, [
+        col("domain", "Конкурент"), col("query", "Запрос"), col("kind", "Что произошло"), col("from", "Было", "num"), col("to", "Стало", "num"), col("delta", "Сдвиг", "delta"), col("ours", "Мы", "num"), col("url", "Страница", "url"),
+      ], moved.rows, { empty: moved.from ? "Между двумя последними проверками сильных движений нет" : "Нужны минимум две проверки с данными по конкурентам", source: "Topvisor · позиции конкурентов", note: "Сдвиг от 5 позиций или вход/выход из топ-10. «Поднялся» по запросу, где мы ниже, — повод проверить, что изменилось на его странице." }),
+      section("competitors_pages", "Страницы конкурентов, которые стоит изучить", [
+        col("domain", "Конкурент"), col("url", "Страница", "url"), col("queries", "Наших запросов в топ-10", "int"), col("top3", "из них в топ-3", "int"), col("best_query", "Лучший запрос"), col("best_position", "Поз", "num"), col("examples", "Примеры запросов"),
+      ], pages.map((item) => ({ ...item, examples: item.examples.join(", ") })), { empty, source: "Topvisor · позиции конкурентов", note: "Страницы, которые держат больше всего наших запросов в топ-10: сравните их структуру, заголовки и разметку со своими." }),
+      section("competitors_trend", "Динамика по проверкам: запросов в топ-10", [
+        col("date", "Проверка"), ...domains.map((domain) => col(`d_${domain}`, domain === ours ? `${domain} (мы)` : domain, "int")),
+      ], [...trend].reverse().map((row) => ({ date: row.date, ...Object.fromEntries(domains.map((domain) => [`d_${domain}`, row.cells[domain] ? row.cells[domain].top10 : null])) })), { empty, source: "Topvisor · позиции конкурентов", note: "Сколько наших запросов каждый сайт держит в топ-10 на каждой проверке. Пусто — по этому сайту в ту проверку данных нет." }),
+      ...(await viewCompetitorsSerp(query, sources)),
+    ],
+  };
+}
+
+/** Прежний блок «кто в топ-10» по снимкам выдачи: снимки платные и сейчас не собираются, поэтому блок обычно пуст. */
+async function viewCompetitorsSerp(query, sources) {
   const list = await rows(query, `
     WITH latest AS (SELECT query, max(captured_at) AS at FROM seo_serp_snapshots GROUP BY query)
     SELECT s.domain, count(DISTINCT s.query)::int AS queries, avg(s.position)::float AS position,
@@ -541,12 +616,10 @@ async function viewCompetitors(query, sources) {
     best: item.best,
     sample: (item.sample || []).slice(0, 3).join(", "),
   }));
-  return {
-    sections: [section("competitors", "SERP Competitor Gap — кто стабильно в топ-10", [
-      col("domain", "Домен"), col("ours", "Мы", "bool"), col("queries", "Запросов в топ-10", "int"),
-      col("share", "Доля запросов", "pct_int"), col("position", "Средняя поз", "num"), col("best", "Лучшая", "int"), col("sample", "Примеры запросов"),
-    ], rowsOut, { empty: emptyFor(sources, "topvisor_serp"), source: "Topvisor · выдача", note: "Разрыв по возможностям (даты, цены, карта, отзывы…) сессия снимает через Obscura по 3–5 конкурентам из этого списка." })],
-  };
+  return [section("competitors", "SERP Competitor Gap — кто стабильно в топ-10 по снимкам выдачи", [
+    col("domain", "Домен"), col("ours", "Мы", "bool"), col("queries", "Запросов в топ-10", "int"),
+    col("share", "Доля запросов", "pct_int"), col("position", "Средняя поз", "num"), col("best", "Лучшая", "int"), col("sample", "Примеры запросов"),
+  ], rowsOut, { empty: "Снимков выдачи нет: они платные в Topvisor и сейчас не собираются. Конкуренты по позициям — в таблицах выше.", source: "Topvisor · выдача" })];
 }
 
 // ─── Клики и спрос ────────────────────────────────────────────────────────────
@@ -1057,7 +1130,7 @@ async function viewIssues(query) {
     FROM seo_issues ORDER BY status IN ('open', 'review') DESC, potential_score DESC, last_seen_at DESC LIMIT 500`);
   return {
     sections: [section("issues", "Находки детекторов", [
-      col("detector", "Детектор", "detector"), col("title", "Находка"), col("severity", "Важность", "severity"), col("affected_count", "Затронуто", "int"),
+      col("detector", "Детектор", "detector"), col("title", "Находка", "issue_link"), col("severity", "Важность", "severity"), col("affected_count", "Затронуто", "issue_count"),
       col("potential_score", "Потенциал", "int"), col("status", "Статус", "issue_status"), col("last_seen_at", "Видели", "datetime"), col("actions", "", "issue_actions"),
     ], list.map((item) => ({ ...item, potential_score: Math.round(num(item.potential_score)) })), { empty: "Находок нет", source: "детекторы", note: "Задача создаётся только из находки с цифрой. Шум и повторы помечаются, чтобы сессия не считала их проблемой второй раз." })],
     options: { detectors: DETECTOR_LABELS },

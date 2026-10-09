@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
-import { seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
+import { scenariosOnDay, seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
+import { seoCalendarData } from "./seo-calendar.mjs";
 import { seoSchedulerStatus } from "./seo-scheduler.mjs";
-import { ctrCurve, recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
+import { ctrCurve, recordChange, saveOutreach, SCENARIOS, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
 import { collectWordstatDemand, topUpDemand, wordstatDynamics } from "./seo-wordstat.mjs";
 import { pageCard } from "./seo-page-card-db.mjs";
 import { explainIssue } from "./seo-explain.mjs";
 import { extractMarkup } from "./seo-markup.mjs";
+import { fetchWithRetry } from "./net-retry.mjs";
+import { parseCompetitorCells, splitCell } from "./seo-competitors.mjs";
 import { collectPageQueries, collectPageTotals, topPagePaths } from "./seo-webmaster-pages.mjs";
 import { diffSnapshots, pathOfUrl } from "./seo-page-card.mjs";
 import { nextPositionsAction } from "./seo-rank-check.mjs";
@@ -154,6 +157,25 @@ CREATE TABLE IF NOT EXISTS seo_demand_snapshots (
   raw JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_seo_demand_snapshots_query ON seo_demand_snapshots(query, captured_at DESC);
+
+-- Конкуренты из Topvisor: список проекта и их позиции по нашим запросам (по проверкам). Хранится история, Topvisor отдаёт только выбранные даты.
+CREATE TABLE IF NOT EXISTS seo_competitors (
+  id BIGINT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  site TEXT NOT NULL DEFAULT '',
+  tracking BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS seo_competitor_ranks (
+  captured_on DATE NOT NULL,
+  competitor_id BIGINT NOT NULL,
+  region TEXT NOT NULL DEFAULT '',
+  query TEXT NOT NULL,
+  position INT,
+  url TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (captured_on, competitor_id, region, query)
+);
+CREATE INDEX IF NOT EXISTS idx_seo_competitor_ranks_query ON seo_competitor_ranks(query, captured_on DESC);
 
 -- Вебмастер по страницам: суточные показы/клики/позиция страницы (query = '') и пары «страница — запрос». API хранит две недели,
 -- поэтому история копится здесь. url — путь страницы без хоста.
@@ -765,7 +787,8 @@ async function topvisorCall(auth, method, body, timeoutMs = 60000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${TOPVISOR_API}/${method}`, {
+    // Проверка позиций платная и меняет состояние: её не повторяем, остальные вызовы переживают разовый сбой сети.
+    const response = await fetchWithRetry(`${TOPVISOR_API}/${method}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -774,7 +797,7 @@ async function topvisorCall(auth, method, body, timeoutMs = 60000) {
       },
       body: JSON.stringify(body),
       signal: controller.signal,
-    });
+    }, { tries: /checker\/go$/.test(method) ? 1 : 3 });
     const text = await response.text();
     let data = null;
     try { data = JSON.parse(text); } catch { /* ниже — ошибка с текстом ответа */ }
@@ -825,12 +848,16 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
   if (!dates.length) {
     return { project: project.name || String(projectId), region: region.label, regions: regions.map((item) => ({ index: item.index, label: item.label })), keywords: 0, rows: 0, last_check: null };
   }
+  // Конкуренты проекта: без них сбор работает как раньше (список недоступен — не причина терять свои позиции).
+  const competitors = await topvisorCall(auth, "get/projects_2/competitors", { project_id: Number(projectId) }).catch(() => []);
+  const competitorIds = (Array.isArray(competitors) ? competitors : []).map((item) => Number(item.id)).filter(Number.isFinite);
   const history = await topvisorCall(auth, "get/positions_2/history", {
     project_id: Number(projectId),
     regions_indexes: [region.index],
     dates,
     fields: ["id", "name"],
     positions_fields: ["position", "relevant_url"],
+    ...(competitorIds.length ? { competitors_ids: competitorIds } : {}),
   }, 120000);
 
   const rowsOut = [];
@@ -838,8 +865,10 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
     const name = String(keyword.name || "").trim();
     if (!name) continue;
     for (const [key, cell] of Object.entries(keyword.positionsData || {})) {
-      const day = key.split(":")[0];
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      // В истории рядом с нашими лежат ячейки конкурентов (ключ «дата:id_проекта:регион»): берём только свой проект.
+      const parts = splitCell(key);
+      if (!parts || parts.projectId !== String(projectId)) continue;
+      const day = parts.day;
       const raw = cell?.position;
       const position = raw === undefined || raw === null || raw === "--" || raw === "" ? null : Number(raw);
       rowsOut.push({
@@ -866,6 +895,7 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
       [JSON.stringify(chunk), region.label, region.device],
     );
   }
+  const saved = await storeCompetitors(query, Array.isArray(competitors) ? competitors : [], parseCompetitorCells(history?.keywords || [], { ownProjectId: projectId, competitorIds, regionIndex: region.index }), region.label, dates);
   return {
     project: project.name || String(projectId),
     region: region.label,
@@ -874,8 +904,12 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
     rows: rowsOut.length,
     dates,
     last_check: dates[dates.length - 1],
+    competitors: saved,
   };
 }
+
+// Сколько примеров адресов детектор сохраняет в находке: хватает открыть полный список в панели «Подробнее», а в задачу уходит только начало.
+const EVIDENCE_LIMIT = 1000;
 
 const WEBMASTER_API = "https://api.webmaster.yandex.net/v4";
 const METRICA_API = "https://api-metrika.yandex.net";
@@ -890,7 +924,7 @@ const WEBMASTER_MAX_QUERIES_PER_DAY = 3000;
 async function yandexGet(base, path, params, token, timeoutMs = 60000) {
   const url = new URL(`${base}${path}`);
   for (const [key, value] of params) url.searchParams.append(key, String(value));
-  const response = await fetch(url, { headers: { authorization: `OAuth ${token}`, accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
+  const response = await fetchWithRetry(url, { headers: { authorization: `OAuth ${token}`, accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
   const text = await response.text();
   let data = null;
   try { data = JSON.parse(text); } catch { /* ниже — ошибка с текстом ответа */ }
@@ -899,7 +933,7 @@ async function yandexGet(base, path, params, token, timeoutMs = 60000) {
 }
 
 async function yandexPost(base, path, body, token, timeoutMs = 60000) {
-  const response = await fetch(`${base}${path}`, {
+  const response = await fetchWithRetry(`${base}${path}`, {
     method: "POST",
     headers: { authorization: `OAuth ${token}`, accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -1341,6 +1375,13 @@ export async function checkTopvisor(query) {
 }
 
 /** Подробности находки: пояснение детектора, примеры и их показы/клики из Вебмастера за 28 дней. */
+/** Доказательства для текста задачи: начало списков и сколько всего; полный список открывается в SEO Wizard («Подробнее»). */
+export function evidenceForTask(evidence, limit = 25) {
+  const cut = (value) => (Array.isArray(value) && value.length > limit ? [...value.slice(0, limit), `… ещё ${value.length - limit}: полный список в SEO Wizard, «Подробнее»`] : value);
+  const short = Object.fromEntries(Object.entries(evidence && typeof evidence === "object" ? evidence : {}).map(([key, value]) => [key, cut(value)]));
+  return JSON.stringify(short, null, 2);
+}
+
 export async function issueDetail(query, issueId) {
   await ensureSeoWizardSchema(query);
   const issue = (await query(
@@ -1361,6 +1402,30 @@ export async function issueDetail(query, issueId) {
     for (const row of found) stats[row.path] = { impressions: row.impressions, clicks: row.clicks };
   }
   return explainIssue(issue, stats);
+}
+
+/** Список конкурентов проекта и их позиции за выбранные даты (даты заменяются целиком: Topvisor мог досчитать проверку). */
+async function storeCompetitors(query, competitors, cells, regionLabel, dates) {
+  if (!competitors.length) return { count: 0, rows: 0 };
+  for (const item of competitors) {
+    await query(
+      `INSERT INTO seo_competitors(id, name, site, tracking, updated_at) VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, site = EXCLUDED.site, tracking = EXCLUDED.tracking, updated_at = now()`,
+      [item.id, String(item.name || item.site || item.url || "").slice(0, 200), String(item.site || item.url || item.name || "").slice(0, 200), Boolean(Number(item.on))],
+    );
+  }
+  if (!cells.length) return { count: competitors.length, rows: 0 };
+  await query("DELETE FROM seo_competitor_ranks WHERE region = $1 AND captured_on = ANY($2::date[]) AND competitor_id = ANY($3::bigint[])", [regionLabel, dates, competitors.map((item) => item.id)]);
+  for (let i = 0; i < cells.length; i += 1000) {
+    await query(
+      `INSERT INTO seo_competitor_ranks(captured_on, competitor_id, region, query, position, url)
+       SELECT r.day, r.competitor_id, $2, r.query, r.position, r.url
+       FROM jsonb_to_recordset($1::jsonb) AS r(day DATE, competitor_id BIGINT, query TEXT, position INT, url TEXT)
+       ON CONFLICT (captured_on, competitor_id, region, query) DO UPDATE SET position = EXCLUDED.position, url = EXCLUDED.url`,
+      [JSON.stringify(cells.slice(i, i + 1000)), regionLabel],
+    );
+  }
+  return { count: competitors.length, rows: cells.length };
 }
 
 /** Настройки Topvisor для проверок: ключ, User-Id, проект и индекс региона (из настроек или первый регион проекта). */
@@ -1543,7 +1608,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${items.length} адресов технического раздела находятся в sitemap.`,
       affected_count: items.length,
       potential_score: items.length * 10,
-      evidence: { section, sample_urls: items.slice(0, 20).map((item) => item.path), count: items.length },
+      evidence: { section, sample_urls: items.slice(0, EVIDENCE_LIMIT).map((item) => item.path), count: items.length },
     });
   }
 
@@ -1557,7 +1622,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${oldLastmod.length} адресов имеют lastmod 2024 года или раньше.`,
       affected_count: oldLastmod.length,
       potential_score: oldLastmod.length,
-      evidence: { by_year: countBy(oldLastmod, (item) => item.lastmod.slice(0, 4)), sample_urls: oldLastmod.slice(0, 30).map((item) => ({ path: item.path, lastmod: item.lastmod })) },
+      evidence: { by_year: countBy(oldLastmod, (item) => item.lastmod.slice(0, 4)), sample_urls: oldLastmod.slice(0, EVIDENCE_LIMIT).map((item) => ({ path: item.path, lastmod: item.lastmod })) },
     });
   }
 
@@ -1572,7 +1637,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
         summary: `${missing.length} туров из фида не найдены в sitemap как /tour?id=N.`,
         affected_count: missing.length,
         potential_score: missing.length * 8,
-        evidence: { total_tours: tourIds.length, missing_count: missing.length, sample_tour_ids: missing.slice(0, 50) },
+        evidence: { total_tours: tourIds.length, missing_count: missing.length, sample_tour_ids: missing.slice(0, EVIDENCE_LIMIT) },
       });
     }
   }
@@ -1600,7 +1665,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${duplicates.length} окончаний URL встречаются минимум в двух разделах sitemap.`,
       affected_count: duplicates.length,
       potential_score: duplicates.length * 3,
-      evidence: { duplicate_suffixes: duplicates.slice(0, 50) },
+      evidence: { duplicate_suffixes: duplicates.slice(0, 300) },
     });
   }
 
@@ -1638,9 +1703,10 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       let params = [];
       try { params = [...new URL(link.to_url).searchParams.keys()].filter((key) => key !== "id"); } catch { continue; }
       for (const param of params) {
-        if (!queryLinks.has(param)) queryLinks.set(param, { param, pages: new Set(), targets: new Set() });
+        if (!queryLinks.has(param)) queryLinks.set(param, { param, pages: new Set(), targets: new Set(), pairs: new Map() });
         queryLinks.get(param).pages.add(snapshot.url);
         queryLinks.get(param).targets.add(pathOf(link.to_url));
+        queryLinks.get(param).pairs.set(`${pathOf(snapshot.url)}>${pathOf(link.to_url)}`, { from: pathOf(snapshot.url), to: pathOf(link.to_url) });
       }
     }
   }
@@ -1653,7 +1719,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${item.pages.size} проверенных страниц ссылаются на ${item.targets.size} адресов с параметром ${item.param}. Сверить с политикой фильтров: есть ли для этих состояний ЧПУ.`,
       affected_count: item.targets.size,
       potential_score: item.pages.size * 2,
-      evidence: { param: item.param, source_pages: [...item.pages].slice(0, 20).map(pathOf), sample_targets: [...item.targets].slice(0, 30) },
+      evidence: { param: item.param, source_pages: [...item.pages].slice(0, EVIDENCE_LIMIT).map(pathOf), sample_targets: [...item.targets].slice(0, EVIDENCE_LIMIT), links: [...item.pairs.values()].slice(0, 5000), links_total: item.pairs.size },
     });
   }
 
@@ -1668,7 +1734,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${nonSelfCanonical.length} проверенных адресов из sitemap указывают canonical на другой URL.`,
       affected_count: nonSelfCanonical.length,
       potential_score: nonSelfCanonical.length * 4,
-      evidence: { sample: nonSelfCanonical.slice(0, 30).map((item) => ({ path: pathOf(item.url), canonical: pathOf(item.canonical) })) },
+      evidence: { sample: nonSelfCanonical.slice(0, EVIDENCE_LIMIT).map((item) => ({ path: pathOf(item.url), canonical: pathOf(item.canonical) })) },
     });
   }
   const broken = crawlSnapshots.filter((item) => inSitemap(item) && (item.status_code >= 400 || item.status_code === 0));
@@ -1681,7 +1747,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${broken.length} проверенных адресов из sitemap вернули ошибку или не ответили.`,
       affected_count: broken.length,
       potential_score: broken.length * 6,
-      evidence: { by_status: countBy(broken, (item) => String(item.status_code)), sample: broken.slice(0, 40).map((item) => ({ path: pathOf(item.requested_url || item.url), status: item.status_code })) },
+      evidence: { by_status: countBy(broken, (item) => String(item.status_code)), sample: broken.slice(0, EVIDENCE_LIMIT).map((item) => ({ path: pathOf(item.requested_url || item.url), status: item.status_code })) },
     });
   }
   const empty = crawlSnapshots.filter((item) => item.status_code === 200 && inSitemap(item) && Number(item.meta?.text_chars || 0) < 50);
@@ -1694,7 +1760,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
       summary: `${empty.length} проверенных адресов из sitemap отдают 200, но текста на странице почти нет.`,
       affected_count: empty.length,
       potential_score: empty.length * 5,
-      evidence: { sample: empty.slice(0, 40).map((item) => ({ path: pathOf(item.url), bytes: item.meta?.bytes || 0 })) },
+      evidence: { sample: empty.slice(0, EVIDENCE_LIMIT).map((item) => ({ path: pathOf(item.url), bytes: item.meta?.bytes || 0 })) },
     });
   }
 
@@ -2084,7 +2150,7 @@ export async function createSeoTaskFromIssue(query, { issueId, projectName = DEF
     "",
     "Доказательства:",
     "```json",
-    JSON.stringify(issue.evidence, null, 2),
+    evidenceForTask(issue.evidence),
     "```",
     "",
     "Правило: без цифры задача не создаётся; 301/canonical/noindex только после решения человека.",
@@ -2146,6 +2212,11 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
       // Синхронный режим (wait: true) остаётся для скриптов и тестов; экран запускает в фоне и опрашивает состояние.
       if (body.wait === true) return reply(200, await runSeoWizardCollection(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
       return reply(202, await startSeoRun(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false }));
+    }
+    if (url.pathname === "/api/mbox/seo/calendar" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      const info = Object.fromEntries(SCENARIOS.map((item) => [item.id, { when: item.when, server: item.server || "", session: item.session || "", notify: item.notify || "" }]));
+      return reply(200, await seoCalendarData(query, { monthText: url.searchParams.get("month") || "", scenariosOnDay, info, autorun: Boolean(seoSchedulerStatus().enabled) }));
     }
     if (url.pathname === "/api/mbox/seo/scenario" && req.method === "GET") {
       await ensureSeoWizardSchema(query);

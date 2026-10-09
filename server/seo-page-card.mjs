@@ -219,6 +219,12 @@ export function pageSignals(card) {
   for (const item of queries.filter((row) => num(row.demand) >= 5000 && (row.topvisor_position === null || num(row.topvisor_position) > 50) && row.topvisor_date).slice(0, 2)) {
     add("info", `Запрос «${item.query}» (спрос ${num(item.demand).toLocaleString("ru-RU")}) вне топ-50.`);
   }
+  for (const item of queries.filter((row) => row.best_rival && row.best_rival_position !== null && num(row.demand) >= 1000).sort((a, b) => num(b.demand) - num(a.demand)).slice(0, 2)) {
+    const mine = item.topvisor_position;
+    if (mine === null || mine === undefined || item.best_rival_position < mine) {
+      add("info", `По запросу «${item.query}» (спрос ${num(item.demand).toLocaleString("ru-RU")}) выше нас ${item.best_rival}: позиция ${item.best_rival_position}${mine ? `, у нас ${mine}` : ", нас нет в проверенной глубине"}.`);
+    }
+  }
   if (wm.comparable) {
     const before = num(wm.previous_14?.clicks);
     const now = num(wm.last_14?.clicks);

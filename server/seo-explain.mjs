@@ -94,7 +94,15 @@ export function examplesOf(detector, evidence = {}) {
   }
   for (const id of list(e.sample_tour_ids)) add(`тур № ${id}`);
   for (const item of list(e.duplicate_suffixes)) add(item.suffix, `в разделах: ${list(item.sections).join(", ")} · адресов ${list(item.paths).length}`);
-  for (const path of list(e.source_pages)) add(path, e.param ? `ссылается на ?${e.param}=` : "");
+  if (list(e.links).length) {
+    // Затронутые адреса — цели ссылок; к каждому добавляем, с каких страниц на него ссылаются.
+    const byTarget = new Map();
+    for (const link of e.links) { const from = byTarget.get(link.to) || []; from.push(link.from); byTarget.set(link.to, from); }
+    for (const [target, from] of byTarget) add(target, `ссылок с ${from.length} страниц${from.length ? `: ${from.slice(0, 3).join(", ")}${from.length > 3 ? "…" : ""}` : ""}`);
+  } else {
+    for (const path of list(e.source_pages)) add(path, e.param ? `ссылается на ?${e.param}=` : "");
+    for (const target of list(e.sample_targets)) add(target, "адрес с параметром");
+  }
   for (const item of list(e.sample)) {
     if (item.canonical) add(item.path, `canonical → ${item.canonical}`);
     else if (item.status !== undefined) add(item.path, `HTTP ${item.status}`);

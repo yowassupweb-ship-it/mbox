@@ -1,6 +1,7 @@
 import { BookOpenCheck, CalendarCheck, ChevronRight, Database, ListChecks, Play, Radar, Scale, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
 import type { FlowStatus, FlowStep, LiveRun, RhythmItem, ScenarioState } from "./seoTypes";
+import { SeoCalendar } from "./SeoCalendar";
 import "../../styles/seo-flow.css";
 
 const STEP_ICONS: Record<FlowStep["id"], ReactNode> = {
@@ -13,9 +14,6 @@ const STEP_ICONS: Record<FlowStep["id"], ReactNode> = {
 };
 
 const STATUS_TEXT: Record<FlowStatus, string> = { ok: "в норме", stale: "устарело", idle: "ждёт", blocked: "заблокировано", working: "в работе" };
-
-const MARKER_LABEL: Record<string, string> = { monday: "Понедельник: очередь недели", thursday: "Четверг: проверка внедрения", architecture: "10 число: архитектура", authority: "20 число: авторитет", monthly: "25 число: итоги месяца" };
-const MARKER_SHORT: Record<string, string> = { monday: "Пн", thursday: "Чт", architecture: "Арх", authority: "Авт", monthly: "Итог" };
 
 const DAY_FORMAT = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" });
 
@@ -95,39 +93,13 @@ export function SeoFlow({ state, running, onRun, onOpen }: { state: ScenarioStat
         </ol>
       </section>
 
-      <section className="seo-rhythm" aria-label="Ритм месяца">
-        <div className="seo-rhythm-head">
-          <h3 className="seo-flow-heading">Ритм: {state.month.title}</h3>
-          <p className={state.autorun.enabled ? "seo-autorun is-on" : "seo-autorun"}>
-            {state.autorun.enabled ? "Автозапуск включён: сервер сам собирает данные по расписанию" : "Автозапуска нет: сбор идёт по кнопке. На сервере включается переменной SEO_AUTORUN=1"}
-            {state.autorun.last_error ? ` · ошибка: ${state.autorun.last_error}` : ""}
-          </p>
-        </div>
-        <MonthGrid month={state.month} />
-        <ul className="seo-legend" aria-label="Обозначения">
-          {Object.keys(MARKER_LABEL).map((id) => <li key={id}><i className={`seo-mark m-${id}`} aria-hidden="true" />{MARKER_LABEL[id]}</li>)}
-        </ul>
+      <section className="seo-rhythm" aria-label="Календарь и расписание">
+        <SeoCalendar onRun={onRun} busy={Boolean(live)} onOpen={onOpen} refreshKey={`${state.today}|${state.live?.run_id ?? ""}|${state.rhythm.map((item) => item.last_package_at).join(",")}`} />
+        <h3 className="seo-flow-heading">Сценарии и расписание</h3>
         <div className="seo-rhythm-list">
           {state.rhythm.map((item) => <RhythmRow key={item.id} item={item} busy={Boolean(live)} onRun={onRun} />)}
         </div>
       </section>
-    </div>
-  );
-}
-
-function MonthGrid({ month }: { month: ScenarioState["month"] }) {
-  const first = new Date(month.year, month.month - 1, 1).getDay();
-  const offset = (first + 6) % 7; // неделя с понедельника
-  const cells: Array<{ day: number; markers: string[] } | null> = [...Array.from({ length: offset }, () => null), ...month.days.map((day) => ({ day: day.day, markers: day.markers }))];
-  return (
-    <div className="seo-month" role="grid" aria-label={month.title}>
-      {["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((name) => <span key={name} className="seo-month-dow" role="columnheader">{name}</span>)}
-      {cells.map((cell, index) => cell ? (
-        <span key={cell.day} role="gridcell" className={`seo-month-day${cell.day === month.today ? " is-today" : ""}${cell.day < month.today ? " is-past" : ""}`} aria-label={`${cell.day}${cell.markers.length ? `: ${cell.markers.map((id) => MARKER_LABEL[id]).join(", ")}` : ""}`}>
-          <b>{cell.day}</b>
-          <span className="seo-month-marks">{cell.markers.map((id) => <i key={id} className={`seo-mark m-${id}`} title={MARKER_LABEL[id]}><span>{MARKER_SHORT[id]}</span></i>)}</span>
-        </span>
-      ) : <span key={`e${index}`} className="seo-month-day is-empty" aria-hidden="true" />)}
     </div>
   );
 }

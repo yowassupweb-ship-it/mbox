@@ -26,3 +26,12 @@ test("CSV содержит колонку комментария", () => {
   assert.ok(csv.split("\r\n")[0].endsWith("Польза цели (комментарий)"));
   assert.ok(csv.split("\r\n")[1].endsWith(";польза"));
 });
+
+test("в задачу уходит начало списков доказательств, а не тысяча адресов", async () => {
+  const { evidenceForTask } = await import("./seo-wizard.mjs");
+  const text = evidenceForTask({ param: "favorites", sample_targets: Array.from({ length: 248 }, (_, i) => `/t${i}`), count: 248 });
+  const parsed = JSON.parse(text);
+  assert.equal(parsed.sample_targets.length, 26);
+  assert.match(parsed.sample_targets[25], /ещё 223/);
+  assert.equal(parsed.count, 248);
+});

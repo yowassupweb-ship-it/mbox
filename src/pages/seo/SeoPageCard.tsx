@@ -13,6 +13,7 @@ type QueryRow = {
   query: string; demand: number | null; demand_month: string; topvisor_position: number | null; topvisor_date: string; topvisor_url: string; other_page_ranks: boolean;
   impressions: number | null; clicks: number | null; ctr: number | null; webmaster_position: number | null; webmaster_days: number;
   tier: string; reason: string; gain: number | null; expected: number | null;
+  best_rival: string; best_rival_position: number | null; best_rival_url: string;
 };
 type Period = { days: number; impressions: number; clicks: number; ctr: number | null; avg_position: number | null };
 type Card = {
@@ -114,7 +115,7 @@ export function SeoPageCard({ initial, origin }: { initial: string; origin: stri
             {card.semantics.queries.length === 0 ? <p className="seo-form-hint">Запросов нет.</p> : (
               <div className="seo-card-table">
                 <table>
-                  <thead><tr><th>Запрос</th><th>Спрос / мес</th><th>Потенциал</th><th>Topvisor</th><th>Показы</th><th>Клики</th><th>CTR, %</th><th>Поз. Вебмастер</th></tr></thead>
+                  <thead><tr><th>Запрос</th><th>Спрос / мес</th><th>Потенциал</th><th>Topvisor</th><th>Показы</th><th>Клики</th><th>CTR, %</th><th>Поз. Вебмастер</th><th>Лучший конкурент</th></tr></thead>
                   <tbody>
                     {card.semantics.queries.map((row) => (
                       <tr key={row.query}>
@@ -125,6 +126,7 @@ export function SeoPageCard({ initial, origin }: { initial: string; origin: stri
                           {fmt(row.topvisor_position)}{row.other_page_ranks && <em className="seo-card-warn"> другая стр.</em>}
                         </td>
                         <td>{fmt(row.impressions)}</td><td>{fmt(row.clicks)}</td><td>{fmt(row.ctr, 2)}</td><td>{fmt(row.webmaster_position, 1)}</td>
+                        <td title={row.best_rival_url || undefined}>{row.best_rival ? `${row.best_rival} · ${fmt(row.best_rival_position)}` : "—"}</td>
                       </tr>
                     ))}
                   </tbody>

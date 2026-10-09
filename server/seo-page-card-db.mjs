@@ -81,6 +81,15 @@ export async function pageCard(query, input, deps = {}) {
   ).catch(() => ({ rows: [] }))).rows : [];
   const demandBy = new Map(demandRows.map((row) => [row.query, row]));
   const ctr = deps.ctr || fallbackCtr;
+  // Лучший конкурент по каждому запросу на последней проверке с данными по конкурентам.
+  const rivalRows = queryNames.length ? (await query(
+    `SELECT DISTINCT ON (r.query) r.query, c.name AS domain, r.position, r.url
+       FROM seo_competitor_ranks r JOIN seo_competitors c ON c.id = r.competitor_id
+      WHERE r.query = ANY($1::text[]) AND r.position IS NOT NULL AND r.captured_on = (SELECT max(captured_on) FROM seo_competitor_ranks)
+      ORDER BY r.query, r.position`,
+    [queryNames],
+  ).catch(() => ({ rows: [] }))).rows : [];
+  const rivalBy = new Map(rivalRows.map((row) => [row.query, row]));
 
   const pairBy = new Map(pairs.map((row) => [row.query, row]));
   const queries = queryNames.map((text) => {
@@ -102,6 +111,9 @@ export async function pageCard(query, input, deps = {}) {
       ctr: pair && pair.impressions ? round((pair.clicks / pair.impressions) * 100, 2) : null,
       webmaster_position: pair ? pair.position : null,
       webmaster_days: pair ? pair.days : 0,
+      best_rival: rivalBy.get(text)?.domain || "",
+      best_rival_position: rivalBy.has(text) ? num(rivalBy.get(text).position) : null,
+      best_rival_url: rivalBy.get(text)?.url || "",
       ...potential,
     };
   }).sort((a, b) => (num(b.expected) - num(a.expected)) || (num(b.clicks) - num(a.clicks)) || (num(b.impressions) - num(a.impressions)));

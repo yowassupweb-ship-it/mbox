@@ -85,7 +85,8 @@ const TABS: Tab[] = [
   { id: "week", label: "Неделя", views: [{ id: "queue", label: "Очередь недели" }, { id: "decisions", label: "Решения" }, { id: "changes", label: "Журнал изменений" }] },
   { id: "architecture", label: "Архитектура", views: [{ id: "registry", label: "Реестр URL" }, { id: "index", label: "Состав индекса" }, { id: "filters", label: "Query и фильтры" }, { id: "links", label: "Внутренние ссылки" }] },
   { id: "cannibal", label: "Каннибализация", views: [{ id: "cannibal", label: "Монитор" }] },
-  { id: "pages", label: "Страницы", views: [{ id: "quality", label: "Качество" }, { id: "competitors", label: "Конкуренты" }] },
+  { id: "pages", label: "Страницы", views: [{ id: "quality", label: "Качество" }] },
+  { id: "competitors", label: "Конкуренты" },
   { id: "clicks", label: "Клики", views: [{ id: "ctr", label: "CTR" }, { id: "opportunities", label: "Возможности" }, { id: "positions", label: "Позиции" }, { id: "serp", label: "Выдача и сниппеты" }] },
   { id: "demand", label: "Спрос и трафик", views: [{ id: "demand", label: "Потенциал и спрос" }, { id: "traffic", label: "Трафик и заявки" }] },
   { id: "authority", label: "Авторитет", views: [{ id: "outreach", label: "Link Outreach" }] },
@@ -405,13 +406,32 @@ function SeoWizard() {
   );
 }
 
+const DETAIL_PAGE = 100;
+
 function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: () => void }) {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  useEffect(() => { setPage(0); }, [search]);
   const rows: Array<[string, string]> = [["Что это", data.what], ["Почему важно", data.why], ["Как проверить", data.check], ["Что делать", data.fix]];
+  const needle = search.trim().toLowerCase();
+  const shown = needle ? data.examples.filter((item) => `${item.path} ${item.note}`.toLowerCase().includes(needle)) : data.examples;
+  const pages = Math.max(1, Math.ceil(shown.length / DETAIL_PAGE));
+  const visible = shown.slice(page * DETAIL_PAGE, (page + 1) * DETAIL_PAGE);
+  const origin = window.location.origin;
+  const download = () => {
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const lines = [["Адрес", "Примечание", "Показы 28 дн.", "Клики"].map(escape).join(";"), ...shown.map((item) => [item.path, item.note, item.impressions ?? "", item.clicks ?? ""].map(escape).join(";"))];
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" }));
+    link.download = `seo-finding-${data.id}.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  };
   return (
     <div className="seo-detail-scrim" onClick={onClose}>
       <aside className="seo-detail" role="dialog" aria-modal="true" aria-label={data.title} onClick={(event) => event.stopPropagation()}>
@@ -429,20 +449,33 @@ function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: (
         {Object.entries(data.counts).map(([name, values]) => (
           <p key={name} className="seo-detail-counts">{Object.entries(values).map(([key, value]) => `${key}: ${value.toLocaleString("ru-RU")}`).join(" · ")}</p>
         ))}
-        <h3>Примеры{data.affected.truncated ? ` — показано ${data.affected.shown} из ${data.affected.total.toLocaleString("ru-RU")}` : ` — ${data.affected.shown}`}</h3>
-        {data.examples.length === 0 ? <p className="seo-form-hint">Детектор не сохранил примеры адресов. Список появится после следующего сбора.</p> : (
-          <table>
-            <thead><tr><th>Адрес</th><th>Примечание</th><th>Показы 28 дн.</th><th>Клики</th></tr></thead>
-            <tbody>
-              {data.examples.map((item) => (
-                <tr key={`${item.path}|${item.note}`}>
-                  <td className="is-url">{item.path}</td><td>{item.note || "—"}</td>
-                  <td>{item.impressions === undefined ? "—" : item.impressions.toLocaleString("ru-RU")}</td>
-                  <td>{item.clicks === undefined ? "—" : item.clicks.toLocaleString("ru-RU")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <h3>Список{data.affected.truncated ? ` — сохранено ${data.affected.shown} из ${data.affected.total.toLocaleString("ru-RU")}` : ` — ${data.affected.shown}`}</h3>
+        {data.examples.length === 0 ? <p className="seo-form-hint">Детектор не сохранил адреса. Список появится после следующего сбора.</p> : (
+          <>
+            <div className="seo-detail-tools">
+              <input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Найти адрес" aria-label="Найти адрес в списке" />
+              <button type="button" onClick={download}><Download size={13} aria-hidden="true" /> CSV</button>
+            </div>
+            <table>
+              <thead><tr><th>Адрес</th><th>Примечание</th><th>Показы 28 дн.</th><th>Клики</th></tr></thead>
+              <tbody>
+                {visible.map((item) => (
+                  <tr key={`${item.path}|${item.note}`}>
+                    <td className="is-url">{item.path.startsWith("/") ? <a className="seo-url" href={`${origin}${item.path}`} target="_blank" rel="noreferrer">{item.path}</a> : item.path}</td><td>{item.note || "—"}</td>
+                    <td>{item.impressions === undefined ? "—" : item.impressions.toLocaleString("ru-RU")}</td>
+                    <td>{item.clicks === undefined ? "—" : item.clicks.toLocaleString("ru-RU")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {pages > 1 && (
+              <div className="seo-detail-pager">
+                <button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Предыдущая страница"><ChevronLeft size={14} /></button>
+                <span>{page + 1} из {pages} · найдено {shown.length.toLocaleString("ru-RU")}</span>
+                <button type="button" onClick={() => setPage((value) => Math.min(pages - 1, value + 1))} disabled={page >= pages - 1} aria-label="Следующая страница"><ChevronRight size={14} /></button>
+              </div>
+            )}
+          </>
         )}
       </aside>
     </div>
@@ -473,6 +506,13 @@ const TABLE_LABELS: Record<string, string> = {
   positions_movers: "Изменения",
   positions_sections: "По разделам",
   positions_flapping: "Гуляют страницы",
+  competitors_summary: "Кто сильнее",
+  competitors_gaps: "Где нас обходят",
+  competitors_wins: "Где мы впереди",
+  competitors_movers: "Кто двигался",
+  competitors_pages: "Страницы конкурентов",
+  competitors_trend: "Динамика",
+  competitors: "Выдача (снимки)",
   potential: "Потенциал страниц",
   demand: "Спрос (Wordstat)",
   pending: "Ждут решения",
@@ -727,6 +767,10 @@ function Cell({ column, row, options, actions }: { column: Column; row: Row; opt
         </select>
       );
     }
+    case "issue_link":
+      return <button type="button" className="seo-url-card seo-issue-link" onClick={() => actions?.issueDetail(row)} title="Открыть подробности: что это и весь список адресов">{String(value ?? "")}</button>;
+    case "issue_count":
+      return <button type="button" className="seo-url-card seo-issue-count" onClick={() => actions?.issueDetail(row)} title="Открыть список затронутых адресов">{empty ? "—" : formatNumber(value)}</button>;
     case "issue_actions": {
       const busy = Boolean(actions?.busy);
       const more = <button type="button" onClick={() => actions?.issueDetail(row)} title="Что это, почему важно, примеры адресов, как проверить и что делать">Подробнее</button>;
