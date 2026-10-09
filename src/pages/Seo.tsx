@@ -506,6 +506,8 @@ const TABLE_LABELS: Record<string, string> = {
   positions_movers: "Изменения",
   positions_sections: "По разделам",
   positions_flapping: "Гуляют страницы",
+  links_summary: "По типам",
+  links: "Каждая ссылка",
   competitors_summary: "Кто сильнее",
   competitors_gaps: "Где нас обходят",
   competitors_wins: "Где мы впереди",

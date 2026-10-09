@@ -4,6 +4,7 @@
 // 10/20/25 числа. Всё считается поверх 14 таблиц seo_* (server/seo-wizard.mjs) — отдельного хранилища нет.
 // Цифр не выдумываем: пока источник не подключён, раздел отвечает empty с именем источника.
 import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
+import { adviceFor, classifyTarget, cleanAnchor, priorityOf } from "./seo-links-kind.mjs";
 import { bySection, groupByDate, movers, trendByCheck, urlFlapping } from "./seo-rank-stats.mjs";
 import { buildBoard, gaps as rivalGaps, rivalMovers, rivalPages, summary as rivalSummary, trendMatrix, wins as rivalWins } from "./seo-competitors.mjs";
 import { pageKind } from "./seo-wizard.mjs";
@@ -377,9 +378,11 @@ async function viewFilters(query, sources, settings) {
   };
 }
 
-async function viewLinks(query, sources) {
+async function viewLinks(query, sources, settings) {
   const [links, urls] = await Promise.all([queryLinks(query), rows(query, "SELECT path FROM seo_urls")]);
   const paths = new Set(urls.map((item) => item.path.replace(/\/+$/, "")));
+  // Чистый адрес, который владелец описал в «Query и фильтры», главнее догадки по реестру страниц.
+  const described = new Map((settings?.config?.filter_params || []).filter((item) => item?.param && item?.own_url).map((item) => [item.param, item.own_url]));
   const groups = new Map();
   for (const link of links) {
     let base = "/";
@@ -388,27 +391,47 @@ async function viewLinks(query, sources) {
       const key = `${base}?${param}=${value}`;
       if (!groups.has(key)) {
         const guess = `${base.replace(/\/+$/, "")}/${value}`;
-        groups.set(key, { target: key, param, anchor: link.anchor, pages: new Set(), should: paths.has(guess) ? guess : "", });
+        groups.set(key, { target: key, param, anchor: link.anchor, pages: new Set(), should: described.get(param) || (paths.has(guess) ? guess : "") });
       }
       groups.get(key).pages.add(pathOf(link.from_url));
     }
   }
-  const list = [...groups.values()]
-    .map((item) => ({ target: item.target, param: item.param, anchor: item.anchor, pages: item.pages.size, sample: [...item.pages][0] || "", should: item.should }))
-    .sort((a, b) => (b.should ? 1 : 0) - (a.should ? 1 : 0) || b.pages - a.pages);
+  const list = [...groups.values()].map((item) => {
+    const kind = classifyTarget(item.target, item.param);
+    const pages = item.pages.size;
+    return {
+      kind: kind.kind, label: kind.label, anchor: cleanAnchor(item.anchor), target: item.target, should: item.should,
+      pages, sample: [...item.pages][0] || "", advice: adviceFor({ kind: kind.kind, pages, should: item.should }),
+      _priority: priorityOf({ kind: kind.kind, pages, should: item.should }),
+    };
+  }).sort((a, b) => b._priority - a._priority).map(({ _priority, ...row }) => row);
+
+  const byKind = new Map();
+  for (const row of list) {
+    const entry = byKind.get(row.kind) || { kind: row.kind, label: row.label, addresses: 0, links: 0, advice: "" };
+    entry.addresses += 1;
+    entry.links += row.pages;
+    byKind.set(row.kind, entry);
+  }
+  const summaryRows = [...byKind.values()].map((entry) => ({ ...entry, advice: adviceFor({ kind: entry.kind, pages: entry.links, should: "" }) })).sort((a, b) => (a.kind === "pagination" ? 1 : 0) - (b.kind === "pagination" ? 1 : 0) || b.links - a.links);
   const total = await scalar(query, "SELECT count(*)::int FROM seo_links");
+  const empty = total ? "Ссылок на адреса с ?параметром= среди проверенных страниц нет" : "Нет данных: обход ещё не собрал внутренние ссылки";
   return {
-    sections: [section("links", "Internal Links Audit — куда ведёт навигация", [
-      col("anchor", "Элемент (текст ссылки)"),
-      col("target", "Сейчас ведёт на", "code"),
-      col("should", "Должен вести на", "url"),
-      col("pages", "Страниц со ссылкой", "int"),
-      col("sample", "Пример страницы", "url"),
-    ], list, {
-      empty: total ? "Ссылок на ?параметр= среди проверенных страниц нет" : "Нет данных: обход ещё не собрал внутренние ссылки",
-      note: `Всего внутренних ссылок в базе: ${num(total).toLocaleString("ru-RU")}. «Должен вести на» — существующий ЧПУ-адрес для того же состояния.`,
-      source: "обход HTTP",
-    })],
+    sections: [
+      section("links_summary", "Что внутри сайта ведёт на адреса с параметрами: по типам", [
+        col("label", "Что это"), col("addresses", "Разных адресов", "int"), col("links", "Ссылок на страницах", "int"), col("advice", "Что делать"),
+      ], summaryRows, {
+        empty, source: "обход HTTP",
+        note: `Это ссылки внутри вашего сайта на адреса с хвостом «?что-то=». Поисковик считает каждый такой адрес отдельной страницей: они плодят дубли и тратят обход, который мог бы уйти на нужные страницы. Здесь они собраны по типам, ниже — каждая ссылка отдельно. Всего внутренних ссылок в базе: ${num(total).toLocaleString("ru-RU")}.`,
+      }),
+      section("links", "Internal Links Audit — каждая ссылка отдельно", [
+        col("label", "Что это"), col("anchor", "Текст ссылки"), col("target", "Сейчас ведёт на", "code"), col("pages", "Страниц со ссылкой", "int"),
+        col("advice", "Что делать"), col("should", "Должен вести на", "url"), col("sample", "Пример страницы", "url"),
+      ], list, {
+        empty, source: "обход HTTP",
+        note: "«Должен вести на» заполняется, когда для параметра описан чистый адрес в «Настройки → Query и фильтры» или такой адрес уже есть на сайте. Пусто — решение ещё не принято, подсказка в колонке «Что делать».",
+      }),
+    ],
   };
 }
 
