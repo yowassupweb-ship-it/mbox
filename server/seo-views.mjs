@@ -4,6 +4,7 @@
 // 10/20/25 числа. Всё считается поверх 14 таблиц seo_* (server/seo-wizard.mjs) — отдельного хранилища нет.
 // Цифр не выдумываем: пока источник не подключён, раздел отвечает empty с именем источника.
 import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
+import { bySection, groupByDate, movers, trendByCheck, urlFlapping } from "./seo-rank-stats.mjs";
 import { pageKind } from "./seo-wizard.mjs";
 
 const OUR_DOMAIN = /(^|\.)vs-travel\.ru$/i;
@@ -670,6 +671,24 @@ async function viewPositions(query, sources) {
     `Спрос есть у ${withDemand} из ${potentialRows.length} запросов.`,
     "Потенциал = спрос × (CTR топ-3 − CTR текущей позиции) × достижимость (чем дальше от топа, тем меньше). Кривая CTR — наша из Вебмастера, пока её нет — запасная. Уровни A ≥ 100, B ≥ 30, C ≥ 5 кликов в месяц.",
   ].filter(Boolean).join(" ");
+  // Подробная статистика по всем сохранённым проверкам одного региона (последнего по времени).
+  const history = await rows(query, `
+    WITH region AS (SELECT region FROM seo_rank_snapshots WHERE source = 'topvisor' ORDER BY captured_at DESC LIMIT 1)
+    SELECT captured_at::date::text AS date, query, url, position
+    FROM seo_rank_snapshots WHERE source = 'topvisor' AND region = (SELECT region FROM region)
+      AND captured_at > now() - interval '120 days'`);
+  const grouped = groupByDate(history);
+  const weight = (text, position) => {
+    const d = demandBy.get(text);
+    return d && position !== null ? d.demand * curve(Math.round(position)) : 0;
+  };
+  const trend = trendByCheck(grouped, demandBy.size ? weight : undefined);
+  const moved = movers(grouped);
+  const kindLabel = { up: "вырос", down: "упал", lost: "пропал из проверенной глубины", appeared: "появился" };
+  const sectionStats = bySection(grouped, (url) => pathOf(url).split("/").filter(Boolean)[0] || "");
+  const flapping = urlFlapping(grouped);
+  const checks = grouped.length;
+  const statsNote = checks ? `Проверок в истории: ${checks}; последняя ${grouped[checks - 1][0]}. Видимость — сумма «спрос × CTR позиции» по запросам: растёт, когда запросы поднимаются.` : "";
   return {
     sections: [
       section("query_potential", "Потенциал запросов — что поднимать в первую очередь", [
@@ -677,6 +696,25 @@ async function viewPositions(query, sources) {
         col("clicks_now", "Кликов сейчас", "int"), col("clicks_target", "В топ-3", "int"), col("gain", "Прирост", "int"),
         col("expected", "Ожидаемый прирост", "int"), col("tier", "Уровень", "badge"), col("reason", "Примечание"), col("demand_month", "Месяц спроса"), col("at", "Позиции от", "datetime"),
       ], potentialRows, { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · Wordstat", note: potentialNote }),
+      section("positions_trend", "Динамика по проверкам", [
+        col("date", "Проверка"), col("tracked", "Запросов", "int"), col("found", "В проверенной глубине", "int"), col("top3", "Топ-3", "int"), col("top10", "Топ-10", "int"),
+        col("top20", "Топ-20", "int"), col("top50", "Топ-50", "int"), col("avg_position", "Средняя", "num"), col("median_position", "Медиана", "num"), col("visibility", "Видимость, кл./мес", "int"),
+      ], [...trend].reverse(), { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции", note: statsNote }),
+      section("positions_movers", `Изменения позиций${moved.from ? `: ${moved.from} → ${moved.to}` : ""}`, [
+        col("query", "Запрос"), col("kind", "Что произошло"), col("from", "Было", "num"), col("to", "Стало", "num"), col("delta", "Сдвиг", "delta"), col("path", "URL", "url"),
+      ], moved.rows.map((row) => ({ query: row.query, kind: kindLabel[row.kind] || row.kind, from: row.from, to: row.to, delta: row.delta, path: row.url ? pathOf(row.url) : "" })), {
+        empty: moved.from ? "Между двумя последними проверками сильных сдвигов нет" : "Нужны минимум две проверки",
+        source: "Topvisor · позиции",
+        note: moved.from ? `Вошли в топ-10: ${moved.counts.entered_top10}, вышли из топ-10: ${moved.counts.left_top10}; вошли в топ-3: ${moved.counts.entered_top3}, вышли из топ-3: ${moved.counts.left_top3}. Сдвиг от 3 позиций.` : "",
+      }),
+      section("positions_sections", "По разделам сайта", [
+        col("section", "Раздел"), col("queries", "Запросов", "int"), col("found", "В проверенной глубине", "int"), col("avg_position", "Средняя", "num"), col("top10", "В топ-10", "int"), col("top10_share", "Доля топ-10, %", "int"),
+      ], sectionStats, { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции" }),
+      section("positions_flapping", "Страница под запрос меняется", [
+        col("query", "Запрос"), col("changes", "Смен страницы", "int"), col("urls", "Страницы по проверкам"), col("last_change", "Последняя смена"),
+      ], flapping.map((row) => ({ query: row.query, changes: row.changes, urls: row.urls.map(pathOf).join(" → "), last_change: row.last_change })), {
+        empty: "Страницы под запросы стабильны", source: "Topvisor · позиции", note: "Если под один запрос по очереди ранжируются разные страницы, это каннибализация или нестабильная выдача.",
+      }),
       section("positions_dist", "Срез мониторинга", [col("label", "Диапазон"), col("now", "Последняя проверка", "int"), col("week", "Прошлая проверка", "int")], list.length ? dist : [], { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции", note: list.length ? `${list.length} отслеживаемых запросов.` : "" }),
       section("positions", "Позиции по запросам", [
         col("query", "Запрос"), col("path", "Ранжируется URL", "url"), col("position", "Позиция", "num"), col("change", "К прошлой проверке", "delta"),
@@ -1027,7 +1065,7 @@ async function viewIssues(query) {
 }
 
 export const SCENARIOS = [
-  { id: "daily", when: "Каждый день", server: "Снимки Вебмастера, Topvisor (позиции), Метрики; сторожевые проверки: падения, массовые 404, смена canonical/robots, критичные ошибки аудита", session: "не запускается", notify: "только при критике" },
+  { id: "daily", when: "Каждый день", server: "Снимки Вебмастера и Метрики; сторожевые проверки: падения, массовые 404, смена canonical/robots, критичные ошибки аудита. Позиции Topvisor — раз в неделю: сервер заказывает проверку (без платных снимков выдачи), забирает позиции, спрос Wordstat и пересчитывает статистику", session: "не запускается", notify: "только при критике" },
   { id: "monday", when: "Понедельник", server: "Снимки выдачи по кластерам-кандидатам; детекторы 03, 05 (CTR, сниппеты, выдача), позиции, поведение, потенциал → пакет недели", session: "«SEO: понедельник» — очередь недели 3–5 задач, решения человеку, отчёт", notify: "сводка недели" },
   { id: "thursday", when: "Четверг", server: "Повторный аудит и обход по страницам из утверждённых задач → пакет внедрения", session: "«SEO: четверг» — что внедрено, журнал изменений со снимком «до», что застряло", notify: "если есть что отметить" },
   { id: "architecture", when: "10 число", server: "Полный обход и аудит, детекторы 01, 02, состав индекса; семантика и потенциал по Wordstat; выдача по ядру → пакет архитектуры", session: "«SEO: архитектура» — состав индекса, нарушения политики, каннибализация, решения по разделам", notify: "сводка" },

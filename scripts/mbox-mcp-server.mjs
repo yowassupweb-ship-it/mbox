@@ -268,6 +268,21 @@ server.registerTool(
 );
 
 server.registerTool(
+  "seo_export_goals",
+  {
+    title: "Export all Yandex Metrica goals with numbers",
+    description: "Every goal of the chosen (or all configured) Metrica counters with reaches and conversion for the period: all traffic and search traffic, previous-period change, role from SEO Wizard settings. Not limited to lead/booking: use it to see which micro-goals show where visitors drop off. days: 7-180 (default 28).",
+    inputSchema: { counters: z.array(z.string()).optional().describe("Counter IDs; omit for the configured ones"), days: z.number().optional() },
+  },
+  async ({ counters = [], days = 28 }) => {
+    const query = new URLSearchParams({ days: String(days) });
+    for (const id of counters) query.append("counter", id);
+    const data = await mboxFetch(`/api/mbox/seo/metrica/goals?${query}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "seo_run_collection",
   {
     title: "Run SEO Wizard collection",

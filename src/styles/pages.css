@@ -44,10 +44,12 @@
 
 .seo-actions button,
 .seo-form-actions button,
+.seo-form-actions a,
 .seo-form-toggle button,
 .seo-row-btn,
 .seo-row-actions button {
   display: inline-flex;
+  text-decoration: none;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -73,6 +75,7 @@
 
 .seo-actions button:hover:not(:disabled),
 .seo-form-actions button:hover:not(:disabled),
+.seo-form-actions a:hover,
 .seo-form-toggle button:hover:not(:disabled),
 .seo-row-btn:hover:not(:disabled),
 .seo-row-actions button:hover:not(:disabled) {
@@ -2766,3 +2769,18 @@ time {
   .seo-metrica-goals li { grid-template-columns: minmax(0, 1fr) 150px; }
   .seo-metrica-goals textarea { grid-column: 1 / -1; }
 }
+
+/* Подробности находки детектора */
+.seo-detail-scrim { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; background: color-mix(in srgb, var(--bg-color) 55%, transparent); }
+.seo-detail { width: min(560px, 100%); height: 100%; overflow-y: auto; padding: var(--space-4); border-left: var(--border-width) solid var(--border-color); background: var(--element-bg); color: var(--text-main); }
+.seo-detail header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.seo-detail h2 { margin: 0; font-size: var(--text-lg); }
+.seo-detail h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); font-weight: var(--weight-semibold); }
+.seo-detail header button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
+.seo-detail dl { display: grid; gap: var(--space-3); margin: var(--space-3) 0 0; }
+.seo-detail dt { font-size: var(--text-xs); color: var(--text-muted); text-transform: none; }
+.seo-detail dd { margin: 2px 0 0; font-size: var(--text-sm); line-height: 1.5; }
+.seo-detail-counts { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.seo-detail table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.seo-detail th, .seo-detail td { padding: 6px 8px; border-bottom: var(--border-width) solid var(--border-color); text-align: left; vertical-align: top; }
+.seo-detail td.is-url { word-break: break-all; font-variant-numeric: tabular-nums; }

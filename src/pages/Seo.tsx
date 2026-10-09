@@ -186,6 +186,8 @@ function SeoWizard() {
   const [running, setRunning] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [detail, setDetail] = useState<IssueDetailData | null>(null);
+  const [detailError, setDetailError] = useState("");
 
   const current = TABS.find((item) => item.id === tab) ?? TABS[0];
   const viewId = current.views ? (current.views.some((item) => item.id === views[current.id]) ? views[current.id] : current.views[0].id) : current.id;
@@ -316,6 +318,10 @@ function SeoWizard() {
       else list.push({ param: String(row.param), example: String(row.example || ""), own_url: "", index: "", canonical: "", link: "", [field]: value });
       return act(`filter:${row.param}`, () => saveConfig({ filter_params: list }));
     },
+    issueDetail: (row) => {
+      setDetailError("");
+      fetchJson<IssueDetailData>(`/api/mbox/seo/issues/${row.id}/detail`).then(setDetail).catch((cause) => setDetailError(cause instanceof Error ? cause.message : String(cause)));
+    },
     issueTask: (row) => act(`task:${row.id}`, () => fetchJson(`/api/mbox/seo/issues/${row.id}/task`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })),
     issueStatus: (row, status) => act(`issue:${row.id}`, () => fetchJson(`/api/mbox/seo/issues/${row.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) })),
     outreachStatus: (row, status) => act(`outreach:${row.id}`, () => fetchJson(`/api/mbox/seo/outreach/${row.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...row, status }) })),
@@ -388,9 +394,64 @@ function SeoWizard() {
           </>
         ) : <SeoLoading />)}
       </div>
+      {detailError && <p className="seo-error" role="alert">{detailError}</p>}
+      {detail && <IssueDetailPanel data={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }
+
+function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const rows: Array<[string, string]> = [["Что это", data.what], ["Почему важно", data.why], ["Как проверить", data.check], ["Что делать", data.fix]];
+  return (
+    <div className="seo-detail-scrim" onClick={onClose}>
+      <aside className="seo-detail" role="dialog" aria-modal="true" aria-label={data.title} onClick={(event) => event.stopPropagation()}>
+        <header>
+          <h2>{data.title}</h2>
+          <button type="button" onClick={onClose} aria-label="Закрыть"><X size={16} /></button>
+        </header>
+        <dl>
+          {rows.filter(([, text]) => text).map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text}</dd></div>)}
+          <div>
+            <dt>Потенциал {data.potential.score.toLocaleString("ru-RU")}</dt>
+            <dd>{data.potential.formula ? `Как считается: ${data.potential.formula}. ` : ""}{data.potential.note}</dd>
+          </div>
+        </dl>
+        {Object.entries(data.counts).map(([name, values]) => (
+          <p key={name} className="seo-detail-counts">{Object.entries(values).map(([key, value]) => `${key}: ${value.toLocaleString("ru-RU")}`).join(" · ")}</p>
+        ))}
+        <h3>Примеры{data.affected.truncated ? ` — показано ${data.affected.shown} из ${data.affected.total.toLocaleString("ru-RU")}` : ` — ${data.affected.shown}`}</h3>
+        {data.examples.length === 0 ? <p className="seo-form-hint">Детектор не сохранил примеры адресов. Список появится после следующего сбора.</p> : (
+          <table>
+            <thead><tr><th>Адрес</th><th>Примечание</th><th>Показы 28 дн.</th><th>Клики</th></tr></thead>
+            <tbody>
+              {data.examples.map((item) => (
+                <tr key={`${item.path}|${item.note}`}>
+                  <td className="is-url">{item.path}</td><td>{item.note || "—"}</td>
+                  <td>{item.impressions === undefined ? "—" : item.impressions.toLocaleString("ru-RU")}</td>
+                  <td>{item.clicks === undefined ? "—" : item.clicks.toLocaleString("ru-RU")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+type IssueDetailData = {
+  id: string; detector: string; title: string; summary: string; severity: string; status: string;
+  what: string; why: string; check: string; fix: string;
+  potential: { score: number; formula: string; note: string };
+  affected: { total: number; shown: number; truncated: boolean };
+  examples: Array<{ path: string; note: string; impressions?: number; clicks?: number }>;
+  counts: Record<string, Record<string, number>>;
+};
 
 const SOURCES_TABLE = "__sources";
 
@@ -402,6 +463,11 @@ const TABLE_LABELS: Record<string, string> = {
   quality: "По страницам",
   positions_dist: "Срез мониторинга",
   positions: "Позиции по запросам",
+  query_potential: "Потенциал запросов",
+  positions_trend: "Динамика",
+  positions_movers: "Изменения",
+  positions_sections: "По разделам",
+  positions_flapping: "Гуляют страницы",
   potential: "Потенциал страниц",
   demand: "Спрос (Wordstat)",
   pending: "Ждут решения",
@@ -476,6 +542,7 @@ type RowActions = {
   setBucketDecision: (row: Row, decision: string) => void;
   setFilterField: (row: Row, field: string, value: string) => void;
   issueTask: (row: Row) => void;
+  issueDetail: (row: Row) => void;
   issueStatus: (row: Row, status: string) => void;
   outreachStatus: (row: Row, status: string) => void;
   runScenario: (row: Row) => void;
@@ -647,10 +714,12 @@ function Cell({ column, row, options, actions }: { column: Column; row: Row; opt
       );
     }
     case "issue_actions": {
-      if (!["open", "review"].includes(String(row.status))) return null;
       const busy = Boolean(actions?.busy);
+      const more = <button type="button" onClick={() => actions?.issueDetail(row)} title="Что это, почему важно, примеры адресов, как проверить и что делать">Подробнее</button>;
+      if (!["open", "review"].includes(String(row.status))) return <span className="seo-row-actions">{more}</span>;
       return (
         <span className="seo-row-actions">
+          {more}
           {row.status === "open" && <button type="button" onClick={() => actions?.issueTask(row)} disabled={busy} title="Создать задачу MBOX с доказательствами"><Check size={12} /> В задачи</button>}
           <button type="button" onClick={() => actions?.issueStatus(row, "noise")} disabled={busy} title="Не проблема: сессия больше не будет считать это находкой"><X size={12} /> Шум</button>
         </span>
@@ -928,7 +997,7 @@ const GOAL_ROLES: Array<{ value: MetricaGoalRole; label: string }> = [
   { value: "booking", label: "бронирование" },
   { value: "track", label: "собирать, не заявка" },
 ];
-const METRICA_MAX_GOALS = 16;
+const METRICA_MAX_GOALS = 160;
 
 /** Цели счётчика из Метрики поверх сохранённых: роль и описание сохраняются по ID, пропавшие из Метрики помечаются. */
 function mergeGoals(saved: MetricaGoal[], fresh: Array<{ id: string; name: string; type: string }>): MetricaGoal[] {
@@ -984,11 +1053,16 @@ function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaC
   return (
     <section className="seo-settings-block seo-metrica">
       <h2>Счётчики и цели</h2>
-      <p className="seo-form-hint">Счётчики и все их цели берутся из Метрики по токену. Отметьте, какие цели собирать: «заявка» и «бронирование» складываются в заявки по страницам, «собирать» — только для отчёта. Описание объясняет агентам, что значит цель. В одном запросе Метрики помещается до {METRICA_MAX_GOALS} целей на счётчик.</p>
+      <p className="seo-form-hint">Счётчики и все их цели берутся из Метрики по токену. Отметьте, какие цели собирать: «заявка» и «бронирование» складываются в заявки по страницам, «собирать» — только для отчёта. Описание объясняет агентам, что значит цель. Целей можно отмечать много: они собираются пачками, до {METRICA_MAX_GOALS} на счётчик. «Выгрузить все цели» отдаёт таблицу по всем целям, а не только отмеченным.</p>
       <div className="seo-form-actions">
         <button type="button" disabled={loading} onClick={() => void load(counters.map((counter) => counter.id))}><RefreshCw size={14} aria-hidden="true" /> {loading ? "Загружаю…" : counters.length ? "Обновить счётчики и цели" : "Загрузить счётчики из Метрики"}</button>
         <input className="seo-metrica-manual" value={manual} inputMode="numeric" placeholder="номер счётчика" aria-label="Номер счётчика" onChange={(event) => setManual(event.currentTarget.value)} />
         <button type="button" disabled={!/^\d+$/.test(manual.trim()) || loading} onClick={() => { addCounter(manual); setManual(""); }}><Plus size={14} aria-hidden="true" /> Добавить</button>
+        {counters.length > 0 && (
+          <a className="seo-button-link" href={`/api/mbox/seo/metrica/goals?format=csv&days=28${counters.map((counter) => `&counter=${encodeURIComponent(counter.id)}`).join("")}`} download title="Все цели всех счётчиков с достижениями и конверсией за 28 дней, весь трафик и поиск, динамика к прошлому периоду">
+            <Download size={14} aria-hidden="true" /> Выгрузить все цели (CSV)
+          </a>
+        )}
         {catalog && !catalog.ok && <span className="seo-error" role="alert">{catalog.error}</span>}
       </div>
       {available.length > 0 && (

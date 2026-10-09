@@ -33,3 +33,27 @@ test("при 429 останавливается и не продолжает с�
   assert.equal(out.saved, 0);
   assert.equal(out.left, 20);
 });
+
+test("секундный лимит 429 не останавливает сбор: ждём и повторяем", async () => {
+  const db = fakeDb({ tracked: ["туры", "экскурсии"] });
+  let calls = 0;
+  const flaky = async () => {
+    calls += 1;
+    if (calls === 2) return { ok: false, status: 429, text: async () => '{"message":"search-api.wordstatRequestsPerSecond.rate rate quota limit exceed: allowed 10 requests"}' };
+    return { ok: true, status: 200, text: async () => JSON.stringify({ totalCount: "7", results: [] }) };
+  };
+  const pauses = [];
+  const out = await collectWordstatDemand(db.query, { apiKey: "k" }, { fetchImpl: flaky, sleep: async (ms) => { pauses.push(ms); }, gapMs: 0 });
+  assert.equal(out.saved, 2);
+  assert.equal(out.stopped, undefined);
+  assert.ok(pauses.includes(1100));
+});
+
+test("запросы идут не чаще заданного ритма", async () => {
+  const db = fakeDb({ tracked: ["a", "b", "c", "d"] });
+  const starts = [];
+  const timed = async () => { starts.push(Date.now()); return { ok: true, status: 200, text: async () => JSON.stringify({ totalCount: "1", results: [] }) }; };
+  await collectWordstatDemand(db.query, { apiKey: "k" }, { fetchImpl: timed, gapMs: 40 });
+  const gaps = starts.slice(1).map((time, i) => time - starts[i]);
+  assert.ok(Math.min(...gaps) >= 30, `слишком частые запросы: ${gaps}`);
+});

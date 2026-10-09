@@ -3,6 +3,8 @@ import { seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
 import { seoSchedulerStatus } from "./seo-scheduler.mjs";
 import { recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
 import { collectWordstatDemand } from "./seo-wordstat.mjs";
+import { explainIssue } from "./seo-explain.mjs";
+import { nextPositionsAction } from "./seo-rank-check.mjs";
 
 const DEFAULT_SITE = "https://www.vs-travel.ru";
 const DEFAULT_PROJECT = "Вокруг света";
@@ -148,6 +150,19 @@ CREATE TABLE IF NOT EXISTS seo_demand_snapshots (
   raw JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_seo_demand_snapshots_query ON seo_demand_snapshots(query, captured_at DESC);
+
+-- Проверки позиций, которые мы просили у Topvisor: когда, что ответил, чем кончилось (недельное обновление).
+CREATE TABLE IF NOT EXISTS seo_rank_checks (
+  id BIGSERIAL PRIMARY KEY,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'requested',
+  project_id TEXT NOT NULL DEFAULT '',
+  region_index TEXT NOT NULL DEFAULT '',
+  price JSONB NOT NULL DEFAULT '{}',
+  result JSONB NOT NULL DEFAULT '{}',
+  error TEXT NOT NULL DEFAULT ''
+);
 
 CREATE TABLE IF NOT EXISTS seo_traffic_snapshots (
   id BIGSERIAL PRIMARY KEY,
@@ -892,11 +907,20 @@ export async function collectWebmasterSearch(query, token, hostId) {
   };
 }
 
-// Метрика принимает до 20 метрик в запросе: 4 базовые + до 16 целей на счётчик.
-const METRICA_MAX_GOALS = 16;
+// Метрика принимает до 20 метрик в запросе: 4 базовые + до 16 целей. Целей на счётчике бывает намного больше,
+// поэтому цели идут пачками по 16 отдельными запросами и склеиваются по (день, адрес входа).
+const METRICA_GOALS_PER_REQUEST = 16;
+// Потолок на счётчик — защита от тысячи целей: каждая пачка это отдельный проход по всем строкам.
+const METRICA_MAX_GOALS = 160;
 
 function trackedGoals(counter) {
   return counter.goals.filter((goal) => goal.role).slice(0, METRICA_MAX_GOALS);
+}
+
+function chunked(list, size) {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out.length ? out : [[]];
 }
 
 /** Origin для адресов входа счётчика: основной сайт — как в реестре (с www), чужой сайт — свой адрес. */
@@ -935,6 +959,86 @@ export async function metricaCatalog(query, counterIds = []) {
   }
 }
 
+const GOALS_EXPORT_PER_REQUEST = 9; // reaches + conversionRate на цель: 9 целей = 18 метрик из допустимых 20
+
+/**
+ * Выгрузка ВСЕХ целей счётчиков с цифрами: достижения за период (весь трафик и поисковый), конверсия, динамика к предыдущему периоду.
+ * Роли из настроек (lead/booking/track) подставляются, но не ограничивают выгрузку: заявка и покупка — слабая картина,
+ * по остальным целям видно, где посетители застревают. Составные цели идут шагами отдельными строками (как в каталоге).
+ */
+export async function exportMetricaGoals(query, { counterIds = [], days = 28 } = {}) {
+  const settings = await getSeoSettings(query, true);
+  const token = process.env.YANDEX_METRICA_TOKEN || settings.secrets?.metrica_token;
+  if (!token) return { ok: false, error: "Не указан токен Метрики" };
+  const span = Math.max(7, Math.min(180, Number(days) || 28));
+  const wantedIds = [...new Set(counterIds.map(String).filter((id) => /^\d+$/.test(id)))];
+  const configured = metricaCountersOf(settings.config);
+  const ids = wantedIds.length ? wantedIds : configured.map((counter) => counter.id);
+  if (!ids.length) return { ok: false, error: "Не выбран ни один счётчик: укажите счётчики в настройках Metrica или передайте counter" };
+  const period = { date1: isoDay(new Date(Date.now() - span * 86400000)), date2: isoDay(new Date(Date.now() - 86400000)) };
+  const before = { date1: isoDay(new Date(Date.now() - 2 * span * 86400000)), date2: isoDay(new Date(Date.now() - (span + 1) * 86400000)) };
+  const organic = "ym:s:trafficSourceName=='Search engine traffic'";
+  const rowsOut = [];
+  const visitsByCounter = {};
+  const errors = {};
+  const counterMeta = await metricaCatalog(query, ids);
+  if (!counterMeta.ok) return counterMeta;
+  const stat = async (counterId, metrics, range, filters) => {
+    const params = [["ids", counterId], ["metrics", metrics.join(",")], ["accuracy", "full"], ["date1", range.date1], ["date2", range.date2]];
+    if (filters) params.push(["filters", filters]);
+    const page = await yandexGet(METRICA_API, "/stat/v1/data", params, token, 120000);
+    return { totals: (page?.totals || [])[0] || [], visits: Number((page?.totals || [])[0]?.[0]) };
+  };
+  await mapLimit(ids, 2, async (counterId) => {
+    try {
+      const counter = counterMeta.counters.find((item) => item.id === counterId) || { id: counterId, name: "", site: "" };
+      const roles = new Map((configured.find((item) => item.id === counterId)?.goals || []).map((goal) => [goal.id, goal.role]));
+      const goals = counterMeta.goals?.[counterId] || [];
+      if (counterMeta.errors?.[counterId]) throw new Error(counterMeta.errors[counterId]);
+      const [visitsAll, visitsOrganic] = await Promise.all([stat(counterId, ["ym:s:visits"], period), stat(counterId, ["ym:s:visits"], period, organic)]);
+      for (const pack of chunked(goals, GOALS_EXPORT_PER_REQUEST)) {
+        if (!pack.length) continue;
+        const metrics = pack.flatMap((goal) => [`ym:s:goal${goal.id}reaches`, `ym:s:goal${goal.id}conversionRate`]);
+        const [all, org, prev] = await Promise.all([stat(counterId, metrics, period), stat(counterId, metrics, period, organic), stat(counterId, metrics, before, organic)]);
+        pack.forEach((goal, index) => {
+          const reachesAll = Math.round(all.totals[index * 2] || 0);
+          const reachesOrganic = Math.round(org.totals[index * 2] || 0);
+          const reachesPrev = Math.round(prev.totals[index * 2] || 0);
+          rowsOut.push({
+            counter_id: counterId, counter: counter.name, site: counter.site, goal_id: goal.id, goal: goal.name, type: goal.type,
+            role: roles.get(goal.id) || "",
+            reaches_all: reachesAll, conversion_all: round2(all.totals[index * 2 + 1]),
+            reaches_organic: reachesOrganic, conversion_organic: round2(org.totals[index * 2 + 1]),
+            reaches_organic_prev: reachesPrev,
+            change_organic: reachesPrev ? round2(((reachesOrganic - reachesPrev) / reachesPrev) * 100) : null,
+          });
+        });
+      }
+      visitsByCounter[counterId] = { all: Math.round(visitsAll.visits || 0), organic: Math.round(visitsOrganic.visits || 0) };
+    } catch (error) {
+      errors[counterId] = error instanceof Error ? error.message : String(error);
+    }
+  });
+  const list = [...rowsOut].sort((a, b) => b.reaches_organic - a.reaches_organic || b.reaches_all - a.reaches_all);
+  return { ok: true, period, previous_period: before, days: span, counters: ids, visits: visitsByCounter, total: list.length, goals: list, errors };
+}
+
+function round2(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+}
+
+/** CSV для выгрузки целей: разделитель «;» и BOM, чтобы Excel открыл кириллицу и числа. */
+export function goalsCsv(exported) {
+  const header = ["Счётчик", "ID счётчика", "Сайт", "ID цели", "Цель", "Тип", "Роль", "Достижений (весь трафик)", "Конверсия, % (весь)", "Достижений (поиск)", "Конверсия, % (поиск)", "Поиск, пред. период", "Изменение, %"];
+  const cell = (value) => {
+    const text = value === null || value === undefined ? "" : String(value);
+    return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const lines = (exported.goals || []).map((row) => [row.counter, row.counter_id, row.site, row.goal_id, row.goal, row.type, row.role, row.reaches_all, row.conversion_all, row.reaches_organic, row.conversion_organic, row.reaches_organic_prev, row.change_organic].map(cell).join(";"));
+  return `\ufeff${[header.join(";"), ...lines].join("\r\n")}\r\n`;
+}
+
 /** Яндекс Метрика: посещения из поиска по посадочным страницам и дням; цели «заявка» и «бронирование» суммируются по ролям. */
 const TRACKING_PARAMS = /^(utm_[a-z_]+|yclid|ysclid|gclid|fbclid|_openstat|from|ref|roistat\w*|etext|frommarket|clid)$/i;
 
@@ -954,43 +1058,49 @@ async function collectMetricaCounter(token, counter, days, origin) {
   const goals = trackedGoals(counter);
   const date1 = days[days.length - 1];
   const date2 = days[0];
-  const metrics = ["ym:s:visits", "ym:s:bounceRate", "ym:s:pageDepth", "ym:s:avgVisitDurationSeconds", ...goals.map((goal) => `ym:s:goal${goal.id}reaches`)];
   const limit = 10000;
-  const rowsOut = [];
+  const merged = new Map();
   const reachedTotal = {};
-  for (let offset = 1; offset < 200000; offset += limit) {
-    const page = await yandexGet(METRICA_API, "/stat/v1/data", [
-      ["ids", counter.id], ["metrics", metrics.join(",")], ["dimensions", "ym:s:date,ym:s:startURL"],
-      ["filters", "ym:s:trafficSourceName=='Search engine traffic'"], ["date1", date1], ["date2", date2],
-      ["accuracy", "full"], ["sort", "-ym:s:visits"], ["limit", limit], ["offset", offset],
-    ], token, 120000);
-    for (const item of page?.data || []) {
-      const day = String(item.dimensions?.[0]?.name || "");
-      const url = landingUrl(item.dimensions?.[1]?.name, origin);
-      const [visits, bounceRate, depth, duration, ...reached] = item.metrics || [];
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !url || !visits) continue;
-      const byRole = {};
-      const byGoal = {};
-      goals.forEach((goal, index) => {
-        const value = reached[index];
-        if (!value) return;
-        byGoal[goal.id] = value;
-        reachedTotal[goal.id] = (reachedTotal[goal.id] || 0) + value;
-        if (goal.role === "lead" || goal.role === "booking") byRole[goal.role] = (byRole[goal.role] || 0) + value;
-      });
-      rowsOut.push({
-        captured_on: day,
-        url,
-        visits: Math.round(visits),
-        bounces: Math.round((visits * (bounceRate || 0)) / 100),
-        page_depth: Number.isFinite(depth) ? depth : null,
-        visit_duration: Number.isFinite(duration) ? duration : null,
-        goals: byRole,
-        raw: { counter_id: counter.id, goals: byGoal },
-      });
+  for (const pack of chunked(goals, METRICA_GOALS_PER_REQUEST)) {
+    const metrics = ["ym:s:visits", "ym:s:bounceRate", "ym:s:pageDepth", "ym:s:avgVisitDurationSeconds", ...pack.map((goal) => `ym:s:goal${goal.id}reaches`)];
+    for (let offset = 1; offset < 200000; offset += limit) {
+      const page = await yandexGet(METRICA_API, "/stat/v1/data", [
+        ["ids", counter.id], ["metrics", metrics.join(",")], ["dimensions", "ym:s:date,ym:s:startURL"],
+        ["filters", "ym:s:trafficSourceName=='Search engine traffic'"], ["date1", date1], ["date2", date2],
+        ["accuracy", "full"], ["sort", "-ym:s:visits"], ["limit", limit], ["offset", offset],
+      ], token, 120000);
+      for (const item of page?.data || []) {
+        const day = String(item.dimensions?.[0]?.name || "");
+        const url = landingUrl(item.dimensions?.[1]?.name, origin);
+        const [visits, bounceRate, depth, duration, ...reached] = item.metrics || [];
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !url || !visits) continue;
+        const key = `${day}|${url}`;
+        let row = merged.get(key);
+        if (!row) {
+          row = {
+            captured_on: day,
+            url,
+            visits: Math.round(visits),
+            bounces: Math.round((visits * (bounceRate || 0)) / 100),
+            page_depth: Number.isFinite(depth) ? depth : null,
+            visit_duration: Number.isFinite(duration) ? duration : null,
+            goals: {},
+            raw: { counter_id: counter.id, goals: {} },
+          };
+          merged.set(key, row);
+        }
+        pack.forEach((goal, index) => {
+          const value = reached[index];
+          if (!value) return;
+          row.raw.goals[goal.id] = value;
+          reachedTotal[goal.id] = (reachedTotal[goal.id] || 0) + value;
+          if (goal.role === "lead" || goal.role === "booking") row.goals[goal.role] = (row.goals[goal.role] || 0) + value;
+        });
+      }
+      if ((page?.data || []).length < limit || offset + limit > Number(page?.total_rows || 0)) break;
     }
-    if ((page?.data || []).length < limit || offset + limit > Number(page?.total_rows || 0)) break;
   }
+  const rowsOut = [...merged.values()];
   return {
     rows: rowsOut,
     summary: {
@@ -1079,6 +1189,102 @@ export async function checkTopvisor(query) {
     return { ok: true, project: project.name || String(projectId), site: project.site || "", regions, last_check: checks[checks.length - 1] || null };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Подробности находки: пояснение детектора, примеры и их показы/клики из Вебмастера за 28 дней. */
+export async function issueDetail(query, issueId) {
+  await ensureSeoWizardSchema(query);
+  const issue = (await query(
+    "SELECT id::text, detector, severity, status, title, summary, evidence, affected_count, potential_score FROM seo_issues WHERE id = $1",
+    [issueId],
+  )).rows[0];
+  if (!issue) return null;
+  const paths = [...new Set(explainIssue(issue).examples.map((item) => item.path).filter((path) => path.startsWith("/")))];
+  const stats = {};
+  if (paths.length) {
+    const found = (await query(
+      `SELECT regexp_replace(url, '^https?://[^/]+', '') AS path, sum(impressions)::int AS impressions, sum(clicks)::int AS clicks
+         FROM seo_search_snapshots
+        WHERE captured_at > now() - interval '28 days' AND regexp_replace(url, '^https?://[^/]+', '') = ANY($1::text[])
+        GROUP BY 1`,
+      [paths],
+    ).catch(() => ({ rows: [] }))).rows;
+    for (const row of found) stats[row.path] = { impressions: row.impressions, clicks: row.clicks };
+  }
+  return explainIssue(issue, stats);
+}
+
+/** Настройки Topvisor для проверок: ключ, User-Id, проект и индекс региона (из настроек или первый регион проекта). */
+async function topvisorContext(query) {
+  const settings = await getSeoSettings(query, true);
+  const auth = { userId: process.env.TOPVISOR_USER_ID || settings.config?.topvisor_user_id, apiKey: process.env.TOPVISOR_API_KEY || settings.secrets?.topvisor_api_key };
+  const projectId = process.env.TOPVISOR_PROJECT_ID || settings.config?.topvisor_project_id;
+  if (!auth.apiKey || !auth.userId || !projectId) throw new Error("Topvisor не настроен: нужны API-ключ, User-Id и ID проекта");
+  return { auth, projectId, regionIndex: settings.config?.topvisor_region_index || "" };
+}
+
+/**
+ * Попросить Topvisor перепроверить позиции проекта. Снимки выдачи (платные) не запрашиваются никогда: do_snapshots = 0.
+ * Цену проверки узнаём заранее (get/positions_2/checker/price) и пишем в журнал; если метод не ответил, проверке это не мешает.
+ */
+export async function requestTopvisorCheck(query) {
+  await ensureSeoWizardSchema(query);
+  const { auth, projectId, regionIndex } = await topvisorContext(query);
+  const filters = [{ name: "id", operator: "EQUALS", values: [Number(projectId)] }];
+  const regions = regionIndex ? { regions_indexes: [Number(regionIndex)] } : {};
+  const price = await topvisorCall(auth, "get/positions_2/checker/price", { filters, ...regions }).catch((error) => ({ unavailable: error instanceof Error ? error.message : String(error) }));
+  try {
+    const result = await topvisorCall(auth, "edit/positions_2/checker/go", { filters, do_snapshots: 0, ...regions });
+    const row = (await query(
+      "INSERT INTO seo_rank_checks(status, project_id, region_index, price, result) VALUES ('requested', $1, $2, $3::jsonb, $4::jsonb) RETURNING id::text, requested_at::text",
+      [String(projectId), String(regionIndex), JSON.stringify(price ?? {}), JSON.stringify(result ?? {})],
+    )).rows[0];
+    return { ok: true, id: row.id, requested_at: row.requested_at, price };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await query("INSERT INTO seo_rank_checks(status, project_id, region_index, price, error) VALUES ('error', $1, $2, $3::jsonb, $4)", [String(projectId), String(regionIndex), JSON.stringify(price ?? {}), message.slice(0, 500)]);
+    return { ok: false, error: message };
+  }
+}
+
+/** Забрать свежие позиции Topvisor и спрос Wordstat без полного сбора (без обхода сайта). */
+export async function refreshPositions(query) {
+  const { auth, projectId, regionIndex } = await topvisorContext(query);
+  const ranks = await collectTopvisorRanks(query, auth, projectId, regionIndex);
+  const settings = await getSeoSettings(query, true);
+  const apiKey = process.env.YANDEX_WORDSTAT_API_KEY || settings.secrets?.wordstat_api_key;
+  const demand = apiKey
+    ? await collectWordstatDemand(query, { apiKey, folderId: process.env.YANDEX_WORDSTAT_FOLDER_ID || settings.config?.wordstat_folder_id || "" }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }))
+    : null;
+  return { ranks, demand };
+}
+
+/**
+ * Один тик недельного обновления позиций: попросить проверку, дождаться, забрать результат.
+ * Возвращает, что сделано, для лога планировщика; ошибки не бросает (расписание не должно падать).
+ */
+export async function positionsTick(query, { now = new Date() } = {}) {
+  try {
+    await ensureSeoWizardSchema(query);
+    const last = (await query("SELECT id::text, status, requested_at::text FROM seo_rank_checks ORDER BY requested_at DESC LIMIT 1")).rows[0] || null;
+    const action = nextPositionsAction({ now, last });
+    if (!action) return { action: null };
+    if (action === "request") return { action, ...(await requestTopvisorCheck(query)) };
+    if (action === "give_up") {
+      await query("UPDATE seo_rank_checks SET status = 'timeout', finished_at = now(), error = 'Topvisor не завершил проверку за 8 часов' WHERE id = $1", [last.id]);
+      return { action, id: last.id };
+    }
+    const refreshed = await refreshPositions(query);
+    const lastCheck = refreshed.ranks?.last_check || "";
+    const requestedDay = String(last.requested_at).slice(0, 10);
+    if (lastCheck && lastCheck >= requestedDay) {
+      await query("UPDATE seo_rank_checks SET status = 'done', finished_at = now(), result = $2::jsonb WHERE id = $1", [last.id, JSON.stringify({ last_check: lastCheck, keywords: refreshed.ranks?.keywords, rows: refreshed.ranks?.rows, demand: refreshed.demand })]);
+      return { action: "done", id: last.id, last_check: lastCheck };
+    }
+    return { action: "waiting", id: last.id, last_check: lastCheck };
+  } catch (error) {
+    return { action: "error", error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -1773,8 +1979,26 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     if (url.pathname === "/api/mbox/seo/changes" && req.method === "POST") {
       return reply(201, { change: await recordChange(query, await readBody(req)) });
     }
+    if (url.pathname === "/api/mbox/seo/metrica/goals" && req.method === "GET") {
+      const exported = await exportMetricaGoals(query, { counterIds: url.searchParams.getAll("counter"), days: Number(url.searchParams.get("days")) || 28 });
+      if (exported.ok && url.searchParams.get("format") === "csv") {
+        res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="metrica-goals.csv"' });
+        res.end(goalsCsv(exported));
+        return true;
+      }
+      return reply(exported.ok ? 200 : 400, exported);
+    }
     if (url.pathname === "/api/mbox/seo/metrica/catalog" && req.method === "GET") {
       return reply(200, await metricaCatalog(query, url.searchParams.getAll("counter")));
+    }
+    if (url.pathname === "/api/mbox/seo/positions/refresh" && req.method === "POST") {
+      const body = await readBody(req);
+      // mode "request": попросить Topvisor перепроверить позиции (платно, без снимков выдачи); иначе забрать то, что уже есть.
+      return reply(200, body.mode === "request" ? await requestTopvisorCheck(query) : await refreshPositions(query));
+    }
+    if (url.pathname === "/api/mbox/seo/positions/checks" && req.method === "GET") {
+      await ensureSeoWizardSchema(query);
+      return reply(200, { checks: (await query("SELECT id::text, requested_at::text, finished_at::text, status, price, result, error FROM seo_rank_checks ORDER BY requested_at DESC LIMIT 30")).rows });
     }
     if (url.pathname === "/api/mbox/seo/topvisor/check" && req.method === "GET") {
       return reply(200, await checkTopvisor(query));
@@ -1784,6 +2008,11 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     }
     if (url.pathname === "/api/mbox/seo/settings" && req.method === "PUT") {
       return reply(200, await saveSeoSettings(query, await readBody(req)));
+    }
+    const detailMatch = url.pathname.match(/^\/api\/mbox\/seo\/issues\/(\d+)\/detail$/);
+    if (detailMatch && req.method === "GET") {
+      const detail = await issueDetail(query, detailMatch[1]);
+      return reply(detail ? 200 : 404, detail || { error: "not_found" });
     }
     const issueMatch = url.pathname.match(/^\/api\/mbox\/seo\/issues\/(\d+)$/);
     if (issueMatch && req.method === "PATCH") {

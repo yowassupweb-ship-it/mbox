@@ -5,6 +5,11 @@ import { demandFromTop, isStaleQuery } from "./seo-potential.mjs";
 const ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/wordstat/topRequests";
 const MAX_PER_RUN = 400;
 const CONCURRENCY = 3;
+// Лимит Wordstat API — 10 запросов в секунду (search-api.wordstatRequestsPerSecond). Держим 8 с запасом и ждём,
+// если всё же получили 429 по секундной квоте; суточная и прочие квоты останавливают сбор до следующего прогона.
+const MIN_GAP_MS = 125;
+const SECOND_LIMIT_RETRIES = 3;
+const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function wordstatTop({ apiKey, folderId = "" }, phrase, fetchImpl = fetch) {
   const response = await fetchImpl(ENDPOINT, {
@@ -35,7 +40,7 @@ export async function wordstatTargets(query, month) {
   return { all: list.length, todo: list.filter((text) => !done.has(text)) };
 }
 
-export async function collectWordstatDemand(query, auth, { fetchImpl = fetch, limit = MAX_PER_RUN, now = new Date() } = {}) {
+export async function collectWordstatDemand(query, auth, { fetchImpl = fetch, limit = MAX_PER_RUN, now = new Date(), sleep = sleepFor, gapMs = MIN_GAP_MS } = {}) {
   const month = now.toISOString().slice(0, 7);
   const { all, todo } = await wordstatTargets(query, month);
   const batch = todo.slice(0, limit);
@@ -43,11 +48,31 @@ export async function collectWordstatDemand(query, auth, { fetchImpl = fetch, li
   let failed = 0;
   let stopped = "";
   let index = 0;
+  let nextSlot = 0;
+  // Общий для потоков ритм: каждый запрос получает своё место не раньше gapMs после предыдущего.
+  const takeSlot = async () => {
+    const at = Math.max(Date.now(), nextSlot);
+    nextSlot = at + gapMs;
+    if (at > Date.now()) await sleep(at - Date.now());
+  };
+  const fetchTop = async (phrase) => {
+    for (let attempt = 0; ; attempt += 1) {
+      await takeSlot();
+      try {
+        return await wordstatTop(auth, phrase, fetchImpl);
+      } catch (error) {
+        const perSecond = error.status === 429 && /PerSecond/i.test(error.message);
+        if (!perSecond || attempt >= SECOND_LIMIT_RETRIES) throw error;
+        nextSlot = Math.max(nextSlot, Date.now() + 1100);
+        await sleep(1100);
+      }
+    }
+  };
   const worker = async () => {
     while (index < batch.length && !stopped) {
       const phrase = batch[index++];
       try {
-        const data = await wordstatTop(auth, phrase, fetchImpl);
+        const data = await fetchTop(phrase);
         const { demand, basis, total } = demandFromTop(data, phrase);
         await query(
           "INSERT INTO seo_demand_snapshots(source, query, region, demand, month, raw) VALUES ('wordstat_api', $1, '', $2, $3, $4::jsonb)",

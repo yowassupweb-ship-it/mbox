@@ -2,7 +2,7 @@
 // Правила «что пора» — dueScenarios (seo-strategy.mjs), здесь только таймер и защита от наложения. По умолчанию
 // выключено: сбор — это тысяча запросов к сайту, включается явно переменной SEO_AUTORUN=1 на сервере.
 import { dueScenarios } from "./seo-strategy.mjs";
-import { liveSeoRun, startSeoRun } from "./seo-wizard.mjs";
+import { liveSeoRun, positionsTick, startSeoRun } from "./seo-wizard.mjs";
 
 const TICK_MS = Number(process.env.SEO_AUTORUN_TICK_MS || 10 * 60_000);
 const state = { enabled: false, started_at: "", last_tick_at: "", last_start: null, last_error: "" };
@@ -17,6 +17,12 @@ export function seoAutorunEnabled(env = process.env) {
 
 async function tick(query, log) {
   state.last_tick_at = new Date().toISOString();
+  // Позиции Topvisor: раз в неделю и независимо от дневного сбора: заказ проверки, ожидание, забор результата.
+  const positions = await positionsTick(query);
+  if (positions.action) {
+    state.last_positions = { ...positions, at: new Date().toISOString() };
+    log(`[seo-scheduler] позиции: ${positions.action}${positions.error ? ` — ${positions.error}` : ""}${positions.last_check ? ` (проверка от ${positions.last_check})` : ""}`);
+  }
   if (liveSeoRun()) return;
   try {
     const packages = (await query("SELECT DISTINCT ON (scenario) scenario, created_at::text AS at FROM seo_packages ORDER BY scenario, created_at DESC")).rows;
