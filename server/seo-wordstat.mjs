@@ -28,11 +28,20 @@ export async function wordstatTop({ apiKey, folderId = "" }, phrase, fetchImpl =
   return data;
 }
 
-/** Запросы для сбора: отслеживаемые в Topvisor, без устаревших (год в тексте) и без уже собранных в этом месяце. */
-export async function wordstatTargets(query, month) {
-  const list = (await query(
+/**
+ * Запросы для сбора: сначала отслеживаемые в Topvisor, затем самые крупные запросы страниц из Вебмастера (по показам) — иначе у
+ * запросов страниц нет спроса и потенциал не считается. Без устаревших (год в тексте) и без уже собранных в этом месяце.
+ */
+export async function wordstatTargets(query, month, { fromWebmaster = 300 } = {}) {
+  const tracked = (await query(
     `SELECT DISTINCT ON (query) query FROM seo_rank_snapshots ORDER BY query, captured_at DESC`,
-  )).rows.map((row) => row.query).filter((text) => text && !isStaleQuery(text));
+  )).rows.map((row) => row.query);
+  const popular = (await query(
+    `SELECT query FROM seo_page_stats WHERE query <> '' AND captured_on > current_date - 30
+      GROUP BY query ORDER BY sum(impressions) DESC LIMIT $1`,
+    [fromWebmaster],
+  ).catch(() => ({ rows: [] }))).rows.map((row) => row.query);
+  const list = [...new Set([...tracked, ...popular])].filter((text) => text && !isStaleQuery(text));
   if (!list.length) return { all: 0, todo: [] };
   const done = new Set((await query(
     "SELECT DISTINCT query FROM seo_demand_snapshots WHERE source = 'wordstat_api' AND month = $1 AND query = ANY($2::text[])",

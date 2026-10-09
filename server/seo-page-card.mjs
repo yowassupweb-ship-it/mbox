@@ -175,3 +175,56 @@ export function sitemapNote({ in_sitemap, lastmod, source, now = new Date() }) {
     note: !lastmod ? "В sitemap есть, но без lastmod." : age !== null && age > 365 ? `lastmod старше года (${age} дн.): робот может считать страницу неизменной.` : `lastmod ${String(lastmod).slice(0, 10)}.`,
   };
 }
+
+// ─── Что в карточке стоит заметить ───────────────────────────────────────────
+
+/**
+ * Автоматические замечания по карточке: то, что видно по данным без интерпретаций. Каждое — { level, text }:
+ * high — похоже на ошибку или потерю трафика, medium — стоит проверить, info — для сведения.
+ */
+export function pageSignals(card) {
+  const out = [];
+  const add = (level, text) => out.push({ level, text });
+  const page = card.page || {};
+  const meta = card.meta || {};
+  const wm = card.webmaster || {};
+  const impressions = num(wm.last_14?.impressions);
+  const queries = card.semantics?.queries || [];
+  const maxDemand = Math.max(0, ...queries.map((item) => num(item.demand)));
+
+  if (page.noindex && (impressions > 0 || maxDemand >= 1000)) {
+    add("high", `Страница закрыта noindex, но показывается в поиске (${impressions} показов за период) или под неё есть спрос (до ${maxDemand.toLocaleString("ru-RU")} в месяц). Проверьте, что закрытие намеренное: оно убирает страницу из индекса и забирает трафик.`);
+  }
+  if (page.canonical_is_self === false && page.canonical) add("high", `Canonical ведёт на другую страницу (${pathOfUrl(page.canonical)}): эта страница сама ранжироваться не будет.`);
+  if (page.type === "technical" && page.status_code === 200) {
+    const visits = num(card.metrica?.visits_28);
+    add("high", `Техническая страница отдаёт 200${card.sitemap?.in_sitemap ? ", лежит в sitemap" : ""}${page.noindex ? "" : " и открыта для индексации"}${visits ? `; поисковых визитов за 28 дней: ${visits.toLocaleString("ru-RU")}` : ""}. Такие адреса должны отдавать 404 или быть закрыты.`);
+  }
+  if (page.status_code && page.status_code !== 200) add("high", `Страница отдаёт HTTP ${page.status_code}.`);
+  if (meta.h1_count !== null && meta.h1_count !== undefined && Number(meta.h1_count) !== 1) add("medium", Number(meta.h1_count) === 0 ? "На странице нет H1." : `На странице несколько H1 (${meta.h1_count}).`);
+  const titleLength = num(meta.title_length);
+  if (meta.title && (titleLength > 70 || titleLength < 25)) add("info", `Title длиной ${titleLength} знаков: ${titleLength > 70 ? "обрежется в выдаче" : "слишком короткий"}.`);
+  if (meta.description !== null && meta.description !== undefined) {
+    const length = String(meta.description).length;
+    if (length === 0) add("medium", "Нет meta description: сниппет соберёт поисковик.");
+    else if (length < 70 || length > 180) add("info", `Description длиной ${length} знаков: ${length < 70 ? "короткий" : "обрежется в выдаче"}.`);
+  }
+  if (num(meta.images) >= 5 && num(meta.images_without_alt) / num(meta.images) >= 0.25) add("info", `Картинок без alt: ${meta.images_without_alt} из ${meta.images}.`);
+  const types = card.markup?.schema?.types || [];
+  if (card.markup && page.type && page.type !== "technical" && !types.some((type) => /BreadcrumbList/.test(type))) add("info", "Нет разметки BreadcrumbList (хлебные крошки в выдаче).");
+  if (card.markup?.schema?.json_ld_broken) add("medium", `Битых блоков JSON-LD: ${card.markup.schema.json_ld_broken}.`);
+  for (const item of queries.filter((row) => row.other_page_ranks).sort((a, b) => num(b.demand) - num(a.demand)).slice(0, 3)) {
+    add("medium", `Под запрос «${item.query}» (спрос ${num(item.demand).toLocaleString("ru-RU")}) Topvisor видит другую страницу: ${item.topvisor_url}. Возможна каннибализация.`);
+  }
+  for (const item of queries.filter((row) => num(row.demand) >= 5000 && (row.topvisor_position === null || num(row.topvisor_position) > 50) && row.topvisor_date).slice(0, 2)) {
+    add("info", `Запрос «${item.query}» (спрос ${num(item.demand).toLocaleString("ru-RU")}) вне топ-50.`);
+  }
+  if (wm.comparable) {
+    const before = num(wm.previous_14?.clicks);
+    const now = num(wm.last_14?.clicks);
+    if (before >= 30 && now <= before * 0.7) add("high", `Клики в Вебмастере упали на ${Math.round((1 - now / before) * 100)}% к предыдущему периоду (${before} → ${now}).`);
+  }
+  if (card.sitemap?.in_sitemap === false && impressions > 0) add("medium", "Страницы нет в sitemap, хотя она показывается в поиске.");
+  const order = { high: 0, medium: 1, info: 2 };
+  return out.sort((a, b) => order[a.level] - order[b.level]);
+}

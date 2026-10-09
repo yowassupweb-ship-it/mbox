@@ -20,7 +20,8 @@ type Card = {
   meta: Record<string, unknown> & { title: string; title_length: number; h1: string; snapshot_at: string };
   markup: { schema: { json_ld_blocks: number; json_ld_broken: number; types: string[] }; microdata: number } | null;
   sitemap: { in_sitemap: boolean; lastmod?: string; lastmod_age_days?: number | null; note: string };
-  webmaster: { last_14: Period; previous_14: Period; days_stored: number; first_day: string; last_day: string };
+  webmaster: { last_14: Period; previous_14: Period; comparable: boolean; days_stored: number; first_day: string; last_day: string };
+  signals: Array<{ level: "high" | "medium" | "info"; text: string }>;
   semantics: { total_queries: number; with_demand: number; core_terms: Array<{ term: string; weight: number }>; queries: QueryRow[] };
   metrica: { visits_28: number; visits_prev_28: number; bounce_rate: number | null; note: string; goals: Array<{ goal_id: string; goal: string; note: string; role: string; reaches: number; conversion: number | null }> };
   seasonality: { enough: boolean; note: string; seasonal?: boolean; index?: Array<number | null>; peak?: string[]; queries?: string[] } | null;
@@ -85,6 +86,13 @@ export function SeoPageCard({ initial, origin }: { initial: string; origin: stri
             </p>
           </header>
 
+          {card.signals.length > 0 && (
+            <section className="seo-card-signals" aria-label="Что заметить">
+              <h3>Что заметить</h3>
+              <ul>{card.signals.map((item) => <li key={item.text} data-level={item.level}><b>{item.level === "high" ? "Важно" : item.level === "medium" ? "Проверить" : "К сведению"}</b> {item.text}</li>)}</ul>
+            </section>
+          )}
+
           {card.gaps.length > 0 && (
             <section className="seo-card-gaps" aria-label="Чего не хватает">
               <h3>Чего не хватает</h3>
@@ -93,8 +101,8 @@ export function SeoPageCard({ initial, origin }: { initial: string; origin: stri
           )}
 
           <div className="seo-card-stats">
-            <Stat label="Клики Вебмастера, 14 дн." value={fmt(card.webmaster.last_14.clicks)} hint={delta(card.webmaster.last_14.clicks, card.webmaster.previous_14.clicks) && `к прошлым 14: ${delta(card.webmaster.last_14.clicks, card.webmaster.previous_14.clicks)}`} />
-            <Stat label="Показы, 14 дн." value={fmt(card.webmaster.last_14.impressions)} hint={card.webmaster.last_14.ctr !== null ? `CTR ${fmt(card.webmaster.last_14.ctr, 2)}%` : null} />
+            <Stat label={`Клики Вебмастера, ${card.webmaster.last_14.days} дн.`} value={fmt(card.webmaster.last_14.clicks)} hint={card.webmaster.comparable ? (delta(card.webmaster.last_14.clicks, card.webmaster.previous_14.clicks) && `к прошлым 14: ${delta(card.webmaster.last_14.clicks, card.webmaster.previous_14.clicks)}`) : "сравнивать пока не с чем: истории мало"} />
+            <Stat label={`Показы, ${card.webmaster.last_14.days} дн.`} value={fmt(card.webmaster.last_14.impressions)} hint={card.webmaster.last_14.ctr !== null ? `CTR ${fmt(card.webmaster.last_14.ctr, 2)}%` : null} />
             <Stat label="Позиция в Вебмастере" value={fmt(card.webmaster.last_14.avg_position, 1)} hint={card.webmaster.days_stored ? `история с ${day(card.webmaster.first_day)}` : null} />
             <Stat label="Визиты из поиска, 28 дн." value={fmt(card.metrica.visits_28)} hint={delta(card.metrica.visits_28, card.metrica.visits_prev_28) && `к прошлым 28: ${delta(card.metrica.visits_28, card.metrica.visits_prev_28)}`} />
             <Stat label="Запросов у страницы" value={fmt(card.semantics.total_queries)} hint={`со спросом: ${card.semantics.with_demand}`} />

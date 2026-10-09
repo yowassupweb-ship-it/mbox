@@ -69,3 +69,21 @@ test("ядро семантики и заметка по sitemap", () => {
   assert.match(sitemapNote({ in_sitemap: false }).note, /нет в sitemap/);
   assert.match(sitemapNote({ in_sitemap: true, lastmod: "2024-01-01", now: new Date("2026-10-09") }).note, /старше года/);
 });
+
+test("замечания: noindex при показах, canonical на чужую страницу, техническая 200, несколько H1; порядок по важности", async () => {
+  const { pageSignals } = await import("./seo-page-card.mjs");
+  const base = { page: { path: "/x", type: "selection", status_code: 200, noindex: true, canonical: "https://s/y", canonical_is_self: false }, meta: { h1_count: 0, title: "t", title_length: 90, description: "" }, webmaster: { last_14: { impressions: 670, clicks: 43 }, previous_14: { clicks: 100 }, comparable: true }, semantics: { queries: [{ query: "туры", demand: 40000, other_page_ranks: true, topvisor_url: "/z", topvisor_position: 9, topvisor_date: "2026-10-09" }] }, metrica: { visits_28: 0 }, sitemap: { in_sitemap: true }, markup: { schema: { types: ["Organization"], json_ld_broken: 0 } } };
+  const out = pageSignals(base);
+  assert.equal(out[0].level, "high");
+  assert.ok(out.some((item) => /noindex/.test(item.text) && /670/.test(item.text)));
+  assert.ok(out.some((item) => /Canonical ведёт на другую/.test(item.text)));
+  assert.ok(out.some((item) => /нет H1/i.test(item.text)));
+  assert.ok(out.some((item) => /другую страницу: \/z/.test(item.text)));
+  assert.ok(out.some((item) => /BreadcrumbList/.test(item.text)));
+  const order = out.map((item) => item.level);
+  assert.deepEqual(order, [...order].sort((a, b) => ({ high: 0, medium: 1, info: 2 }[a] - { high: 0, medium: 1, info: 2 }[b])));
+  const tech = pageSignals({ ...base, page: { path: "/404", type: "technical", status_code: 200, noindex: false }, metrica: { visits_28: 3592 }, webmaster: { last_14: { impressions: 0 }, comparable: false }, semantics: { queries: [] } });
+  assert.ok(tech.some((item) => /Техническая страница отдаёт 200/.test(item.text) && /3\s?592/.test(item.text)));
+  const drop = pageSignals({ ...base, page: { path: "/p", noindex: false }, webmaster: { last_14: { impressions: 100, clicks: 20 }, previous_14: { clicks: 100 }, comparable: true }, semantics: { queries: [] } });
+  assert.ok(drop.some((item) => /упали на 80%/.test(item.text)));
+});

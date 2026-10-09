@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectWordstatDemand } from "./seo-wordstat.mjs";
 
-function fakeDb({ tracked, done = [] }) {
+function fakeDb({ tracked, done = [], popular = [] }) {
   const inserts = [];
   const query = async (sql, params) => {
     if (/FROM seo_rank_snapshots/.test(sql)) return { rows: tracked.map((q) => ({ query: q })) };
+    if (/FROM seo_page_stats/.test(sql)) return { rows: (popular || []).map((q) => ({ query: q })) };
     if (/FROM seo_demand_snapshots/.test(sql)) return { rows: done.map((q) => ({ query: q })) };
     if (/INSERT INTO seo_demand_snapshots/.test(sql)) { inserts.push(params); return { rows: [] }; }
     throw new Error(`unexpected sql ${sql}`);
@@ -73,4 +74,11 @@ test("дособор: после упора в часовую квоту ждё�
   const later = await topUpDemand(db.query, { apiKey: "k" }, { now: new Date("2026-10-09T11:05:00Z"), fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ totalCount: "3", results: [] }) }), sleep: async () => {} });
   assert.equal(later.saved, 2);
   resetDemandBlock();
+});
+
+test("запросы страниц из Вебмастера тоже получают спрос, после отслеживаемых и без дублей", async () => {
+  const db = fakeDb({ tracked: ["туры по россии"], popular: ["туры по россии", "куда поехать на новый год", "тур 2024"] });
+  const out = await collectWordstatDemand(db.query, { apiKey: "k" }, { fetchImpl: ok(10), gapMs: 0, now: new Date("2026-10-09") });
+  assert.equal(out.tracked, 2);
+  assert.deepEqual(db.inserts.map((row) => row[0]).sort(), ["куда поехать на новый год", "туры по россии"]);
 });

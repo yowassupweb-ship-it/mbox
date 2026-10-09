@@ -2,7 +2,7 @@
 // Тонкие места (запросы к Вебмастеру и Wordstat по требованию, кривая CTR) приходят снаружи через deps,
 // чтобы модуль не зависел от остального SEO Wizard и проверялся на подставной базе.
 import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
-import { coreTerms, effectAround, pathOfUrl, seasonality, sitemapNote, sumSeries } from "./seo-page-card.mjs";
+import { coreTerms, effectAround, pageSignals, pathOfUrl, seasonality, sitemapNote, sumSeries } from "./seo-page-card.mjs";
 
 const DAY = 86_400_000;
 const num = (value) => { const n = Number(value); return Number.isFinite(n) ? n : 0; };
@@ -13,8 +13,10 @@ const PATH_SQL = (column) => `COALESCE(NULLIF(rtrim(regexp_replace(${column}, '^
 
 const sum = (rows, key) => rows.reduce((total, row) => total + num(row[key]), 0);
 
-function periodTotals(daily, days, offset = 0, now = new Date()) {
-  const end = now.getTime() - offset * DAY;
+function periodTotals(daily, days, offset = 0, anchor = new Date()) {
+  // Окна считаются от последнего дня, за который есть данные, а не от «сегодня»: Вебмастер отстаёт на неделю,
+  // и «последние 14 дней от сегодня» захватывали бы только часть данных.
+  const end = anchor.getTime() - offset * DAY;
   const start = end - days * DAY;
   const rows = daily.filter((row) => { const t = Date.parse(`${row.date}T00:00:00Z`); return t > start && t <= end; });
   const impressions = sum(rows, "impressions");
@@ -35,12 +37,18 @@ export async function pageCard(query, input, deps = {}) {
        FROM seo_urls WHERE ${PATH_SQL("url")} = $1 ORDER BY in_sitemap DESC, updated_at DESC LIMIT 1`,
     [path],
   ).catch(() => ({ rows: [] }))).rows[0] || null;
-  if (!urlRow) gaps.push("Страницы нет в реестре адресов: она не попала ни в sitemap, ни в обход. Данные ниже — только из Вебмастера, Topvisor и Метрики, если они есть.");
+  if (!urlRow) gaps.push("Страницы нет в реестре адресов: она не попала ни в sitemap, ни в обход сайта. Данные — из Вебмастера, Topvisor и Метрики, метатеги — с живой страницы.");
 
-  // Метатеги и разметка — последний снимок обхода.
-  const snapshot = urlRow ? (await query("SELECT captured_at::text AS captured_at, status_code, canonical, title, h1, meta FROM seo_page_snapshots WHERE url = $1 ORDER BY captured_at DESC LIMIT 1", [urlRow.url])).rows[0] : null;
+  // Метатеги и разметка — последний снимок обхода; нет снимка или разметки в нём — открываем живую страницу (один запрос, не сохраняется).
+  let snapshot = urlRow ? (await query("SELECT captured_at::text AS captured_at, status_code, canonical, title, h1, meta FROM seo_page_snapshots WHERE url = $1 ORDER BY captured_at DESC LIMIT 1", [urlRow.url])).rows[0] : null;
+  let live = false;
+  if ((!snapshot || !snapshot.meta?.markup) && deps.crawlLive) {
+    const fresh = await deps.crawlLive(path).catch(() => null);
+    if (fresh && fresh.status_code) { snapshot = { captured_at: now.toISOString(), status_code: fresh.status_code, canonical: fresh.canonical, title: fresh.title, h1: fresh.h1, meta: fresh.meta || {} }; live = true; }
+  }
   const markup = snapshot?.meta?.markup || null;
-  if (snapshot && !markup) gaps.push("В последнем снимке страницы нет разметки (он сделан до карточки): полные метатеги появятся после следующего обхода.");
+  if (live) gaps.push(urlRow ? "Метатеги и разметка получены с живой страницы сейчас: в последнем обходе их ещё не было." : "Метатеги и разметка получены с живой страницы сейчас: в обход сайта эта страница не входит.");
+  else if (snapshot && !markup) gaps.push("В последнем снимке страницы нет разметки (он сделан до карточки): полные метатеги появятся после следующего обхода.");
 
   // Вебмастер: суточные итоги страницы и её запросы.
   const daily = (await query(
@@ -156,13 +164,17 @@ export async function pageCard(query, input, deps = {}) {
     gaps.push("Сезонность не оценить: нет запросов с известным спросом.");
   }
 
-  return {
+  const anchor = daily.length ? new Date(`${daily[daily.length - 1].date}T00:00:00Z`) : now;
+  const last14 = periodTotals(daily, 14, 0, anchor);
+  const previous14 = periodTotals(daily, 14, 14, anchor);
+
+  const card = {
     page: urlRow ? {
       url: urlRow.url, path, type: urlRow.url_type, section: urlRow.section, status_code: urlRow.status_code, canonical: urlRow.canonical || "",
       canonical_is_self: urlRow.canonical ? pathOfUrl(urlRow.canonical) === path : null,
-      in_search: urlRow.in_search, decision: urlRow.decision || "", decision_note: urlRow.decision_note || "",
+      in_search: daily.some((row) => row.impressions > 0) ? true : Boolean(urlRow.in_search), decision: urlRow.decision || "", decision_note: urlRow.decision_note || "",
       noindex: Boolean(urlRow.quality?.noindex),
-    } : { url: "", path },
+    } : { url: "", path, ...(live ? { status_code: snapshot.status_code, canonical: snapshot.canonical || "", canonical_is_self: snapshot.canonical ? pathOfUrl(snapshot.canonical) === path : null, type: "вне реестра", noindex: Boolean(snapshot.meta?.noindex), in_search: daily.some((row) => row.impressions > 0) } : {}) },
     meta: {
       title: snapshot?.title || urlRow?.title || "", title_length: (snapshot?.title || urlRow?.title || "").length,
       h1: snapshot?.h1 || urlRow?.h1 || "", h1_count: snapshot?.meta?.h1_count ?? null,
@@ -171,11 +183,11 @@ export async function pageCard(query, input, deps = {}) {
       og: markup?.og ?? null, twitter_card: markup?.twitter_card ?? null,
       hreflang: markup?.hreflang ?? null, h2: markup?.h2 ?? null, h2_count: markup?.h2_count ?? null, images: markup?.images ?? null,
       images_without_alt: markup?.images_without_alt ?? null, words: markup?.words ?? null, text_chars: snapshot?.meta?.text_chars ?? null,
-      snapshot_at: snapshot?.captured_at || "",
+      snapshot_at: snapshot?.captured_at || "", live,
     },
     markup: markup ? { schema: markup.schema, microdata: markup.schema?.microdata ?? 0 } : null,
     sitemap: sitemapNote({ in_sitemap: Boolean(urlRow?.in_sitemap), lastmod: urlRow?.lastmod, source: urlRow?.source_flags?.sitemap_source, now }),
-    webmaster: { last_14: periodTotals(daily, 14, 0, now), previous_14: periodTotals(daily, 14, 14, now), days_stored: daily.length, first_day: daily[0]?.date || "", last_day: daily[daily.length - 1]?.date || "", daily: daily.slice(-60) },
+    webmaster: { last_14: last14, previous_14: previous14, comparable: last14.days >= 10 && previous14.days >= 10, days_stored: daily.length, first_day: daily[0]?.date || "", last_day: daily[daily.length - 1]?.date || "", daily: daily.slice(-60) },
     semantics: { total_queries: queries.length, with_demand: queries.filter((item) => item.demand !== null).length, core_terms: coreTerms(queries), queries: queries.slice(0, 100) },
     metrica,
     seasonality: season,
@@ -183,6 +195,7 @@ export async function pageCard(query, input, deps = {}) {
     effects,
     gaps,
   };
+  return { ...card, signals: pageSignals(card) };
 }
 
 /** Пары «страница — запрос» из накопленной статистики Вебмастера: сумма за всё хранимое время и средняя позиция по показам. */

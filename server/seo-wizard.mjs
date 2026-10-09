@@ -1417,8 +1417,9 @@ export async function seoPageCard(query, input) {
   const own = await ctrCurve(query).catch(() => null);
   return pageCard(query, input, {
     ctr: own && own(1) > 0 ? own : null,
-    goalNotes: goalNotesOf(settings.config),
+    goalNotes: goalNotesOf(settings.config, { all: true }),
     collectQueries: (path) => collectOnePageQueries(query, path),
+    crawlLive: (path) => crawlPage(normalizeUrl(path, siteOrigin())),
     fetchDynamics: apiKey ? (phrase) => wordstatDynamics({ apiKey, folderId }, phrase) : null,
   });
 }
@@ -1893,11 +1894,27 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
   }
 }
 
-/** Комментарии владельца к целям Метрики (польза цели): агентам они объясняют, какие цели что значат. Только цели с комментарием или ролью. */
-export function goalNotesOf(config = {}) {
+/**
+ * Комментарии владельца к целям Метрики (польза цели): агентам они объясняют, какие цели что значат.
+ * По умолчанию только цели с комментарием или ролью; all: true — все (нужно карточке страницы, чтобы показать названия целей).
+ */
+export function goalNotesOf(config = {}, { all = false } = {}) {
   return metricaCountersOf(config).flatMap((counter) => counter.goals
-    .filter((goal) => goal.description || goal.role)
+    .filter((goal) => all || goal.description || goal.role)
     .map((goal) => ({ counter_id: counter.id, counter: counter.name, site: counter.site, goal_id: goal.id, goal: goal.name, role: goal.role, note: goal.description })));
+}
+
+/** Самые крупные цели по поисковым достижениям за 28 дней (из собранной статистики Метрики), с названием и комментарием, если они есть. */
+export async function topGoals(query, config, limit = 15) {
+  const rows = (await query(
+    `SELECT g.key AS goal_id, sum(g.value::float)::int AS reaches
+       FROM seo_traffic_snapshots t, jsonb_each_text(COALESCE(t.raw->'goals', '{}'::jsonb)) g
+      WHERE t.source = 'metrica' AND t.captured_on > current_date - 28
+      GROUP BY 1 ORDER BY 2 DESC LIMIT $1`,
+    [limit],
+  ).catch(() => ({ rows: [] }))).rows;
+  const known = new Map(goalNotesOf(config, { all: true }).map((item) => [item.goal_id, item]));
+  return rows.map((row) => ({ goal_id: row.goal_id, goal: known.get(row.goal_id)?.goal || "", reaches: row.reaches, role: known.get(row.goal_id)?.role || "", note: known.get(row.goal_id)?.note || "" }));
 }
 
 export async function buildSeoPackage(query, { scenario = "monday", runId = null } = {}) {
@@ -1940,7 +1957,10 @@ export async function buildSeoPackage(query, { scenario = "monday", runId = null
     },
     candidates: issues,
     pending_decisions: pendingDecisions,
-    goal_notes: goalNotesOf((await getSeoSettings(query).catch(() => ({ config: {} }))).config),
+    ...(await (async () => {
+      const config = (await getSeoSettings(query).catch(() => ({ config: {} }))).config;
+      return { goal_notes: goalNotesOf(config), goals_top: await topGoals(query, config) };
+    })()),
     obscura_checks: issues
       .filter((issue) => ["04_home_h1_missing", "01_home_duplicate_index_php", "03_duplicate_slug_across_sections"].includes(issue.detector))
       .slice(0, 10)
