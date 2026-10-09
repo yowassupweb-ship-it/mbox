@@ -26,11 +26,21 @@ export const KIND_LABEL = {
   other: "Не в sitemap",
 };
 
+const TRACKING = /^(utm_[a-z_]+|yclid|ysclid|gclid|fbclid|_openstat|from|ref|clid|roistat\w*|etext)$/i;
+
+/** Адрес без рекламных меток: /page?utm_source=x — та же страница, что /page. Остальные параметры (?id=5) — часть адреса. */
+export function withoutTracking(key) {
+  const [path, query = ""] = String(key).split("?");
+  const kept = query.split("&").filter((part) => part && !TRACKING.test(part.split("=")[0]));
+  return kept.length ? `${path}?${kept.join("&")}` : path;
+}
+
 /** Тип страницы из индекса Яндекса относительно нашего sitemap. */
 export function classifyIndexed(url, sitemapPaths) {
   const key = pathKey(url);
   const path = key.split("?")[0];
-  if (sitemapPaths.has(key) || sitemapPaths.has(path)) return "in_sitemap";
+  // Параметр — часть адреса: /tour?id=5 не то же самое, что /tour. Совпадение по пути без параметров допускается только для рекламных меток.
+  if (sitemapPaths.has(key) || sitemapPaths.has(withoutTracking(key))) return "in_sitemap";
   if (/^\/(lk|ajax|bitrix|admin|api|cart|order|login|auth|search)(\/|$)/i.test(path)) return "technical";
   if (/\.php$/i.test(path)) return "legacy";
   if (/^\/tour$/.test(path) && /(^|\?|&)id=\d+/.test(key)) return "tour_outside";

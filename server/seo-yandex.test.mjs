@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyIndexed, indexTrend, indexingRows, kindAdvice, linkTargets, pathKey, presentProblems, summarizeIndexed } from "./seo-yandex.mjs";
+import { classifyIndexed, withoutTracking, indexTrend, indexingRows, kindAdvice, linkTargets, pathKey, presentProblems, summarizeIndexed } from "./seo-yandex.mjs";
 
 const sitemap = new Set(["/", "/odnodnevnye", "/tour?id=1", "/podbor-tura/novyy-god"]);
 
@@ -73,4 +73,13 @@ test("внешние ссылки: назначения, домены и сос�
   ], registry);
   assert.deepEqual(out.map((item) => [item.path, item.links, item.state]), [["/ekskursii.php", 2, "legacy"], ["/odnodnevnye", 1, "ok"], ["/gone", 1, "broken"], ["/new-page", 1, "unknown"]]);
   assert.equal(out[0].domains, 1, "www и без www — один домен");
+});
+
+test("параметр — часть адреса: /tour в sitemap не делает /tour?id=N «страницей из sitemap», а рекламные метки отбрасываются", () => {
+  const map = new Set(["/tour", "/odnodnevnye"]);
+  assert.equal(classifyIndexed("https://vs-travel.ru/tour?id=2157", map), "tour_outside");
+  assert.equal(classifyIndexed("https://vs-travel.ru/tour", map), "in_sitemap");
+  assert.equal(classifyIndexed("https://vs-travel.ru/odnodnevnye?utm_source=x&yclid=1", map), "in_sitemap");
+  assert.equal(withoutTracking("/tour?id=5&utm_medium=cpc"), "/tour?id=5");
+  assert.equal(withoutTracking("/p?utm_a=1"), "/p");
 });
