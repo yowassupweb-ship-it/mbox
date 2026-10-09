@@ -17,9 +17,9 @@ const GUIDE = {
     formula: "число адресов со старым lastmod × 1",
   },
   "01_tours_missing_from_sitemap": {
-    what: "Страницы туров, известные MBOX, отсутствуют в sitemap.",
+    what: "Туры из таблицы MBOX (tour_sheets) не найдены в sitemap по адресу /tour?id=N. Список — из базы MBOX, а не из фида и не из поиска: сам по себе он не доказывает, что страница живая.",
     why: "Туры, которых нет в sitemap, обнаруживаются позже и реже. Это прямые коммерческие страницы.",
-    check: "Взять номер тура из примеров и найти его страницу на сайте; проверить, что она открывается и должна индексироваться.",
+    check: "Нажмите «Перепроверить на сайте»: выборка туров откроется заново и покажет, сколько из них отвечают 200, открыты для индексации и имеют свой canonical.",
     fix: "Добавить недостающие туры в генерацию sitemap; если тур снят с продажи — не считать его потерей.",
     formula: "число пропущенных туров × 8",
   },
@@ -140,6 +140,7 @@ export function explainIssue(issue, stats = {}) {
     },
     affected: { total, shown: examples.length, truncated: total > examples.length },
     examples,
+    verification: evidence.verification && typeof evidence.verification === "object" ? evidence.verification : null,
     counts: Object.fromEntries(Object.entries(evidence).filter(([, value]) => value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "number"))),
   };
 }

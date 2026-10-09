@@ -183,3 +183,21 @@ export function rivalPages(board, ours, { limit = 150 } = {}) {
   }
   return [...pages.values()].sort((a, b) => b.queries - a.queries || b.top3 - a.top3).slice(0, limit);
 }
+
+/**
+ * Наши позиции из ответа history: строки { captured_at, query, url, position, raw }. Берутся только ячейки своего проекта.
+ * Ответ с competitors_ids содержит одних конкурентов: для него результат пуст, и вызывающий не должен стирать старые позиции.
+ */
+export function parseOwnCells(keywords, { ownProjectId }) {
+  const rows = [];
+  for (const keyword of keywords || []) {
+    const query = String(keyword?.name || "").trim();
+    if (!query) continue;
+    for (const [key, cell] of Object.entries(keyword.positionsData || {})) {
+      const parts = splitCell(key);
+      if (!parts || parts.projectId !== String(ownProjectId)) continue;
+      rows.push({ captured_at: `${parts.day}T12:00:00Z`, query, url: String(cell?.relevant_url || ""), position: toPosition(cell?.position), raw: { keyword_id: keyword.id, cell } });
+    }
+  }
+  return rows;
+}

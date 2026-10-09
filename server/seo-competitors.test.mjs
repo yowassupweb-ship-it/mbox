@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBoard, domainStats, gaps, parseCompetitorCells, rivalMovers, rivalPages, splitCell, summary, trendMatrix, wins } from "./seo-competitors.mjs";
+import { buildBoard, domainStats, gaps, parseCompetitorCells, parseOwnCells, rivalMovers, rivalPages, splitCell, summary, trendMatrix, wins } from "./seo-competitors.mjs";
 
 const OURS = "vs-travel.ru";
 const rows = [
@@ -91,4 +91,11 @@ test("динамика по проверкам для всех доменов", 
   assert.equal(matrix.length, 2);
   assert.equal(matrix[1].cells["rtoperator.ru"].top10, 2);
   assert.equal(matrix[0].cells["magput.ru"], null);
+});
+
+test("свои позиции берутся только из ячеек своего проекта; ответ только с конкурентами даёт пустоту (его нельзя записывать вместо своих)", () => {
+  const own = [{ id: 1, name: "тур", positionsData: { "2026-10-09:25882986:1": { position: "5", relevant_url: "/a" }, "2026-10-09:25920382:1": { position: "1", relevant_url: "https://rival/x" } } }];
+  assert.deepEqual(parseOwnCells(own, { ownProjectId: 25882986 }).map((row) => [row.query, row.position, row.url]), [["тур", 5, "/a"]]);
+  const rivalsOnly = [{ id: 1, name: "тур", positionsData: { "2026-10-09:25920382:1": { position: "1" }, "2026-10-09:25920384:1": { position: "4" } } }];
+  assert.deepEqual(parseOwnCells(rivalsOnly, { ownProjectId: 25882986 }), []);
 });

@@ -181,11 +181,22 @@ function emptyFor(sources, key) {
 }
 
 async function searchByUrl(query) {
-  const list = await rows(query, `
+  // Показы и клики по страницам: сначала накопленная статистика Вебмастера по страницам (seo_page_stats, ключ — путь),
+  // старые снимки по запросам адреса страницы не содержат и остаются запасным вариантом.
+  const pages = await rows(query, `
+    SELECT url, sum(impressions)::int AS impressions, sum(clicks)::int AS clicks,
+           CASE WHEN sum(impressions) FILTER (WHERE position IS NOT NULL) > 0
+                THEN sum(position * impressions) FILTER (WHERE position IS NOT NULL) / sum(impressions) FILTER (WHERE position IS NOT NULL) END AS position
+    FROM seo_page_stats WHERE query = '' AND captured_on > current_date - 28 GROUP BY url`).catch(() => []);
+  const counts = await rows(query, "SELECT url, count(DISTINCT query)::int AS queries FROM seo_page_stats WHERE query <> '' AND captured_on > current_date - 28 GROUP BY url").catch(() => []);
+  const queriesBy = new Map(counts.map((item) => [item.url, item.queries]));
+  const byPath = new Map(pages.map((item) => [item.url, { ...item, queries: queriesBy.get(item.url) || 0 }]));
+  const legacy = await rows(query, `
     SELECT url, sum(impressions)::int AS impressions, sum(clicks)::int AS clicks, count(DISTINCT query)::int AS queries,
            CASE WHEN sum(impressions) > 0 THEN sum(COALESCE(position, 0) * impressions) / sum(impressions) END AS position
-    FROM seo_search_snapshots WHERE captured_at > now() - interval '${WINDOW}' GROUP BY url`);
-  return new Map(list.map((item) => [item.url, item]));
+    FROM seo_search_snapshots WHERE captured_at > now() - interval '${WINDOW}' AND url <> '' GROUP BY url`);
+  const byUrl = new Map(legacy.map((item) => [item.url, item]));
+  return { get: (url) => byPath.get(pathOf(url)) || byUrl.get(url) };
 }
 
 async function inlinksByUrl(query) {
@@ -217,6 +228,15 @@ export async function ctrCurve(query) {
 }
 
 async function queryPairs(query) {
+  // Пары «запрос — страница» с показами и кликами: из статистики Вебмастера по страницам (путь страницы вместо адреса);
+  // пока её нет — из старых снимков по запросам (адреса там пустые, поэтому таблицы по страницам были бедными).
+  const fromPages = await rows(query, `
+    SELECT query, url, sum(impressions)::int AS impressions, sum(clicks)::int AS clicks,
+           CASE WHEN sum(impressions) FILTER (WHERE position IS NOT NULL) > 0
+                THEN sum(position * impressions) FILTER (WHERE position IS NOT NULL) / sum(impressions) FILTER (WHERE position IS NOT NULL) END AS position
+    FROM seo_page_stats WHERE query <> '' AND captured_on > current_date - 28
+    GROUP BY query, url`).catch(() => []);
+  if (fromPages.length) return fromPages;
   return rows(query, `
     SELECT query, url, sum(impressions)::int AS impressions, sum(clicks)::int AS clicks,
            CASE WHEN sum(impressions) > 0 THEN sum(COALESCE(position, 0) * impressions) / sum(impressions) END AS position

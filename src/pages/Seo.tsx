@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ApiError, fetchJson, fetchOr } from "../lib/api";
 import { SeoFlow } from "./seo/SeoFlow";
 import { SeoPageCard } from "./seo/SeoPageCard";
+import { SeoHelp } from "./seo/SeoHelp";
 import { SeoStrategyView } from "./seo/SeoStrategy";
 import type { LiveRun, RunStatus, ScenarioState, Strategy } from "./seo/seoTypes";
 import { OctopusSpinner } from "../components/OctopusSpinner";
@@ -385,6 +386,7 @@ function SeoWizard() {
 
 
       <div className="seo-body">
+        <SeoHelp viewId={viewId} />
         {viewId === "scenario" && (scenarioState ? <SeoFlow state={scenarioState} running={live} onRun={(scenario) => void runScenario(scenario)} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
         {viewId === "strategy" && (strategy ? <SeoStrategyView data={strategy} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
         {viewId === "overview" && (dashboard ? <SeoDashboard data={dashboard} actions={actions} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
@@ -411,6 +413,20 @@ const DETAIL_PAGE = 100;
 function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: () => void }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [verify, setVerify] = useState<VerifyResult | null>(data.verification);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
+  const runVerify = async () => {
+    setVerifying(true);
+    setVerifyError("");
+    try {
+      setVerify(await fetchJson<VerifyResult>(`/api/mbox/seo/issues/${data.id}/verify`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+    } catch (cause) {
+      setVerifyError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setVerifying(false);
+    }
+  };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -449,6 +465,20 @@ function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: (
         {Object.entries(data.counts).map(([name, values]) => (
           <p key={name} className="seo-detail-counts">{Object.entries(values).map(([key, value]) => `${key}: ${value.toLocaleString("ru-RU")}`).join(" · ")}</p>
         ))}
+        <div className="seo-verify">
+          <button type="button" className="seo-verify-btn" onClick={() => void runVerify()} disabled={verifying || data.examples.length === 0} aria-busy={verifying || undefined}>
+            <RefreshCw size={13} aria-hidden="true" /> {verifying ? "Открываю страницы…" : verify ? "Перепроверить ещё раз" : "Перепроверить на сайте"}
+          </button>
+          <span className="seo-form-hint">{verify ? `Проверка от ${new Date(verify.checked_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: сервер делает её сам после каждого сбора.` : "Откроет до 30 адресов из списка заново, без JavaScript, и скажет, подтверждается ли находка."}</span>
+          {verifyError && <p className="seo-error" role="alert">Не получилось проверить: {verifyError}. Повторите позже.</p>}
+          {verify && (
+            <div className={`seo-verify-result is-${verify.verdict}`} role="status">
+              <strong>{VERDICT_WORD[verify.verdict]}</strong> · проверено {verify.checked} из {verify.of_total.toLocaleString("ru-RU")}
+              <p>{verify.text}</p>
+              {verify.bad.length > 0 && <details><summary>Не подтвердились ({verify.bad.length})</summary><ul>{verify.bad.slice(0, 30).map((path) => <li key={path}>{path}</li>)}</ul></details>}
+            </div>
+          )}
+        </div>
         <h3>Список{data.affected.truncated ? ` — сохранено ${data.affected.shown} из ${data.affected.total.toLocaleString("ru-RU")}` : ` — ${data.affected.shown}`}</h3>
         {data.examples.length === 0 ? <p className="seo-form-hint">Детектор не сохранил адреса. Список появится после следующего сбора.</p> : (
           <>
@@ -482,6 +512,12 @@ function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: (
   );
 }
 
+type VerifyResult = {
+  checked: number; of_total: number; checked_at: string; verdict: "confirmed" | "partly" | "not_confirmed" | "unknown"; text: string; bad: string[];
+  checks?: Array<{ path: string; status: number; noindex: boolean; canonical: string; canonical_self: boolean | null; text_chars: number; title: string }>;
+};
+const VERDICT_WORD: Record<VerifyResult["verdict"], string> = { confirmed: "Подтверждено", partly: "Частично", not_confirmed: "Не подтверждено", unknown: "Нечего проверять" };
+
 type IssueDetailData = {
   id: string; detector: string; title: string; summary: string; severity: string; status: string;
   what: string; why: string; check: string; fix: string;
@@ -489,6 +525,7 @@ type IssueDetailData = {
   affected: { total: number; shown: number; truncated: boolean };
   examples: Array<{ path: string; note: string; impressions?: number; clicks?: number }>;
   counts: Record<string, Record<string, number>>;
+  verification: VerifyResult | null;
 };
 
 const SOURCES_TABLE = "__sources";

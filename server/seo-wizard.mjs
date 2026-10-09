@@ -6,9 +6,10 @@ import { ctrCurve, recordChange, saveOutreach, SCENARIOS, seoDashboard, seoView,
 import { collectWordstatDemand, topUpDemand, wordstatDynamics } from "./seo-wordstat.mjs";
 import { pageCard } from "./seo-page-card-db.mjs";
 import { explainIssue } from "./seo-explain.mjs";
+import { conclude, pathForExample, spread } from "./seo-verify.mjs";
 import { extractMarkup } from "./seo-markup.mjs";
 import { fetchWithRetry } from "./net-retry.mjs";
-import { parseCompetitorCells, splitCell } from "./seo-competitors.mjs";
+import { parseCompetitorCells, parseOwnCells } from "./seo-competitors.mjs";
 import { collectPageQueries, collectPageTotals, topPagePaths } from "./seo-webmaster-pages.mjs";
 import { diffSnapshots, pathOfUrl } from "./seo-page-card.mjs";
 import { nextPositionsAction } from "./seo-rank-check.mjs";
@@ -851,36 +852,26 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
   // Конкуренты проекта: без них сбор работает как раньше (список недоступен — не причина терять свои позиции).
   const competitors = await topvisorCall(auth, "get/projects_2/competitors", { project_id: Number(projectId) }).catch(() => []);
   const competitorIds = (Array.isArray(competitors) ? competitors : []).map((item) => Number(item.id)).filter(Number.isFinite);
-  const history = await topvisorCall(auth, "get/positions_2/history", {
+  const historyBody = {
     project_id: Number(projectId),
     regions_indexes: [region.index],
     dates,
     fields: ["id", "name"],
     positions_fields: ["position", "relevant_url"],
-    ...(competitorIds.length ? { competitors_ids: competitorIds } : {}),
-  }, 120000);
+  };
+  // Важно: если в запросе есть competitors_ids, Topvisor отдаёт ТОЛЬКО конкурентов и не отдаёт наш проект.
+  // Поэтому свои позиции и позиции конкурентов — два разных запроса.
+  const history = await topvisorCall(auth, "get/positions_2/history", historyBody, 120000);
+  const rivalHistory = competitorIds.length
+    ? await topvisorCall(auth, "get/positions_2/history", { ...historyBody, competitors_ids: competitorIds }, 120000).catch(() => null)
+    : null;
 
-  const rowsOut = [];
-  for (const keyword of history?.keywords || []) {
-    const name = String(keyword.name || "").trim();
-    if (!name) continue;
-    for (const [key, cell] of Object.entries(keyword.positionsData || {})) {
-      // В истории рядом с нашими лежат ячейки конкурентов (ключ «дата:id_проекта:регион»): берём только свой проект.
-      const parts = splitCell(key);
-      if (!parts || parts.projectId !== String(projectId)) continue;
-      const day = parts.day;
-      const raw = cell?.position;
-      const position = raw === undefined || raw === null || raw === "--" || raw === "" ? null : Number(raw);
-      rowsOut.push({
-        captured_at: `${day}T12:00:00Z`,
-        query: name,
-        url: String(cell?.relevant_url || ""),
-        position: Number.isFinite(position) ? position : null,
-        raw: { keyword_id: keyword.id, cell },
-      });
-    }
+  const rowsOut = parseOwnCells(history?.keywords || [], { ownProjectId: projectId });
+
+  // Нет своих позиций при непустом списке запросов — разбор или ответ сломался: старые данные не трогаем, а не стираем и пишем пустоту.
+  if (!rowsOut.length && (history?.keywords || []).length) {
+    throw new Error("Topvisor вернул историю без позиций нашего проекта: прежние позиции оставлены как есть");
   }
-
   // Прогон за те же даты заменяет прошлый: Topvisor мог досчитать проверку, дубли по дням не нужны.
   await query(
     "DELETE FROM seo_rank_snapshots WHERE source = 'topvisor' AND region = $1 AND captured_at::date = ANY($2::date[])",
@@ -895,7 +886,7 @@ async function collectTopvisorRanks(query, auth, projectId, regionIndex) {
       [JSON.stringify(chunk), region.label, region.device],
     );
   }
-  const saved = await storeCompetitors(query, Array.isArray(competitors) ? competitors : [], parseCompetitorCells(history?.keywords || [], { ownProjectId: projectId, competitorIds, regionIndex: region.index }), region.label, dates);
+  const saved = await storeCompetitors(query, Array.isArray(competitors) ? competitors : [], parseCompetitorCells(rivalHistory?.keywords || [], { ownProjectId: projectId, competitorIds, regionIndex: region.index }), region.label, dates);
   return {
     project: project.name || String(projectId),
     region: region.label,
@@ -1374,6 +1365,47 @@ export async function checkTopvisor(query) {
   }
 }
 
+/**
+ * Живая перепроверка находки: открывает выборку её адресов на сайте заново и делает вывод, подтверждается ли находка.
+ * Страницы открываются без JavaScript (как обычный запрос), поэтому для «пустых» страниц вывод это оговаривает.
+ */
+export async function verifyIssue(query, issueId, { count = 30 } = {}) {
+  const detail = await issueDetail(query, issueId);
+  if (!detail) return null;
+  const paths = spread([...new Set(detail.examples.map(pathForExample).filter(Boolean))], count);
+  const checks = await mapLimit(paths, 5, async (path) => {
+    const page = await crawlPage(normalizeUrl(path, siteOrigin()));
+    const canonical = page.canonical ? pathOfUrl(page.canonical) : "";
+    return {
+      path,
+      status: page.status_code,
+      noindex: Boolean(page.meta?.noindex),
+      canonical,
+      canonical_self: canonical ? canonical === pathOfUrl(page.url || path) : null,
+      text_chars: Number(page.meta?.text_chars || 0),
+      title: (page.title || "").slice(0, 80),
+    };
+  });
+  return { checked: checks.length, of_total: detail.affected.total, checked_at: new Date().toISOString(), ...conclude(detail.detector, checks), checks };
+}
+
+/** Перепроверка самых важных открытых находок прогона; результат сохраняется в evidence.verification и уходит в пакет. */
+export async function verifyTopIssues(query, runId, { limit = 8 } = {}) {
+  const ids = (await query(
+    "SELECT id::text FROM seo_issues WHERE last_run_id = $1 AND severity = 'high' AND status IN ('open', 'review') ORDER BY potential_score DESC LIMIT $2",
+    [runId, limit],
+  )).rows.map((row) => row.id);
+  const done = [];
+  for (const id of ids) {
+    const verified = await verifyIssue(query, id, { count: 20 });
+    if (!verified) continue;
+    const summary = { verdict: verified.verdict, text: verified.text, checked: verified.checked, of_total: verified.of_total, checked_at: verified.checked_at, bad: verified.bad.slice(0, 10) };
+    await query("UPDATE seo_issues SET evidence = evidence || $2::jsonb WHERE id = $1", [id, JSON.stringify({ verification: summary })]);
+    done.push({ id, verdict: verified.verdict });
+  }
+  return done;
+}
+
 /** Подробности находки: пояснение детектора, примеры и их показы/клики из Вебмастера за 28 дней. */
 /** Доказательства для текста задачи: начало списков и сколько всего; полный список открывается в SEO Wizard («Подробнее»). */
 export function evidenceForTask(evidence, limit = 25) {
@@ -1634,7 +1666,7 @@ async function detectIssues(query, runId, sitemapUrls, crawlSnapshots, tourIds, 
         severity: "high",
         key: "tour_id_pages",
         title: "Страницы туров отсутствуют в sitemap",
-        summary: `${missing.length} туров из фида не найдены в sitemap как /tour?id=N.`,
+        summary: `${missing.length} туров из базы MBOX (таблица tour_sheets) не найдены в sitemap как /tour?id=N. Это сравнение двух списков, а не проверка страниц: кнопка «Перепроверить на сайте» открывает выборку туров и показывает, живые ли они и индексируются ли.`,
         affected_count: missing.length,
         potential_score: missing.length * 8,
         evidence: { total_tours: tourIds.length, missing_count: missing.length, sample_tour_ids: missing.slice(0, EVIDENCE_LIMIT) },
@@ -1933,6 +1965,9 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
       });
       issues.push({ detector: "source_sitemap_unavailable" });
     }
+    // Главные находки перепроверяются вживую сразу: агент и человек видят «подтверждено/нет», а не только вывод детектора.
+    stage("перепроверка находок");
+    await verifyTopIssues(query, runId).catch((error) => console.error(`[seo] перепроверка находок: ${error?.message || error}`));
     const sitemapPaths = new Set(sitemapUrls.map((item) => item.path));
     const checkedInSitemap = checked.filter((item) => sitemapPaths.has(pathOf(item.requested_url || item.url)));
     stats = {
@@ -2306,6 +2341,11 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     }
     if (url.pathname === "/api/mbox/seo/settings" && req.method === "PUT") {
       return reply(200, await saveSeoSettings(query, await readBody(req)));
+    }
+    const verifyMatch = url.pathname.match(/^\/api\/mbox\/seo\/issues\/(\d+)\/verify$/);
+    if (verifyMatch && req.method === "POST") {
+      const verified = await verifyIssue(query, verifyMatch[1]);
+      return reply(verified ? 200 : 404, verified || { error: "not_found" });
     }
     const detailMatch = url.pathname.match(/^\/api\/mbox\/seo\/issues\/(\d+)\/detail$/);
     if (detailMatch && req.method === "GET") {
