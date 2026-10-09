@@ -995,7 +995,9 @@ export async function exportMetricaGoals(query, { counterIds = [], days = 28 } =
   await mapLimit(ids, 2, async (counterId) => {
     try {
       const counter = counterMeta.counters.find((item) => item.id === counterId) || { id: counterId, name: "", site: "" };
-      const roles = new Map((configured.find((item) => item.id === counterId)?.goals || []).map((goal) => [goal.id, goal.role]));
+      const settingsGoals = configured.find((item) => item.id === counterId)?.goals || [];
+      const roles = new Map(settingsGoals.map((goal) => [goal.id, goal.role]));
+      const notes = new Map(settingsGoals.map((goal) => [goal.id, goal.description]));
       const goals = counterMeta.goals?.[counterId] || [];
       if (counterMeta.errors?.[counterId]) throw new Error(counterMeta.errors[counterId]);
       const [visitsAll, visitsOrganic] = await Promise.all([stat(counterId, ["ym:s:visits"], period), stat(counterId, ["ym:s:visits"], period, organic)]);
@@ -1010,6 +1012,7 @@ export async function exportMetricaGoals(query, { counterIds = [], days = 28 } =
           rowsOut.push({
             counter_id: counterId, counter: counter.name, site: counter.site, goal_id: goal.id, goal: goal.name, type: goal.type,
             role: roles.get(goal.id) || "",
+            note: notes.get(goal.id) || "",
             reaches_all: reachesAll, conversion_all: round2(all.totals[index * 2 + 1]),
             reaches_organic: reachesOrganic, conversion_organic: round2(org.totals[index * 2 + 1]),
             reaches_organic_prev: reachesPrev,
@@ -1033,12 +1036,12 @@ function round2(value) {
 
 /** CSV для выгрузки целей: разделитель «;» и BOM, чтобы Excel открыл кириллицу и числа. */
 export function goalsCsv(exported) {
-  const header = ["Счётчик", "ID счётчика", "Сайт", "ID цели", "Цель", "Тип", "Роль", "Достижений (весь трафик)", "Конверсия, % (весь)", "Достижений (поиск)", "Конверсия, % (поиск)", "Поиск, пред. период", "Изменение, %"];
+  const header = ["Счётчик", "ID счётчика", "Сайт", "ID цели", "Цель", "Тип", "Роль", "Достижений (весь трафик)", "Конверсия, % (весь)", "Достижений (поиск)", "Конверсия, % (поиск)", "Поиск, пред. период", "Изменение, %", "Польза цели (комментарий)"];
   const cell = (value) => {
     const text = value === null || value === undefined ? "" : String(value);
     return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
-  const lines = (exported.goals || []).map((row) => [row.counter, row.counter_id, row.site, row.goal_id, row.goal, row.type, row.role, row.reaches_all, row.conversion_all, row.reaches_organic, row.conversion_organic, row.reaches_organic_prev, row.change_organic].map(cell).join(";"));
+  const lines = (exported.goals || []).map((row) => [row.counter, row.counter_id, row.site, row.goal_id, row.goal, row.type, row.role, row.reaches_all, row.conversion_all, row.reaches_organic, row.conversion_organic, row.reaches_organic_prev, row.change_organic, row.note].map(cell).join(";"));
   return `\ufeff${[header.join(";"), ...lines].join("\r\n")}\r\n`;
 }
 
@@ -1717,6 +1720,13 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
   }
 }
 
+/** Комментарии владельца к целям Метрики (польза цели): агентам они объясняют, какие цели что значат. Только цели с комментарием или ролью. */
+export function goalNotesOf(config = {}) {
+  return metricaCountersOf(config).flatMap((counter) => counter.goals
+    .filter((goal) => goal.description || goal.role)
+    .map((goal) => ({ counter_id: counter.id, counter: counter.name, site: counter.site, goal_id: goal.id, goal: goal.name, role: goal.role, note: goal.description })));
+}
+
 export async function buildSeoPackage(query, { scenario = "monday", runId = null } = {}) {
   await ensureSeoWizardSchema(query);
   const latestRun = runId ? { id: String(runId) } : (await query("SELECT id::text FROM seo_runs ORDER BY started_at DESC LIMIT 1")).rows[0];
@@ -1757,6 +1767,7 @@ export async function buildSeoPackage(query, { scenario = "monday", runId = null
     },
     candidates: issues,
     pending_decisions: pendingDecisions,
+    goal_notes: goalNotesOf((await getSeoSettings(query).catch(() => ({ config: {} }))).config),
     obscura_checks: issues
       .filter((issue) => ["04_home_h1_missing", "01_home_duplicate_index_php", "03_duplicate_slug_across_sections"].includes(issue.detector))
       .slice(0, 10)

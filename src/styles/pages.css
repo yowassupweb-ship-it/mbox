@@ -2784,3 +2784,9 @@ time {
 .seo-detail table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
 .seo-detail th, .seo-detail td { padding: 6px 8px; border-bottom: var(--border-width) solid var(--border-color); text-align: left; vertical-align: top; }
 .seo-detail td.is-url { word-break: break-all; font-variant-numeric: tabular-nums; }
+
+/* Комментарий к цели Метрики: польза цели */
+.seo-metrica-note { display: grid; gap: 4px; grid-column: 1 / -1; }
+.seo-metrica-note > span { font-size: var(--text-xs); color: var(--text-muted); }
+.seo-metrica-note textarea { width: 100%; min-height: 52px; padding: var(--space-2) var(--space-3); resize: vertical; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); line-height: 1.45; }
+.seo-metrica-note textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }

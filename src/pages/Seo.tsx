@@ -1103,7 +1103,10 @@ function MetricaCounters({ counters, onChange, saveFirst }: { counters: MetricaC
                     <select value={goal.role} aria-label={`Что делать с целью «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { role: event.currentTarget.value as MetricaGoalRole })}>
                       {GOAL_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
                     </select>
-                    <textarea rows={1} value={goal.description} placeholder="Что значит цель: где срабатывает, что считать" aria-label={`Описание цели «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { description: event.currentTarget.value })} />
+                    <label className="seo-metrica-note">
+                      <span>Польза цели, комментарий</span>
+                      <textarea rows={2} value={goal.description} placeholder="Зачем эта цель: что она показывает, где срабатывает, чем полезна для SEO. Это видят агенты SEO Wizard и выгрузка целей." aria-label={`Польза цели «${goal.name || goal.id}»`} onChange={(event) => patchGoal(counter.id, goal.id, { description: event.currentTarget.value })} />
+                    </label>
                   </li>
                 ))}
               </ul>
