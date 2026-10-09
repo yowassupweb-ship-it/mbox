@@ -110,3 +110,33 @@ export async function topUpDemand(query, auth, { now = new Date(), fetchImpl, sl
 }
 
 export function resetDemandBlock() { blockedUntil = 0; }
+
+const DYNAMICS_ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/wordstat/dynamics";
+
+/** Помесячная динамика спроса фразы за последние `months` полных месяцев → [{ month: "YYYY-MM", value }]. Один запрос к API. */
+export async function wordstatDynamics({ apiKey, folderId = "" }, phrase, { months = 24, now = new Date(), fetchImpl = fetch } = {}) {
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)); // последний день прошлого месяца
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - months + 1, 1));
+  const attempts = [
+    { fromDate: `${start.toISOString().slice(0, 10)}T00:00:00Z`, toDate: `${end.toISOString().slice(0, 10)}T00:00:00Z` },
+    { fromDate: `${start.toISOString().slice(0, 10)}T00:00:00Z`, toDate: `${end.toISOString().slice(0, 10)}T23:59:59Z` },
+  ];
+  let lastError = null;
+  for (const range of attempts) {
+    const response = await fetchImpl(DYNAMICS_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Api-Key ${apiKey}` },
+      body: JSON.stringify({ phrase, period: "PERIOD_MONTHLY", ...range, ...(folderId ? { folderId } : {}) }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* не JSON */ }
+    if (response.ok) {
+      return (data?.results || []).map((item) => ({ month: String(item.date).slice(0, 7), value: Number(item.count) || 0 })).filter((item) => /^\d{4}-\d{2}$/.test(item.month));
+    }
+    lastError = Object.assign(new Error(`Wordstat ${response.status}: ${(data?.message || text).slice(0, 200)}`), { status: response.status });
+    if (response.status !== 400) break; // формат дат пробуем второй раз только при 400
+  }
+  throw lastError;
+}

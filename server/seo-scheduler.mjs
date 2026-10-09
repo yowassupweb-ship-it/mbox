@@ -2,7 +2,7 @@
 // Правила «что пора» — dueScenarios (seo-strategy.mjs), здесь только таймер и защита от наложения. По умолчанию
 // выключено: сбор — это тысяча запросов к сайту, включается явно переменной SEO_AUTORUN=1 на сервере.
 import { dueScenarios } from "./seo-strategy.mjs";
-import { demandTick, liveSeoRun, positionsTick, startSeoRun } from "./seo-wizard.mjs";
+import { demandTick, liveSeoRun, pageQueriesTick, positionsTick, startSeoRun } from "./seo-wizard.mjs";
 
 const TICK_MS = Number(process.env.SEO_AUTORUN_TICK_MS || 10 * 60_000);
 const state = { enabled: false, started_at: "", last_tick_at: "", last_start: null, last_error: "" };
@@ -23,6 +23,9 @@ async function tick(query, log) {
     state.last_positions = { ...positions, at: new Date().toISOString() };
     log(`[seo-scheduler] позиции: ${positions.action}${positions.error ? ` — ${positions.error}` : ""}${positions.last_check ? ` (проверка от ${positions.last_check})` : ""}`);
   }
+  // Запросы страниц из Вебмастера: раз в неделю, у самых крупных страниц (API хранит две недели, история копится у нас).
+  const pages = await pageQueriesTick(query);
+  if (pages) log(`[seo-scheduler] запросы страниц Вебмастера: ${pages.error ? `ошибка ${pages.error}` : `страниц ${pages.done}/${pages.pages}, строк ${pages.rows}, ошибок ${pages.failed}`}`);
   const demand = await demandTick(query);
   if (demand) log(`[seo-scheduler] спрос Wordstat: собрано ${demand.saved ?? 0}, осталось ${demand.left ?? "?"}${demand.stopped ? `, стоп: ${demand.stopped}` : ""}${demand.error ? `, ошибка: ${demand.error}` : ""}`);
   if (liveSeoRun()) return;

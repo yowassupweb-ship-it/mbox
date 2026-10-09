@@ -2790,3 +2790,38 @@ time {
 .seo-metrica-note > span { font-size: var(--text-xs); color: var(--text-muted); }
 .seo-metrica-note textarea { width: 100%; min-height: 52px; padding: var(--space-2) var(--space-3); resize: vertical; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); line-height: 1.45; }
 .seo-metrica-note textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Карточка страницы */
+.seo-url-pair { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; }
+.seo-url-card { padding: 0; border: 0; background: none; color: var(--accent-color); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.seo-url-card:hover { text-decoration: underline; }
+.seo-card { display: grid; gap: var(--space-4); }
+.seo-card h2 { margin: 0; font-size: var(--text-lg); overflow-wrap: anywhere; }
+.seo-card h3 { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); font-weight: var(--weight-semibold); }
+.seo-card-search { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--element-bg); }
+.seo-card-search input { flex: 1; min-height: 36px; border: 0; background: transparent; color: var(--text-main); font: inherit; outline: none; }
+.seo-card-search button { min-height: 28px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; cursor: pointer; }
+.seo-card-head p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+.seo-card-gaps { padding: var(--space-3); border: var(--border-width) solid color-mix(in srgb, var(--state-warn) 45%, var(--border-color)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--state-warn) 8%, transparent); }
+.seo-card-gaps ul { margin: 0; padding-left: 18px; font-size: var(--text-sm); line-height: 1.5; }
+.seo-card-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); }
+.seo-card-stat { display: grid; gap: 2px; padding: var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--element-bg); }
+.seo-card-stat span { font-size: var(--text-xs); color: var(--text-muted); }
+.seo-card-stat strong { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.seo-card-stat small { font-size: var(--text-xs); color: var(--text-muted); }
+.seo-card-terms { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+.seo-card-table { overflow-x: auto; }
+.seo-card-table table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.seo-card-table th, .seo-card-table td { padding: 6px 8px; border-bottom: var(--border-width) solid var(--border-color); text-align: left; vertical-align: top; font-variant-numeric: tabular-nums; }
+.seo-card-table th { font-size: var(--text-xs); color: var(--text-muted); font-weight: var(--weight-medium); white-space: nowrap; }
+.seo-card-warn { color: var(--state-warn); font-style: normal; font-size: var(--text-xs); }
+.seo-card-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); }
+.seo-card-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--space-3); margin: 0; font-size: var(--text-sm); }
+.seo-card-dl dt { color: var(--text-muted); }
+.seo-card-dl dd { margin: 0; overflow-wrap: anywhere; }
+.seo-card-note { margin: 0 0 var(--space-3); font-size: var(--text-sm); line-height: 1.5; }
+.seo-card-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; height: 90px; align-items: end; }
+.seo-card-bars div { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 2px; }
+.seo-card-bars i { display: block; width: 100%; min-height: 2px; background: var(--accent-color); border-radius: 2px 2px 0 0; }
+.seo-card-bars span { font-size: var(--text-2xs); color: var(--text-muted); }
+.seo-card-effects { margin: var(--space-3) 0 0; padding-left: 18px; font-size: var(--text-sm); line-height: 1.6; }

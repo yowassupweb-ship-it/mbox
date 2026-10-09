@@ -199,7 +199,7 @@ async function allUrls(query) {
 }
 
 /** Кривая «позиция → CTR» по нашим же данным за 28 дней (как в презентации: ожидаемый CTR — наш, не отраслевой). */
-async function ctrCurve(query) {
+export async function ctrCurve(query) {
   const list = await rows(query, `
     SELECT GREATEST(1, LEAST(50, round(position)))::int AS pos, sum(clicks)::float AS clicks, sum(impressions)::float AS imp
     FROM seo_search_snapshots WHERE captured_at > now() - interval '${WINDOW}' AND position IS NOT NULL

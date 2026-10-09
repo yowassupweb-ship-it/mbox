@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Download, Externa
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, fetchJson, fetchOr } from "../lib/api";
 import { SeoFlow } from "./seo/SeoFlow";
+import { SeoPageCard } from "./seo/SeoPageCard";
 import { SeoStrategyView } from "./seo/SeoStrategy";
 import type { LiveRun, RunStatus, ScenarioState, Strategy } from "./seo/seoTypes";
 import { OctopusSpinner } from "../components/OctopusSpinner";
@@ -80,6 +81,7 @@ const TABS: Tab[] = [
   { id: "scenario", label: "Сценарий" },
   { id: "strategy", label: "Стратегия" },
   { id: "overview", label: "Обзор" },
+  { id: "page", label: "Страница" },
   { id: "week", label: "Неделя", views: [{ id: "queue", label: "Очередь недели" }, { id: "decisions", label: "Решения" }, { id: "changes", label: "Журнал изменений" }] },
   { id: "architecture", label: "Архитектура", views: [{ id: "registry", label: "Реестр URL" }, { id: "index", label: "Состав индекса" }, { id: "filters", label: "Query и фильтры" }, { id: "links", label: "Внутренние ссылки" }] },
   { id: "cannibal", label: "Каннибализация", views: [{ id: "cannibal", label: "Монитор" }] },
@@ -187,6 +189,7 @@ function SeoWizard() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [detail, setDetail] = useState<IssueDetailData | null>(null);
+  const [pageTarget, setPageTarget] = useState("");
   const [detailError, setDetailError] = useState("");
 
   const current = TABS.find((item) => item.id === tab) ?? TABS[0];
@@ -213,7 +216,7 @@ function SeoWizard() {
       try { setDashboard(await fetchJson<Dashboard>("/api/mbox/seo/dashboard")); } catch (cause) { setError(errorText(cause)); } finally { setLoading(false); }
       return;
     }
-    if (id === "settings" || id === "data") return;
+    if (id === "settings" || id === "data" || id === "page") return;
     if (cache[id] && !force) return;
     setLoading(true);
     try {
@@ -318,6 +321,7 @@ function SeoWizard() {
       else list.push({ param: String(row.param), example: String(row.example || ""), own_url: "", index: "", canonical: "", link: "", [field]: value });
       return act(`filter:${row.param}`, () => saveConfig({ filter_params: list }));
     },
+    openPage: (path) => { setPageTarget(path); setTab("page"); },
     issueDetail: (row) => {
       setDetailError("");
       fetchJson<IssueDetailData>(`/api/mbox/seo/issues/${row.id}/detail`).then(setDetail).catch((cause) => setDetailError(cause instanceof Error ? cause.message : String(cause)));
@@ -385,7 +389,8 @@ function SeoWizard() {
         {viewId === "overview" && (dashboard ? <SeoDashboard data={dashboard} actions={actions} onOpen={(tabId, view) => { setTab(tabId); if (view) setViews((value) => ({ ...value, [tabId]: view })); }} /> : <SeoLoading />)}
         {viewId === "settings" && <SeoScenarioSettings settings={settings} onSave={saveConfig} />}
         {viewId === "data" && <SeoRawData />}
-        {viewId !== "scenario" && viewId !== "strategy" && viewId !== "overview" && viewId !== "settings" && viewId !== "data" && (data ? (
+        {viewId === "page" && <SeoPageCard initial={pageTarget} origin={settings.config.site_origin} />}
+        {viewId !== "scenario" && viewId !== "strategy" && viewId !== "overview" && viewId !== "settings" && viewId !== "data" && viewId !== "page" && (data ? (
           <>
             {viewId === "outreach" && <OutreachForm onSaved={() => loadView("outreach", true)} />}
             {viewId === "changes" && <ChangeForm onSaved={() => loadView("changes", true)} />}
@@ -543,6 +548,7 @@ type RowActions = {
   setFilterField: (row: Row, field: string, value: string) => void;
   issueTask: (row: Row) => void;
   issueDetail: (row: Row) => void;
+  openPage: (path: string) => void;
   issueStatus: (row: Row, status: string) => void;
   outreachStatus: (row: Row, status: string) => void;
   runScenario: (row: Row) => void;
@@ -656,6 +662,14 @@ function Cell({ column, row, options, actions }: { column: Column; row: Row; opt
       if (empty) return <>—</>;
       const path = String(value);
       const href = /^https?:\/\//.test(path) ? path : `${(actions?.origin || "").replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+      if (actions?.openPage) {
+        return (
+          <span className="seo-url-pair">
+            <button type="button" className="seo-url-card" onClick={() => actions.openPage(path)} title="Открыть карточку страницы">{path}</button>
+            <a className="seo-url" href={href} target="_blank" rel="noreferrer" title={href} aria-label="Открыть страницу сайта"><ExternalLink size={11} aria-hidden="true" /></a>
+          </span>
+        );
+      }
       return <a className="seo-url" href={href} target="_blank" rel="noreferrer" title={href}>{path}<ExternalLink size={11} aria-hidden="true" /></a>;
     }
     case "status": {

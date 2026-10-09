@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import { seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
 import { seoSchedulerStatus } from "./seo-scheduler.mjs";
-import { recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
-import { collectWordstatDemand, topUpDemand } from "./seo-wordstat.mjs";
+import { ctrCurve, recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
+import { collectWordstatDemand, topUpDemand, wordstatDynamics } from "./seo-wordstat.mjs";
+import { pageCard } from "./seo-page-card-db.mjs";
 import { explainIssue } from "./seo-explain.mjs";
+import { extractMarkup } from "./seo-markup.mjs";
+import { collectPageQueries, collectPageTotals, topPagePaths } from "./seo-webmaster-pages.mjs";
+import { diffSnapshots, pathOfUrl } from "./seo-page-card.mjs";
 import { nextPositionsAction } from "./seo-rank-check.mjs";
 
 const DEFAULT_SITE = "https://www.vs-travel.ru";
@@ -150,6 +154,50 @@ CREATE TABLE IF NOT EXISTS seo_demand_snapshots (
   raw JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_seo_demand_snapshots_query ON seo_demand_snapshots(query, captured_at DESC);
+
+-- Вебмастер по страницам: суточные показы/клики/позиция страницы (query = '') и пары «страница — запрос». API хранит две недели,
+-- поэтому история копится здесь. url — путь страницы без хоста.
+CREATE TABLE IF NOT EXISTS seo_page_stats (
+  captured_on DATE NOT NULL,
+  url TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  impressions INT NOT NULL DEFAULT 0,
+  clicks INT NOT NULL DEFAULT 0,
+  position DOUBLE PRECISION,
+  PRIMARY KEY (captured_on, url, query)
+);
+CREATE INDEX IF NOT EXISTS idx_seo_page_stats_url ON seo_page_stats(url, captured_on DESC);
+CREATE INDEX IF NOT EXISTS idx_seo_page_stats_query ON seo_page_stats(query) WHERE query <> '';
+
+-- Что менялось на странице: сравнение с предыдущим снимком при каждом обходе. Сырые снимки чистятся, события остаются.
+CREATE TABLE IF NOT EXISTS seo_page_changes (
+  id BIGSERIAL PRIMARY KEY,
+  url TEXT NOT NULL,
+  path TEXT NOT NULL,
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  run_id BIGINT,
+  field TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  old_value TEXT NOT NULL DEFAULT '',
+  new_value TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_seo_page_changes_path ON seo_page_changes(path, detected_at DESC);
+
+-- Помесячная динамика спроса из Wordstat (для сезонности): один запрос API на фразу, дальше берётся отсюда.
+CREATE TABLE IF NOT EXISTS seo_demand_history (
+  query TEXT NOT NULL,
+  month TEXT NOT NULL,
+  demand BIGINT NOT NULL DEFAULT 0,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (query, month)
+);
+
+-- Состояние фоновых заданий расписания (когда последний раз собирали запросы страниц и т. п.).
+CREATE TABLE IF NOT EXISTS seo_jobs (
+  name TEXT PRIMARY KEY,
+  last_at TIMESTAMPTZ,
+  result JSONB NOT NULL DEFAULT '{}'
+);
 
 -- Проверки позиций, которые мы просили у Topvisor: когда, что ответил, чем кончилось (недельное обновление).
 CREATE TABLE IF NOT EXISTS seo_rank_checks (
@@ -455,6 +503,8 @@ async function crawlPage(url, deadlineAt = 0) {
       description_length: description.length,
       noindex: /noindex/.test(robots),
       error: response.error || "",
+      // Разметка и метатеги целиком: карточка страницы показывает их и сравнивает версии («что менялось»).
+      markup: html ? extractMarkup(html) : null,
     },
   };
 }
@@ -845,6 +895,88 @@ async function yandexGet(base, path, params, token, timeoutMs = 60000) {
   try { data = JSON.parse(text); } catch { /* ниже — ошибка с текстом ответа */ }
   if (!response.ok) throw new Error(`${path.split("/").slice(0, 4).join("/")}: ${data?.error_message || data?.message || text.slice(0, 160) || `HTTP ${response.status}`}`);
   return data;
+}
+
+async function yandexPost(base, path, body, token, timeoutMs = 60000) {
+  const response = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { authorization: `OAuth ${token}`, accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch { /* ниже — ошибка с текстом ответа */ }
+  if (!response.ok) throw new Error(`${response.status} ${path.split("/").slice(0, 4).join("/")}: ${data?.error_message || data?.message || text.slice(0, 160) || "ошибка"}`);
+  return data;
+}
+
+/** Вызов query-analytics/list Вебмастера для сайта из настроек: call(body) → ответ. */
+async function webmasterAnalyticsCall(token, hostId) {
+  const userId = (await yandexGet(WEBMASTER_API, "/user", [], token))?.user_id;
+  if (!userId) throw new Error("Вебмастер: не вернул user_id, проверьте токен");
+  const path = `/user/${userId}/hosts/${encodeURIComponent(hostId)}/query-analytics/list`;
+  return (body) => yandexPost(WEBMASTER_API, path, body, token);
+}
+
+async function webmasterCredentials(query) {
+  const settings = await getSeoSettings(query, true);
+  const token = process.env.YANDEX_WEBMASTER_TOKEN || settings.secrets?.webmaster_token;
+  const hostId = process.env.YANDEX_WEBMASTER_HOST_ID || settings.config?.webmaster_host_id;
+  return token && hostId ? { token, hostId } : null;
+}
+
+async function jobState(query, name) {
+  return (await query("SELECT last_at::text AS last_at, result FROM seo_jobs WHERE name = $1", [name])).rows[0] || null;
+}
+
+async function saveJob(query, name, result) {
+  await query("INSERT INTO seo_jobs(name, last_at, result) VALUES ($1, now(), $2::jsonb) ON CONFLICT (name) DO UPDATE SET last_at = now(), result = EXCLUDED.result", [name, JSON.stringify(result)]);
+}
+
+/** Итоги Вебмастера по страницам за последние дни (каждый сбор). */
+export async function collectWebmasterPageTotals(query) {
+  await ensureSeoWizardSchema(query);
+  const credentials = await webmasterCredentials(query);
+  if (!credentials) throw new Error("Вебмастер не настроен");
+  const result = await collectPageTotals(query, await webmasterAnalyticsCall(credentials.token, credentials.hostId));
+  await saveJob(query, "webmaster_page_totals", result);
+  return result;
+}
+
+const PAGE_QUERIES_EVERY_MS = 6.9 * 86_400_000;
+
+/** Раз в неделю: запросы самых крупных страниц (по одному обращению к Вебмастеру на страницу). */
+export async function pageQueriesTick(query, { now = new Date(), limit = 400 } = {}) {
+  try {
+    await ensureSeoWizardSchema(query);
+    const job = await jobState(query, "webmaster_page_queries");
+    if (job?.last_at && now.getTime() - Date.parse(job.last_at.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00")) < PAGE_QUERIES_EVERY_MS) return null;
+    const credentials = await webmasterCredentials(query);
+    if (!credentials) return null;
+    const call = await webmasterAnalyticsCall(credentials.token, credentials.hostId);
+    let paths = await topPagePaths(query, limit);
+    if (!paths.length) {
+      await collectPageTotals(query, call);
+      paths = await topPagePaths(query, limit);
+    }
+    const result = await collectPageQueries(query, call, paths);
+    await saveJob(query, "webmaster_page_queries", result);
+    return { ...result, at: now.toISOString() };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Запросы одной страницы по требованию карточки, если по ней ещё нет пар (один запрос к API). */
+export async function collectOnePageQueries(query, path) {
+  const credentials = await webmasterCredentials(query);
+  if (!credentials) return { ok: false, error: "Вебмастер не настроен" };
+  try {
+    return { ok: true, ...(await collectPageQueries(query, await webmasterAnalyticsCall(credentials.token, credentials.hostId), [path], { concurrency: 1 })) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function daysBack(count, lag) {
@@ -1266,6 +1398,21 @@ export async function refreshPositions(query) {
   return { ranks, demand };
 }
 
+/** Карточка страницы: данные всех источников по одному адресу (см. seo-page-card-db.mjs). */
+export async function seoPageCard(query, input) {
+  await ensureSeoWizardSchema(query);
+  const settings = await getSeoSettings(query, true);
+  const apiKey = process.env.YANDEX_WORDSTAT_API_KEY || settings.secrets?.wordstat_api_key;
+  const folderId = process.env.YANDEX_WORDSTAT_FOLDER_ID || settings.config?.wordstat_folder_id || "";
+  const own = await ctrCurve(query).catch(() => null);
+  return pageCard(query, input, {
+    ctr: own && own(1) > 0 ? own : null,
+    goalNotes: goalNotesOf(settings.config),
+    collectQueries: (path) => collectOnePageQueries(query, path),
+    fetchDynamics: apiKey ? (phrase) => wordstatDynamics({ apiKey, folderId }, phrase) : null,
+  });
+}
+
 /** Дособор спроса Wordstat по расписанию (часовая квота API не даёт собрать всё за один заход). */
 export async function demandTick(query, { now = new Date() } = {}) {
   try {
@@ -1349,6 +1496,8 @@ async function runExternalAdapters(query) {
     topvisor_audit: topvisor,
     webmaster: await collected("webmaster", !webmasterToken ? "webmaster_token missing" : !webmasterHostId ? "webmaster_host_id missing" : "",
       () => collectWebmasterSearch(query, webmasterToken, webmasterHostId)),
+    webmaster_pages: await collected("webmaster_pages", !webmasterToken ? "webmaster_token missing" : !webmasterHostId ? "webmaster_host_id missing" : "",
+      () => collectWebmasterPageTotals(query)),
     metrica: await collected("metrica", !metricaToken ? "metrica_token missing" : !metricaCounters.length ? "metrica_counter_id missing" : "",
       () => collectMetricaTraffic(query, metricaToken, metricaCounters, siteOrigin())),
     // Спрос — после позиций: собираем частотность для запросов, которые Topvisor отслеживает (раз в месяц на запрос).
@@ -1647,6 +1796,20 @@ export async function runSeoWizardCollection(query, { scenario = "step1", buildP
     stage("запись результатов");
     // Страницы, до которых не дошли из-за лимита времени прогона, — не «ошибка сайта», их не пишем и не судим.
     const checked = snapshots.filter((item) => item.meta?.error !== "run deadline exceeded");
+    // Что изменилось на страницах с прошлого обхода: сравниваем с предыдущим снимком до записи нового.
+    const previous = new Map((await query("SELECT DISTINCT ON (url) url, status_code, canonical, title, h1, meta FROM seo_page_snapshots ORDER BY url, captured_at DESC")).rows.map((row) => [row.url, row]));
+    // Сырые снимки хранятся 60 дней (последний по каждому адресу всегда остаётся): история изменений лежит в seo_page_changes.
+    await query("DELETE FROM seo_page_snapshots WHERE captured_at < now() - interval '60 days' AND id NOT IN (SELECT max(id) FROM seo_page_snapshots GROUP BY url)");
+    for (const snapshot of checked) {
+      const address = snapshot.url || snapshot.requested_url;
+      const changes = diffSnapshots(previous.get(address), snapshot);
+      for (const change of changes) {
+        await query(
+          "INSERT INTO seo_page_changes(url, path, run_id, field, label, old_value, new_value) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+          [address, pathOfUrl(address), runId, change.field, change.label, change.old.slice(0, 1000), change.new.slice(0, 1000)],
+        );
+      }
+    }
     for (const snapshot of checked) {
       await query(
         `INSERT INTO seo_page_snapshots(run_id, url, status_code, canonical, title, h1, meta)
@@ -2025,6 +2188,14 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
     if (url.pathname === "/api/mbox/seo/positions/checks" && req.method === "GET") {
       await ensureSeoWizardSchema(query);
       return reply(200, { checks: (await query("SELECT id::text, requested_at::text, finished_at::text, status, price, result, error FROM seo_rank_checks ORDER BY requested_at DESC LIMIT 30")).rows });
+    }
+    if (url.pathname === "/api/mbox/seo/page" && req.method === "GET") {
+      try {
+        return reply(200, await seoPageCard(query, url.searchParams.get("url") || url.searchParams.get("path") || ""));
+      } catch (error) {
+        if (error?.status === 400) return reply(400, { error: error.message });
+        throw error;
+      }
     }
     if (url.pathname === "/api/mbox/seo/topvisor/check" && req.method === "GET") {
       return reply(200, await checkTopvisor(query));

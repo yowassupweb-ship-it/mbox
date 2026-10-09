@@ -268,6 +268,19 @@ server.registerTool(
 );
 
 server.registerTool(
+  "seo_page_card",
+  {
+    title: "SEO page card: everything known about one page",
+    description: "One call for a page (URL or path): queries with demand, potential and Topvisor position, Webmaster impressions/clicks per query and trend, Metrica visits and goals with owner notes, meta tags and markup (title, description, robots, OG, Schema.org, H2), sitemap facts, what changed on the page and when, seasonality of demand, and what happened to positions/clicks after each change. The `gaps` array says which data is missing and why: do not fill gaps with guesses.",
+    inputSchema: { url: z.string().describe("Page URL or path, e.g. /odnodnevnye/zolotoe-koltso") },
+  },
+  async ({ url }) => {
+    const data = await mboxFetch(`/api/mbox/seo/page?url=${encodeURIComponent(url)}`);
+    return withPush({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
+  },
+);
+
+server.registerTool(
   "seo_export_goals",
   {
     title: "Export all Yandex Metrica goals with numbers",
