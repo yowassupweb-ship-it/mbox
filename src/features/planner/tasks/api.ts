@@ -21,6 +21,8 @@ export interface Task {
   dueDate: string | null;
   repeat: string | null;
   assignees: string[];
+  automation: TaskAutomation | null;
+  automationRun: AutomationRun | null;
   /** Агент, который сейчас держит задачу (claim), — видно, что над ней уже работают. */
   claimedBy: string;
   claimActive: boolean;
@@ -28,6 +30,11 @@ export interface Task {
   updatedAt: string;
   props: Record<string, unknown>;
 }
+
+/** Автоматизация задачи: в день срока (в `time`) агент получает задание с текстом задачи. */
+export interface TaskAutomation { agent: string; prompt: string; time: string }
+/** Последний запуск: дошло ли задание и был ли агент на связи (иначе оно ждёт, пока наблюдатель вернётся). */
+export interface AutomationRun { due: string; fired_at: string; inbox_id: string | null; agent_online: boolean | null; error: string }
 
 export interface TaskList { id: string; name: string; color?: string }
 
@@ -65,7 +72,15 @@ export function assigneesOf(t: Task): string[] {
 type Row = {
   id: string; list_id: string; title: string; note: string; status: string; priority: string;
   props: Record<string, unknown> | null; claimed_by: string; claim_active: boolean; created_at: string; updated_at: string;
+  automation_run?: AutomationRun | null;
 };
+
+function parseAutomation(value: unknown): TaskAutomation | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.agent !== 'string' || typeof v.prompt !== 'string' || !v.agent || !v.prompt) return null;
+  return { agent: v.agent, prompt: v.prompt, time: typeof v.time === 'string' ? v.time : '09:00' };
+}
 
 function fromRow(row: Row): Task {
   const props = row.props || {};
@@ -79,6 +94,8 @@ function fromRow(row: Row): Task {
     dueDate: typeof props.due === 'string' ? props.due.slice(0, 10) : null,
     repeat: typeof props.repeat === 'string' ? props.repeat : null,
     assignees: Array.isArray(props.assignees) ? props.assignees.map(String) : [],
+    automation: parseAutomation(props.automation),
+    automationRun: row.automation_run || null,
     claimedBy: row.claimed_by || '',
     claimActive: Boolean(row.claim_active),
     createdAt: row.created_at,
@@ -172,6 +189,7 @@ function toBody(patch: Partial<Task>): Record<string, unknown> {
   if (patch.dueDate !== undefined) props.due = patch.dueDate ? patch.dueDate.slice(0, 10) : null;
   if (patch.repeat !== undefined) props.repeat = patch.repeat && patch.repeat !== 'none' ? patch.repeat : null;
   if (patch.assignees !== undefined) props.assignees = patch.assignees.length ? patch.assignees : null;
+  if (patch.automation !== undefined) props.automation = patch.automation;
   if (Object.keys(props).length) body.props = props;
   return body;
 }

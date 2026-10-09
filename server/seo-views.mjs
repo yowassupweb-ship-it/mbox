@@ -3,6 +3,7 @@
 // SEO Opportunities, SERP Competitor Gap, Link Outreach, Weekly Queue, Change Log), дашборд и отчёты
 // 10/20/25 числа. Всё считается поверх 14 таблиц seo_* (server/seo-wizard.mjs) — отдельного хранилища нет.
 // Цифр не выдумываем: пока источник не подключён, раздел отвечает empty с именем источника.
+import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
 import { pageKind } from "./seo-wizard.mjs";
 
 const OUR_DOMAIN = /(^|\.)vs-travel\.ru$/i;
@@ -649,8 +650,33 @@ async function viewPositions(query, sources) {
     stale: /20(1\d|2[0-5])/.test(item.query),
     at: item.captured_at,
   }));
+  // Потенциал каждого запроса: спрос (Wordstat) × разница CTR между текущей позицией и топ-3, с поправкой на достижимость.
+  const [demandRows, ownCtr] = await Promise.all([
+    rows(query, `SELECT DISTINCT ON (query) query, demand, month FROM seo_demand_snapshots ORDER BY query, captured_at DESC`),
+    ctrCurve(query),
+  ]);
+  const demandBy = new Map(demandRows.map((item) => [item.query, item]));
+  const curve = ownCtr(1) > 0 ? ownCtr : fallbackCtr;
+  const potentialRows = list.map((item) => {
+    const d = demandBy.get(item.query);
+    const result = queryPotential({ query: item.query, demand: d ? d.demand : null, position: item.position, ctr: curve });
+    return { query: item.query, path: item.url ? pathOf(item.url) : "", position: round(item.position), demand: d ? d.demand : null, ...result, demand_month: d?.month || "", at: item.captured_at };
+  }).sort((a, b) => (b.expected ?? -1) - (a.expected ?? -1));
+  const latestRank = list.reduce((max, item) => (item.captured_at > max ? item.captured_at : max), "");
+  const rankAgeDays = latestRank ? Math.floor((Date.now() - Date.parse(latestRank)) / 86400000) : null;
+  const withDemand = potentialRows.filter((item) => item.gain !== null).length;
+  const potentialNote = [
+    latestRank ? `Позиции Topvisor от ${latestRank.slice(0, 10)}${rankAgeDays !== null && rankAgeDays > 3 ? ` — устарели на ${rankAgeDays} дн., по ним решений не принимать` : ""}.` : "",
+    `Спрос есть у ${withDemand} из ${potentialRows.length} запросов.`,
+    "Потенциал = спрос × (CTR топ-3 − CTR текущей позиции) × достижимость (чем дальше от топа, тем меньше). Кривая CTR — наша из Вебмастера, пока её нет — запасная. Уровни A ≥ 100, B ≥ 30, C ≥ 5 кликов в месяц.",
+  ].filter(Boolean).join(" ");
   return {
     sections: [
+      section("query_potential", "Потенциал запросов — что поднимать в первую очередь", [
+        col("query", "Запрос"), col("path", "Ранжируется URL", "url"), col("position", "Позиция", "num"), col("demand", "Спрос / мес", "int"),
+        col("clicks_now", "Кликов сейчас", "int"), col("clicks_target", "В топ-3", "int"), col("gain", "Прирост", "int"),
+        col("expected", "Ожидаемый прирост", "int"), col("tier", "Уровень", "badge"), col("reason", "Примечание"), col("demand_month", "Месяц спроса"), col("at", "Позиции от", "datetime"),
+      ], potentialRows, { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · Wordstat", note: potentialNote }),
       section("positions_dist", "Срез мониторинга", [col("label", "Диапазон"), col("now", "Последняя проверка", "int"), col("week", "Прошлая проверка", "int")], list.length ? dist : [], { empty: emptyFor(sources, "topvisor_ranks"), source: "Topvisor · позиции", note: list.length ? `${list.length} отслеживаемых запросов.` : "" }),
       section("positions", "Позиции по запросам", [
         col("query", "Запрос"), col("path", "Ранжируется URL", "url"), col("position", "Позиция", "num"), col("change", "К прошлой проверке", "delta"),

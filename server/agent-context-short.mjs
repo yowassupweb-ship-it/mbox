@@ -54,6 +54,11 @@ function compactTodo(todo) {
     row.claimed_until = todo.claimed_until;
     row.heartbeat_at = todo.heartbeat_at;
   }
+  // Коммит на задачу есть, а она не закрыта: работа сделана, статус забыли (правило «#N в коммите»).
+  if (Array.isArray(todo.commits) && todo.commits.length) {
+    row.commits = todo.commits.slice(0, 3).map((commit) => `${commit.sha} ${commit.subject}`.trim());
+    row.commit_count = todo.commits.length;
+  }
   return row;
 }
 
@@ -92,6 +97,9 @@ export function buildShortAgentContext({
       approved_secrets: secrets.length,
       memories: memories.length,
     },
+    ...(openTodos.some((todo) => todo.commits?.length)
+      ? { needs_closing: openTodos.filter((todo) => todo.commits?.length).map((todo) => todo.id) }
+      : {}),
     note: "short: только незакрытые задачи и последние записи. Закрытые задачи, полные тексты и все props — через get_task / get_memory / detail=full.",
     todos: openTodos.map(compactTodo),
     relations: relations.map((relation) => ({

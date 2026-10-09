@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
 import { seoSchedulerStatus } from "./seo-scheduler.mjs";
 import { recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
+import { collectWordstatDemand } from "./seo-wordstat.mjs";
 
 const DEFAULT_SITE = "https://www.vs-travel.ru";
 const DEFAULT_PROJECT = "Вокруг света";
@@ -584,6 +585,7 @@ const DEFAULT_SEO_CONFIG = {
   // пусто — не собираются. Старые metrica_counter_id/metrica_goals переезжают сюда при чтении (metricaCountersOf).
   metrica_counters: [],
   wordstat_access: "direct",
+  wordstat_folder_id: "",
   section_roles: {
     "podbor-tura": "",
     odnodnevnye: "",
@@ -593,7 +595,7 @@ const DEFAULT_SEO_CONFIG = {
   filter_policy: { indexed: "", closed: "" },
 };
 
-const SEO_SECRET_FIELDS = ["topvisor_api_key", "webmaster_token", "metrica_token", "wordstat_token"];
+const SEO_SECRET_FIELDS = ["topvisor_api_key", "webmaster_token", "metrica_token", "wordstat_token", "wordstat_api_key"];
 
 const METRICA_GOAL_ROLES = new Set(["", "lead", "booking", "track"]);
 
@@ -1087,7 +1089,8 @@ async function runExternalAdapters(query) {
   const topvisorKey = process.env.TOPVISOR_API_KEY || secrets.topvisor_api_key;
   const webmasterToken = process.env.YANDEX_WEBMASTER_TOKEN || secrets.webmaster_token;
   const metricaToken = process.env.YANDEX_METRICA_TOKEN || secrets.metrica_token;
-  const wordstatToken = process.env.YANDEX_WORDSTAT_TOKEN || secrets.wordstat_token;
+  // Wordstat — через Yandex Search API: ключ сервисного аккаунта и каталог. Старый OAuth-токен (wordstat_token) к нему не подходит.
+  const wordstatToken = process.env.YANDEX_WORDSTAT_API_KEY || secrets.wordstat_api_key;
   const topvisorProjectId = process.env.TOPVISOR_PROJECT_ID || cfg.topvisor_project_id;
   const webmasterHostId = process.env.YANDEX_WEBMASTER_HOST_ID || cfg.webmaster_host_id;
   const envCounter = process.env.YANDEX_METRICA_COUNTER_ID;
@@ -1124,10 +1127,9 @@ async function runExternalAdapters(query) {
       () => collectWebmasterSearch(query, webmasterToken, webmasterHostId)),
     metrica: await collected("metrica", !metricaToken ? "metrica_token missing" : !metricaCounters.length ? "metrica_counter_id missing" : "",
       () => collectMetricaTraffic(query, metricaToken, metricaCounters, siteOrigin())),
-    wordstat: await configuredSource("wordstat", Boolean(wordstatToken), {
-      reason: wordstatToken ? "step_4" : "wordstat_token missing",
-      access: cfg.wordstat_access || "direct",
-    }),
+    // Спрос — после позиций: собираем частотность для запросов, которые Topvisor отслеживает (раз в месяц на запрос).
+    wordstat: await collected("wordstat", !wordstatToken ? "wordstat_api_key missing" : "",
+      async () => ({ access: cfg.wordstat_access || "direct", ...(await collectWordstatDemand(query, { apiKey: wordstatToken, folderId: process.env.YANDEX_WORDSTAT_FOLDER_ID || cfg.wordstat_folder_id || "" })) })),
   };
 }
 

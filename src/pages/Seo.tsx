@@ -36,6 +36,7 @@ type SeoSettings = {
     metrica_goals: { lead: string; booking: string };
     metrica_counters?: MetricaCounter[];
     wordstat_access: string;
+    wordstat_folder_id?: string;
     section_roles: Record<string, string>;
     filter_policy: { indexed: string; closed: string };
     filter_params?: FilterParam[];
@@ -863,7 +864,8 @@ function SeoToolSettings({ tool }: { tool: SeoToolId }) {
       <form className="seo-settings" onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <div className="seo-settings-grid">
           {tool === "wordstat-api" && <>
-            <SecretField label="Токен Wordstat" name="wordstat_token" secrets={secrets} has={settings.has_secrets.wordstat_token} onChange={setSecrets} />
+            <SecretField label="API-ключ Wordstat (сервисный аккаунт Yandex Cloud, роль search-api.webSearch.user)" name="wordstat_api_key" secrets={secrets} has={settings.has_secrets.wordstat_api_key} onChange={setSecrets} />
+            <Field label="ID каталога Yandex Cloud (b1g…, если API просит folderId)" value={c.wordstat_folder_id || ""} onChange={(wordstat_folder_id) => patch({ wordstat_folder_id })} />
             <label className="seo-field">
               <span>Доступ</span>
               <select value={c.wordstat_access} onChange={(event) => patch({ wordstat_access: event.currentTarget.value })}>

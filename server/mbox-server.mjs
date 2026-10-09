@@ -37,6 +37,7 @@ import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { createHelp, handleBrowserAgentApi, handleBrowserHelpApi, runBrowserOp, waitHelp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
 import { startSeoScheduler } from "./seo-scheduler.mjs";
+import { commitsForTodos, recordCommit } from "./todo-commits.mjs";
 import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
 import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
 import { callIntegration, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
@@ -2584,6 +2585,21 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 201, { todo: result.rows[0] });
   }
 
+  // Хук post-commit присылает коммит: номера #N из сообщения привязываются к задачам, «Closes #N» закрывает.
+  if (url.pathname === "/api/mbox/todos/commits" && req.method === "POST") {
+    const body = await readBody(req);
+    try {
+      const result = await recordCommit(query, {
+        sha: body.sha, message: body.message, repo: body.repo, branch: body.branch, author: body.author, committedAt: body.committed_at,
+      }, { canTouch: (projectId) => scope.all || hasProjectAccess(scope, projectId) });
+      for (const todo of result.closed) broadcastChange(req, "update", "todos", `#${todo.id} закрыта коммитом ${result.sha.slice(0, 8)}`);
+      return sendJson(res, 200, result);
+    } catch (error) {
+      if (error?.status === 400) return sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+  }
+
   const todoMatch = url.pathname.match(/^\/api\/mbox\/todos\/(\d+)$/);
   if (todoMatch && req.method === "GET") {
     const result = await query(
@@ -2701,6 +2717,8 @@ async function handleApiWithContext(req, res, url) {
        ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END, updated_at DESC`,
       [project.id],
     );
+    const commitMap = await commitsForTodos(query, todos.rows.filter((todo) => !["done", "archived"].includes(todo.status)).map((todo) => todo.id));
+    for (const todo of todos.rows) if (commitMap.has(todo.id)) todo.commits = commitMap.get(todo.id);
     const relations = await query(
       `SELECT e.id::text, e.from_entity, e.from_id::text, COALESCE(fp.name, fc.name, e.from_entity || ' #' || e.from_id::text) AS from_label,
               e.to_entity, e.to_id::text, COALESCE(tp.name, tc.name, e.to_entity || ' #' || e.to_id::text) AS to_label,
@@ -3436,22 +3454,26 @@ startSeoScheduler({ query });
  * Автоматизация из календаря: в момент события агент получает задание — как если бы человек написал ему в чат.
  * Claude/Codex подхватывают вопрос с props.to своими наблюдателями, Джарвису отвечаем сразу.
  */
-async function dispatchCalendarAutomation({ ownerUserId, agent, projectId, title, prompt, eventId, occurrence }) {
-  const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [ownerUserId])).rows[0];
+async function dispatchCalendarAutomation({ ownerUserId, agent, projectId, title, prompt, eventId, todoId, repeating, occurrence }) {
+  // Задача проекта не принадлежит одному пользователю — задание идёт от владельца.
+  const owner = (ownerUserId
+    ? await query("SELECT id::text, role FROM users WHERE id = $1", [ownerUserId])
+    : await query("SELECT id::text, role FROM users WHERE role = 'owner' ORDER BY id LIMIT 1")).rows[0];
   if (!owner) throw new Error("владелец события не найден");
   const isOwnerAccount = owner.role === "owner";
-  const props = { to: agent, source: "calendar", calendar_event_id: String(eventId), occurrence, mbox_user_id: owner.id, mbox_owner: isOwnerAccount };
+  const fromTask = Boolean(todoId);
+  const props = { to: agent, source: fromTask ? "task" : "calendar", ...(fromTask ? { todo_id: String(todoId) } : { calendar_event_id: String(eventId) }), occurrence, mbox_user_id: owner.id, mbox_owner: isOwnerAccount };
   const when = occurrence.replace("T", " ").slice(0, 16);
   const body = `${prompt}
 
-— Задание из календаря: «${title}», ${when}. Это автоматизация, человек сейчас может не смотреть: сделай и коротко отчитайся.`;
+— ${fromTask ? `Задание из задачи #${todoId} (срок ${occurrence})` : `Задание из календаря: «${title}», ${when}`}. Это автоматизация, человек сейчас может не смотреть: сделай и коротко отчитайся.${fromTask ? (repeating ? ` Задача повторяющаяся — не закрывай её, срок уже перенесён; укажи #${todoId} в коммите.` : ` Когда работа сделана — закрой задачу #${todoId} (статус done) и укажи #${todoId} в коммите.`) : ""}`;
   const row = (await query(
     `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
      VALUES ($1, 'Человек', 'question', $2, $3, 'open', 'normal', false, $4)
      RETURNING ${INBOX_COLUMNS}`,
-    [projectId || null, `Календарь: ${title}`.slice(0, 200), body, JSON.stringify(props)],
+    [projectId || null, `${fromTask ? "Задача" : "Календарь"}: ${title}`.slice(0, 200), body, JSON.stringify(props)],
   )).rows[0];
-  broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: "Календарь", detail: title, silent: true });
+  broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "create", actor: fromTask ? "Задача" : "Календарь", detail: title, silent: true });
   broadcastRealtime("agent_inbox_item", { inbox_item: row });
   if (agent === JARVIS_NAME) {
     const allowed = isOwnerAccount ? null : (await query("SELECT project_id::text FROM project_memberships WHERE user_id = $1", [owner.id])).rows.map((item) => item.project_id);

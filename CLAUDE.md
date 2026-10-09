@@ -268,6 +268,16 @@ MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент
 
 Задачи по самому MBOX живут в todo проекта `MBOX` в боевой БД, не в локальных файлах.
 
+**Номер задачи — в каждый коммит.** Пиши `#N` в сообщении коммита: `Closes #N` закрывает todo, просто `#N` привязывает
+коммит (`todo_commits`, `server/todo-commits.mjs`, `POST /api/mbox/todos/commits`). Задача с коммитом, но не закрытая, попадает в
+`needs_closing` в `get_agent_context` — закрой её (проверив, что работа сделана) или объясни в `note`, чего не хватает. Хук
+`scripts/git-hooks/post-commit` включает `node scripts/install-git-hooks.mjs` (нужен `MBOX_TOKEN`).
+
+**Агент по сроку.** У задачи планировщика `props.automation = {agent, prompt, time}`: в день срока (в `time`) сервер кладёт задание
+в `agent_inbox` выбранному агенту (`dueTaskAutomations` в `server/planner.mjs`, тот же тик, что и у событий календаря;
+запуск на срок один — `todo_automation_runs`). Повторяющаяся задача после запуска сама переезжает на следующий срок, остальные
+агент закрывает сам. У событий календаря то же самое — `automation` события.
+
 Лизинг задач: `claimed_by` / `claimed_until` / `heartbeat_at`. `claim` берёт задачу на 45 минут,
 повторный `claim` тем же агентом продлевает, чужой активный лиз даёт 409.
 

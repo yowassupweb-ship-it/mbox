@@ -60,3 +60,12 @@ test("short остаётся компактным на большом проек
   const size = JSON.stringify(buildShortAgentContext(input)).length;
   assert.ok(size < 30000, `слишком большой ответ: ${size}`);
 });
+
+test("short показывает коммиты у незакрытых задач и список needs_closing", () => {
+  const data = fixture();
+  data.todos[2].commits = [{ sha: "abc12345", subject: "Fix lease (#3)" }];
+  const out = buildShortAgentContext(data);
+  assert.deepEqual(out.needs_closing, ["3"]);
+  assert.deepEqual(out.todos[0].commits, ["abc12345 Fix lease (#3)"]);
+  assert.equal(buildShortAgentContext(fixture()).needs_closing, undefined);
+});

@@ -67,16 +67,21 @@ const BUILTIN = {
   },
   yandex_wordstat: {
     label: "Яндекс Wordstat",
-    base: "https://api.wordstat.yandex.net",
-    docs: "https://yandex.ru/support/wordstat/ru/content/api-structure",
+    // С 2026 Wordstat работает через Yandex Search API (AI Studio). Старый api.wordstat.yandex.net отдаёт чужой
+    // сертификат и OAuth-токены «Словолова» к новому API не подходят: нужен API-ключ сервисного аккаунта с ролью search-api.webSearch.user.
+    base: "https://searchapi.api.cloud.yandex.net/v2/wordstat",
+    docs: "https://aistudio.yandex.ru/docs/ru/search-api/api-ref/Wordstat/getTop",
     defaultMethod: "POST",
-    hint: "Частотность запросов. Все методы — POST с JSON в body: v1/topRequests {phrase, numPhrases, regions}, v1/dynamics {phrase, period: daily|weekly|monthly, fromDate}, v1/regions {phrase, regionType}, v1/getRegionsTree (без квоты). Лимит 10 запросов в секунду и 1000 в сутки. OAuth-токен с правом wordstat:api.",
+    hint: "Частотность запросов. Все методы — POST с JSON в body; folderId подставляется сам. topRequests {phrase, numPhrases, regions, devices}: популярные запросы за 30 дней; dynamics {phrase, period, fromDate}: динамика; regionsDistribution {phrase}: по регионам; getRegionsTree: коды регионов. API-ключ сервисного аккаунта с ролью search-api.webSearch.user.",
     fields: [
-      { key: "token", label: "OAuth-токен", secret: true, secretName: "wordstat_token", env: "YANDEX_WORDSTAT_TOKEN" },
+      { key: "api_key", label: "API-ключ сервисного аккаунта", secret: true, secretName: "wordstat_api_key", env: "YANDEX_WORDSTAT_API_KEY" },
+      { key: "folder_id", label: "ID каталога Yandex Cloud (b1g…)", secret: false, config: "wordstat_folder_id", env: "YANDEX_WORDSTAT_FOLDER_ID", optional: true },
     ],
-    required: ["token"],
-    headers: (values) => ({ authorization: `Bearer ${values.token}` }),
-    test: { method: "POST", path: "v1/getRegionsTree", body: {} },
+    required: ["api_key"],
+    headers: (values) => ({ authorization: `Api-Key ${values.api_key}` }),
+    // Каталог (если задан) идёт в каждом теле запроса — агенту и интерфейсу его знать не надо. Доки Search API противоречат: в методе folderId обязателен, в разделе про сервисные аккаунты сказано, что не нужен.
+    prepareBody: (values, body) => (body && typeof body === "object" && !Array.isArray(body) && !body.folderId && values.folder_id ? { ...body, folderId: values.folder_id } : body),
+    test: { method: "POST", path: "topRequests", body: { phrase: "туры по россии", numPhrases: 1 } },
   },
 };
 
@@ -228,6 +233,7 @@ export async function callIntegration(query, id, { method, path, query: params, 
   let headers = {};
   let defaultMethod = "GET";
   let extraParams = {};
+  let prepareBody = null;
   if (BUILTIN[id]) {
     const spec = BUILTIN[id];
     const { values } = await builtinValues(query, id);
@@ -236,6 +242,7 @@ export async function callIntegration(query, id, { method, path, query: params, 
     base = spec.base;
     headers = spec.headers(values);
     defaultMethod = spec.defaultMethod;
+    if (spec.prepareBody) prepareBody = (value) => spec.prepareBody(values, value);
   } else {
     const row = await customRow(query, id);
     if (!row) return { ok: false, error: "unknown_service", message: `Сервис «${id}» не найден. Список — integration_list.` };
@@ -251,6 +258,7 @@ export async function callIntegration(query, id, { method, path, query: params, 
   if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(verb)) return { ok: false, error: "bad_method" };
   let url;
   try { url = buildUrl(base, path, { ...(params || {}), ...extraParams }); } catch (error) { return { ok: false, error: "bad_path", message: error.message }; }
+  if (prepareBody && body !== undefined && body !== null) body = prepareBody(typeof body === "string" ? (() => { try { return JSON.parse(body); } catch { return body; } })() : body);
   const hasBody = body !== undefined && body !== null && verb !== "GET";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);

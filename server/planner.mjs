@@ -134,6 +134,17 @@ export function nextDue(due, repeat) {
   return isoDay(next);
 }
 
+/** Автоматизация задачи: в день срока (в `time`, по умолчанию 09:00) агент получает задание. Пустой агент/задание — её нет. */
+export function taskAutomationOf(value) {
+  if (!value || typeof value !== "object") return null;
+  const agent = String(value.agent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  const prompt = String(value.prompt || "").trim().slice(0, 4000);
+  if (!agent || !prompt) return null;
+  const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value.time || "")) ? String(value.time) : "09:00";
+  const projectId = /^\d+$/.test(String(value.project_id || "")) ? String(value.project_id) : null;
+  return { agent, prompt, time, ...(projectId ? { project_id: projectId } : {}) };
+}
+
 /** props задачи после правки: null у ключа — удалить ключ. Служебный owner_user_id правкой не трогается. */
 export function mergeProps(current, patch) {
   const next = { ...(current && typeof current === "object" ? current : {}) };
@@ -144,6 +155,11 @@ export function mergeProps(current, patch) {
   }
   if (next.repeat && !TASK_REPEATS.has(next.repeat)) delete next.repeat;
   if (next.due && !/^\d{4}-\d{2}-\d{2}/.test(String(next.due))) delete next.due;
+  if ("automation" in next) {
+    const automation = taskAutomationOf(next.automation);
+    if (automation) next.automation = automation;
+    else delete next.automation;
+  }
   if (next.assignees && !Array.isArray(next.assignees)) delete next.assignees;
   if (Array.isArray(next.assignees)) next.assignees = [...new Set(next.assignees.map(String).filter(Boolean))].slice(0, 20);
   return next;
@@ -187,6 +203,16 @@ function ensurePlannerSchema(query) {
       error TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (event_id, occurrence)
     )`);
+    // Запуски автоматизаций задач: одна строка на срок — не запустить дважды и показать, дошло ли задание до агента.
+    await query(`CREATE TABLE IF NOT EXISTS todo_automation_runs (
+      todo_id BIGINT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+      due TEXT NOT NULL,
+      fired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      inbox_id BIGINT,
+      agent_online BOOLEAN,
+      error TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (todo_id, due)
+    )`);
   })().catch((error) => { schemaReady = null; throw error; });
   return schemaReady;
 }
@@ -220,9 +246,25 @@ async function readTask(query, id) {
   return (await query("SELECT id::text, project_id::text, props, status FROM todos WHERE id = $1", [id])).rows[0];
 }
 
+/** Последний запуск автоматизации у задач, где она есть: чем кончилось и был ли агент на связи. */
+async function withRuns(query, tasks) {
+  const ids = tasks.filter((task) => task.props?.automation).map((task) => task.id);
+  if (!ids.length) return tasks;
+  const runs = (await query(
+    `SELECT DISTINCT ON (todo_id) todo_id::text, due, fired_at::text, inbox_id::text, agent_online, error
+       FROM todo_automation_runs WHERE todo_id = ANY($1::bigint[]) ORDER BY todo_id, fired_at DESC`,
+    [ids],
+  ).catch(() => ({ rows: [] }))).rows;
+  const byId = new Map(runs.map((run) => [run.todo_id, run]));
+  return tasks.map((task) => {
+    const run = byId.get(task.id);
+    return run ? { ...task, automation_run: { due: run.due, fired_at: run.fired_at, inbox_id: run.inbox_id, agent_online: run.agent_online, error: run.error } } : task;
+  });
+}
+
 async function selectTask(query, id) {
   const row = (await query(`SELECT ${TASK_COLUMNS} FROM todos t WHERE t.id = $1`, [id])).rows[0];
-  return row ? shapeTask(row) : null;
+  return row ? (await withRuns(query, [shapeTask(row)]))[0] : null;
 }
 
 async function listTasks(query, scope, userId) {
@@ -248,7 +290,7 @@ async function listTasks(query, scope, userId) {
     "SELECT id::text, name, COALESCE(color, '') AS color FROM projects WHERE ($1::boolean OR id = ANY($2::bigint[])) ORDER BY lower(name)",
     [Boolean(scope.all), (scope.projectIds || []).map(String)],
   ))).rows;
-  return { tasks: rows.map(shapeTask), lists: [{ id: PERSONAL, name: "Личные", color: "" }, ...lists] };
+  return { tasks: await withRuns(query, rows.map(shapeTask)), lists: [{ id: PERSONAL, name: "Личные", color: "" }, ...lists] };
 }
 
 /** Люди и агенты, которых можно назначить исполнителем: id «user:1» / «agent:Claude». */
@@ -546,6 +588,73 @@ export async function dueAutomations(query, nowWall) {
 }
 
 /**
+ * Задачи, у которых наступил срок и есть автоматизация: срок + время ≤ сейчас (но не старше суток) и запуска на этот срок ещё не было.
+ * Чистая выборка, без записи. Возвращает [{ todo, due, owner }].
+ */
+export async function dueTaskAutomations(query, nowWall) {
+  await ensurePlannerSchema(query);
+  const now = localDate(nowWall).getTime();
+  const rows = (await query(
+    `SELECT t.id::text, t.project_id::text, t.title, t.note, t.status, t.props
+       FROM todos t
+      WHERE t.props ? 'automation' AND t.status NOT IN ('done', 'archived') AND t.props->>'due' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+        AND NOT EXISTS (SELECT 1 FROM todo_automation_runs r WHERE r.todo_id = t.id AND r.due = substr(t.props->>'due', 1, 10))`,
+  )).rows;
+  const due = [];
+  for (const todo of rows) {
+    const automation = taskAutomationOf(todo.props.automation);
+    if (!automation) continue;
+    const day = String(todo.props.due).slice(0, 10);
+    const at = localDate(`${day}T${automation.time}:00`).getTime();
+    if (!(at <= now && at >= now - 24 * 3600_000)) continue;
+    due.push({ todo: { ...todo, props: { ...todo.props, automation } }, due: day, owner: todo.props.owner_user_id ? String(todo.props.owner_user_id) : "" });
+  }
+  return due;
+}
+
+/** Запустить одну автоматизацию задачи. Повторяющейся задаче срок сразу уезжает на следующий раз. */
+async function fireTaskAutomation(query, dispatch, item, log, broadcast) {
+  const { todo } = item;
+  const automation = todo.props.automation;
+  const online = (await query(
+    "SELECT 1 FROM agent_presence WHERE lower(agent_name) = lower($1) AND last_seen > now() - interval '3 minutes' LIMIT 1",
+    [automation.agent],
+  ).catch(() => ({ rows: [] }))).rows.length > 0;
+  const claimed = (await query(
+    "INSERT INTO todo_automation_runs(todo_id, due, agent_online) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING todo_id",
+    [todo.id, item.due, online],
+  )).rows[0];
+  if (!claimed) return;
+  try {
+    const inboxId = await dispatch({
+      ownerUserId: item.owner,
+      agent: automation.agent,
+      projectId: automation.project_id || todo.project_id || null,
+      title: todo.title,
+      prompt: `${automation.prompt}
+
+Задача #${todo.id}: «${todo.title}»${todo.note ? `
+
+${String(todo.note).slice(0, 3000)}` : ""}`,
+      todoId: todo.id,
+      repeating: Boolean(todo.props.repeat),
+      occurrence: item.due,
+    });
+    await query("UPDATE todo_automation_runs SET inbox_id = $3 WHERE todo_id = $1 AND due = $2", [todo.id, item.due, inboxId || null]);
+    const repeat = todo.props.repeat;
+    const next = repeat ? nextDue(item.due, repeat) : null;
+    if (next) {
+      await query("UPDATE todos SET props = props || $2::jsonb, updated_at = now() WHERE id = $1", [todo.id, JSON.stringify({ due: next, last_run_at: new Date().toISOString() })]);
+    }
+    log(`[planner] автоматизация задачи #${todo.id} «${todo.title}» (${item.due}) → ${automation.agent}${online ? "" : " (агент не на связи)"}`);
+  } catch (error) {
+    await query("UPDATE todo_automation_runs SET error = $3 WHERE todo_id = $1 AND due = $2", [todo.id, item.due, String(error?.message || error).slice(0, 500)]);
+    log(`[planner] автоматизация задачи #${todo.id} не запустилась: ${error?.message || error}`);
+  }
+  broadcast?.("entity_changed", { entity: "todos", action: "run", silent: true });
+}
+
+/**
  * Раз в минуту запускать автоматизации календаря: агенту уходит задание (dispatch — от сервера: вопрос во входящие,
  * у Джарвиса — его ответ). Повторение помечается в calendar_event_runs до отправки — двойного запуска не будет,
  * даже если тиков два (прод и dev на одной базе: dev расписание не запускает).
@@ -578,6 +687,7 @@ export function startPlannerAutomations({ query, dispatch, log = console.log, br
         }
         broadcast?.("entity_changed", { entity: "calendar_events", action: "run", silent: true });
       }
+      for (const item of await dueTaskAutomations(query, wallClock())) await fireTaskAutomation(query, dispatch, item, log, broadcast);
     } catch (error) {
       log(`[planner] проверка автоматизаций: ${error?.message || error}`);
     }

@@ -16,6 +16,7 @@
     "GET /api/mbox/oauth/google/callback",
     "GET /api/mbox/telegram-posts",
     "GET /api/mbox/todos/:param/claim",
+    "POST /api/mbox/todos/commits",
     "PATCH /api/mbox/agents/:param",
     "POST /api/mbox/gdocs/append",
     "POST /api/mbox/gdocs/create",

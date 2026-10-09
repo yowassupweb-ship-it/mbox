@@ -76,3 +76,23 @@ test("стена часов — по поясу человека, а не сер
   assert.equal(wallClock(new Date("2026-10-07T12:00:00Z"), "Europe/Moscow"), "2026-10-07T15:00:00");
   assert.equal(wallClock(new Date("2026-10-07T21:30:00Z"), "Europe/Moscow"), "2026-10-08T00:30:00");
 });
+
+test("автоматизация задачи: нормализация и mergeProps", async () => {
+  const { taskAutomationOf, mergeProps } = await import("./planner.mjs");
+  assert.deepEqual(taskAutomationOf({ agent: " Claude ", prompt: " Разбери ", time: "7:5", junk: 1 }), { agent: "Claude", prompt: "Разбери", time: "09:00" });
+  assert.deepEqual(taskAutomationOf({ agent: "Джарвис", prompt: "x", time: "18:30", project_id: "4" }), { agent: "Джарвис", prompt: "x", time: "18:30", project_id: "4" });
+  assert.equal(taskAutomationOf({ agent: "Claude", prompt: "" }), null);
+  assert.equal(mergeProps({ due: "2026-10-10" }, { automation: { agent: "", prompt: "x" } }).automation, undefined);
+  assert.equal(mergeProps({ automation: { agent: "Claude", prompt: "x", time: "10:00" } }, { automation: null }).automation, undefined);
+  assert.equal(mergeProps({}, { automation: { agent: "Claude", prompt: "x" } }).automation.time, "09:00");
+});
+
+test("dueTaskAutomations: ждёт времени, не старше суток, один раз на срок", async () => {
+  const { dueTaskAutomations } = await import("./planner.mjs");
+  const todo = { id: "5", project_id: "2", title: "Отчёт", note: "", status: "open", props: { due: "2026-10-09", automation: { agent: "Claude", prompt: "Сделай", time: "09:00" } } };
+  const query = async (sql) => (/FROM todos t/.test(sql) ? { rows: [todo] } : { rows: [] });
+  assert.equal((await dueTaskAutomations(query, "2026-10-09T08:59:00")).length, 0);
+  assert.equal((await dueTaskAutomations(query, "2026-10-09T09:00:00")).length, 1);
+  assert.equal((await dueTaskAutomations(query, "2026-10-10T08:00:00")).length, 1);
+  assert.equal((await dueTaskAutomations(query, "2026-10-10T09:30:00")).length, 0);
+});

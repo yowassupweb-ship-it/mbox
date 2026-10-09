@@ -1,0 +1,4 @@
+#!/bin/sh
+# Сообщает MBOX о коммите: #N из сообщения привязываются к задачам, «Closes #N» закрывает. Не блокирует коммит.
+node "$(git rev-parse --show-toplevel)/scripts/todo-commit-hook.mjs" >/dev/null 2>&1 &
+exit 0

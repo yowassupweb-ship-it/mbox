@@ -9,7 +9,7 @@ import { Avatar } from '../ui/Avatar';
 import { askConfirm, Menu, MenuItem, Sheet, type MenuAnchor } from '../ui/overlay';
 import {
   assigneesOf, deleteTask, DONE_STATUS, isDone, PERSONAL, PRIORITIES, saveText, STATUSES, statusOf, taskMarkdown, updateTask, useTasks,
-  type Priority, type Status, type Task,
+  type AutomationRun, type Priority, type Status, type Task, type TaskAutomation,
 } from './api';
 import { renderMarkdown, toggleTaskLine } from './markdown';
 import { repeatIdOf, repeatLabel, TASK_REPEATS } from './repeat';
@@ -58,6 +58,7 @@ export default function TaskDocument({ task, onBack, onGone }: {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [menu, setMenu] = useState<{ kind: MenuKind; anchor: MenuAnchor } | null>(null);
   const [people, setPeople] = useState(false);
+  const [auto, setAuto] = useState(false);
   const users = usePeople((s) => s.users);
   const lists = useTasks((s) => s.lists);
 
@@ -226,6 +227,10 @@ export default function TaskDocument({ task, onBack, onGone }: {
         <button type="button" className="ntd-chip" data-on={repeat !== 'none' ? 'true' : undefined} onClick={open('repeat')} aria-haspopup="menu" title="Повторять задачу: выполненная переносится на следующий срок">
           <Repeat size={14} aria-hidden="true" />{repeat !== 'none' ? repeatLabel(repeat) : 'Повтор'}
         </button>
+        <button type="button" className="ntd-chip" data-on={task.automation ? 'true' : undefined} onClick={() => setAuto(true)} aria-haspopup="dialog"
+          title="В срок задачи (в выбранное время) выбранный агент получит задание с текстом этой задачи">
+          <Bot size={14} aria-hidden="true" />{task.automation ? `${task.automation.agent} · ${task.automation.time}` : 'Агент по сроку'}
+        </button>
         <button type="button" className="ntd-chip" data-priority={task.priority} onClick={open('priority')} aria-haspopup="menu">
           <Flag size={14} aria-hidden="true" />{priority.label}
         </button>
@@ -315,8 +320,72 @@ export default function TaskDocument({ task, onBack, onGone }: {
           <MenuItem icon={<Trash2 size={16} />} tone="danger" onSelect={() => { setMenu(null); void remove(); }}>Удалить задачу</MenuItem>
         </Menu>
       )}
+      {auto && (
+        <AutomationSheet
+          task={task}
+          onClose={() => setAuto(false)}
+          onSave={(automation) => {
+            setAuto(false);
+            // Автоматизации нужен срок, от которого считать: без срока — с сегодняшнего дня.
+            const today = new Date();
+            const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            void patch({ automation, ...(automation && !task.dueDate ? { dueDate: iso } : {}) });
+          }}
+        />
+      )}
       {people && <PeopleSheet title="Исполнители" selected={assignees} onClose={() => setPeople(false)} onSave={(ids) => { setPeople(false); void patch({ assignees: ids }); }} />}
     </section>
+  );
+}
+
+const runFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+function runText(run: AutomationRun): string {
+  const when = runFmt.format(new Date(run.fired_at));
+  if (run.error) return `Не запустилось (${when}): ${run.error}`;
+  if (run.agent_online === false) return `Отправлено ${when}, но агент не был на связи — задание ждёт его во входящих.`;
+  return `Отправлено ${when}.`;
+}
+
+/** Настройка автоматизации задачи: кто, во сколько и что делает, когда наступил срок. */
+function AutomationSheet({ task, onClose, onSave }: { task: Task; onClose: () => void; onSave: (automation: TaskAutomation | null) => void }) {
+  const people = usePeople((s) => s.users);
+  const agents = Object.values(people).filter((p) => p.kind === 'agent').map((p) => p.name);
+  const [agent, setAgent] = useState(task.automation?.agent || agents[0] || 'Claude');
+  const [time, setTime] = useState(task.automation?.time || '09:00');
+  const [prompt, setPrompt] = useState(task.automation?.prompt || '');
+  const names = Array.from(new Set([agent, ...agents]));
+  const repeating = Boolean(task.repeat);
+  return (
+    <Sheet
+      title="Агент по сроку"
+      onClose={onClose}
+      footer={(
+        <>
+          {task.automation && <button type="button" className="nx-ghost" onClick={() => onSave(null)}>Выключить</button>}
+          <button type="button" className="nx-ghost" onClick={onClose}>Отмена</button>
+          <button type="button" className="nx-primary" disabled={!prompt.trim()} onClick={() => onSave({ agent, prompt: prompt.trim(), time })}>Сохранить</button>
+        </>
+      )}
+    >
+      <div className="ntd-auto">
+        <label className="ntd-auto-row">
+          <span>Кто сделает</span>
+          <select value={agent} onChange={(e) => setAgent(e.target.value)}>{names.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+        </label>
+        <label className="ntd-auto-row">
+          <span>Во сколько</span>
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value || '09:00')} />
+        </label>
+        <textarea className="ntd-auto-prompt" rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Задание агенту"
+          placeholder="Что сделать. Текст задачи и её номер агент получит вместе с заданием." />
+        <p className="ntd-auto-hint">
+          {task.dueDate ? `Сработает ${task.dueDate.split('-').reverse().join('.')} в ${time}.` : 'Срок не задан — поставим сегодняшний.'}
+          {' '}{repeating ? 'Задача повторяющаяся: после запуска срок сам переедет на следующий раз.' : 'Агент закроет задачу, когда сделает; не закроет — она останется открытой и всплывёт как «сделано, но не закрыто», если в коммите есть её номер.'}
+        </p>
+        {task.automationRun && <p className="ntd-auto-hint" data-tone={task.automationRun.error || task.automationRun.agent_online === false ? 'danger' : undefined}>{runText(task.automationRun)}</p>}
+      </div>
+    </Sheet>
   );
 }
 
