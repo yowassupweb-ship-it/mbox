@@ -1,6 +1,7 @@
 import { Check, Copy, KeyRound, Link2, RefreshCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, fetchJson } from "../../lib/api";
+import { serverOrigin } from "../../lib/serverOrigin";
 
 /**
  * «Поделиться» SEO Wizard (только владелец). Два способа: ссылка (просмотр или управление) и вход по логину и паролю.
@@ -9,7 +10,7 @@ import { ApiError, fetchJson } from "../../lib/api";
  */
 type Link = { mode: "view" | "manage"; token: string; created_at?: string; last_used_at?: string | null; use_count?: number } | null;
 type Login = { id: string; login: string; mode: "view" | "manage"; label: string; created_at: string; last_used_at: string | null; expires_at: string | null; use_count: number; sessions: number };
-type State = { links: { view: Link; manage: Link }; logins: Login[] };
+type State = { base_url?: string; links: { view: Link; manage: Link }; logins: Login[] };
 
 const MODE_WORD = { view: "Просмотр", manage: "Управление" } as const;
 const MODE_HINT = {
@@ -44,7 +45,9 @@ export function SeoShareDialog({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState("");
   const [fresh, setFresh] = useState<{ login: string; password: string; mode: "view" | "manage" } | null>(null);
   const [form, setForm] = useState({ login: "", password: "", mode: "view" as "view" | "manage", label: "", days: "0" });
-  const origin = window.location.origin;
+  // Ссылки отдаём наружу, поэтому адрес сервера, а не внутренний адрес окна приложения (mbox://app).
+  // Адрес для ссылок: сначала тот, что назвал сервер (верный в любой версии приложения), иначе адрес сервера из окна.
+  const origin = (state?.base_url || serverOrigin()).replace(/\/+$/, "");
 
   const load = useCallback(async () => {
     try { setState(await fetchJson<State>("/api/mbox/seo/shares")); setError(""); } catch (cause) { setError(errorText(cause)); }
@@ -135,7 +138,7 @@ export function SeoShareDialog({ onClose }: { onClose: () => void }) {
                 {state.logins.map((item) => (
                   <li key={item.id}>
                     <div>
-                      <strong>{item.login}</strong>{item.label ? ` · ${item.label}` : ""}
+                      <span className="seo-share-name"><strong>{item.login}</strong>{item.label && <em>{item.label}</em>}</span>
                       <small>{stamp(item.last_used_at)} · входов {item.use_count} · сейчас открыто {item.sessions}{item.expires_at ? ` · до ${stamp(item.expires_at)}` : ""}</small>
                     </div>
                     <select value={item.mode} onChange={(event) => void setMode(item, event.currentTarget.value as "view" | "manage")} disabled={busy === `login:${item.id}`} aria-label={`Режим доступа ${item.login}`}>
@@ -148,6 +151,7 @@ export function SeoShareDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </ul>
             )}
+            <h4 className="seo-share-subhead">Новый доступ</h4>
             <form className="seo-share-form" onSubmit={(event) => { event.preventDefault(); void createLogin(); }}>
               <label>Логин<input value={form.login} onChange={(event) => setForm({ ...form, login: event.currentTarget.value })} placeholder="например, ivan" autoComplete="off" required /></label>
               <label>Пароль<input value={form.password} onChange={(event) => setForm({ ...form, password: event.currentTarget.value })} placeholder="пусто — придумаю сам" autoComplete="off" /></label>

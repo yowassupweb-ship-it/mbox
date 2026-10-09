@@ -361,9 +361,11 @@ export function SeoWizard({ shared }: { shared?: SeoSharedInfo | null } = {}) {
           <button type="button" onClick={refresh} disabled={loading || Boolean(running)} title="Перечитать данные">
             <RefreshCw size={15} className={loading ? "is-spinning" : undefined} /> Обновить
           </button>
-          <button type="button" className="is-primary" onClick={() => void runScenario("step1")} disabled={Boolean(running) || access.readOnly} title="Сервер скачает sitemap, проверит страницы и соберёт пакет понедельника">
+          {!access.readOnly && (
+          <button type="button" className="is-primary" onClick={() => void runScenario("step1")} disabled={Boolean(running)} title="Сервер скачает sitemap, проверит страницы и соберёт пакет понедельника">
             <Play size={15} /> {running ? "Сбор идёт…" : "Собрать данные"}
           </button>
+          )}
         </div>
       </header>
 
@@ -415,7 +417,7 @@ export function SeoWizard({ shared }: { shared?: SeoSharedInfo | null } = {}) {
         ) : <SeoLoading />)}
       </div>
       {detailError && <p className="seo-error" role="alert">{detailError}</p>}
-      {detail && <IssueDetailPanel data={detail} onClose={() => setDetail(null)} />}
+      {detail && <IssueDetailPanel data={detail} onClose={() => setDetail(null)} siteOrigin={settings.config.site_origin} />}
       {sharing && <SeoShareDialog onClose={() => setSharing(false)} />}
     </div>
     </SeoAccessProvider>
@@ -424,7 +426,7 @@ export function SeoWizard({ shared }: { shared?: SeoSharedInfo | null } = {}) {
 
 const DETAIL_PAGE = 100;
 
-function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: () => void }) {
+function IssueDetailPanel({ data, onClose, siteOrigin }: { data: IssueDetailData; onClose: () => void; siteOrigin: string }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [verify, setVerify] = useState<VerifyResult | null>(data.verification);
@@ -452,7 +454,7 @@ function IssueDetailPanel({ data, onClose }: { data: IssueDetailData; onClose: (
   const shown = needle ? data.examples.filter((item) => `${item.path} ${item.note}`.toLowerCase().includes(needle)) : data.examples;
   const pages = Math.max(1, Math.ceil(shown.length / DETAIL_PAGE));
   const visible = shown.slice(page * DETAIL_PAGE, (page + 1) * DETAIL_PAGE);
-  const origin = window.location.origin;
+  const origin = siteOrigin.replace(/\/+$/, "");
   const download = () => {
     const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
     const lines = [["Адрес", "Примечание", "Показы 28 дн.", "Клики"].map(escape).join(";"), ...shown.map((item) => [item.path, item.note, item.impressions ?? "", item.clicks ?? ""].map(escape).join(";"))];

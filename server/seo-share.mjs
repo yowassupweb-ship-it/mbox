@@ -116,6 +116,15 @@ export function resetAttempts() { attempts.clear(); }
 
 // ─── Управление владельцем ───────────────────────────────────────────────────
 
+/** Адрес, по которому человек снаружи откроет SEO Wizard: MBOX_PUBLIC_URL, иначе по заголовкам запроса (за прокси Caddy это боевой домен). */
+export function publicBaseUrl(req) {
+  const fixed = String(process.env.MBOX_PUBLIC_URL || "").trim().replace(/\/+$/, "");
+  if (fixed) return fixed;
+  const host = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "").split(",")[0].trim();
+  const proto = String(req.headers?.["x-forwarded-proto"] || (req.socket?.encrypted ? "https" : "http")).split(",")[0].trim();
+  return host ? `${proto}://${host}` : "";
+}
+
 const rowOut = (row) => ({ id: row.id, mode: row.mode, label: row.label, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at, use_count: row.use_count });
 
 /** Маршруты владельца: /api/mbox/seo/shares… (вызывается из обработчика SEO Wizard, доступного только владельцу). */
@@ -134,7 +143,7 @@ export async function handleSeoShareAdmin({ req, res, url, query, readBody, send
     )).rows;
     const links = { view: null, manage: null };
     for (const row of rows.filter((item) => item.kind === "link")) links[row.mode] = { ...rowOut(row), token: row.token };
-    return reply(200, { links, logins: rows.filter((item) => item.kind === "login").map((row) => ({ ...rowOut(row), login: row.login, sessions: row.sessions })) });
+    return reply(200, { base_url: publicBaseUrl(req), links, logins: rows.filter((item) => item.kind === "login").map((row) => ({ ...rowOut(row), login: row.login, sessions: row.sessions })) });
   }
 
   if (kind === "link" && !id && req.method === "POST") {

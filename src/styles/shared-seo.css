@@ -42,3 +42,18 @@
 .seo-share-logins li > div { flex: 1; min-width: 180px; display: grid; gap: 2px; font-size: var(--text-sm); }
 .seo-share-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); align-items: end; margin-top: var(--space-2); }
 .seo-share-form label { display: grid; gap: 4px; font-size: var(--text-xs); color: var(--text-muted); }
+
+/* Окно «Поделиться»: кнопка закрытия не должна наследовать отступы кнопок действий. */
+.seo-share header button { flex: none; width: 32px; min-width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
+.seo-share header button:hover { background: var(--surface-hover); color: var(--text-main); }
+.seo-share header { align-items: center; }
+.seo-share-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.seo-share-name em { color: var(--text-muted); font-size: var(--text-xs); font-style: normal; }
+.seo-share-subhead { margin: var(--space-4) 0 var(--space-1); padding-top: var(--space-3); border-top: var(--border-width) solid var(--border-color); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.seo-share-row input { width: 100%; box-sizing: border-box; }
+.seo-share-form input, .seo-share-form select { width: 100%; box-sizing: border-box; }
+.seo-share-fresh pre { max-width: 100%; }
+
+/* В шапке страницы доступа название уже есть, второй заголовок внутри не нужен. */
+.shared-seo .seo-head h1 { display: none; }
+.shared-seo .seo-head { justify-content: flex-end; }
