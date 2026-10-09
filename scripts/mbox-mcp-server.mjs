@@ -2003,7 +2003,7 @@ server.registerTool(
 // ─── Встроенный браузер MBOX Desktop: агент видит страницу владельца и действует на ней с подсветкой ───
 // Путь: POST /api/mbox/browser/agent → окно MBOX Desktop → вкладка (server/browser-agent.mjs, mbox-desktop/browser.js).
 
-const BROWSER_TAB = z.string().default("").describe("Browser tab key (web:…) from browser_tabs; empty = the tab the owner is looking at now");
+const BROWSER_TAB = z.string().default("").describe("Browser tab key (web:…) from browser_tabs — a stable id given when the tab was opened, NOT its current address (it does not change when the tab navigates; read `url` for where it is). Empty = the tab the owner is looking at now");
 const BROWSER_NOTE = z.string().default("").describe("Short Russian caption shown to the owner next to the highlight, e.g. «заполняю из заметки #12»");
 
 async function browserOp(action, args = {}, tab = "", note = "") {

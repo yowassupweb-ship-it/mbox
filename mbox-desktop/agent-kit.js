@@ -179,7 +179,9 @@ module.exports = String.raw`(() => {
       const c = center(el);
       const top = document.elementFromPoint(c.x, c.y);
       const covered = Boolean(top) && top !== el && !el.contains(top) && !top.contains(el);
-      return { ok: true, ...c, label: describe(el), disabled: Boolean(el.disabled), covered, coveredBy: covered ? describe(top) : "" };
+      // coveredRef — ref того, что лежит сверху: по нему можно нажать именно перекрывающий элемент (кнопку баннера, оверлей-ссылку карточки).
+      const coveredRef = covered ? refOf(top, top.matches("input,textarea,select,[contenteditable]") ? "f" : "b") : "";
+      return { ok: true, ...c, label: describe(el), disabled: Boolean(el.disabled), covered, coveredBy: covered ? describe(top) : "", coveredRef };
     },
     pointInfo(x, y) {
       const el = document.elementFromPoint(x, y);

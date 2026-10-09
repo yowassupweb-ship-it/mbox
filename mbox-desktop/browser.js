@@ -737,12 +737,18 @@ function mouse(contents, type, x, y, extra = {}) {
   contents.sendInputEvent({ type, x: Math.round(x * zoom), y: Math.round(y * zoom), ...extra });
 }
 
-async function pointOf(contents, args, who, key) {
+// allowCovered: наведение и перемещение курсора — не клик; мышь и так попадёт в верхний элемент (оверлей-ссылка карточки, меню), как у человека.
+async function pointOf(contents, args, who, key, allowCovered = false) {
   if (args.ref) {
     const spot = await inPage(contents, `locate(${JSON.stringify(String(args.ref))})`);
     if (!spot?.ok) return spot;
     if (spot.disabled) return { ok: false, error: "disabled", message: `Элемент недоступен (${spot.label}).` };
-    if (spot.covered && !args.force) return { ok: false, error: "covered", message: `Элемент перекрыт: ${spot.coveredBy}. Закройте баннер или окно поверх него (или добавьте force=true).`, label: spot.label };
+    if (spot.covered && !args.force && !allowCovered) {
+      return {
+        ok: false, error: "covered", label: spot.label, covered_by: spot.coveredBy, covered_ref: spot.coveredRef,
+        message: `Элемент перекрыт: ${spot.coveredBy}${spot.coveredRef ? ` (ref ${spot.coveredRef})` : ""}. Закройте баннер или окно поверх него, нажмите на перекрывающий элемент по его ref или добавьте force=true.`,
+      };
+    }
     return spot;
   }
   if (Number.isFinite(Number(args.x)) && Number.isFinite(Number(args.y))) {
@@ -753,11 +759,11 @@ async function pointOf(contents, args, who, key) {
 }
 
 async function pointerAction(contents, args, who, kind) {
-  const spot = await pointOf(contents, args, who);
+  const spot = await pointOf(contents, args, who, null, kind === "hover");
   if (!spot.ok) return spot;
   await cursorTo(contents, spot.x, spot.y, who, kind !== "hover");
   contents.focus?.();
-  if (kind === "hover") { mouse(contents, "mouseMove", spot.x, spot.y); await sleep(200); return { ok: true, hovered: spot.label }; }
+  if (kind === "hover") { mouse(contents, "mouseMove", spot.x, spot.y); await sleep(200); return { ok: true, hovered: spot.label, ...(spot.covered ? { covered_by: spot.coveredBy } : {}) }; }
   const button = kind === "right_click" ? "right" : "left";
   mouse(contents, "mouseMove", spot.x, spot.y);
   await sleep(40);
@@ -793,7 +799,7 @@ async function waitFor(contents, args) {
 /** Действие агента во вкладке. key пустой — вкладка, которую человек видит сейчас. */
 async function runAgentAction(key, action, args = {}, actor = "Агент", note = "") {
   if (action === "tabs") {
-    return { ok: true, active: agentTab("")?.key || "", tabs: [...tabs.keys()].map((item) => ({ ...stateOf(item), visible: tabs.get(item).visible, agent: { ...controlOf(item) } })) };
+    return { ok: true, key_note: "key — стабильный идентификатор вкладки, выданный при открытии; он НЕ меняется при переходах и не равен адресу. Где вкладка сейчас — в url.", active: agentTab("")?.key || "", tabs: [...tabs.keys()].map((item) => ({ ...stateOf(item), visible: tabs.get(item).visible, agent: { ...controlOf(item) } })) };
   }
   // Без вкладки браузера navigate тоже вернёт no_tab: новую вкладку открывает страница MBOX (browserAgent.ts).
   // Явный ключ несуществующей вкладки (закрыта, устарел) не подменяем видимой: раньше действие молча уходило в чужую вкладку.
@@ -858,7 +864,7 @@ async function runAgentAction(key, action, args = {}, actor = "Агент", note
       return { key: target.key, ...(await pointerAction(contents, args, who, action)) };
     }
     if (action === "move_cursor") {
-      const spot = await pointOf(contents, args, who);
+      const spot = await pointOf(contents, args, who, null, true);
       if (!spot.ok) return spot;
       await cursorTo(contents, spot.x, spot.y, who, false);
       mouse(contents, "mouseMove", spot.x, spot.y);
