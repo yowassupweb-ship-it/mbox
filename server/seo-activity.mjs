@@ -2,6 +2,8 @@
 // Человек не должен узнавать о сломавшемся механизме через месяц по отсутствию результата, поэтому всё, что работает по расписанию,
 // пишет сюда итог, а сторож сравнивает ожидаемое с фактом и поднимает тревогу.
 
+import { indexTrend as indexTrendOf } from "./seo-yandex.mjs";
+
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const MSK_OFFSET = 3 * HOUR;
@@ -33,7 +35,7 @@ const SOURCE_NAMES = { topvisor_audit: "Topvisor", webmaster: "Вебмасте�
  * Что должно было произойти и не произошло. Чистая функция: на вход факты, на выход список тревог { id, level, title, text, action }.
  * autorun — включено ли расписание на сервере; без него сервер сам ничего не собирает, и это само по себе тревога.
  */
-export function watchdog({ now = new Date(), autorun = false, tickAt = "", runs = [], lastCheck = null, jobs = {}, ranksAt = "", demand = null }) {
+export function watchdog({ now = new Date(), autorun = false, tickAt = "", runs = [], lastCheck = null, jobs = {}, ranksAt = "", demand = null, indexDrop = null }) {
   const alerts = [];
   const add = (id, level, title, text, action = null) => alerts.push({ id, level, title, text, action });
   const lastRun = runs[0] || null;
@@ -73,6 +75,11 @@ export function watchdog({ now = new Date(), autorun = false, tickAt = "", runs 
   if (demand && demand.todo > 0) {
     const idle = ageHours(demand.last_at, now);
     if (idle === null || idle > 4) add("demand_incomplete", "medium", "Спрос Wordstat собран не весь", `Не хватает ${demand.todo} из ${demand.all} запросов${idle === null ? "" : `, последний сбор ${idle < 24 ? `${Math.round(idle)} ч` : days(idle)} назад`}. Потенциал и видимость по ним не посчитаны.`);
+  }
+  const yandexJob = ageHours(jobs.webmaster_yandex_view?.last_at, now);
+  if (autorun && jobs.webmaster_yandex_view && yandexJob !== null && yandexJob > 9 * 24) add("yandex_stale", "medium", "Данные Яндекса не обновляются", `Недельный сбор «Яндекс видит» не запускался ${days(yandexJob)}: индекс и ошибки обхода устаревают.`, { label: "Яндекс видит", tab: "yandex" });
+  if (indexDrop && indexDrop.drop_from_peak_pct >= 15) {
+    add("index_shrinking", "high", "Индекс Яндекса сокращается", `Страниц в поиске ${indexDrop.last.value.toLocaleString("ru-RU")} против ${indexDrop.peak.value.toLocaleString("ru-RU")} на ${indexDrop.peak.date.split("-").reverse().join(".")} (минус ${indexDrop.drop_from_peak_pct}%). Это может быть и чисткой дублей, и потерей нужных страниц: посмотрите, какие именно уходят.`, { label: "Яндекс видит", tab: "yandex" });
   }
   const order = { high: 0, medium: 1, info: 2 };
   return alerts.sort((a, b) => order[a.level] - order[b.level]);
@@ -120,8 +127,10 @@ export async function healthAlerts(query, { now = new Date(), autorun = false, t
     safe("SELECT max(captured_at)::text AS at FROM seo_demand_snapshots WHERE source = 'wordstat_api'"),
   ]);
   const demand = demandTargets ? { all: demandTargets.all, todo: demandTargets.todo.length, last_at: demandLast[0]?.at || "" } : null;
+  const snapshot = (await safe("SELECT data->'indexed_history' AS history FROM seo_yandex_snapshots ORDER BY captured_on DESC LIMIT 1"))[0];
+  const trend = snapshot?.history ? indexTrendOf(snapshot.history) : null;
   return watchdog({
     now, autorun, tickAt, runs, lastCheck: checks[0] || null,
-    jobs: Object.fromEntries(jobRows.map((row) => [row.name, { last_at: row.last_at }])), ranksAt: ranks[0]?.at || "", demand,
+    jobs: Object.fromEntries(jobRows.map((row) => [row.name, { last_at: row.last_at }])), ranksAt: ranks[0]?.at || "", demand, indexDrop: trend,
   });
 }

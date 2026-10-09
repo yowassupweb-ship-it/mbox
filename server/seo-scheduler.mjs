@@ -3,7 +3,7 @@
 // выключено: сбор — это тысяча запросов к сайту, включается явно переменной SEO_AUTORUN=1 на сервере.
 import { dueScenarios } from "./seo-strategy.mjs";
 import { logActivity } from "./seo-activity.mjs";
-import { demandTick, liveSeoRun, pageQueriesTick, positionsTick, startSeoRun } from "./seo-wizard.mjs";
+import { demandTick, liveSeoRun, pageQueriesTick, positionsTick, startSeoRun, yandexTick } from "./seo-wizard.mjs";
 
 const TICK_MS = Number(process.env.SEO_AUTORUN_TICK_MS || 10 * 60_000);
 const state = { enabled: false, started_at: "", last_tick_at: "", last_start: null, last_error: "" };
@@ -33,6 +33,12 @@ async function tick(query, log) {
   const pages = await pageQueriesTick(query);
   if (pages) await logActivity(query, pages.error ? { kind: "page_queries", title: "Запросы страниц из Вебмастера: ошибка", status: "failed", detail: pages.error } : { kind: "page_queries", title: "Запросы страниц из Вебмастера собраны", status: pages.failed ? "partial" : "ok", detail: `Страниц ${pages.done} из ${pages.pages}, строк ${pages.rows}${pages.failed ? `, ошибок ${pages.failed}` : ""}` });
   if (pages) log(`[seo-scheduler] запросы страниц Вебмастера: ${pages.error ? `ошибка ${pages.error}` : `страниц ${pages.done}/${pages.pages}, строк ${pages.rows}, ошибок ${pages.failed}`}`);
+  // «Яндекс видит»: раз в неделю — индекс, диагностика, ошибки обхода, внешние ссылки.
+  const yandex = await yandexTick(query);
+  if (yandex) {
+    await logActivity(query, yandex.error ? { kind: "yandex", title: "Данные Яндекса не собраны", status: "failed", detail: yandex.error } : { kind: "yandex", title: "Данные Яндекса обновлены", status: yandex.failed?.length ? "partial" : "ok", detail: `В поиске ${yandex.in_search}, собрано ${yandex.collected}${yandex.failed?.length ? `. Не ответили: ${yandex.failed.join(", ")}` : ""}` });
+    log(`[seo-scheduler] яндекс видит: ${yandex.error ? `ошибка ${yandex.error}` : `в поиске ${yandex.in_search}, собрано ${yandex.collected}`}`);
+  }
   const demand = await demandTick(query);
   if (demand && (demand.saved || demand.stopped || demand.error)) await logActivity(query, demand.error ? { kind: "demand", title: "Спрос Wordstat: ошибка", status: "failed", detail: demand.error } : { kind: "demand", title: demand.stopped ? "Спрос Wordstat: упёрлись в квоту, добор через час" : "Спрос Wordstat собран порцией", status: demand.stopped ? "skipped" : "ok", detail: `Собрано ${demand.saved ?? 0}, осталось ${demand.left ?? "?"}${demand.stopped ? `. ${demand.stopped}` : ""}` });
   if (demand) log(`[seo-scheduler] спрос Wordstat: собрано ${demand.saved ?? 0}, осталось ${demand.left ?? "?"}${demand.stopped ? `, стоп: ${demand.stopped}` : ""}${demand.error ? `, ошибка: ${demand.error}` : ""}`);

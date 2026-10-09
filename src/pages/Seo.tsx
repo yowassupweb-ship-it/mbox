@@ -88,6 +88,7 @@ const TABS: Tab[] = [
   { id: "architecture", label: "Архитектура", views: [{ id: "registry", label: "Реестр URL" }, { id: "index", label: "Состав индекса" }, { id: "filters", label: "Query и фильтры" }, { id: "links", label: "Внутренние ссылки" }] },
   { id: "cannibal", label: "Каннибализация", views: [{ id: "cannibal", label: "Монитор" }] },
   { id: "pages", label: "Страницы", views: [{ id: "quality", label: "Качество" }] },
+  { id: "yandex", label: "Яндекс видит" },
   { id: "competitors", label: "Конкуренты" },
   { id: "clicks", label: "Клики", views: [{ id: "ctr", label: "CTR" }, { id: "opportunities", label: "Возможности" }, { id: "positions", label: "Позиции" }, { id: "serp", label: "Выдача и сниппеты" }] },
   { id: "demand", label: "Спрос и трафик", views: [{ id: "demand", label: "Потенциал и спрос" }, { id: "traffic", label: "Трафик и заявки" }] },
@@ -355,6 +356,7 @@ export function SeoWizard({ shared }: { shared?: SeoSharedInfo | null } = {}) {
       <header className="seo-head">
         <h1>SEO Wizard</h1>
         <div className="seo-actions">
+          {viewId === "yandex" && !shared && <button type="button" onClick={() => void act("yandex", () => fetchJson("/api/mbox/seo/yandex/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }))} disabled={busy === "yandex"} title="Забрать у Яндекса свежие данные: сбор занимает до двух минут"><RefreshCw size={15} className={busy === "yandex" ? "is-spinning" : undefined} /> {busy === "yandex" ? "Обновляю…" : "Обновить данные Яндекса"}</button>}
           {!shared && <button type="button" onClick={() => setSharing(true)} title="Дать доступ к SEO Wizard по ссылке или по логину и паролю"><Share2 size={15} /> Поделиться</button>}
           <button type="button" onClick={refresh} disabled={loading || Boolean(running)} title="Перечитать данные">
             <RefreshCw size={15} className={loading ? "is-spinning" : undefined} /> Обновить
@@ -558,6 +560,14 @@ const TABLE_LABELS: Record<string, string> = {
   activity: "История",
   links_summary: "По типам",
   links: "Каждая ссылка",
+  yandex_summary: "Сводка",
+  yandex_problems: "Диагностика",
+  yandex_kinds: "Что в индексе",
+  yandex_outside: "Не в sitemap",
+  yandex_errors: "Ошибки обхода",
+  yandex_links: "Внешние ссылки",
+  yandex_important: "Важные страницы",
+  yandex_trend: "Динамика",
   competitors_summary: "Кто сильнее",
   competitors_gaps: "Где нас обходят",
   competitors_wins: "Где мы впереди",

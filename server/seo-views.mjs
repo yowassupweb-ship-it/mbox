@@ -7,6 +7,7 @@ import { queryPotential, fallbackCtr } from "./seo-potential.mjs";
 import { adviceFor, classifyTarget, cleanAnchor, priorityOf } from "./seo-links-kind.mjs";
 import { bySection, groupByDate, movers, trendByCheck, urlFlapping } from "./seo-rank-stats.mjs";
 import { activityFeed } from "./seo-activity.mjs";
+import { indexingRows, indexTrend, kindAdvice, KIND_LABEL, LINK_STATE_LABEL, linkAdvice, linkTargets, pathKey, presentProblems, summarizeIndexed, classifyIndexed } from "./seo-yandex.mjs";
 import { buildBoard, gaps as rivalGaps, rivalMovers, rivalPages, summary as rivalSummary, trendMatrix, wins as rivalWins } from "./seo-competitors.mjs";
 import { pageKind } from "./seo-wizard.mjs";
 
@@ -1181,6 +1182,87 @@ async function viewIssues(query) {
   };
 }
 
+
+const dateRu = (value) => (value ? String(value).slice(0, 10).split("-").reverse().join(".") : "");
+
+/** «Яндекс видит»: недельный снимок того, что Яндекс сообщает о сайте, и сравнение его индекса с нашим sitemap. */
+async function viewYandex(query) {
+  const snapshot = (await rows(query, "SELECT captured_on::text AS day, data FROM seo_yandex_snapshots ORDER BY captured_on DESC LIMIT 1").catch(() => []))[0];
+  const empty = "Данные Яндекса ещё не собраны: они подтягиваются из Вебмастера раз в неделю или кнопкой «Обновить данные Яндекса». Нужны токен и сайт Вебмастера в настройках источников.";
+  if (!snapshot) {
+    return { sections: ["yandex_summary", "yandex_problems", "yandex_kinds", "yandex_outside", "yandex_errors", "yandex_links", "yandex_important", "yandex_trend"].map((id) => section(id, id, [], [], { empty, source: "Яндекс Вебмастер" })) };
+  }
+  const data = snapshot.data || {};
+  const [urls, pages] = await Promise.all([
+    rows(query, "SELECT path, in_sitemap, status_code FROM seo_urls"),
+    rows(query, "SELECT path, url, title, last_access::text AS last_access FROM seo_yandex_pages"),
+  ]);
+  const sitemapPaths = new Set(urls.filter((item) => item.in_sitemap).map((item) => pathKey(item.path)));
+  const registry = new Map(urls.map((item) => [pathKey(item.path), { status_code: item.status_code, in_sitemap: item.in_sitemap }]));
+  const trend = indexTrend(data.indexed_history);
+  const kinds = summarizeIndexed(pages, sitemapPaths);
+  const outside = pages.filter((item) => classifyIndexed(item.url, sitemapPaths) !== "in_sitemap");
+  const problems = presentProblems(data.diagnostics);
+  const summary = data.summary?.__error ? {} : data.summary || {};
+  const inSearch = num(data.in_search_count);
+  const gap = pages.length ? Math.round((outside.length / pages.length) * 100) : null;
+  const sitemapCount = sitemapPaths.size;
+
+  const summaryRows = [
+    { label: "Страниц в поиске Яндекса", value: inSearch, detail: trend ? `Максимум ${trend.peak.value.toLocaleString("ru-RU")} (${dateRu(trend.peak.date)}), неделей раньше ${trend.week_ago.value.toLocaleString("ru-RU")}${trend.drop_from_peak_pct > 0 ? `, минус ${trend.drop_from_peak_pct}% от максимума` : ""}` : "" },
+    { label: "Страниц в нашем sitemap", value: sitemapCount, detail: inSearch && sitemapCount ? `В поиске в ${Math.round((inSearch / sitemapCount) * 10) / 10} раза больше страниц, чем мы отдаём в карте` : "" },
+    { label: "В поиске, но не в sitemap (по выборке)", value: outside.length, detail: gap !== null ? `${gap}% страниц в поиске: ${kinds.filter((item) => item.kind !== "in_sitemap").slice(0, 3).map((item) => `${item.label.toLowerCase()} ${item.count}`).join(", ")}` : "" },
+    { label: "Исключено Яндексом из поиска", value: num(summary.excluded_pages_count), detail: "Яндекс знает эти страницы, но не показывает: дубли, закрытые и слабые" },
+    { label: "Индекс качества сайта (SQI)", value: num(summary.sqi), detail: "Оценка Яндекса: чем выше, тем лучше сайт ранжируется" },
+    { label: "Проблем по диагностике Яндекса", value: problems.length, detail: problems.length ? problems.map((item) => item.title).join("; ") : "Яндекс не видит проблем" },
+    { label: "Внешних ссылок на сайт", value: num(data.link_count), detail: "Сколько ссылок с других сайтов нашёл Яндекс" },
+    { label: "Лимит переобхода в сутки", value: num(data.quota?.daily_quota), detail: `Осталось сегодня ${num(data.quota?.quota_remainder)}: можно просить Яндекс заново обойти исправленные страницы` },
+  ];
+  const errorRows = indexingRows(data.indexing?.__error ? {} : data.indexing);
+  const importantRows = (data.important?.urls || []).map((item) => ({
+    path: pathKey(item.url), title: item.search_status?.title || "", http: item.indexing_status?.http_code ?? null,
+    searchable: Boolean(item.search_status?.searchable),
+    problem: item.search_status?.searchable ? "" : (item.search_status?.excluded_url_status ? `исключена: ${item.search_status.excluded_url_status}` : item.search_status?.bad_http_status ? `ошибка ${item.search_status.bad_http_status}` : "не в поиске"),
+    checked: item.indexing_status?.access_date || "",
+  })).sort((a, b) => Number(a.searchable) - Number(b.searchable));
+  const linkRows = linkTargets(data.link_samples || [], registry).slice(0, 200).map((item) => ({ ...item, state_label: LINK_STATE_LABEL[item.state], advice: linkAdvice(item.state) }));
+  const linkHistory = (data.links_history?.indicators?.LINKS_TOTAL_COUNT || []).map((item) => ({ date: String(item.date).slice(0, 10), value: num(item.value) }));
+  const trendRows = [...(trend?.points || [])].reverse();
+
+  return {
+    sections: [
+      section("yandex_summary", "Что сообщает Яндекс о сайте", [col("label", "Показатель"), col("value", "Значение", "int"), col("detail", "Что это значит")], summaryRows, {
+        source: "Яндекс Вебмастер", empty,
+        note: `Данные от ${dateRu(snapshot.day)}, обновляются раз в неделю. Это собственный взгляд Яндекса на сайт: он важнее наших догадок, если они расходятся.`,
+      }),
+      section("yandex_problems", "Диагностика сайта: что сам Яндекс считает проблемой", [col("severity_label", "Важность"), col("title", "Проблема"), col("text", "Что делать"), col("since", "С какого числа")], problems, { empty: "Яндекс не видит проблем в диагностике сайта", source: "Яндекс Вебмастер", note: "Возможные проблемы и рекомендации из раздела «Диагностика» Вебмастера." }),
+      section("yandex_kinds", "Какие страницы Яндекс держит в поиске", [col("label", "Тип страницы"), col("count", "Страниц", "int"), col("share", "Доля, %", "num"), col("examples", "Примеры"), col("advice", "Что делать")],
+        kinds.map((item) => ({ ...item, examples: item.examples.join(", "), advice: kindAdvice(item.kind) })), {
+          empty, source: "Яндекс Вебмастер · наш sitemap",
+          note: `Собрано ${pages.length.toLocaleString("ru-RU")} из ${inSearch.toLocaleString("ru-RU")} страниц в поиске. «В sitemap» — страницы, которые мы сами отдаём Яндексу; остальные типы — то, что он нашёл по ссылкам. Чем их больше, тем сильнее раздут индекс.`,
+        }),
+      section("yandex_outside", "Страницы в поиске, которых нет в нашем sitemap", [col("path", "Адрес", "url"), col("kind_label", "Тип"), col("title", "Заголовок в выдаче"), col("last_access", "Обход Яндекса", "datetime")],
+        outside.slice(0, 1000).map((item) => ({ path: item.path, kind_label: KIND_LABEL[classifyIndexed(item.url, sitemapPaths)], title: item.title, last_access: item.last_access })), {
+          empty: "Все страницы из поиска есть в нашем sitemap", source: "Яндекс Вебмастер · наш sitemap",
+          note: `Показано до 1000 из ${outside.length.toLocaleString("ru-RU")}. Откройте адрес в карточке страницы, чтобы решить: добавить в sitemap, закрыть canonical или поставить 301.`,
+        }),
+      section("yandex_errors", "Ошибки, которые Яндекс встречает при обходе (14 дней)", [col("date", "Дата"), col("HTTP_2XX", "Ответ 200", "int"), col("HTTP_3XX", "Редиректы 3xx", "int"), col("HTTP_4XX", "Ошибки 4xx", "int"), col("HTTP_5XX", "Ошибки 5xx", "int"), col("errors", "Всего ошибок", "int")], errorRows, {
+        empty: "Яндекс не передал историю индексации", source: "Яндекс Вебмастер",
+        note: "4xx — страницы не найдены (битые ссылки, удалённые страницы), 5xx — ошибки сервера. Постоянно растущие 5xx — повод проверить хостинг.",
+      }),
+      section("yandex_links", "Куда ведут внешние ссылки (выборка)", [col("path", "Куда ведёт", "url"), col("links", "Ссылок в выборке", "int"), col("domains", "С разных сайтов", "int"), col("state_label", "Состояние страницы"), col("advice", "Что делать"), col("examples", "Примеры сайтов")], linkRows, {
+        empty: "Внешних ссылок в выборке нет", source: "Яндекс Вебмастер · наш реестр адресов",
+        note: `Выборка последних ${(data.link_samples || []).length} ссылок из ${num(data.link_count).toLocaleString("ru-RU")}. Ссылки на старые и нерабочие адреса теряют вес: им нужен 301-редирект.${linkHistory.length ? ` Динамика числа ссылок: ${linkHistory.slice(-4).map((item) => `${dateRu(item.date)} — ${item.value.toLocaleString("ru-RU")}`).join("; ")}.` : ""}`,
+      }),
+      section("yandex_important", "Важные страницы из Вебмастера", [col("path", "Адрес", "url"), col("searchable", "В поиске", "bool"), col("problem", "Проблема"), col("title", "Заголовок"), col("http", "Ответ сервера", "int"), col("checked", "Обход", "datetime")], importantRows, {
+        empty: "Важные страницы в Вебмастере не отмечены", source: "Яндекс Вебмастер",
+        note: "Страницы, которые владелец отметил в Вебмастере как важные. Если такая страница не в поиске, это прямая потеря трафика: сначала их.",
+      }),
+      section("yandex_trend", "Динамика числа страниц в поиске", [col("date", "Дата"), col("value", "Страниц в поиске", "int")], trendRows, { empty, source: "Яндекс Вебмастер", note: "Падение на сотни страниц за неделю бывает от чистки дублей, а бывает от потери нужных страниц: сверяйте с таблицей «Какие страницы Яндекс держит»." }),
+    ],
+  };
+}
+
 const ACTIVITY_STATUS = { ok: "Сделано", failed: "Ошибка", partial: "Частично", skipped: "Пропущено", running: "Идёт", info: "Заметка" };
 const ACTIVITY_SOURCE = { scheduler: "расписание", user: "вручную", run: "сбор", package: "пакет", agent: "агент" };
 
@@ -1277,6 +1359,7 @@ const VIEWS = {
   quality: viewQuality,
   competitors: viewCompetitors,
   activity: viewActivity,
+  yandex: viewYandex,
   ctr: viewCtr,
   opportunities: viewOpportunities,
   positions: viewPositions,

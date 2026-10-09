@@ -8,9 +8,11 @@ import { pageCard } from "./seo-page-card-db.mjs";
 import { explainIssue } from "./seo-explain.mjs";
 import { conclude, pathForExample, spread } from "./seo-verify.mjs";
 import { handleSeoShareAdmin } from "./seo-share.mjs";
+import { pathKey } from "./seo-yandex.mjs";
 import { extractMarkup } from "./seo-markup.mjs";
 import { fetchWithRetry } from "./net-retry.mjs";
 import { activityFeed, healthAlerts, logActivity } from "./seo-activity.mjs";
+import { indexTrend } from "./seo-yandex.mjs";
 import { parseCompetitorCells, parseOwnCells } from "./seo-competitors.mjs";
 import { collectPageQueries, collectPageTotals, topPagePaths } from "./seo-webmaster-pages.mjs";
 import { diffSnapshots, pathOfUrl } from "./seo-page-card.mjs";
@@ -160,6 +162,20 @@ CREATE TABLE IF NOT EXISTS seo_demand_snapshots (
   raw JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_seo_demand_snapshots_query ON seo_demand_snapshots(query, captured_at DESC);
+
+-- «Яндекс видит»: недельные снимки того, что сам Яндекс сообщает о сайте, и список страниц в его поиске (заменяется целиком каждый раз).
+CREATE TABLE IF NOT EXISTS seo_yandex_snapshots (
+  captured_on DATE PRIMARY KEY,
+  data JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS seo_yandex_pages (
+  path TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  last_access TIMESTAMPTZ,
+  seen_on DATE NOT NULL DEFAULT current_date
+);
 
 -- История действий: что сервер и люди делали с SEO Wizard и чем кончилось. Прогоны, пакеты и проверки позиций ведут свои таблицы,
 -- сюда пишется остальное (расписание, перепроверка, добор спроса, ручные запуски).
@@ -967,6 +983,96 @@ async function jobState(query, name) {
 
 async function saveJob(query, name, result) {
   await query("INSERT INTO seo_jobs(name, last_at, result) VALUES ($1, now(), $2::jsonb) ON CONFLICT (name) DO UPDATE SET last_at = now(), result = EXCLUDED.result", [name, JSON.stringify(result)]);
+}
+
+
+const msk = (date) => `${isoDay(date)}T00:00:00.000+03:00`;
+
+/**
+ * «Яндекс видит»: собирает то, что Яндекс сообщает о сайте (сводка, диагностика, история индексации, страницы в поиске,
+ * важные страницы, внешние ссылки). Только чтение. Страницы в поиске — до 20 000 запросами по 100, поэтому раз в неделю.
+ */
+export async function collectYandexView(query, { maxPages = 20000 } = {}) {
+  await ensureSeoWizardSchema(query);
+  const credentials = await webmasterCredentials(query);
+  if (!credentials) throw new Error("Вебмастер не настроен");
+  const { token, hostId } = credentials;
+  const userId = (await yandexGet(WEBMASTER_API, "/user", [], token))?.user_id;
+  if (!userId) throw new Error("Вебмастер не вернул user_id");
+  const base = `/user/${userId}/hosts/${encodeURIComponent(hostId)}`;
+  const get = (path, params = []) => yandexGet(WEBMASTER_API, `${base}${path}`, params, token, 90000);
+  const soft = (promise) => promise.catch((error) => ({ __error: error instanceof Error ? error.message : String(error) }));
+  const now = new Date();
+  const [summary, diagnostics, quota, indexing, indexedHistory, important, linksHistory] = await Promise.all([
+    soft(get("/summary")),
+    soft(get("/diagnostics")),
+    soft(get("/recrawl/quota")),
+    soft(get("/indexing/history", [["indexing_indicator", "HTTP_2XX"], ["indexing_indicator", "HTTP_3XX"], ["indexing_indicator", "HTTP_4XX"], ["indexing_indicator", "HTTP_5XX"], ["date_from", msk(new Date(now.getTime() - 14 * 86400000))], ["date_to", msk(now)]])),
+    soft(get("/search-urls/in-search/history", [["date_from", msk(new Date(now.getTime() - 120 * 86400000))], ["date_to", msk(now)]])),
+    soft(get("/important-urls")),
+    soft(get("/links/external/history", [["indicator", "LINKS_TOTAL_COUNT"]])),
+  ]);
+
+  // Страницы в поиске Яндекса: постранично по 100.
+  const first = await get("/search-urls/in-search/samples", [["offset", 0], ["limit", 100]]);
+  const total = Math.min(num(first?.count), maxPages);
+  const pages = [...(first?.samples || [])];
+  const offsets = [];
+  for (let offset = 100; offset < total; offset += 100) offsets.push(offset);
+  await mapLimit(offsets, 4, async (offset) => {
+    const part = await get("/search-urls/in-search/samples", [["offset", offset], ["limit", 100]]).catch(() => null);
+    if (part?.samples) pages.push(...part.samples);
+  });
+
+  // Внешние ссылки: свежая выборка (до 1000).
+  const linkSamples = [];
+  let linkCount = 0;
+  for (let offset = 0; offset < 1000; offset += 100) {
+    const part = await get("/links/external/samples", [["offset", offset], ["limit", 100]]).catch(() => null);
+    if (!part?.links?.length) break;
+    linkCount = num(part.count);
+    linkSamples.push(...part.links.map((item) => ({ source_url: item.source_url, destination_url: item.destination_url, discovered: item.discovery_date })));
+    if (part.links.length < 100) break;
+  }
+
+  const unique = new Map();
+  for (const page of pages) {
+    const key = pathKey(page.url);
+    if (key) unique.set(key, { path: key, url: page.url, title: String(page.title || "").slice(0, 300), last_access: page.last_access || null });
+  }
+  if (unique.size) {
+    await query("DELETE FROM seo_yandex_pages");
+    const list = [...unique.values()];
+    for (let i = 0; i < list.length; i += 1000) {
+      await query(
+        `INSERT INTO seo_yandex_pages(path, url, title, last_access)
+         SELECT r.path, r.url, r.title, r.last_access FROM jsonb_to_recordset($1::jsonb) AS r(path TEXT, url TEXT, title TEXT, last_access TIMESTAMPTZ)
+         ON CONFLICT (path) DO UPDATE SET url = EXCLUDED.url, title = EXCLUDED.title, last_access = EXCLUDED.last_access, seen_on = current_date`,
+        [JSON.stringify(list.slice(i, i + 1000))],
+      );
+    }
+  }
+  const data = { summary, diagnostics, quota, indexing, indexed_history: indexedHistory, important, links_history: linksHistory, link_samples: linkSamples, link_count: linkCount, in_search_count: num(first?.count), pages_collected: unique.size };
+  await query("INSERT INTO seo_yandex_snapshots(captured_on, data) VALUES (current_date, $1::jsonb) ON CONFLICT (captured_on) DO UPDATE SET data = EXCLUDED.data, created_at = now()", [JSON.stringify(data)]);
+  const failed = Object.entries({ summary, diagnostics, quota, indexing, indexedHistory, important, linksHistory }).filter(([, value]) => value?.__error).map(([key]) => key);
+  return { in_search: num(first?.count), collected: unique.size, links: linkCount, link_samples: linkSamples.length, failed };
+}
+
+const YANDEX_EVERY_MS = 6.9 * 86_400_000;
+
+/** Раз в неделю обновляет «Яндекс видит» (и один раз сразу, если данных ещё нет). */
+export async function yandexTick(query, { now = new Date() } = {}) {
+  try {
+    await ensureSeoWizardSchema(query);
+    const job = await jobState(query, "webmaster_yandex_view");
+    if (job?.last_at && now.getTime() - Date.parse(job.last_at.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00")) < YANDEX_EVERY_MS) return null;
+    if (!(await webmasterCredentials(query))) return null;
+    const result = await collectYandexView(query);
+    await saveJob(query, "webmaster_yandex_view", result);
+    return result;
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Итоги Вебмастера по страницам за последние дни (каждый сбор). */
@@ -2264,6 +2370,16 @@ export async function handleSeoWizardApi({ req, res, url, query, readBody, sendJ
       const startedRun = await startSeoRun(query, { scenario: body.scenario || "step1", buildPackage: body.buildPackage !== false });
       if (!startedRun.already_running) await logActivity(query, { kind: "run", title: `Сбор «${body.scenario || "step1"}» запущен вручную`, source: "user", detail: `Прогон ${startedRun.run_id}` });
       return reply(202, startedRun);
+    }
+    if (url.pathname === "/api/mbox/seo/yandex/refresh" && req.method === "POST") {
+      try {
+        const result = await collectYandexView(query);
+        await saveJob(query, "webmaster_yandex_view", result);
+        await logActivity(query, { kind: "yandex", title: "Данные Яндекса обновлены вручную", source: "user", detail: `В поиске ${result.in_search}, собрано ${result.collected}` });
+        return reply(200, result);
+      } catch (error) {
+        return reply(502, { error: "yandex_failed", message: error instanceof Error ? error.message : String(error) });
+      }
     }
     if (url.pathname === "/api/mbox/seo/activity" && req.method === "GET") {
       await ensureSeoWizardSchema(query);
