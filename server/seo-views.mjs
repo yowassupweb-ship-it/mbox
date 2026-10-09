@@ -688,7 +688,7 @@ async function viewPositions(query, sources) {
   const sectionStats = bySection(grouped, (url) => pathOf(url).split("/").filter(Boolean)[0] || "");
   const flapping = urlFlapping(grouped);
   const checks = grouped.length;
-  const statsNote = checks ? `Проверок в истории: ${checks}; последняя ${grouped[checks - 1][0]}. Видимость — сумма «спрос × CTR позиции» по запросам: растёт, когда запросы поднимаются.` : "";
+  const statsNote = checks ? `Проверок в истории: ${checks}; последняя ${grouped[checks - 1][0]}. Видимость — сумма «спрос × CTR позиции» по запросам: растёт, когда запросы поднимаются. Считается только по запросам, у которых собран спрос (${demandBy.size} из ${grouped[checks - 1][1].size}); пока спрос собран не весь, сравнивать видимость с прошлым нельзя.` : "";
   return {
     sections: [
       section("query_potential", "Потенциал запросов — что поднимать в первую очередь", [

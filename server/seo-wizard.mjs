@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { seoScenarioState, seoStrategy } from "./seo-strategy.mjs";
 import { seoSchedulerStatus } from "./seo-scheduler.mjs";
 import { recordChange, saveOutreach, seoDashboard, seoView, setUrlDecision } from "./seo-views.mjs";
-import { collectWordstatDemand } from "./seo-wordstat.mjs";
+import { collectWordstatDemand, topUpDemand } from "./seo-wordstat.mjs";
 import { explainIssue } from "./seo-explain.mjs";
 import { nextPositionsAction } from "./seo-rank-check.mjs";
 
@@ -987,7 +987,10 @@ export async function exportMetricaGoals(query, { counterIds = [], days = 28 } =
     const params = [["ids", counterId], ["metrics", metrics.join(",")], ["accuracy", "full"], ["date1", range.date1], ["date2", range.date2]];
     if (filters) params.push(["filters", filters]);
     const page = await yandexGet(METRICA_API, "/stat/v1/data", params, token, 120000);
-    return { totals: (page?.totals || [])[0] || [], visits: Number((page?.totals || [])[0]?.[0]) };
+    // Без группировок Метрика отдаёт totals плоским списком [visits, ...]; со вложенностью (редко) берём первую строку.
+    const raw = Array.isArray(page?.totals) ? page.totals : [];
+    const totals = Array.isArray(raw[0]) ? raw[0] : raw;
+    return { totals, visits: Number(totals[0]) };
   };
   await mapLimit(ids, 2, async (counterId) => {
     try {
@@ -1258,6 +1261,18 @@ export async function refreshPositions(query) {
     ? await collectWordstatDemand(query, { apiKey, folderId: process.env.YANDEX_WORDSTAT_FOLDER_ID || settings.config?.wordstat_folder_id || "" }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }))
     : null;
   return { ranks, demand };
+}
+
+/** Дособор спроса Wordstat по расписанию (часовая квота API не даёт собрать всё за один заход). */
+export async function demandTick(query, { now = new Date() } = {}) {
+  try {
+    const settings = await getSeoSettings(query, true);
+    const apiKey = process.env.YANDEX_WORDSTAT_API_KEY || settings.secrets?.wordstat_api_key;
+    if (!apiKey) return null;
+    return await topUpDemand(query, { apiKey, folderId: process.env.YANDEX_WORDSTAT_FOLDER_ID || settings.config?.wordstat_folder_id || "" }, { now });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /**

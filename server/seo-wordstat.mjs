@@ -3,7 +3,8 @@
 import { demandFromTop, isStaleQuery } from "./seo-potential.mjs";
 
 const ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/wordstat/topRequests";
-const MAX_PER_RUN = 400;
+// Квота Wordstat API — 100 запросов в час (search-api.wordstatRequestsPerHour): порция с запасом, остаток добирается следующими часами.
+const MAX_PER_RUN = 90;
 const CONCURRENCY = 3;
 // Лимит Wordstat API — 10 запросов в секунду (search-api.wordstatRequestsPerSecond). Держим 8 с запасом и ждём,
 // если всё же получили 429 по секундной квоте; суточная и прочие квоты останавливают сбор до следующего прогона.
@@ -89,3 +90,23 @@ export async function collectWordstatDemand(query, auth, { fetchImpl = fetch, li
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   return { month, tracked: all, already_collected: all - todo.length, requested: batch.length, saved, failed, left: Math.max(0, todo.length - saved), ...(stopped ? { stopped } : {}) };
 }
+
+// Следующий допустимый заход после упора в квоту. Хранится в памяти процесса: после перезапуска первый заход просто
+// упрётся в квоту ещё раз и снова подождёт.
+let blockedUntil = 0;
+
+/**
+ * Дособор спроса: вызывается тиком расписания. Пока есть нехватающие запросы текущего месяца, заходит раз в час порцией,
+ * не мешая ручным запускам. Возвращает null, если делать нечего или ждём квоту.
+ */
+export async function topUpDemand(query, auth, { now = new Date(), fetchImpl, sleep } = {}) {
+  if (now.getTime() < blockedUntil) return null;
+  const month = now.toISOString().slice(0, 7);
+  const { todo } = await wordstatTargets(query, month);
+  if (!todo.length) return null;
+  const result = await collectWordstatDemand(query, auth, { now, ...(fetchImpl ? { fetchImpl } : {}), ...(sleep ? { sleep } : {}) });
+  if (result.stopped) blockedUntil = now.getTime() + (/PerHour/i.test(result.stopped) ? 61 * 60_000 : /PerSecond/i.test(result.stopped) ? 5 * 60_000 : 6 * 3_600_000);
+  return result;
+}
+
+export function resetDemandBlock() { blockedUntil = 0; }

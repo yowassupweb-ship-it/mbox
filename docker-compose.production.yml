@@ -15,6 +15,8 @@ services:
       MBOX_HOST: "0.0.0.0"
       MBOX_AGENT_NAME: ${MBOX_AGENT_NAME:-Джарвис}
       JARVIS_AUTOREPLY: ${JARVIS_AUTOREPLY:-on}
+      # Расписание SEO Wizard (ежедневный сбор, недельная проверка позиций Topvisor, дособор спроса Wordstat). По умолчанию выключено.
+      SEO_AUTORUN: ${SEO_AUTORUN:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
       GROQ_MODEL_JUNIOR: ${GROQ_MODEL_JUNIOR:-openai/gpt-oss-20b}

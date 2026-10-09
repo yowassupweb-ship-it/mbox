@@ -57,3 +57,20 @@ test("запросы идут не чаще заданного ритма", asyn
   const gaps = starts.slice(1).map((time, i) => time - starts[i]);
   assert.ok(Math.min(...gaps) >= 30, `слишком частые запросы: ${gaps}`);
 });
+
+test("дособор: после упора в часовую квоту ждёт, потом заходит снова", async () => {
+  const { topUpDemand, resetDemandBlock } = await import("./seo-wordstat.mjs");
+  resetDemandBlock();
+  const db = fakeDb({ tracked: ["туры", "экскурсии"] });
+  let calls = 0;
+  const hourly = async () => { calls += 1; return { ok: false, status: 429, text: async () => '{"message":"search-api.wordstatRequestsPerHour.rate rate quota limit exceed: allowed 100 requests"}' }; };
+  const t0 = new Date("2026-10-09T10:00:00Z");
+  const first = await topUpDemand(db.query, { apiKey: "k" }, { now: t0, fetchImpl: hourly, sleep: async () => {} });
+  assert.ok(first.stopped.includes("PerHour"));
+  const callsAfterFirst = calls;
+  assert.equal(await topUpDemand(db.query, { apiKey: "k" }, { now: new Date("2026-10-09T10:30:00Z"), fetchImpl: hourly, sleep: async () => {} }), null);
+  assert.equal(calls, callsAfterFirst, "в часе ожидания обращений быть не должно");
+  const later = await topUpDemand(db.query, { apiKey: "k" }, { now: new Date("2026-10-09T11:05:00Z"), fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ totalCount: "3", results: [] }) }), sleep: async () => {} });
+  assert.equal(later.saved, 2);
+  resetDemandBlock();
+});
