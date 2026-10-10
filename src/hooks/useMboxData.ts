@@ -65,11 +65,12 @@ function urlFor(key: Key, qs: string) {
 }
 
 // У участника этих разделов нет (организации и секреты — только владельцу): не стучимся и не получаем 403 на каждом обновлении.
-const OWNER_ONLY_KEYS = new Set<Key>(["companies", "secrets"]);
+// Пароли — только владельцу; компании видит и админ (все проекты), участник — нет.
+const hiddenKeys = (role: string) => new Set<Key>(role === "owner" ? [] : role === "admin" ? ["secrets"] : ["companies", "secrets"]);
 
-export function useMboxData(query: string, onAuthExpired?: () => void, isMember = false) {
-  const memberRef = useRef(isMember);
-  memberRef.current = isMember;
+export function useMboxData(query: string, onAuthExpired?: () => void, role = "owner") {
+  const hiddenRef = useRef(hiddenKeys(role));
+  hiddenRef.current = hiddenKeys(role);
   const [memories, setMemories] = useState<Memory[]>([]);
   // Отдельно от memories.length/memory_bytes-суммы — те всегда упираются в LIMIT 300 ответа,
   // а тут настоящие числа по всем подходящим записям (см. count(*) OVER() в ручке).
@@ -137,7 +138,7 @@ export function useMboxData(query: string, onAuthExpired?: () => void, isMember 
       state.timer = window.setTimeout(() => void run(), wait);
       return;
     }
-    const keys = [...state.pending].filter((key) => !(memberRef.current && OWNER_ONLY_KEYS.has(key)));
+    const keys = [...state.pending].filter((key) => !hiddenRef.current.has(key));
     state.pending.clear();
     if (!keys.length) return;
     state.running = true;

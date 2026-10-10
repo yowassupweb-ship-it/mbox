@@ -1015,21 +1015,21 @@ ipcMain.handle("mbox-desktop:browser-auth", async (event, id, username, password
 // всех компьютерах. Локальный файл остаётся запасным: без сети браузер обязан работать.
 ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => {
   assertBrowserHost(event);
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { return await serverState.bookmarks(); } catch { /* сеть моргнула — отдаём локальные */ }
   }
   return chromeImport.getBookmarks();
 });
 async function setBrowserBookmark(bookmark) {
   const local = chromeImport.setBookmark(bookmark || {});
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { return publishBookmarks(await serverState.addBookmark(bookmark || {})); } catch { /* ниже отдадим локальные */ }
   }
   return publishBookmarks(local);
 }
 async function removeBrowserBookmark(url) {
   const local = chromeImport.removeBookmark(String(url || ""));
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { return publishBookmarks(await serverState.removeBookmark(String(url || ""))); } catch { /* ниже отдадим локальные */ }
   }
   return publishBookmarks(local);
@@ -1042,21 +1042,21 @@ function bookmarkMenuLabel(item) {
 }
 async function moveBrowserBookmark(url, beforeUrl) {
   const local = chromeImport.moveBookmark(url, beforeUrl);
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { return publishBookmarks(await serverState.moveBookmark(url, beforeUrl)); } catch { /* ниже отдадим локальные */ }
   }
   return publishBookmarks(local);
 }
 async function renameBrowserFolder(folder, to) {
   const local = chromeImport.renameFolder(folder, to);
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { return publishBookmarks(await serverState.renameFolder(folder, to)); } catch { /* ниже отдадим локальные */ }
   }
   return publishBookmarks(local);
 }
 async function removeBrowserFolder(folder) {
   const local = chromeImport.removeFolder(folder);
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { return publishBookmarks(await serverState.removeFolder(folder)); } catch { /* ниже отдадим локальные */ }
   }
   return publishBookmarks(local);
@@ -1106,7 +1106,7 @@ function folderEditItems(folderName, count) {
   ];
 }
 async function browserBookmarkList() {
-  return serverState.isOn()
+  return (await serverState.ensureOn())
     ? serverState.bookmarks().catch(() => chromeImport.getBookmarks())
     : chromeImport.getBookmarks();
 }
@@ -1303,7 +1303,7 @@ ipcMain.handle("mbox-desktop:browser-import-bookmarks", async (event, profile) =
   const result = chromeImport.importFromChrome({ profile: String(profile || "Default"), bookmarks: true, history: false });
   const local = chromeImport.getBookmarks();
   // Импорт с этой машины тоже уезжает на сервер: на втором компьютере повторять его не придётся.
-  if (serverState.isOn()) {
+  if (await serverState.ensureOn()) {
     try { publishBookmarks(await serverState.importBookmarks(local)); return result; } catch { /* ниже отдадим локальные */ }
   }
   publishBookmarks(local);

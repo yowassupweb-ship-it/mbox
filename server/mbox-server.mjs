@@ -30,7 +30,7 @@ import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePubl
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storageForAgent, storagePutStream, storageSignedGet } from "./storage.mjs";
 import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
-import { allowedSkills, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
+import { allowedSkills, canWriteSkill, claimSkill, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
@@ -64,7 +64,7 @@ configureJarvis({
   },
   storage: (() => {
     const agentStorage = storageForAgent(query, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key");
-    const accessOf = (viewer) => storageAccessFor({ all: Boolean(viewer.all), projectIds: viewer.projectIds || [] }, { id: viewer.userId || 0 });
+    const accessOf = (viewer) => storageAccessFor({ all: Boolean(viewer.all), projectIds: viewer.projectIds || [] }, { id: viewer.userId || 0, role: viewer.owner === false ? "member" : "owner" });
     return {
       ...agentStorage,
       canUse: async (viewer, key) => {
@@ -76,10 +76,10 @@ configureJarvis({
   })(),
   gmail: { search: (userId, input) => gmailSearch(query, userId, input), read: (userId, id) => gmailRead(query, userId, id), draft: (userId, input) => gmailDraft(query, userId, input), send: (userId, input) => gmailSend(query, userId, input) },
   gdocs: { search: (userId, input) => gdocSearch(query, userId, input), read: (userId, id) => gdocRead(query, userId, id), append: (userId, id, text) => gdocAppend(query, userId, id, text), replace: (userId, id, find, replace) => gdocReplace(query, userId, id, find, replace), create: (userId, title, text) => gdocCreate(query, userId, title, text), import: (userId, id) => gdocImport(query, userId, id, { ownerUserId: userId }) },
-  integrations: { list: (userId) => listIntegrations(query, userId), call: (id, input, userId) => callIntegration(query, id, input, { userId }) },
+  integrations: { list: (userId, owner) => listIntegrations(query, userId, { owner, userId }), call: (id, input, userId, owner) => callIntegration(query, id, input, { userId, owner }) },
   browserHelp: {
     ask: (userId, input) => createHelp({ clients: realtimeClients, userId, agent: "Джарвис", reason: input.reason, need: input.need, tab: input.tab, url: input.url, query, broadcast: broadcastRealtime }),
-    wait: (id, seconds) => waitHelp(id, seconds),
+    wait: (id, seconds, userId) => waitHelp(id, seconds, userId),
   },
   browserOp: (userId, action, input = {}) => runBrowserOp({ clients: realtimeClients, userId, action, tab: input.tab, args: input.args, actor: "Джарвис", note: input.note }),
 });
@@ -1096,8 +1096,13 @@ function isOwner(user) {
   return user?.role === "owner";
 }
 
+/** Админ видит все проекты и управляет командой, но не личное владельца: секреты, интеграции, почту, локальные папки. */
+function isAdmin(user) {
+  return user?.role === "owner" || user?.role === "admin";
+}
+
 async function projectScope(user) {
-  if (isOwner(user)) return { all: true, projectIds: [] };
+  if (isAdmin(user)) return { all: true, projectIds: [] };
   const result = await query(
     "SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id",
     [user.id],
@@ -1133,7 +1138,7 @@ async function storageAccessFor(scope, user) {
     [scope.all, scope.projectIds],
   )).rows;
   const labels = Object.fromEntries(projects.map((project) => [`projects/${project.id}/`, project.name]));
-  if (scope.all) return { access: null, labels };
+  if (scope.all && isOwner(user)) return { access: null, labels };
   const roots = projects.map((project) => ({ prefix: `projects/${project.id}/`, label: project.name }));
   const viewer = { ...scope, userId: String(user.id) };
   return {
@@ -1196,7 +1201,10 @@ function memberRouteAllowed(pathname) {
     // Связи памяти и источники данных — с фильтром по проектам участника в самих обработчиках.
     || pathname === "/api/mbox/memory-links"
     || pathname === "/api/mbox/data-sources"
-    || /^\/api\/mbox\/browser\/(bookmarks|history|cookies)(?:\/.*)?$/.test(pathname)
+    // Встроенный браузер и агент в нём — у каждого аккаунта свои окна (server/browser-agent.mjs сверяет user.id).
+    || /^\/api\/mbox\/browser\/(bookmarks|history|cookies|agent|help)(?:\/.*)?$/.test(pathname)
+    // Свои внешние API участника; готовые сервисы и Google владельца ему закрыты в server/integrations.mjs.
+    || /^\/api\/mbox\/integrations(?:\/[a-z][a-z0-9_-]{1,39}(?:\/(?:test|call))?)?$/.test(pathname)
     // Хранилище: участнику — только папки его проектов (проверка внутри handleStorageApi).
     || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object|read|write)$/.test(pathname)
     || pathname === "/api/mbox/agent/inbox"
@@ -1296,8 +1304,10 @@ async function handleApiWithContext(req, res, url) {
   if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user, publicOrigin })) return;
 
   if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
+  // Админ видит все проекты, но не личное владельца: пароли, локальные папки его компьютера, ключи SEO.
+  if (!isOwner(user) && /^\/api\/mbox\/(secrets|agent\/approved-secrets)(?:\/|$)/.test(url.pathname)) return sendJson(res, 403, { error: "owner_required" });
 
-  if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: scope.all, broadcast: broadcastRealtime })) return;
+  if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: isOwner(user), broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime, actor: actorFromReq(req), userName: user.username })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
@@ -1306,7 +1316,7 @@ async function handleApiWithContext(req, res, url) {
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
     if (await handleStorageApi({
-      req, res, url, query, readBody, sendJson, allowed: scope.all, access, labels,
+      req, res, url, query, readBody, sendJson, allowed: isOwner(user), access, labels,
       secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key",
       onActivity: (activity) => recordActivityMemory({
         actor: actorFromReq(req),
@@ -1319,14 +1329,14 @@ async function handleApiWithContext(req, res, url) {
   // Закладки, история и куки встроенного браузера — на сервере, чтобы сессия была сквозной
   // между машинами (см. server/browser-state.mjs).
   // Агент во встроенном браузере владельца (см. server/browser-agent.mjs, MCP browser_*).
-  if (await handleBrowserHelpApi({ req, res, url, readBody, sendJson, owner: isOwner(user), user, actor: actorFromReq(req), clients: realtimeClients, query, broadcast: broadcastRealtime })) return;
-  if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user, owner: isOwner(user), actor: actorFromReq(req), clients: realtimeClients })) return;
+  if (await handleBrowserHelpApi({ req, res, url, readBody, sendJson, owner: true, user, actor: actorFromReq(req), clients: realtimeClients, query, broadcast: broadcastRealtime })) return;
+  if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user, owner: true, actor: actorFromReq(req), clients: realtimeClients })) return;
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
   if (await handleGmailApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, origin: publicOrigin(req) })) return;
   if (await handleGoogleDocsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, broadcast: broadcastRealtime })) return;
   if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), userId: user.id })) return;
-  if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: scope.all })) return;
+  if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: isOwner(user) })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
     return sendJson(res, 200, { structure: agentStructure });
@@ -1380,10 +1390,14 @@ async function handleApiWithContext(req, res, url) {
   // Пакеты навыков: skills/ в репозитории плюс правки агентов из базы (server/skill-overrides.mjs).
   // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill/edit_skill_file.
   const skillAllowed = await allowedSkills(query, user);
-  if (await handleSkillAccessApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), skillsRoot: path.join(root, "skills") })) return;
+  if (await handleSkillAccessApi({ req, res, url, query, readBody, sendJson, owner: isAdmin(user), actor: actorFromReq(req), skillsRoot: path.join(root, "skills") })) return;
   if (await handleSkillPackagesApi({
     req, res, url, query, skillsRoot: path.join(root, "skills"), actor: actorFromReq(req), sendJson, readBody,
-    access: { allowed: skillAllowed, canWrite: isOwner(user) },
+    access: {
+      allowed: skillAllowed,
+      canWrite: isAdmin(user) || ((id, exists) => canWriteSkill(query, user, id, exists)),
+      onCreate: (id) => claimSkill(query, user, id),
+    },
     onChange: (change) => {
       broadcastRealtime("skill_file_changed", change);
       recordActivityMemory({
@@ -2738,7 +2752,7 @@ async function handleApiWithContext(req, res, url) {
     const runs = await query("SELECT id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 20", [project.id]);
     const history = await query("SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text FROM audit_events WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50", [project.id]);
     const memories = await relevantMemories(`${project.name} ${project.stack.join(" ")} ${JSON.stringify(project.props || {})}`, { projectId: project.id, limit: 5 });
-    const secrets = await query(
+    const secrets = !isOwner(user) ? { rows: [] } : await query(
       `SELECT s.id::text, s.title, s.login, s.url,
               pgp_sym_decrypt(s.secret_ciphertext::bytea, $2) AS password,
               s.approved_until::text

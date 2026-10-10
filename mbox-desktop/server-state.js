@@ -51,6 +51,16 @@ async function probe() {
 
 const isOn = () => enabled;
 
+// Проба при старте могла не пройти (сеть ещё не поднялась, сессии ещё нет) — без повтора закладки до
+// перезапуска уходили в локальный файл и «терялись» на сервере. Повторяем не чаще раза в 10 с.
+let lastProbeAt = 0;
+async function ensureOn() {
+  if (enabled) return true;
+  if (Date.now() - lastProbeAt < 10_000) return false;
+  lastProbeAt = Date.now();
+  return probe();
+}
+
 // ── Закладки ────────────────────────────────────────────────────────────────────────────────
 
 async function bookmarks() {
@@ -214,6 +224,7 @@ module.exports = {
   configure,
   probe,
   isOn,
+  ensureOn,
   bookmarks,
   addBookmark,
   importBookmarks,

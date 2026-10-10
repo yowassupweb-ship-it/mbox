@@ -112,7 +112,14 @@ export async function ensureIntegrationsSchema(query) {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  // Своё API есть у каждого аккаунта: NULL — владелец MBOX, иначе id участника. Код сервиса общий на всех.
+  await query("ALTER TABLE integrations ADD COLUMN IF NOT EXISTS owner_user_id BIGINT REFERENCES users(id) ON DELETE CASCADE");
 }
+
+/** Чьи свои API видит и правит человек: владелец — строки без хозяина, остальные — свои. $N — номер параметра. */
+const ownerFilter = (ctx = {}, n = 1) => ctx.owner !== false
+  ? { sql: "owner_user_id IS NULL", values: [] }
+  : { sql: `owner_user_id = ${n}`, values: [String(ctx.userId || 0)] };
 
 async function builtinValues(query, id) {
   const spec = BUILTIN[id];
@@ -128,18 +135,21 @@ async function builtinValues(query, id) {
   return { values, from };
 }
 
-async function customRow(query, id) {
+async function customRow(query, id, ctx = {}) {
+  const own = ownerFilter(ctx, 3);
   return (await query(
     `SELECT service, label, base_url, auth_type, auth_name, notes,
             CASE WHEN secret_ciphertext IS NULL THEN '' ELSE pgp_sym_decrypt(secret_ciphertext, $2) END AS secret, updated_at::text
-     FROM integrations WHERE service = $1`,
-    [id, secretKey()],
+     FROM integrations WHERE service = $1 AND ${own.sql}`,
+    [id, secretKey(), ...own.values],
   )).rows[0] || null;
 }
 
-export async function listIntegrations(query, userId) {
+export async function listIntegrations(query, userId, ctx = { owner: true }) {
   const out = [];
-  for (const [id, spec] of Object.entries(BUILTIN)) {
+  const owner = ctx.owner !== false;
+  // Готовые сервисы и Google работают на ключах и входе владельца — участнику их не показываем.
+  for (const [id, spec] of owner ? Object.entries(BUILTIN) : []) {
     const { values, from } = await builtinValues(query, id);
     out.push({
       service: id, label: spec.label, kind: "builtin", base_url: spec.base, docs: spec.docs, hint: spec.hint,
@@ -148,10 +158,11 @@ export async function listIntegrations(query, userId) {
     });
   }
   const google = userId ? await gmailStatus(query, userId, "").catch(() => null) : null;
-  for (const [id, spec] of Object.entries(GOOGLE_API)) {
+  for (const [id, spec] of owner ? Object.entries(GOOGLE_API) : []) {
     out.push({ service: id, label: spec.label, kind: "google", base_url: spec.base, docs: spec.docs, hint: `${spec.hint}${google?.docs_ok ? "" : " Подключается в карточке «Google»."}`, configured: Boolean(google?.docs_ok), fields: [] });
   }
-  const custom = (await query("SELECT service, label, base_url, auth_type, auth_name, notes, secret_ciphertext IS NOT NULL AS has_secret, updated_at::text FROM integrations ORDER BY lower(label)")).rows;
+  const own = ownerFilter({ owner, userId });
+  const custom = (await query(`SELECT service, label, base_url, auth_type, auth_name, notes, secret_ciphertext IS NOT NULL AS has_secret, updated_at::text FROM integrations WHERE ${own.sql} ORDER BY lower(label)`, own.values)).rows;
   for (const row of custom) {
     out.push({
       service: row.service, label: row.label, kind: "custom", base_url: row.base_url, docs: "", hint: row.notes,
@@ -170,7 +181,9 @@ function validateBase(raw) {
   return url.origin + url.pathname.replace(/\/+$/, "");
 }
 
-export async function saveIntegration(query, id, input = {}) {
+export async function saveIntegration(query, id, input = {}, ctx = { owner: true }) {
+  const owner = ctx.owner !== false;
+  if ((BUILTIN[id] || GOOGLE_API[id]) && !owner) throw new Error("Готовые сервисы настраивает владелец MBOX — добавьте своё API под другим кодом");
   if (BUILTIN[id]) {
     const spec = BUILTIN[id];
     const config = {};
@@ -184,7 +197,8 @@ export async function saveIntegration(query, id, input = {}) {
     return;
   }
   if (!SERVICE_ID.test(id)) throw new Error("Код сервиса: латиница, цифры, - и _, 2–40 знаков, с буквы");
-  const existing = await customRow(query, id);
+  const existing = await customRow(query, id, ctx);
+  if (!existing && (await query("SELECT 1 FROM integrations WHERE service = $1", [id])).rows[0]) throw new Error("Этот код сервиса уже занят — выберите другой");
   const label = String(input.label || existing?.label || id).trim().slice(0, 80);
   const base = validateBase(input.base_url ?? existing?.base_url);
   const authType = Object.hasOwn(AUTH_TYPES, input.auth_type) ? input.auth_type : existing?.auth_type || "bearer";
@@ -192,17 +206,18 @@ export async function saveIntegration(query, id, input = {}) {
   if ((authType === "header" || authType === "query") && !authName) throw new Error("Для этого способа входа нужно имя заголовка или параметра");
   const secret = typeof input.secret === "string" && input.secret.trim() ? input.secret.trim() : existing?.secret || "";
   await query(
-    `INSERT INTO integrations(service, label, base_url, auth_type, auth_name, notes, secret_ciphertext, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 = '' THEN NULL ELSE pgp_sym_encrypt($7, $8) END, now())
+    `INSERT INTO integrations(service, label, base_url, auth_type, auth_name, notes, secret_ciphertext, owner_user_id, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 = '' THEN NULL ELSE pgp_sym_encrypt($7, $8) END, $9, now())
      ON CONFLICT (service) DO UPDATE SET label = EXCLUDED.label, base_url = EXCLUDED.base_url, auth_type = EXCLUDED.auth_type, auth_name = EXCLUDED.auth_name,
        notes = EXCLUDED.notes, secret_ciphertext = EXCLUDED.secret_ciphertext, updated_at = now()`,
-    [id, label, base, authType, authName, String(input.notes ?? existing?.notes ?? "").slice(0, 500), secret, secretKey()],
+    [id, label, base, authType, authName, String(input.notes ?? existing?.notes ?? "").slice(0, 500), secret, secretKey(), owner ? null : String(ctx.userId)],
   );
 }
 
-export async function deleteIntegration(query, id) {
+export async function deleteIntegration(query, id, ctx = { owner: true }) {
   if (BUILTIN[id]) throw new Error("Готовый сервис удалить нельзя — очистите поля");
-  await query("DELETE FROM integrations WHERE service = $1", [id]);
+  const own = ownerFilter(ctx, 2);
+  await query(`DELETE FROM integrations WHERE service = $1 AND ${own.sql}`, [id, ...own.values]);
 }
 
 function buildUrl(base, path, params) {
@@ -218,6 +233,8 @@ function buildUrl(base, path, params) {
 
 /** Вызов API сервиса с подстановкой ключа. Возвращает { ok, status, data, truncated } и никогда — секрет. */
 export async function callIntegration(query, id, { method, path, query: params, body, max_chars: maxChars } = {}, ctx = {}) {
+  const owner = ctx.owner !== false;
+  if ((BUILTIN[id] || GOOGLE_API[id]) && !owner) return { ok: false, error: "owner_only", message: "Готовые сервисы работают на ключах владельца MBOX. Своё API добавьте в «Настройки → Интеграции»." };
   if (GOOGLE_API[id]) {
     if (!ctx.userId) return { ok: false, error: "no_user", message: "Google доступен только от имени владельца" };
     try {
@@ -244,7 +261,7 @@ export async function callIntegration(query, id, { method, path, query: params, 
     defaultMethod = spec.defaultMethod;
     if (spec.prepareBody) prepareBody = (value) => spec.prepareBody(values, value);
   } else {
-    const row = await customRow(query, id);
+    const row = await customRow(query, id, ctx);
     if (!row) return { ok: false, error: "unknown_service", message: `Сервис «${id}» не найден. Список — integration_list.` };
     if (!row.secret) return { ok: false, error: "not_configured", message: `${row.label}: ключ не задан. Владелец вносит его в «Настройки → Интеграции».` };
     base = row.base_url;
@@ -303,41 +320,42 @@ export async function testIntegration(query, id, ctx = {}) {
     const detail = typeof result.data === "string" ? result.data.slice(0, 200) : JSON.stringify(result.data || "").slice(0, 200);
     return { ok: false, message: result.message || `API ответило ${result.status}${detail ? `: ${detail}` : ""}` };
   }
-  const row = await customRow(query, id);
+  const row = await customRow(query, id, ctx);
   if (!row) return { ok: false, message: "Сервис не найден" };
   // Для своего API общей проверки нет: достаточно, что адрес отвечает (любой статус < 500), ключ проверяет первый настоящий вызов.
-  const result = await callIntegration(query, id, { method: "GET", path: "", max_chars: 500 });
+  const result = await callIntegration(query, id, { method: "GET", path: "", max_chars: 500 }, ctx);
   if (result.error) return { ok: false, message: result.message || result.error };
   return { ok: result.status < 500, message: `Адрес отвечает (HTTP ${result.status}). Ключ проверится первым настоящим вызовом.` };
 }
 
 export async function handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner, actor, userId }) {
   if (!url.pathname.startsWith("/api/mbox/integrations")) return false;
-  if (!owner) { sendJson(res, 403, { error: "owner_required" }); return true; }
+  // Участник подключает свои API: видит и правит только их, готовые сервисы владельца ему закрыты.
+  const ctx = { owner: Boolean(owner), userId: String(userId) };
   try {
     if (url.pathname === "/api/mbox/integrations" && req.method === "GET") {
-      sendJson(res, 200, { integrations: await listIntegrations(query, userId), auth_types: AUTH_TYPES });
+      sendJson(res, 200, { integrations: await listIntegrations(query, userId, ctx), auth_types: AUTH_TYPES, owner: ctx.owner });
       return true;
     }
     const match = url.pathname.match(/^\/api\/mbox\/integrations\/([a-z][a-z0-9_-]{1,39})(?:\/(test|call))?$/);
     if (!match) return false;
     const [, id, action] = match;
     if (!action && req.method === "PUT") {
-      await saveIntegration(query, id, await readBody(req));
-      sendJson(res, 200, { ok: true, integrations: await listIntegrations(query, userId) });
+      await saveIntegration(query, id, await readBody(req), ctx);
+      sendJson(res, 200, { ok: true, integrations: await listIntegrations(query, userId, ctx) });
       return true;
     }
     if (!action && req.method === "DELETE") {
-      await deleteIntegration(query, id);
+      await deleteIntegration(query, id, ctx);
       sendJson(res, 200, { ok: true });
       return true;
     }
     if (action === "test" && req.method === "POST") {
-      sendJson(res, 200, await testIntegration(query, id, { userId }));
+      sendJson(res, 200, await testIntegration(query, id, ctx));
       return true;
     }
     if (action === "call" && req.method === "POST") {
-      const result = await callIntegration(query, id, await readBody(req), { userId });
+      const result = await callIntegration(query, id, await readBody(req), ctx);
       console.log(`integration ${id}: ${actor || "?"} ${result.ok ? "ok" : result.error || result.status}`);
       sendJson(res, 200, result);
       return true;

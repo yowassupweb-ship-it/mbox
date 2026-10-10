@@ -110,7 +110,7 @@ function App() {
 function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean }; onLogout: () => void; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
   // Общая строка поиска в шапке перезапрашивала все 12 ручек на каждую букву — поиск теперь живёт
   // в своей вкладке рабочего места (Workbench/SearchView), данные грузятся без фильтра.
-  const data = useMboxData("", onLogout, user.role !== "owner");
+  const data = useMboxData("", onLogout, user.role);
   const realtime = useRealtime(data.reload);
   const agentNotices = useMemo(
     () => [...realtime.notices, ...data.auditEvents.filter((event) => !auditIsNoise(event)).slice(0, 12).map(auditNotice)].slice(0, 12),
@@ -243,8 +243,8 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
               server={user.role === "owner" ? <ServerBoard pulse={realtime.pulse} /> : undefined}
               access={<AccessBoard user={user} onLogout={onLogout} />}
               team={<TeamBoard user={user} projects={data.projects} />}
-              skills={user.role === "owner" ? <SkillAccessBoard /> : undefined}
-              integrations={user.role === "owner" ? <IntegrationsBoard /> : undefined}
+              skills={user.role === "owner" || user.role === "admin" ? <SkillAccessBoard /> : undefined}
+              integrations={<IntegrationsBoard />}
               passwords={user.role === "owner" ? <PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} /> : undefined}
               logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
             />
@@ -899,7 +899,7 @@ function AccessBoard({ user, onLogout }: { user: { username: string; role: strin
       <Panel title="Профиль" icon={ShieldCheck}>
         <div className="entity-list">
           <EntityLine title="Логин" value={user.username} />
-          <EntityLine title="Роль" value={user.role === "owner" ? "владелец: все проекты, навыки и настройки" : "участник: проекты, навыки и документы, к которым вам дали доступ"} />
+          <EntityLine title="Роль" value={user.role === "owner" ? "владелец: все проекты, навыки и настройки" : user.role === "admin" ? "админ: все проекты, команда и навыки; свои интеграции, браузер и агенты" : "участник: проекты, навыки и документы, к которым вам дали доступ; свои навыки, интеграции, браузер и агенты"} />
           <button className="ghost-action" onClick={async () => {
             await notifyDesktopSignedOut();
             await fetch("/api/mbox/auth/logout", { method: "POST" });
@@ -916,8 +916,8 @@ function AccessBoard({ user, onLogout }: { user: { username: string; role: strin
 function TeamBoard({ user, projects }: { user: { username: string; role: string }; projects: Project[] }) {
   return (
     <div className="content-grid settings-single-grid">
-      {user.role === "owner"
-        ? <><InviteManager projects={projects} /><AccountManager projects={projects} /></>
+      {user.role === "owner" || user.role === "admin"
+        ? <><InviteManager projects={projects} /><AccountManager projects={projects} viewerRole={user.role} /></>
         : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
       <AgentsOnThisComputer username={user.username} />
     </div>
@@ -1037,7 +1037,7 @@ type AccountUser = {
   id: string;
   email: string;
   username: string;
-  role: "owner" | "member";
+  role: "owner" | "admin" | "member";
   jarvis_enabled?: boolean;
   password_reset_at?: string | null;
   projects: Array<{ project_id: string; project_name: string; role: string }>;
@@ -1064,7 +1064,9 @@ function ProjectAccessPicker({ projects, selected, onChange, disabled = false }:
   );
 }
 
-function AccountManager({ projects }: { projects: Project[] }) {
+const ROLE_LABEL: Record<AccountUser["role"], string> = { owner: "владелец", admin: "админ", member: "участник" };
+
+function AccountManager({ projects, viewerRole }: { projects: Project[]; viewerRole: string }) {
   const [accounts, setAccounts] = useState<AccountUser[]>([]);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -1143,6 +1145,31 @@ function AccountManager({ projects }: { projects: Project[] }) {
     }
   }
 
+  async function changeRole(account: AccountUser, role: "admin" | "member") {
+    if (role === "admin") {
+      const ok = await askConfirm({
+        title: `Сделать ${account.username} админом?`,
+        message: "Админ видит все проекты, приглашает и настраивает участников, выдаёт навыки. Ваши пароли, интеграции, почта и локальные папки ему не видны.",
+        confirmLabel: "Сделать админом",
+      });
+      if (!ok) return;
+    }
+    setBusy(`role:${account.id}`);
+    setError("");
+    try {
+      await fetchJson(`/api/mbox/admin/users/${account.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      await load();
+    } catch (cause) {
+      setError(accountErrorText(cause, "Не удалось сменить роль"));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function toggleJarvis(account: AccountUser, enabled: boolean) {
     setBusy(`jarvis:${account.id}`);
     setError("");
@@ -1183,18 +1210,28 @@ function AccountManager({ projects }: { projects: Project[] }) {
               <div className="account-row" key={account.id}>
                 <div className="account-identity">
                   <strong>{account.username}</strong>
-                  <span>{account.email} · {account.role === "owner" ? "владелец" : "участник"}{account.password_reset_at ? " · временный пароль, ещё не сменён" : ""}</span>
+                  <span>{account.email} · {ROLE_LABEL[account.role] || account.role}{account.password_reset_at ? " · временный пароль, ещё не сменён" : ""}</span>
                 </div>
                 {account.role === "owner" ? (
                   <span className="account-owner-note">Все проекты и личный Jarvis</span>
+                ) : account.role === "admin" && viewerRole !== "owner" ? (
+                  <span className="account-owner-note">Админ: все проекты и команда</span>
                 ) : (
                   <>
-                    <ProjectAccessPicker projects={projects} selected={selected} onChange={(ids) => setDraftProjects((current) => ({ ...current, [account.id]: ids }))} />
+                    {viewerRole === "owner" && (
+                      <select className="account-role" value={account.role} disabled={busy === `role:${account.id}`} onChange={(event) => void changeRole(account, event.target.value as "admin" | "member")} aria-label="Роль">
+                        <option value="member">Участник</option>
+                        <option value="admin">Админ</option>
+                      </select>
+                    )}
+                    {account.role === "admin"
+                      ? <span className="account-owner-note">Все проекты и команда</span>
+                      : <ProjectAccessPicker projects={projects} selected={selected} onChange={(ids) => setDraftProjects((current) => ({ ...current, [account.id]: ids }))} />}
                     <label className="account-jarvis" title="Свой Джарвис: отдельная история и чаты, видит только проекты этого аккаунта.">
                       <input type="checkbox" checked={account.jarvis_enabled !== false} disabled={busy === `jarvis:${account.id}`} onChange={(event) => void toggleJarvis(account, event.target.checked)} />
                       Свой Джарвис
                     </label>
-                    <button className="account-save" type="button" disabled={!changed || busy === account.id} onClick={() => saveAccess(account)}>{busy === account.id ? "Сохраняю…" : "Сохранить доступ"}</button>
+                    {account.role === "member" && <button className="account-save" type="button" disabled={!changed || busy === account.id} onClick={() => saveAccess(account)}>{busy === account.id ? "Сохраняю…" : "Сохранить доступ"}</button>}
                     <button className="ghost-action" type="button" disabled={busy === `reset:${account.id}`} onClick={() => void resetPassword(account)}>{busy === `reset:${account.id}` ? "Сбрасываю…" : "Сбросить пароль"}</button>
                   </>
                 )}

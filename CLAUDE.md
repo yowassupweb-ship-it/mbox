@@ -258,6 +258,17 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    .xlsx (`extractText`) и картинки до 5 МБ; pdf и прочее — только ссылкой. Запись — текст/base64 до 25 МБ, `overwrite=false` по умолчанию.
    Участник видит и пишет только `projects/<его id>/` и доступные заметки; настройки бакета и ключи агентам не отдаются.
 
+33. **Роли: owner, admin, member.** `users.role` без CHECK. Админ (`isAdmin` в `server/mbox-server.mjs`, `devProjectScope` в `vite.config.ts`)
+   видит все проекты (`projectScope` → `all`), управляет командой (`ownerOnly` в `server/accounts.mjs` пускает и его; владельца и других админов
+   не трогает — `protectedFor`) и доступом к навыкам. Роль member ↔ admin меняет только владелец (`PATCH /admin/users/:id` с `role`).
+   Личное владельца админу закрыто отдельно, хотя `scope.all`: `/secrets` и `/agent/approved-secrets`, пароли в `/agent/context`, локальные
+   папки (`handleWorkspaceApi allowed: isOwner`), настройки бакета (S3 для админа — как участнику, но по всем проектам), SEO-мастер, Gmail/Google,
+   готовые интеграции. Джарвис различает владельца по `viewer.owner` (из `props.mbox_owner`), а не по `viewer.all`.
+   У каждого аккаунта своё: браузер и агент в нём (`/browser/agent|help`, операции и просьбы сверяются с `user.id`), свои API
+   (`integrations.owner_user_id`, NULL — владелец; код сервиса общий, чужой занятый → ошибка) и свои навыки: участник создаёт новый id
+   и правит только свои (`skill_owners`, `canWriteSkill`/`claimSkill` в `server/skill-access.mjs`), админ — любые.
+   Закладки MBOX Desktop: `serverState.ensureOn()` перепроверяет связь с сервером раз в 10 с, если проба при старте не прошла.
+
 ## Работа агента с MBOX
 
 MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:

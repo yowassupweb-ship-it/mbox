@@ -123,6 +123,8 @@ function IntegrationCard({ item, authTypes, onChanged }: { item: Integration; au
 export function IntegrationsBoard() {
   const [items, setItems] = useState<Integration[]>([]);
   const [authTypes, setAuthTypes] = useState<Record<string, string>>({});
+  // Владелец видит готовые сервисы и Google, остальные — только свои API (server/integrations.mjs).
+  const [owner, setOwner] = useState(false);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
   const [newId, setNewId] = useState("");
@@ -131,10 +133,11 @@ export function IntegrationsBoard() {
 
   const load = useCallback(async () => {
     try {
-      const result = await fetchJson<{ integrations: Integration[]; auth_types: Record<string, string> }>("/api/mbox/integrations");
+      const result = await fetchJson<{ integrations: Integration[]; auth_types: Record<string, string>; owner?: boolean }>("/api/mbox/integrations");
       setItems(result.integrations);
       setAuthTypes(result.auth_types);
-    } catch { setError("Не удалось загрузить интеграции. Они доступны только владельцу."); }
+      setOwner(result.owner !== false);
+    } catch { setError("Не удалось загрузить интеграции."); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -145,16 +148,16 @@ export function IntegrationsBoard() {
       const answer = await fetchJson<{ integrations: Integration[] }>(`/api/mbox/integrations/${newId.trim().toLowerCase()}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: newLabel || newId, base_url: newUrl, auth_type: "bearer" }) });
       setItems(answer.integrations);
       setAdding(false); setNewId(""); setNewLabel(""); setNewUrl("");
-    } catch { setError("Не удалось добавить. Код — латиницей (например gsc), адрес — полный https://…, внутренние адреса запрещены."); }
+    } catch { setError("Не удалось добавить. Код — латиницей (например gsc) и не занят другим аккаунтом, адрес — полный https://…, внутренние адреса запрещены."); }
   }
 
   return (
     <div className="content-grid settings-single-grid">
       <Panel title="Как это работает" icon={Plug}>
-        <p className="integration-hint">Впишите ключи один раз — агенты (Claude, ChatGPT) и Джарвис смогут обращаться к этим сервисам через MBOX сами. Сами ключи хранятся на сервере в зашифрованном виде и агентам не показываются. По умолчанию агентам велено только читать данные, не менять их во внешних сервисах.</p>
+        <p className="integration-hint">Впишите ключи один раз — агенты (Claude, ChatGPT) и Джарвис смогут обращаться к этим сервисам через MBOX сами. Сами ключи хранятся на сервере в зашифрованном виде и агентам не показываются. По умолчанию агентам велено только читать данные, не менять их во внешних сервисах.{owner ? "" : " Здесь ваши личные API: их видите только вы и ваши агенты."}</p>
         {error && <p className="account-error" role="alert">{error}</p>}
       </Panel>
-      <GmailCard />
+      {owner && <GmailCard />}
       {items.map((item) => (item.kind === "google" ? <GoogleApiRow key={item.service} item={item} /> : <IntegrationCard key={item.service} item={item} authTypes={authTypes} onChanged={setItems} />))}
       <Panel title="Своё API" icon={Plus}>
         {adding ? (

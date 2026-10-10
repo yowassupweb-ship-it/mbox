@@ -132,7 +132,8 @@ async function writeFiles(query, skillsRoot, { id, files, author, message }) {
  * Возвращает true, если запрос обработан.
  */
 export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot, actor, sendJson, readBody, onChange, access }) {
-  // access (необязательно): { allowed: null | Set<id>, canWrite } — кого и что пускать; без него (dev) всё открыто.
+  // access (необязательно): { allowed: null | Set<id>, canWrite: boolean | (id, exists) => Promise<boolean>, onCreate?(id) } —
+  // кого и что пускать; без него (dev) всё открыто.
   const base = "/api/mbox/agent/skills/packages";
   if (!url.pathname.startsWith(base)) return false;
   const rest = url.pathname.slice(base.length);
@@ -147,9 +148,16 @@ export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot,
   if (!match) return false;
   const [, id, action] = match;
   const file = url.searchParams.get("file") || "";
+  const writing = action === "/files" && req.method !== "GET";
+  let exists = null;
+  const existsNow = async () => (exists ??= Boolean(await mergedPackage(query, skillsRoot, id)));
   // Закрытый навык не показываем и не подтверждаем его существование: для человека без доступа его нет.
-  if (access?.allowed && !access.allowed.has(id)) { sendJson(res, 404, { error: "skill_not_found" }); return true; }
-  if (access && access.canWrite === false && action === "/files" && req.method !== "GET") { sendJson(res, 403, { error: "owner_required" }); return true; }
+  // Запись в несуществующий id — это создание своего навыка, её пропускаем дальше.
+  if (access?.allowed && !access.allowed.has(id) && !(writing && !(await existsNow()))) { sendJson(res, 404, { error: "skill_not_found" }); return true; }
+  if (writing && access && access.canWrite !== true) {
+    const ok = typeof access.canWrite === "function" ? await access.canWrite(id, await existsNow()) : false;
+    if (!ok) { sendJson(res, 403, { error: "skill_owner_required", hint: "Править можно свои навыки; чужой — попросите владельца или создайте свой под новым id" }); return true; }
+  }
 
   if (!action && req.method === "GET") {
     const skillPackage = await mergedPackage(query, skillsRoot, id);
@@ -166,6 +174,7 @@ export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot,
     const result = Array.isArray(body.files)
       ? await writeFiles(query, skillsRoot, { id, files: body.files, author: actor, message: body.message })
       : await writeFile(query, skillsRoot, { id, path: file || body.path, content: body.content, author: actor, message: body.message });
+    if (result.changed && exists === false) await access?.onCreate?.(id);
     if (Array.isArray(result.changed)) result.changed.forEach((path) => onChange?.({ skill: id, path, actor }));
     else if (result.changed) onChange?.({ skill: id, path: file || body.path, actor });
     sendJson(res, result.status, result.body);

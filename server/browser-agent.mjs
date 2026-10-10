@@ -51,13 +51,13 @@ export async function runBrowserOp({ clients, userId, action, tab = "", args = {
   const id = randomUUID();
   const result = new Promise((resolve) => {
     const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "timeout" }); }, WAIT_MS);
-    pending.set(id, { resolve, timer, claimedBy: "" });
+    pending.set(id, { resolve, timer, claimedBy: "", userId: String(userId) });
   });
   const delivered = sendBrowserOp(clients, userId, { type: "browser_op", id, action, tab: String(tab || ""), args: args && typeof args === "object" ? args : {}, actor: String(actor).slice(0, 60), note: String(note).slice(0, 300) });
   if (!delivered) {
     const entry = pending.get(id);
     if (entry) { clearTimeout(entry.timer); pending.delete(id); }
-    return { ok: false, error: "no_window", message: "MBOX не открыт ни в одном окне владельца — браузер недоступен." };
+    return { ok: false, error: "no_window", message: "MBOX не открыт ни в одном окне этого аккаунта — браузер недоступен." };
   }
   return result;
 }
@@ -73,7 +73,8 @@ export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson,
   // Окно с мостом к браузеру перед исполнением просит право (claim); первое получает его, остальные молчат.
   const claimMatch = url.pathname.match(/^\/api\/mbox\/browser\/agent\/([0-9a-f-]{36})\/claim$/);
   if (claimMatch && req.method === "POST") {
-    const entry = pending.get(claimMatch[1]);
+    const found = pending.get(claimMatch[1]);
+    const entry = found?.userId === String(user.id) ? found : null;
     const body = await readBody(req);
     const windowId = String(body.window || "").slice(0, 80) || "unknown";
     if (!entry) { sendJson(res, 200, { ok: true, won: false, reason: "gone" }); return true; }
@@ -84,7 +85,9 @@ export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson,
 
   const resultMatch = url.pathname.match(/^\/api\/mbox\/browser\/agent\/([0-9a-f-]{36})\/result$/);
   if (resultMatch && req.method === "POST") {
-    const entry = pending.get(resultMatch[1]);
+    const found = pending.get(resultMatch[1]);
+    // Каждый управляет только своим браузером: ответ на чужое действие не принимаем.
+    const entry = found?.userId === String(user.id) ? found : null;
     const body = await readBody(req);
     // Окно без моста к браузеру (сайт в обычном браузере, телефон) отвечает skip — ждём настоящее. Если право на
     // действие уже взято, принимаем ответ только от его владельца (окна старых версий не просят право и не шлют window).
@@ -106,7 +109,7 @@ export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson,
     const id = randomUUID();
     const result = new Promise((resolve) => {
       const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "timeout" }); }, WAIT_MS);
-      pending.set(id, { resolve, timer, claimedBy: "" });
+      pending.set(id, { resolve, timer, claimedBy: "", userId: String(user.id) });
     });
     const delivered = sendBrowserOp(clients, user.id, {
       type: "browser_op",
@@ -120,7 +123,7 @@ export async function handleBrowserAgentApi({ req, res, url, readBody, sendJson,
     if (!delivered) {
       const entry = pending.get(id);
       if (entry) { clearTimeout(entry.timer); pending.delete(id); }
-      sendJson(res, 409, { ok: false, error: "no_window", message: "MBOX не открыт ни в одном окне владельца — браузер недоступен." });
+      sendJson(res, 409, { ok: false, error: "no_window", message: "MBOX не открыт ни в одном окне этого аккаунта — браузер недоступен." });
       return true;
     }
     const answer = await result;
@@ -150,13 +153,14 @@ export function createHelp({ clients, userId, agent, reason, need = "", tab = ""
   query?.(
     `INSERT INTO agent_inbox(agent_name, item_type, title, body, priority, requires_human, props)
      VALUES ($1, 'help', $2, $3, 'high', true, $4::jsonb) RETURNING id::text`,
-    [item.agent, `Агенту нужна помощь в браузере: ${item.reason}`.slice(0, 200), [item.need, item.url && `Страница: ${item.url}`].filter(Boolean).join("\n"), JSON.stringify({ browser_help_id: item.id, to: "Человек" })],
+    [item.agent, `Агенту нужна помощь в браузере: ${item.reason}`.slice(0, 200), [item.need, item.url && `Страница: ${item.url}`].filter(Boolean).join("\n"), JSON.stringify({ browser_help_id: item.id, to: "Человек", mbox_user_id: item.userId })],
   ).then((result) => { item.inboxId = result.rows[0]?.id || null; broadcast?.("entity_changed", { entity: "agent_inbox", action: "create", actor: item.agent, detail: item.reason, silent: false }); }).catch(() => {});
   return { ...helpView(item), delivered };
 }
 
-export function waitHelp(id, seconds = HELP_MAX_WAIT_S) {
-  const item = helps.get(id);
+export function waitHelp(id, seconds = HELP_MAX_WAIT_S, userId = null) {
+  const found = helps.get(id);
+  const item = userId === null || found?.userId === String(userId) ? found : null;
   if (!item) return Promise.resolve({ id, status: "unknown", message: "Просьба не найдена (сервер перезапускался или она устарела). Создай новую." });
   if (item.status !== "pending") return Promise.resolve(helpView(item));
   const limit = Math.min(Math.max(Number(seconds) || HELP_MAX_WAIT_S, 1), HELP_MAX_WAIT_S) * 1000;
@@ -183,7 +187,7 @@ export function resolveHelp({ id, userId, action, message, query, clients }) {
 
 export const listHelps = (userId) => [...helps.values()].filter((item) => item.userId === String(userId) && item.status === "pending").map(helpView);
 
-/** Маршруты /api/mbox/browser/help*: создать, ждать, ответить. Только владелец. */
+/** Маршруты /api/mbox/browser/help*: создать, ждать, ответить. У каждого аккаунта свои просьбы. */
 export async function handleBrowserHelpApi({ req, res, url, readBody, sendJson, owner, user, actor, clients, query, broadcast }) {
   if (!url.pathname.startsWith("/api/mbox/browser/help")) return false;
   if (!owner) { sendJson(res, 403, { error: "owner_required" }); return true; }
@@ -195,7 +199,7 @@ export async function handleBrowserHelpApi({ req, res, url, readBody, sendJson, 
   }
   const match = url.pathname.match(/^\/api\/mbox\/browser\/help\/([0-9a-f-]{36})(\/resolve)?$/);
   if (!match) return false;
-  if (!match[2] && req.method === "GET") { sendJson(res, 200, await waitHelp(match[1], Number(url.searchParams.get("wait")) || 1)); return true; }
+  if (!match[2] && req.method === "GET") { sendJson(res, 200, await waitHelp(match[1], Number(url.searchParams.get("wait")) || 1, user.id)); return true; }
   if (match[2] && req.method === "POST") {
     const body = await readBody(req);
     const view = resolveHelp({ id: match[1], userId: user.id, action: String(body.action || "done"), message: body.message, query, clients });

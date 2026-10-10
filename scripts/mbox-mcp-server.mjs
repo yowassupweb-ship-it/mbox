@@ -2324,7 +2324,7 @@ server.registerTool(
   "integration_list",
   {
     title: "List connected external APIs",
-    description: "External APIs the owner connected in MBOX (Topvisor, Yandex Webmaster, Yandex Metrica and any custom API): service code, whether keys are filled, base URL, usage hint. Keys are never shown. Call this before integration_call when unsure which services exist. If a service is not configured, tell the owner to add the keys in MBOX → Settings → Integrations.",
+    description: "External APIs connected in MBOX for this account (the owner also has Topvisor, Yandex Webmaster, Yandex Metrica and Google; every account has its own custom APIs): service code, whether keys are filled, base URL, usage hint. Keys are never shown. Call this before integration_call when unsure which services exist. If a service is not configured, tell the person to add the key in MBOX → Settings → Integrations.",
     inputSchema: {},
   },
   async () => {
@@ -2338,7 +2338,7 @@ server.registerTool(
   {
     title: "Call an external API through MBOX",
     description: [
-      "Call an external API with the owner's stored key (MBOX adds the auth header; you never see the key). service = code from integration_list: topvisor, yandex_webmaster, yandex_metrica, yandex_wordstat (all methods POST with JSON body) or a custom one.",
+      "Call an external API with the account's stored key (MBOX adds the auth header; you never see the key). service = code from integration_list: topvisor, yandex_webmaster, yandex_metrica, yandex_wordstat (all methods POST with JSON body) or a custom one.",
       "Topvisor API v2: path is the method name, e.g. get/projects_2/projects, get/keywords_2/keywords, get/positions_2/history; send parameters as JSON in body (method POST). Other services: method GET/POST/PUT/PATCH/DELETE, path relative to the base URL (no query string), URL parameters in query.",
       "Read-only by default: do not change data in an external service (create/delete projects, keywords, goals) unless the owner explicitly asked. Large answers are truncated — narrow with limit/filters or raise max_chars (max 60000).",
     ].join("\n"),

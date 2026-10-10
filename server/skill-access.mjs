@@ -3,7 +3,7 @@
 // Владелец меняет и то, и другое в «Настройки → Навыки».
 //
 // Фильтр действует на всё, что отдаёт навыки: каталог страницы «Навыки», пакеты (MCP list_skills/get_skill, синхронизация на ПК агентов,
-// вкладки навыка). Правка файлов навыка — только владельцу.
+// вкладки навыка). Правка файлов: владелец и админ — любого навыка, участник — своих (созданных им, таблица skill_owners).
 
 import { listSkillPackages } from "./skill-packages.mjs";
 import { SKILL_CATALOG } from "./skill-catalog.mjs";
@@ -25,7 +25,14 @@ export async function ensureSkillAccessSchema(query) {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (skill_id, user_id)
   )`);
+  await query(`CREATE TABLE IF NOT EXISTS skill_owners (
+    skill_id TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
 }
+
+const managesSkills = (user) => user?.role === "owner" || user?.role === "admin";
 
 async function baseSkills(query) {
   const base = new Set(DEFAULT_BASE);
@@ -37,10 +44,24 @@ async function baseSkills(query) {
 
 /** Какие навыки видит человек: null — все (владелец), иначе множество id пакетов. */
 export async function allowedSkills(query, user) {
-  if (!user || user.role === "owner") return null;
+  if (!user || managesSkills(user)) return null;
   const allowed = await baseSkills(query);
   for (const row of (await query("SELECT skill_id FROM skill_access WHERE user_id = $1", [user.id])).rows) allowed.add(row.skill_id);
   return allowed;
+}
+
+/** Может ли человек записать файл навыка: свой навык или новый (его он и создаёт). */
+export async function canWriteSkill(query, user, id, exists) {
+  if (managesSkills(user)) return true;
+  if (!exists) return true;
+  return Boolean((await query("SELECT 1 FROM skill_owners WHERE skill_id = $1 AND user_id = $2", [id, user.id])).rows[0]);
+}
+
+/** Новый навык участника: он хозяин, и навык сразу виден ему (и его агентам через синхронизацию). */
+export async function claimSkill(query, user, id) {
+  if (managesSkills(user)) return;
+  await query("INSERT INTO skill_owners(skill_id, user_id) VALUES ($1, $2) ON CONFLICT (skill_id) DO NOTHING", [id, user.id]);
+  await query("INSERT INTO skill_access(skill_id, user_id, granted_by) VALUES ($1, $2, 'author') ON CONFLICT (skill_id, user_id) DO NOTHING", [id, user.id]);
 }
 
 /** Навык по id каталога (в нём у UX/UI-навыков префикс skill-ux-ui-). */

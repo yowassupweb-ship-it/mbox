@@ -183,11 +183,16 @@ export async function handlePublicInvite({ req, res, url, query, readBody, sendJ
   return true;
 }
 
+// Командой управляют владелец и админ (role = 'admin': все проекты, приглашения, участники, без личного владельца).
 const ownerOnly = (user, sendJson, res) => {
-  if (user?.role === "owner") return true;
+  if (user?.role === "owner" || user?.role === "admin") return true;
   sendJson(res, 403, { error: "owner_required" });
   return false;
 };
+
+/** Чужой аккаунт, который этот человек трогать не может: владельца — никто, админа — только владелец. */
+const protectedFor = (actor, target) => String(actor.id) !== String(target.id)
+  && (target.role === "owner" || (target.role === "admin" && actor.role !== "owner"));
 
 function looksLikePasswordHash(value) {
   return /^(pbkdf2_sha256|bcrypt|scrypt|argon2|sha256|sha512)\$/i.test(String(value || ""));
@@ -203,7 +208,7 @@ async function accountRows(query) {
      LEFT JOIN project_memberships pm ON pm.user_id = u.id
      LEFT JOIN projects p ON p.id = pm.project_id
      GROUP BY u.id
-     ORDER BY CASE WHEN u.role = 'owner' THEN 0 ELSE 1 END, lower(u.username)` ,
+     ORDER BY CASE u.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, lower(u.username)` ,
   )).rows;
 }
 
@@ -461,11 +466,12 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (invalid) { sendJson(res, 400, { error: invalid }); return true; }
     const email = String(body.email || `${username.toLowerCase().replace(/\s+/g, ".")}@mbox.local`).trim();
     if (await usernameTaken(query, username, email)) { sendJson(res, 409, { error: "account_already_exists" }); return true; }
+    const role = body.role === "admin" && user.role === "owner" ? "admin" : "member";
     const created = await query(
       `INSERT INTO users(email, username, password_hash, role, jarvis_enabled)
-       VALUES ($1, $2, crypt($3, gen_salt('bf')), 'member', $4)
+       VALUES ($1, $2, crypt($3, gen_salt('bf')), $5, $4)
        RETURNING id::text, email, username, role, created_at::text`,
-      [email, username, password, body.jarvis_enabled === true],
+      [email, username, password, body.jarvis_enabled === true, role],
     ).catch((error) => ({ error }));
     if (created.error) {
       sendJson(res, 409, { error: "account_already_exists" });
@@ -482,7 +488,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (!ownerOnly(user, sendJson, res)) return true;
     const target = (await query("SELECT id::text, role FROM users WHERE id = $1", [resetMatch[1]])).rows[0];
     if (!target) { sendJson(res, 404, { error: "not_found" }); return true; }
-    if (target.role === "owner") { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
+    if (target.role === "owner" || protectedFor(user, target)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
     const password = temporaryPassword();
     await query("UPDATE users SET password_hash = crypt($2, gen_salt('bf')), password_reset_at = now() WHERE id = $1", [target.id, password]);
     const revoked = await query("DELETE FROM auth_sessions WHERE user_id = $1", [target.id]);
@@ -495,7 +501,13 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     const body = await readBody(req);
     const existing = (await query("SELECT id::text, role FROM users WHERE id = $1", [match[1]])).rows[0];
     if (!existing) { sendJson(res, 404, { error: "not_found" }); return true; }
-    if (existing.role === "owner" && String(user.id) !== String(existing.id)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
+    if (protectedFor(user, existing)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
+    // Роль участник ↔ админ меняет только владелец, и не себе.
+    if (body.role !== undefined && body.role !== existing.role) {
+      if (user.role !== "owner" || existing.role === "owner" || !["member", "admin"].includes(body.role)) { sendJson(res, 403, { error: "role_change_forbidden" }); return true; }
+      await query("UPDATE users SET role = $1 WHERE id = $2", [body.role, match[1]]);
+      existing.role = body.role;
+    }
     const password = String(body.password || "");
     await query(
       `UPDATE users SET
@@ -506,7 +518,8 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
        WHERE id = $4`,
       [String(body.username || "").trim(), String(body.email || "").trim(), looksLikePasswordHash(password) ? "" : password, match[1]],
     );
-    if (existing.role !== "owner" && Object.prototype.hasOwnProperty.call(body, "project_ids")) await replaceMemberships(query, match[1], body.project_ids);
+    // Проекты выбираются только участнику: админ и владелец видят все.
+    if (existing.role === "member" && Object.prototype.hasOwnProperty.call(body, "project_ids")) await replaceMemberships(query, match[1], body.project_ids);
     if (existing.role !== "owner" && typeof body.jarvis_enabled === "boolean") await query("UPDATE users SET jarvis_enabled = $1 WHERE id = $2", [body.jarvis_enabled, match[1]]);
     sendJson(res, 200, { user: (await accountRows(query)).find((row) => row.id === match[1]) });
     return true;

@@ -3214,19 +3214,21 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
 
   if (name === "integration_list" || name === "integration_call") {
     if (!integrations) return "интеграции недоступны в этом режиме";
-    if (!viewer?.userId || !viewer.all) return "внешние API с ключами доступны только владельцу MBOX";
+    if (!viewer?.userId) return "внешние API доступны только от имени аккаунта MBOX";
+    // У владельца — готовые сервисы и его API, у остальных — только свои API (server/integrations.mjs).
+    const integrationOwner = viewer.owner !== false;
     if (name === "integration_list") {
-      const rows = await integrations.list(String(viewer.userId));
+      const rows = await integrations.list(String(viewer.userId), integrationOwner);
       return rows.map((row) => `${row.service} — ${row.label}: ${row.configured ? "подключён" : "ключи не заполнены"}; адрес ${row.base_url}${row.hint ? `\n   ${row.hint}` : ""}${row.kind === "builtin" ? `\n   по умолчанию: ${row.fields.filter((field) => !field.secret && field.value).map((field) => `${field.label} = ${field.value}`).join(", ") || "—"}` : ""}`).join("\n");
     }
-    const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars }, String(viewer.userId));
+    const result = await integrations.call(String(args.service || "").trim(), { method: args.method, path: String(args.path || ""), query: args.query, body: args.body, max_chars: args.max_chars }, String(viewer.userId), integrationOwner);
     if (result.ok === false && (!result.status || result.error === "api_error")) return `API: ${result.message || result.error}`;
     return `HTTP ${result.status}${result.ok ? "" : " (ошибка)"}\n${typeof result.data === "string" ? result.data : JSON.stringify(result.data)}${result.truncated ? `\n[ответ обрезан: ${result.total_chars} символов; ${result.hint}]` : ""}`;
   }
 
   if (name.startsWith("gmail_")) {
     if (!gmail) return "почта недоступна в этом режиме";
-    if (!viewer?.userId || !viewer.all) return "почта подключена только у владельца MBOX";
+    if (!viewer?.userId || !viewer.owner) return "почта подключена только у владельца MBOX";
     try {
       if (name === "gmail_search") {
         const result = await gmail.search(String(viewer.userId), { q: args.query, max: args.max });
@@ -3252,7 +3254,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
       const check = async (key) => (await storage.canUse(viewerScope, key)) ? null : "нет доступа к этой папке — только папки проектов, где человек участвует";
       if (name === "storage_list") {
         const prefix = String(args.prefix || "");
-        if (!prefix && !viewerScope.all) return (await storage.roots(viewerScope)).map((root) => `📁 ${root}`).join("\n") || "папок проектов нет";
+        if (!prefix && (!viewerScope.all || viewerScope.owner === false)) return (await storage.roots(viewerScope)).map((root) => `📁 ${root}`).join("\n") || "папок проектов нет";
         if (prefix) { const denied = await check(storage.cleanKey(prefix)); if (denied) return denied; }
         const data = await storage.list(prefix);
         const lines = [...data.folders.map((folder) => `📁 ${folder}`), ...data.objects.map((item) => `${item.key} · ${item.size} Б`)];
@@ -3276,7 +3278,7 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
 
   if (name.startsWith("gdoc_")) {
     if (!gdocs) return "Google Документы недоступны в этом режиме";
-    if (!viewer?.userId || !viewer.all) return "Google подключён только у владельца MBOX";
+    if (!viewer?.userId || !viewer.owner) return "Google подключён только у владельца MBOX";
     const uid = String(viewer.userId);
     try {
       if (name === "gdoc_search") {
@@ -3298,11 +3300,11 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
   // Встроенный браузер владельца: тот же путь, что у MCP browser_* (окно MBOX Desktop выполняет действие с подсветкой).
   if (name.startsWith("browser_")) {
     if (!browserOp) return "браузер недоступен в этом режиме";
-    if (!viewer?.userId || !viewer.all) return "браузером MBOX управляет только владелец";
+    if (!viewer?.userId) return "браузер доступен только от имени аккаунта MBOX";
     if (name === "browser_ask_help" || name === "browser_wait_help") {
       if (!browserHelp) return "просьба о помощи недоступна в этом режиме";
       const view = name === "browser_ask_help"
-        ? await (async () => { const created = browserHelp.ask(String(viewer.userId), { reason: args.reason, need: args.need, tab: args.tab }); return browserHelp.wait(created.id, 40); })()
+        ? await (async () => { const created = browserHelp.ask(String(viewer.userId), { reason: args.reason, need: args.need, tab: args.tab }); return browserHelp.wait(created.id, 40, String(viewer.userId)); })()
         : await browserHelp.wait(String(args.id || ""), 40);
       if (view.status === "done") return `человек ответил: готово${view.message ? `. Комментарий: ${view.message}` : ""}. Сделай свежий browser_snapshot и продолжай.`;
       if (view.status === "stopped") return `человек просит остановиться${view.message ? `: ${view.message}` : ""}. Не продолжай, расскажи что сделано и что осталось.`;
@@ -3995,7 +3997,7 @@ export async function replyAsJarvis(item) {
         try {
           result = call.function?.name === "request_tools"
             ? (enableToolGroups(focusGroups, call.function?.arguments), enableToolGroups(activeGroups, call.function?.arguments))
-            : await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList, item.id, mboxUserId ? { userId: mboxUserId, all: allowedProjectIds == null, projectIds: allowedProjectIds || [] } : null);
+            : await runJarvisTool(client, call.function?.name, call.function?.arguments, projectList, item.id, mboxUserId ? { userId: mboxUserId, owner: includeLegacyInbox, all: allowedProjectIds == null, projectIds: allowedProjectIds || [] } : null);
           jlog(item.id, `  ${call.function?.name} -> ${result.slice(0, 200)}`);
         } catch (error) {
           result = describeToolFailure(call.function?.name || "инструмент", error);

@@ -935,7 +935,7 @@ async function requireUser(req: IncomingMessage, res: ServerResponse) {
 }
 
 async function devProjectScope(user: { id: string; role: string }) {
-  if (user.role === "owner") return { all: true, projectIds: [] as string[] };
+  if (user.role === "owner" || user.role === "admin") return { all: true, projectIds: [] as string[] };
   const result = await queryPostgres<{ project_id: string }>(
     "SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id",
     [user.id],
@@ -1159,7 +1159,7 @@ function mboxDevApi() {
           }
           // Зеркало прод-ручек состояния встроенного браузера (см. server/browser-state.mjs).
           // Агент во встроенном браузере — общий модуль server/browser-agent.mjs, как у прода.
-          if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user: sessionUser, owner: sessionUser.role === "owner", actor: actorFromReq(req), clients: realtimeClients })) return;
+          if (await handleBrowserAgentApi({ req, res, url, readBody, sendJson, user: sessionUser, owner: true, actor: actorFromReq(req), clients: realtimeClients })) return;
           if (await handleBrowserStateApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: true, userId: sessionUser.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
           if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
           // Зеркало прод-ручек SEO Wizard (server/seo-wizard.mjs), доступ — только владельцу, как scope.all в проде.
