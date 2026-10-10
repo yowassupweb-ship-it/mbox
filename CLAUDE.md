@@ -271,7 +271,14 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
 
 ## Работа агента с MBOX
 
-MCP-сервер `mbox-prod` подключён в `../../.mcp.json` (агент `Claude`). Инструменты:
+**Вся работа записывается в MBOX через MCP `mbox-prod` — обязательно.** Любая программа, скрипт, правка, сборка или релиз,
+сделанные агентом, должны оставить след в MBOX: задача (`create_task`/`set_task_status`, факты в `props`, ход — в `note`),
+запуск (`create_agent_run`) и/или решение (`record_decision`). Работа, которой нет в MBOX, считается несделанной. Если MCP
+недоступен — сказать об этом человеку в начале работы, а не молча работать мимо MBOX.
+
+MCP-сервер `mbox-prod` подключён на уровне пользователя (`claude mcp add mbox-prod -s user`, `~/.claude.json`): запускает
+`~/.mbox/agent/scripts/mbox-mcp-server.mjs` из набора `mbox-agent` с `MBOX_URL`, `MBOX_TOKEN` аккаунта и `MBOX_AGENT_NAME=Claude`.
+Проверка — `claude mcp get mbox-prod`. Инструменты:
 `describe_structure`, `get_agent_context`, `get_next_task`, `claim_task`, `set_task_status`,
 `create_task`, `create_project_relation`, `create_inbox_item`, `create_agent_run`, `record_decision`,
 `list_recent_history`, `list_project_context`, `get_project_access`.
