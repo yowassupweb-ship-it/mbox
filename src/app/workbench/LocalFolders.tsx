@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Bot, ChevronRight, FilePlus2, FolderPlus, GitBranch, RefreshCw, X } from "lucide-react";
 import { formatSince } from "../../lib/format";
@@ -35,7 +36,7 @@ function cleanError(cause: unknown) {
   return (cause instanceof Error ? cause.message : String(cause)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 }
 
-export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
+export function LocalFoldersView({ tabs, switcher }: { tabs: TabsApi; switcher?: ReactNode }) {
   const ws = useLocalWorkspace();
   const [expanded, setExpanded] = usePersistentState<string[]>("mbox.local.expanded", []);
   const [children, setChildren] = useState<Record<string, DirEntry[]>>({});
@@ -263,6 +264,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
     return (
       <div className="wb-view">
         <header className="wb-view-head"><span>Папки</span></header>
+        {switcher}
         <div className="wb-view-body">
           <p className="wb-empty">Локальные папки открываются и правятся в приложении MBOX Desktop. Здесь — те, что оно подключило.</p>
           {ws.server.map((row) => <ServerWorkspaceCard key={row.id} row={row} />)}
@@ -280,6 +282,7 @@ export function LocalFoldersView({ tabs }: { tabs: TabsApi }) {
           <button type="button" onClick={() => { ws.refresh(); for (const id of expanded) { const [rootKey, ...rest] = id.split(":"); void load(rootKey, rest.join(":")); } }} title="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
+      {switcher}
       <div className="wb-filter">
         <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Найти файл по имени" onKeyDown={(event) => { if (event.key === "Escape") setFilter(""); }} />
         {filter && <button type="button" onClick={() => setFilter("")} aria-label="Очистить"><X size={13} /></button>}

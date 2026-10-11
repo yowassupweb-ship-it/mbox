@@ -19,6 +19,41 @@ function useCopy() {
   return { copied, copy };
 }
 
+/**
+ * Личные правила человека к навыку (learnings): агент дописывает их, когда его поправили, и читает перед работой.
+ * Видны и правятся только этим аккаунтом; файлы автора навыка не меняются.
+ */
+function SkillLearnings({ packageId }: { packageId: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [saved, setSaved] = useState("");
+  const [state, setState] = useState("");
+  useEffect(() => {
+    fetchJson<{ content: string }>(`/api/mbox/agent/skills/packages/${packageId}/learnings`)
+      .then((result) => { setText(result.content); setSaved(result.content); })
+      .catch(() => setText(null));
+  }, [packageId]);
+  if (text === null) return null;
+  async function save() {
+    setState("Сохраняю…");
+    try {
+      await fetchJson(`/api/mbox/agent/skills/packages/${packageId}/learnings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text }) });
+      setSaved(text ?? "");
+      setState("Сохранено. Агенты получат правила при следующей синхронизации.");
+    } catch { setState("Не удалось сохранить"); }
+  }
+  return (
+    <section className="wb-skill-details wb-skill-learnings">
+      <h2>Мои правила</h2>
+      <p className="wb-skill-usage">Как этот навык должен работать именно для вас. Агент сам дописывает сюда правило, когда вы поправляете его работу. Это видите только вы.</p>
+      <textarea value={text} onChange={(event) => setText(event.target.value)} rows={6} placeholder="Например: письма — без восклицательных знаков; таблицы — сначала итог, потом детали." aria-label="Мои правила к навыку" />
+      <div className="wb-skill-learnings-actions">
+        <button type="button" className="wb-inline-btn" disabled={text === saved} onClick={() => void save()}>Сохранить</button>
+        {state && <span role="status">{state}</span>}
+      </div>
+    </section>
+  );
+}
+
 export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsApi }) {
   const { data, loading } = useSkillsCatalog();
   const { copied, copy } = useCopy();
@@ -75,6 +110,7 @@ export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsAp
         )}
         </dl>
       </section>
+      <SkillLearnings packageId={skill.id.replace(/^skill-ux-ui-/, "")} />
     </div>
   );
 }

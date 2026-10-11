@@ -1469,7 +1469,173 @@ server.registerTool(
       method: "PUT",
       body: JSON.stringify({ files, message }),
     });
-    return textResult(result.unchanged ? "No changes." : `Saved ${result.files?.length || files.length} files in ${id}. Live now.`);
+    return textResult(result.unchanged ? "No changes." : `Saved ${result.files?.length || files.length} files in ${id}. Live now. A new skill is personal: only its author sees it until it is shared (Settings → My skills) or published with skill_store_publish.`);
+  },
+);
+
+// Навык — это инструкция агенту (SKILL.md). Новый навык личный; в магазин команды он попадает только по прямой просьбе человека.
+server.registerTool(
+  "skill_store_publish",
+  {
+    title: "Publish my skill to the team store",
+    description: "Publish one of the caller's own skills (instructions, SKILL.md) to the MBOX skill store so every teammate can install it. Only on the person's explicit request: by default a skill stays personal. Updating a published skill is automatic, installers always get the latest version. An API connection is a tool, not a skill: tools are published from the Tools section by the person.",
+    inputSchema: {
+      id: z.string().describe("skill id (the folder name), must be the caller's own skill"),
+      title: z.string().default("").describe("name shown in the store; defaults to the id"),
+      summary: z.string().default("").describe("one line: what the skill does and when to use it"),
+    },
+  },
+  async ({ id, title, summary }) => {
+    await mboxFetch("/api/mbox/store", { method: "POST", body: JSON.stringify({ kind: "skill", ref: id, title: title || id, summary }) });
+    return textResult(`Skill "${id}" is published in the MBOX store.`);
+  },
+);
+
+server.registerTool(
+  "skill_store_unpublish",
+  {
+    title: "Take my skill off the team store",
+    description: "Remove one of the caller's own skills from the MBOX skill store. Teammates who already installed it keep it. Only on the person's explicit request.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const { items } = await mboxFetch("/api/mbox/store");
+    const item = (items || []).find((entry) => entry.kind === "skill" && entry.ref === id && entry.mine);
+    if (!item) return textResult(`Skill "${id}" is not published by you.`);
+    await mboxFetch(`/api/mbox/store/${item.id}`, { method: "DELETE" });
+    return textResult(`Skill "${id}" is no longer in the store.`);
+  },
+);
+
+// ─── Презентации «на глазах» ─────────────────────────────────────────────────
+// Презентация — JSON: { version: 1, theme, slides: [{ id, background?, notes, elements: [...] }] }, слайд 960×540.
+// Элементы: text { x, y, w, h, html, role?: title|subtitle|body, style?: { fontSize, color, align, valign, bold, italic } },
+// shape { shape: rect|round|ellipse|line, fill, stroke, strokeWidth, html? }, image { src (https или data:), fit: cover|contain }.
+// Открытая вкладка перечитывает презентацию после каждой правки и подсвечивает изменённый слайд.
+
+const slideShape = z.object({
+  background: z.string().optional(),
+  notes: z.string().optional(),
+  elements: z.array(z.record(z.string(), z.unknown())).describe("blocks: text | shape | image with x, y, w, h in 960×540 slide pixels"),
+}).passthrough();
+
+server.registerTool(
+  "presentation_list",
+  {
+    title: "List presentations and templates",
+    description: "List the person's presentations (title, slides, updated). templates=true lists only templates — start a new deck from one of them so it matches the person's style.",
+    inputSchema: { templates: z.boolean().default(false), query: z.string().default("") },
+  },
+  async ({ templates, query }) => {
+    const qs = new URLSearchParams({ ...(templates ? { templates: "1" } : {}), ...(query ? { q: query } : {}) });
+    const { presentations } = await mboxFetch(`/api/mbox/presentations?${qs}`);
+    if (!presentations?.length) return textResult(templates ? "No templates yet. Make a good deck and suggest the person marks it as a template." : "No presentations.");
+    return textResult(presentations.map((item) => `#${item.id} ${item.title}${item.is_template ? " [template]" : ""} · ${item.slide_count} slides · ${item.updated_at.slice(0, 16)}`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "presentation_create",
+  {
+    title: "Create a presentation",
+    description: "Create a presentation in MBOX (Workspace → Presentations). template_id copies a template (theme, layouts, sample slides) to adapt. show=true opens it as a tab so the person watches you build it slide by slide. Returns the id.",
+    inputSchema: { title: z.string().default(""), template_id: z.string().default(""), project: z.string().default(""), show: z.boolean().default(true) },
+  },
+  async ({ title, template_id: templateId, project, show }) => {
+    let projectId = null;
+    if (project) {
+      const { projects = [] } = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}&limit=20`).catch(() => ({}));
+      projectId = (projects.find((item) => item.name.toLowerCase() === project.toLowerCase()) || projects[0])?.id || null;
+    }
+    const { presentation } = await mboxFetch("/api/mbox/presentations", { method: "POST", body: JSON.stringify({ title, template_id: templateId || undefined, project_id: projectId || undefined }) });
+    const shown = show ? await showInMbox(`slides:${presentation.id}`, presentation.title) : "";
+    return textResult(`Presentation #${presentation.id} «${presentation.title}» created with ${presentation.slide_count} slides.${shown}`);
+  },
+);
+
+server.registerTool(
+  "presentation_read",
+  {
+    title: "Read a presentation",
+    description: "Read a presentation as JSON (theme and slides with blocks). Read before editing; slide indexes start at 0.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const { presentation } = await mboxFetch(`/api/mbox/presentations/${encodeURIComponent(id)}`);
+    return textResult(`#${presentation.id} «${presentation.title}»${presentation.is_template ? " [template]" : ""}\n${presentation.content}`);
+  },
+);
+
+server.registerTool(
+  "presentation_slide",
+  {
+    title: "Change one slide (live)",
+    description: "Change a presentation one slide at a time so the person sees each step in the open tab: op=add (insert slide at index, default end), update (replace slide at index), delete, move (index → to), theme (patch theme: fontFamily, background, text, accent, titleSize, bodySize). Keep text short; one idea per slide; fit blocks inside 960×540.",
+    inputSchema: {
+      id: z.string(),
+      op: z.enum(["add", "update", "delete", "move", "theme"]),
+      index: z.number().int().optional(),
+      to: z.number().int().optional(),
+      slide: slideShape.optional(),
+      theme: z.record(z.string(), z.unknown()).optional(),
+    },
+  },
+  async ({ id, op, index, to, slide, theme }) => {
+    const result = await mboxFetch(`/api/mbox/presentations/${encodeURIComponent(id)}/slides`, { method: "POST", body: JSON.stringify({ op, index, to, slide, theme }) });
+    return textResult(`Done (${op}). The deck now has ${result.slides} slides.`);
+  },
+);
+
+server.registerTool(
+  "presentation_write",
+  {
+    title: "Replace a whole presentation",
+    description: "Replace the whole presentation JSON at once. Prefer presentation_slide for visible step-by-step work; use this for bulk restyling.",
+    inputSchema: { id: z.string(), deck: z.record(z.string(), z.unknown()), title: z.string().default("") },
+  },
+  async ({ id, deck, title }) => {
+    const { presentation } = await mboxFetch(`/api/mbox/presentations/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ content: JSON.stringify(deck), ...(title ? { title } : {}) }) });
+    return textResult(`Saved «${presentation.title}»: ${presentation.slide_count} slides.`);
+  },
+);
+
+server.registerTool(
+  "presentation_set_template",
+  {
+    title: "Mark a presentation as a template",
+    description: "Mark (or unmark) a presentation as a template the person can start new decks from. Do it when the person approves a deck's look or asks for it.",
+    inputSchema: { id: z.string(), is_template: z.boolean().default(true) },
+  },
+  async ({ id, is_template: isTemplate }) => {
+    await mboxFetch(`/api/mbox/presentations/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ is_template: isTemplate }) });
+    return textResult(isTemplate ? `#${id} is now a template.` : `#${id} is no longer a template.`);
+  },
+);
+
+// Подстройка навыка под человека: у каждого свои правила к навыку (learnings.md в выданном пакете, раздел «Мои правила»).
+server.registerTool(
+  "skill_learning_add",
+  {
+    title: "Remember a personal rule for a skill",
+    description: "Append one short rule to the person's own learnings for a skill (shown in learnings.md under «Мои правила» for this account only; the skill author's files are not changed). Use it when the person corrected your result, rejected a variant, or said always/never while you worked with that skill. One line: what to do differently and why. No one-off details, personal data or secrets.",
+    inputSchema: { id: z.string().describe("skill id"), text: z.string().describe("the rule, one line") },
+  },
+  async ({ id, text }) => {
+    await mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}/learnings`, { method: "POST", body: JSON.stringify({ text }) });
+    return textResult(`Rule saved to the person's learnings for "${id}".`);
+  },
+);
+
+server.registerTool(
+  "skill_learnings",
+  {
+    title: "Read the person's rules for a skill",
+    description: "Read this account's personal learnings for a skill. Read them before working with the skill if learnings.md was not loaded.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const result = await mboxFetch(`/api/mbox/agent/skills/packages/${encodeURIComponent(id)}/learnings`);
+    return textResult(result.content?.trim() || "No personal rules yet.");
   },
 );
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { RemoteCarets } from "./RemoteCarets";
 import { ShareButton } from "./ShareLinks";
 import { usePresence } from "./presence";
@@ -134,7 +135,7 @@ if (typeof window !== "undefined") {
   });
 }
 
-export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
+export function NotesView({ tabs, defaultProjectId = null, onOpen, switcher }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void; switcher?: ReactNode }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(notesStore.query);
   const [importing, setImporting] = useState(false);
@@ -239,13 +240,14 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Tab
   return (
     <div className="wb-view">
       <header className="wb-view-head">
-        <span>Заметки</span>
+        <span className={switcher ? "wb-tables-heading" : undefined}>{switcher ? "Рабочее пространство" : "Заметки"}</span>
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importInputRef.current?.click()} title={canCreate ? "Импорт Word в новую заметку" : "Нет доступных проектов для заметок"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createNoteAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая заметка (Ctrl+Alt+N)" : "Нет доступных проектов для заметок"}><Plus size={14} /></button>
           <input ref={importInputRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWordAsNote(file); event.target.value = ""; }} />
         </div>
       </header>
+      {switcher}
       <div className="wb-filter">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти в заметках" onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
         {query && <button type="button" onClick={() => setQuery("")} aria-label="Очистить"><X size={13} /></button>}

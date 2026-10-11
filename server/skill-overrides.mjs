@@ -21,7 +21,42 @@ CREATE TABLE IF NOT EXISTS skill_file_versions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS skill_file_versions_lookup ON skill_file_versions (skill_id, path, id);
+CREATE TABLE IF NOT EXISTS skill_user_learnings (
+  skill_id TEXT NOT NULL,
+  user_id BIGINT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (skill_id, user_id)
+);
 `;
+
+// Подстройка под человека. Каждый навык, который отдаётся человеку и его агентам, получает:
+//  • в конце SKILL.md — раздел ADAPT: прочитать learnings.md перед работой и дописывать туда правила после поправок;
+//  • learnings.md — общий опыт автора (если он есть в навыке) плюс личные правила этого человека (skill_user_learnings).
+// Файлы автора не меняются: личное подмешивается при выдаче. Чтение файла для правки (?file= без personal=1) видит исходник.
+const ADAPT_MARK = "## Подстройка под человека";
+const ADAPT = `\n\n${ADAPT_MARK}\n\nПеред работой прочитай learnings.md рядом с этим файлом: там правила и предпочтения именно этого человека, они важнее общих советов выше. Когда человек поправил результат, отказался от варианта или сказал «всегда» или «никогда», допиши одно короткое правило через MCP skill_learning_add (id навыка и строка «что делать иначе и почему»). Разовые детали, личные данные и секреты не записывай.\n`;
+const PERSONAL_HEAD = "## Мои правила";
+
+async function personalLearnings(query, skillId, userId) {
+  if (!userId) return "";
+  return (await query("SELECT content FROM skill_user_learnings WHERE skill_id = $1 AND user_id = $2", [skillId, String(userId)]).catch(() => ({ rows: [] }))).rows[0]?.content || "";
+}
+
+/** Пакет навыка для конкретного человека: раздел ADAPT в SKILL.md и learnings.md с его правилами. */
+async function personalize(query, skillPackage, userId) {
+  if (!skillPackage) return skillPackage;
+  const entries = skillPackage.files.map((file) => ({ path: file.path, buffer: Buffer.from(file.content, "base64"), edited: Boolean(file.edited) }));
+  const skill = entries.find((entry) => entry.path === "SKILL.md");
+  if (skill && !skill.buffer.toString("utf8").includes(ADAPT_MARK)) skill.buffer = Buffer.from(skill.buffer.toString("utf8").replace(/\s*$/, "") + ADAPT, "utf8");
+  const personal = (await personalLearnings(query, skillPackage.id, userId)).trim();
+  const learnings = entries.find((entry) => entry.path === "learnings.md");
+  const authorPart = learnings ? learnings.buffer.toString("utf8").replace(/\s*$/, "") : "# Опыт навыка";
+  const text = `${authorPart}\n\n${PERSONAL_HEAD}\n\n${personal || "Пока пусто. Агент допишет сюда правила, когда вы поправите его работу по этому навыку."}\n`;
+  if (learnings) learnings.buffer = Buffer.from(text, "utf8");
+  else entries.push({ path: "learnings.md", buffer: Buffer.from(text, "utf8") });
+  return buildSkillPackage(skillPackage.id, entries);
+}
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
@@ -59,10 +94,10 @@ async function mergedPackage(query, skillsRoot, id) {
   return buildSkillPackage(id, [...files.entries()].map(([path, file]) => ({ path, buffer: file.buffer, edited: file.source === "mbox" })));
 }
 
-async function listMerged(query, skillsRoot) {
+async function listMerged(query, skillsRoot, userId = null, only = null) {
   const ids = new Set(listSkillPackages(skillsRoot).map((item) => item.id));
   for (const version of await versionsOf(query)) ids.add(version.skill_id);
-  const packages = await Promise.all([...ids].sort().map((id) => mergedPackage(query, skillsRoot, id)));
+  const packages = await Promise.all([...ids].filter((id) => !only || only.has(id)).sort().map(async (id) => personalize(query, await mergedPackage(query, skillsRoot, id), userId)));
   return packages.filter(Boolean).map(({ files, ...rest }) => ({ ...rest, files: files.map(({ content, ...file }) => file) }));
 }
 
@@ -131,20 +166,28 @@ async function writeFiles(query, skillsRoot, { id, files, author, message }) {
  *   GET  /api/mbox/agent/skills/packages/:id/history?file=<путь> — версии файла
  * Возвращает true, если запрос обработан.
  */
+/** Навыки-пакеты коротко (id, имя, описание из SKILL.md) — для списка «Навыки», где нет навыков, созданных в MBOX. */
+export async function packageSummaries(query, skillsRoot, allowed = null) {
+  const ids = new Set(listSkillPackages(skillsRoot).map((item) => item.id));
+  for (const version of await versionsOf(query)) ids.add(version.skill_id);
+  const list = await Promise.all([...ids].filter((id) => !allowed || allowed.has(id)).sort().map((id) => mergedPackage(query, skillsRoot, id)));
+  return list.filter(Boolean).map((item) => ({ id: item.id, name: item.name, description: item.description || "" }));
+}
+
 export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot, actor, sendJson, readBody, onChange, access }) {
-  // access (необязательно): { allowed: null | Set<id>, canWrite: boolean | (id, exists) => Promise<boolean>, onCreate?(id) } —
+  // access (необязательно): { allowed: null | Set<id>, canWrite: boolean | (id, exists) => Promise<boolean>, onCreate?(id), userId? } —
   // кого и что пускать; без него (dev) всё открыто.
   const base = "/api/mbox/agent/skills/packages";
   if (!url.pathname.startsWith(base)) return false;
   const rest = url.pathname.slice(base.length);
 
   if (rest === "" && req.method === "GET") {
-    const all = await listMerged(query, skillsRoot);
-    sendJson(res, 200, { packages: access?.allowed ? all.filter((item) => access.allowed.has(item.id)) : all });
+    const all = await listMerged(query, skillsRoot, access?.userId, access?.allowed || null);
+    sendJson(res, 200, { packages: all });
     return true;
   }
 
-  const match = rest.match(/^\/([a-z0-9][a-z0-9-]*)(\/files|\/history)?$/);
+  const match = rest.match(/^\/([a-z0-9][a-z0-9-]*)(\/files|\/history|\/learnings)?$/);
   if (!match) return false;
   const [, id, action] = match;
   const file = url.searchParams.get("file") || "";
@@ -159,9 +202,39 @@ export async function handleSkillPackagesApi({ req, res, url, query, skillsRoot,
     if (!ok) { sendJson(res, 403, { error: "skill_owner_required", hint: "Править можно свои навыки; чужой — попросите владельца или создайте свой под новым id" }); return true; }
   }
 
+  // Личные правила человека к навыку: прочитать, заменить целиком, дописать строку.
+  if (action === "/learnings") {
+    if (!access?.userId) { sendJson(res, 400, { error: "user_required" }); return true; }
+    if (!(await existsNow())) { sendJson(res, 404, { error: "skill_not_found" }); return true; }
+    if (req.method === "GET") { sendJson(res, 200, { id, content: await personalLearnings(query, id, access.userId) }); return true; }
+    if (req.method === "PUT" || req.method === "POST") {
+      const body = await readBody(req);
+      let content;
+      if (req.method === "PUT") content = String(body.content ?? "");
+      else {
+        const line = String(body.text || "").replace(/\s+/g, " ").trim().slice(0, 500);
+        if (!line) { sendJson(res, 400, { error: "text_required" }); return true; }
+        const current = await personalLearnings(query, id, access.userId);
+        content = `${current.replace(/\s*$/, "")}${current.trim() ? "\n" : ""}- ${line} (${new Date().toISOString().slice(0, 10)})`;
+      }
+      if (content.length > 20_000) { sendJson(res, 413, { error: "too_long", hint: "Правил слишком много — сожмите их" }); return true; }
+      await query(
+        `INSERT INTO skill_user_learnings(skill_id, user_id, content) VALUES ($1, $2, $3)
+         ON CONFLICT (skill_id, user_id) DO UPDATE SET content = EXCLUDED.content, updated_at = now()`,
+        [id, String(access.userId), content],
+      );
+      onChange?.({ skill: id, path: "learnings.md", actor, personal: true });
+      sendJson(res, 200, { id, content });
+      return true;
+    }
+    return false;
+  }
+
   if (!action && req.method === "GET") {
-    const skillPackage = await mergedPackage(query, skillsRoot, id);
-    if (!skillPackage) { sendJson(res, 404, { error: "skill_not_found" }); return true; }
+    const raw = await mergedPackage(query, skillsRoot, id);
+    if (!raw) { sendJson(res, 404, { error: "skill_not_found" }); return true; }
+    const personal = !file || url.searchParams.get("personal") === "1";
+    const skillPackage = personal ? await personalize(query, raw, access?.userId) : raw;
     if (!file) { sendJson(res, 200, { package: skillPackage }); return true; }
     const found = skillPackage.files.find((item) => item.path === file);
     if (!found) { sendJson(res, 404, { error: "skill_file_not_found" }); return true; }

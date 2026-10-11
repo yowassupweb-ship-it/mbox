@@ -5,11 +5,12 @@ import { fetchJson } from "../../lib/api";
 import { Panel, PasswordInput } from "../../ui";
 import { askConfirm } from "../../ui/askText";
 import { GmailCard } from "./GmailCard";
+import { IconControls, ItemIcon } from "../skills/ItemIcon";
 
 type Field = { key: string; label: string; secret: boolean; optional: boolean; filled: boolean; source: string; value: string };
 type Integration = {
   service: string; label: string; kind: "builtin" | "custom" | "google"; base_url: string; docs: string; hint: string; configured: boolean;
-  auth_type?: string; auth_name?: string; fields: Field[];
+  auth_type?: string; auth_name?: string; fields: Field[]; icon?: string;
 };
 type Result = { ok: boolean; message: string };
 
@@ -79,6 +80,10 @@ function IntegrationCard({ item, authTypes, onChanged }: { item: Integration; au
   return (
     <Panel title={item.label} icon={Plug} actions={<span className={item.configured ? "meta-chip tone-ok" : "meta-chip tone-warn"}>{item.configured ? <><CheckCircle2 size={12} /> Подключено</> : <><CircleAlert size={12} /> Не заполнено</>}</span>}>
       <form className="integration-form" onSubmit={save}>
+        <div className="integration-icon-row">
+          <ItemIcon icon={item.icon} name={item.label} size={56} />
+          <IconControls kind="tool" refId={item.service} hasIcon={Boolean(item.icon)} onChanged={() => void fetchJson<{ integrations: Integration[] }>("/api/mbox/integrations").then((answer) => onChanged(answer.integrations))} />
+        </div>
         {item.hint && <p className="integration-hint">{item.hint}</p>}
         {item.docs && <a className="integration-docs" href={item.docs} target="_blank" rel="noreferrer"><ExternalLink size={12} /> Документация API</a>}
         {item.kind === "custom" && (
@@ -120,7 +125,7 @@ function IntegrationCard({ item, authTypes, onChanged }: { item: Integration; au
 }
 
 /** Внешние API с ключами: Topvisor, Яндекс Вебмастер и Метрика, любые свои. Агенты и Джарвис вызывают их через MBOX и ключей не видят. */
-export function IntegrationsBoard() {
+export function IntegrationsBoard({ only }: { only?: string } = {}) {
   const [items, setItems] = useState<Integration[]>([]);
   const [authTypes, setAuthTypes] = useState<Record<string, string>>({});
   // Владелец видит готовые сервисы и Google, остальные — только свои API (server/integrations.mjs).
@@ -153,13 +158,14 @@ export function IntegrationsBoard() {
 
   return (
     <div className="content-grid settings-single-grid">
-      <Panel title="Как это работает" icon={Plug}>
+      {!only && <Panel title="Как это работает" icon={Plug}>
         <p className="integration-hint">Впишите ключи один раз — агенты (Claude, ChatGPT) и Джарвис смогут обращаться к этим сервисам через MBOX сами. Сами ключи хранятся на сервере в зашифрованном виде и агентам не показываются. По умолчанию агентам велено только читать данные, не менять их во внешних сервисах.{owner ? "" : " Здесь ваши личные API: их видите только вы и ваши агенты."}</p>
         {error && <p className="account-error" role="alert">{error}</p>}
-      </Panel>
-      {owner && <GmailCard />}
-      {items.map((item) => (item.kind === "google" ? <GoogleApiRow key={item.service} item={item} /> : <IntegrationCard key={item.service} item={item} authTypes={authTypes} onChanged={setItems} />))}
-      <Panel title="Своё API" icon={Plus}>
+      </Panel>}
+      {only && error && <p className="account-error" role="alert">{error}</p>}
+      {owner && (!only || items.some((item) => item.service === only && item.kind === "google")) && <GmailCard />}
+      {items.filter((item) => !only || item.service === only).map((item) => (item.kind === "google" ? <GoogleApiRow key={item.service} item={item} /> : <IntegrationCard key={item.service} item={item} authTypes={authTypes} onChanged={setItems} />))}
+      {!only && <Panel title="Своё API" icon={Plus}>
         {adding ? (
           <form className="integration-form" onSubmit={create}>
             <div className="integration-grid">
@@ -175,7 +181,7 @@ export function IntegrationsBoard() {
         ) : (
           <button className="ghost-action" type="button" onClick={() => setAdding(true)}><Plus size={14} /> Добавить API: адрес и ключ</button>
         )}
-      </Panel>
+      </Panel>}
     </div>
   );
 }

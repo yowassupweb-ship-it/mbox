@@ -17,15 +17,21 @@ import { ensureWorkspaceSchema, handleWorkspaceApi } from "./server/workspaces.m
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./server/notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./server/tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./server/documents.mjs";
+import { ensurePresentationsSchema, handlePresentationsApi } from "./server/presentations.mjs";
 import { handleSpotlightApi } from "./server/spotlight.mjs";
 import { handlePlannerApi } from "./server/planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
+import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./server/spaces.mjs";
 import { TOOL_CATALOG } from "./server/tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storagePutStream, storageSignedGet } from "./server/storage.mjs";
-import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./server/skill-overrides.mjs";
+import { ensureSkillOverridesSchema, handleSkillPackagesApi, packageSummaries } from "./server/skill-overrides.mjs";
+import { allowedSkills, canManageSkill, canWriteSkill, claimSkill, extraCatalogEntries, ensureSkillAccessSchema, handleSkillAccessApi } from "./server/skill-access.mjs";
+import { ensureSkillStoreSchema, handleSkillStoreApi } from "./server/skill-store.mjs";
+import { ensureItemIconsSchema, handleItemIconsApi } from "./server/item-icons.mjs";
+import { canManageTool, ensureIntegrationsSchema, handleIntegrationsApi } from "./server/integrations.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./server/seo-wizard.mjs";
 import { documentToDocx, docxFileName } from "./server/docx.mjs";
@@ -935,12 +941,7 @@ async function requireUser(req: IncomingMessage, res: ServerResponse) {
 }
 
 async function devProjectScope(user: { id: string; role: string }) {
-  if (user.role === "owner" || user.role === "admin") return { all: true, projectIds: [] as string[] };
-  const result = await queryPostgres<{ project_id: string }>(
-    "SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id",
-    [user.id],
-  );
-  return { all: false, projectIds: result.rows.map((row) => row.project_id) };
+  return projectScopeFor(queryPostgres, user) as Promise<{ all: boolean; owner: boolean; projectIds: string[] }>;
 }
 
 function devHasProjectAccess(scope: { all: boolean; projectIds: string[] }, projectId: unknown) {
@@ -980,9 +981,14 @@ function mboxDevApi() {
       ensureDocumentsSchema(queryPostgres).catch((error: Error) => console.error(`documents schema: ${error.message}`));
       ensureChatThreadsSchema(queryPostgres).catch((error: Error) => console.error(`chat threads schema: ${error.message}`));
       ensureBrowserStateSchema(queryPostgres).catch((error: Error) => console.error(`browser state schema: ${error.message}`));
+      ensureSpacesSchema(queryPostgres).catch((error: Error) => console.error(`spaces schema: ${error.message}`));
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
       ensureStorageSchema(queryPostgres).catch((error: Error) => console.error(`storage schema: ${error.message}`));
       ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
+      ensureIntegrationsSchema(queryPostgres).catch((error: Error) => console.error(`integrations schema: ${error.message}`));
+      ensurePresentationsSchema(queryPostgres).catch((error: Error) => console.error(`presentations schema: ${error.message}`));
+      ensureItemIconsSchema(queryPostgres).catch((error: Error) => console.error(`icons schema: ${error.message}`));
+      ensureSkillAccessSchema(queryPostgres).then(() => ensureSkillStoreSchema(queryPostgres)).catch((error: Error) => console.error(`skill access schema: ${error.message}`));
       ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
       import("./server/migrations.mjs").then(({ runMigrations }) => runMigrations(getPool())).catch((error: Error) => console.error(`migrations: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
@@ -1123,6 +1129,7 @@ function mboxDevApi() {
           const devScope = await devProjectScope(sessionUser);
 
           if (await handleAccountsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser })) return;
+          if (await handleSpacesApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser })) return;
 
           if (await handleWorkspaceApi({
             req, res, url, query: queryPostgres, readBody, sendJson,
@@ -1137,6 +1144,7 @@ function mboxDevApi() {
           if (await handlePlannerApi({ req, res, url, query: queryPostgres, readBody, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload), actor: devActor, userName: sessionUser.username })) return;
           if (await handleTablesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handlePresentationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
           if (url.pathname.startsWith("/api/mbox/storage")) {
             // Зеркало прод-логики: папки хранилища по проектам, участнику — только свои (см. storageAccessFor на проде).
@@ -1147,7 +1155,7 @@ function mboxDevApi() {
             const labels = Object.fromEntries(projects.map((project) => [`projects/${project.id}/`, project.name]));
             const roots = projects.map((project) => ({ prefix: `projects/${project.id}/`, label: project.name }));
             const viewer = { ...devScope, userId: String(sessionUser.id) };
-            const access = ownerOnly ? null : {
+            const access = ownerOnly && devScope.all ? null : {
               roots,
               canUse: async (key: string) => {
                 if (roots.some((root) => key.startsWith(root.prefix))) return true;
@@ -1296,8 +1304,19 @@ function mboxDevApi() {
           }
 
           // Пакеты навыков с правками агентов — общий модуль server/skill-overrides.mjs, как у прода.
+          if (await handleSkillAccessApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, actor: actorFromReq(req), skillsRoot: path.resolve("skills") })) return;
+          if (await handleIntegrationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, owner: sessionUser.role === "owner", actor: actor || await resolveRequestActor(req), userId: sessionUser.id })) return;
+          if (await handleItemIconsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, canManage: (kind: string, ref: string) => (kind === "skill" ? canManageSkill(queryPostgres, sessionUser, ref) : canManageTool(queryPostgres, ref, { owner: sessionUser.role === "owner", userId: String(sessionUser.id) })) })) return;
+          if (await handleSkillStoreApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, owner: sessionUser.role === "owner", isSkillMine: (id: string) => canManageSkill(queryPostgres, sessionUser, id) })) return;
+          const devSkillAllowed = await allowedSkills(queryPostgres, sessionUser);
           if (await handleSkillPackagesApi({
             req, res, url, query: queryPostgres, skillsRoot: path.resolve("skills"), actor: actorFromReq(req), sendJson, readBody,
+            access: {
+              allowed: devSkillAllowed,
+              canWrite: (id: string, exists: boolean) => canWriteSkill(queryPostgres, sessionUser, id, exists),
+              onCreate: (id: string) => claimSkill(queryPostgres, sessionUser, id),
+              userId: String(sessionUser.id),
+            },
             onChange: (change: Record<string, unknown>) => broadcastRealtime(realtimeClients, "skill_file_changed", change),
           })) return;
 
@@ -1334,7 +1353,8 @@ function mboxDevApi() {
             const unknown = usage.rows
               .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
               .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
-            return sendJson(res, 200, { skills: [...skills, ...unknown], modes });
+            const devExtra = await extraCatalogEntries(queryPostgres, sessionUser, await packageSummaries(queryPostgres, path.resolve("skills"), await allowedSkills(queryPostgres, sessionUser)), skills.map((skill: { id: string }) => skill.id));
+            return sendJson(res, 200, { skills: [...skills, ...devExtra, ...unknown], modes });
           }
 
           // Зеркало прод-ручки: лимиты подписок агентов (см. server/agent-usage.mjs).
@@ -1884,7 +1904,7 @@ function mboxDevApi() {
 
           if (url.pathname === "/api/mbox/companies") {
             if (req.method === "POST") {
-              if (!devScope.all) return sendJson(res, 403, { error: "owner_required" });
+              if (!devScope.owner) return sendJson(res, 403, { error: "owner_required" });
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
                 `INSERT INTO companies(folder_id, name, status, props, color, access_level)
@@ -2042,7 +2062,6 @@ function mboxDevApi() {
             const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 200), 1), 200);
             const offset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
             if (req.method === "POST") {
-              if (!devScope.all) return sendJson(res, 403, { error: "owner_required" });
               const body = await readBody<Record<string, unknown>>(req);
               const result = await queryPostgres(
                 `INSERT INTO projects(name, status, stack, git_url, deploy_provider, deploy_target, color, access_level, props)
@@ -2050,6 +2069,7 @@ function mboxDevApi() {
                  RETURNING id::text`,
                 [String(body.name ?? "").trim(), String(body.status ?? ""), JSON.stringify(Array.isArray(body.stack) ? body.stack : []), String(body.git_url ?? ""), String(body.deploy_provider ?? ""), String(body.deploy_target ?? ""), String(body.color ?? "#2c2c2e"), String(body.access_level ?? ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
               );
+              await addProjectMember(queryPostgres, (result.rows[0] as { id: string } | undefined)?.id, sessionUser.id);
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "projects" });
               return sendJson(res, 201, { project: result.rows[0] });
             }
@@ -2245,7 +2265,7 @@ function mboxDevApi() {
           }
 
           if (projectMatch && req.method === "DELETE") {
-            if (!devScope.all) return sendJson(res, 403, { error: "owner_required" });
+            if (!devHasProjectAccess(devScope, projectMatch[1])) return sendJson(res, 403, { error: "forbidden" });
             await queryPostgres("DELETE FROM projects WHERE id = $1", [projectMatch[1]]);
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "projects" });
             return sendJson(res, 200, { ok: true });

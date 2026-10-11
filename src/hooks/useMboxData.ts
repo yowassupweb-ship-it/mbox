@@ -65,8 +65,7 @@ function urlFor(key: Key, qs: string) {
 }
 
 // У участника этих разделов нет (организации и секреты — только владельцу): не стучимся и не получаем 403 на каждом обновлении.
-// Пароли — только владельцу; компании видит и админ (все проекты), участник — нет.
-const hiddenKeys = (role: string) => new Set<Key>(role === "owner" ? [] : role === "admin" ? ["secrets"] : ["companies", "secrets"]);
+const hiddenKeys = (role: string) => new Set<Key>(role === "owner" ? [] : ["companies", "secrets"]);
 
 export function useMboxData(query: string, onAuthExpired?: () => void, role = "owner") {
   const hiddenRef = useRef(hiddenKeys(role));

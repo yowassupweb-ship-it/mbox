@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
-import { BarChart3, Bug, Cloud, Figma, Globe, LineChart, Play, RefreshCw, Rss, Theater, TrendingUp, X, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { BarChart3, Bug, Cloud, Figma, Globe, LineChart, Play, Plus, RefreshCw, Rss, Store, Theater, TrendingUp, X, type LucideIcon } from "lucide-react";
 import { openSkillPage } from "./agentTabs";
 import { formatLastUsed, skillGroup, useSkillsCatalog, useToolsCatalog } from "./catalog";
 import { usePersistentState, type TabsApi } from "./tabs";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { fetchJson } from "../../lib/api";
+import { ItemIcon } from "../../features/skills/ItemIcon";
 
 function Filter({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
@@ -15,11 +17,15 @@ function Filter({ value, onChange, placeholder }: { value: string; onChange: (va
 }
 
 export function SkillsView({ tabs }: { tabs: TabsApi }) {
-  const { data, loading, reload } = useSkillsCatalog();
+  const { data, loading, reload: reloadSkills } = useSkillsCatalog();
+  const { data: programs, reload: reloadPrograms } = useToolsCatalog();
+  const reload = () => { reloadSkills(); reloadPrograms(); };
   const [filter, setFilter] = usePersistentState("mbox.skills.filter", "");
   const [collapsed, setCollapsed] = usePersistentState<string[]>("mbox.skills.collapsed", []);
   const needle = filter.trim().toLowerCase();
 
+  // Программы и MCP (бот, фид, браузеры) — не API, а справочные карточки «как этим пользоваться»: по смыслу это навыки.
+  const programItems = programs.tools.filter((tool) => !/-api$/.test(tool.id)).filter((tool) => !needle || `${tool.name} ${tool.kind} ${tool.summary} ${tool.group || ""}`.toLowerCase().includes(needle));
   const groups = useMemo(() => {
     const map = new Map<string, typeof data.skills>();
     for (const skill of data.skills) {
@@ -35,6 +41,7 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
       <header className="wb-view-head">
         <span>Навыки</span>
         <div className="wb-view-actions">
+          <button type="button" onClick={() => tabs.open("skillstore", true)} title="Магазин навыков" aria-label="Магазин навыков"><Store size={13} /></button>
           <button type="button" onClick={reload} title="Обновить" aria-label="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
@@ -79,7 +86,26 @@ export function SkillsView({ tabs }: { tabs: TabsApi }) {
             </section>
           );
         })}
-        {!loading && !groups.length && <p className="wb-empty">{needle ? "Ничего не найдено" : "Навыков пока нет"}</p>}
+        {!loading && !groups.length && !programItems.length && <p className="wb-empty">{needle ? "Ничего не найдено" : "Навыков пока нет"}</p>}
+        {programItems.length > 0 && (
+          <section className="wb-menu-group">
+            <button type="button" className="wb-menu-group-head" onClick={() => setCollapsed((current) => (current.includes("open:programs") ? current.filter((item) => item !== "open:programs") : [...current, "open:programs"]))}>
+              <span className={Boolean(needle) || collapsed.includes("open:programs") ? "wb-caret is-open" : "wb-caret"}>›</span>Программы и MCP<b>{programItems.length}</b>
+            </button>
+            {(Boolean(needle) || collapsed.includes("open:programs")) && programItems.map((tool) => {
+              const key = `tool:${tool.id}`;
+              return (
+                <button key={tool.id} type="button" className={["wb-menu-item has-icon wb-tool-item", tabs.active === key ? "is-active" : ""].filter(Boolean).join(" ")} onClick={() => tabs.open(key)} onDoubleClick={() => tabs.open(key, true)} title={`${tool.summary}
+
+${tool.status}`}>
+                  <span className={`wb-tool-glyph ${toolTone(tool)}`}><ToolIcon id={tool.id} src={tool.planned ? "" : tool.icon} name={tool.name} size={36} /><i aria-hidden="true" /></span>
+                  <span className="wb-menu-item-title">{tool.name}</span>
+                  <span className="wb-menu-item-meta">{tool.kind}</span>
+                </button>
+              );
+            })}
+          </section>
+        )}
         {data.modes.length > 0 && !needle && (
           <section className="wb-menu-group">
             <div className="wb-menu-group-head is-static">Служебные режимы</div>
@@ -153,57 +179,62 @@ function toolTone(tool: { status: string; planned?: boolean }) {
   return "is-ok";
 }
 
+type ApiTool = { service: string; label: string; kind: "builtin" | "custom" | "google"; configured: boolean; hint: string; icon: string };
+
+/** Свой значок сервиса из набора MBOX для готовых API; остальные рисует ItemIcon. */
+const API_IMAGES: Record<string, string> = {
+  topvisor: "/assets/icons/tools/topvisor-api.png",
+  yandex_webmaster: "/assets/icons/tools/webmaster-api.png",
+  yandex_metrica: "/assets/icons/tools/metrica-api.png",
+  yandex_wordstat: "/assets/icons/tools/wordstat-api.png",
+};
+
+/**
+ * Инструменты — это подключения к API: ключ внесён один раз, и агенты работают с сервисом через MBOX, не видя ключа.
+ * Навыки (инструкции агенту) — в соседнем разделе, туда же переехали программы и MCP: это не API.
+ */
 export function ToolsView({ tabs }: { tabs: TabsApi }) {
-  const { data, loading, reload } = useToolsCatalog();
+  const [apis, setApis] = useState<ApiTool[]>([]);
+  const [apiLoading, setApiLoading] = useState(true);
+  const reloadApis = () => fetchJson<{ integrations: ApiTool[] }>("/api/mbox/integrations").then((result) => setApis(result.integrations)).catch(() => setApis([])).finally(() => setApiLoading(false));
+  useEffect(() => { void reloadApis(); }, []);
+  const reload = () => { void reloadApis(); };
   const [filter, setFilter] = usePersistentState("mbox.tools.filter", "");
-  const [collapsed, setCollapsed] = usePersistentState<string[]>("mbox.tools.collapsed", []);
   const needle = filter.trim().toLowerCase();
-  const tools = data.tools.filter((tool) => !needle || `${tool.name} ${tool.kind} ${tool.summary} ${tool.group || ""} ${tool.capabilities.join(" ")}`.toLowerCase().includes(needle));
-  const groups = [...tools.reduce((map, tool) => map.set(tool.group || "Другое", [...(map.get(tool.group || "Другое") ?? []), tool]), new Map<string, typeof tools>())];
+  const apiItems = apis.filter((tool) => !needle || `${tool.label} ${tool.hint}`.toLowerCase().includes(needle));
 
   return (
     <div className="wb-view">
       <header className="wb-view-head">
         <span>Инструменты</span>
         <div className="wb-view-actions">
+          <button type="button" onClick={() => tabs.open("api:", true)} title="Подключить своё API" aria-label="Подключить своё API"><Plus size={13} /></button>
+          <button type="button" onClick={() => tabs.open("skillstore", true)} title="Магазин: инструменты команды" aria-label="Магазин"><Store size={13} /></button>
           <button type="button" onClick={reload} title="Обновить" aria-label="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
       <Filter value={filter} onChange={setFilter} placeholder="Найти инструмент" />
       <div className="wb-view-body">
-        {loading && <OctopusSpinner />}
-        {groups.map(([group, items]) => {
-          const open = Boolean(needle) || !collapsed.includes(group);
-          const planned = items.every((tool) => tool.planned);
-          return (
-            <section key={group} className="wb-menu-group">
-              <button type="button" className="wb-menu-group-head" onClick={() => setCollapsed((current) => (current.includes(group) ? current.filter((item) => item !== group) : [...current, group]))}>
-                <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>{group}{planned && <i className="wb-tool-soon">скоро</i>}<b>{items.length}</b>
-              </button>
-              {open && items.map((tool) => {
-                const key = `tool:${tool.id}`;
-                return (
-                  <button
-                    key={tool.id}
-                    type="button"
-                    className={["wb-menu-item has-icon wb-tool-item", tabs.active === key ? "is-active" : "", tool.planned ? "is-planned" : ""].filter(Boolean).join(" ")}
-                    onClick={() => tabs.open(key)}
-                    onDoubleClick={() => tabs.open(key, true)}
-                    title={`${tool.summary}\n\n${tool.status}`}
-                  >
-                    <span className={`wb-tool-glyph ${toolTone(tool)}`}>
-                      <ToolIcon id={tool.id} src={tool.planned ? "" : tool.icon} name={tool.name} size={36} />
-                      <i aria-hidden="true" />
-                    </span>
-                    <span className="wb-menu-item-title">{tool.name}</span>
-                    <span className="wb-menu-item-meta">{tool.kind}</span>
-                  </button>
-                );
-              })}
-            </section>
-          );
-        })}
-        {!loading && !tools.length && <p className="wb-empty">{needle ? "Ничего не найдено" : "Инструментов пока нет"}</p>}
+        {apiLoading && <OctopusSpinner />}
+        {apiItems.length > 0 && (
+          <section className="wb-menu-group">
+            <div className="wb-menu-group-head is-static">API<b>{apiItems.length}</b></div>
+            {apiItems.map((tool) => {
+              const key = `api:${tool.service}`;
+              return (
+                <button key={tool.service} type="button" className={["wb-menu-item has-icon wb-tool-item", tabs.active === key ? "is-active" : ""].filter(Boolean).join(" ")} onClick={() => tabs.open(key)} onDoubleClick={() => tabs.open(key, true)} title={tool.hint}>
+                  <span className={`wb-tool-glyph ${tool.configured ? "is-ok" : "is-warn"}`}>
+                    {API_IMAGES[tool.service] && !tool.icon ? <img className="item-icon" src={API_IMAGES[tool.service]} width={36} height={36} alt="" /> : <ItemIcon icon={tool.icon} name={tool.label} size={36} />}
+                    <i aria-hidden="true" />
+                  </span>
+                  <span className="wb-menu-item-title">{tool.label}</span>
+                  <span className="wb-menu-item-meta">{tool.configured ? "подключено" : "нужен ключ"}</span>
+                </button>
+              );
+            })}
+          </section>
+        )}
+        {!apiLoading && !apis.length && !needle && <p className="wb-empty">Подключённых API пока нет. Нажмите «+» или откройте магазин.</p>}
       </div>
     </div>
   );

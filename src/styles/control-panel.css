@@ -1404,3 +1404,64 @@
 .skill-matrix-check { display: grid; place-items: center; min-height: 32px; }
 .skill-matrix-check input { width: 16px; height: 16px; accent-color: var(--accent-color); }
 .skill-matrix-check input:disabled { opacity: .5; }
+
+/* Мои навыки: карточка навыка, редактор SKILL.md, форма создания */
+.skill-list { display: grid; gap: var(--space-2); }
+.skill-card { display: grid; gap: var(--space-2); padding: var(--space-3); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-lg); background: var(--element-bg); }
+.skill-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); }
+.skill-create-fields { grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); }
+.skill-create-body,
+.skill-editor textarea { width: 100%; min-width: 0; padding: 10px 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); color: var(--text-main); font: inherit; font-size: var(--text-sm); line-height: 1.5; resize: vertical; }
+.skill-editor { display: grid; gap: var(--space-2); }
+.skill-editor textarea { font-family: var(--font-mono, ui-monospace, monospace); }
+.skill-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.skill-editor-state { color: var(--text-muted); font-size: var(--text-xs); }
+@media (max-width: 720px) {
+  .skill-card-head { grid-template-columns: 1fr; }
+  .skill-create-fields { grid-template-columns: 1fr; }
+}
+
+/* Кнопки в сетках панелей по размеру подписи, а не на всю ширину: grid растягивает дочерние элементы. */
+:is(.settings-board, .wb-store-page, .store) :is(.primary-action, .ghost-action, .danger-action) { justify-self: start; width: fit-content; max-width: 100%; }
+
+/* Значок навыка или API: скруглённая плитка как у приложения */
+.item-icon { flex: none; display: inline-grid; place-items: center; border-radius: 22.5%; object-fit: cover; box-shadow: 0 0 0 var(--border-width) var(--border-color), 0 1px 3px rgba(0, 0, 0, 0.18); }
+.item-icon.is-generated { background: linear-gradient(145deg, hsl(var(--icon-hue) 62% 52%), hsl(calc(var(--icon-hue) + 28) 60% 38%)); color: #fff; font-weight: var(--weight-bold); letter-spacing: 0.02em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); user-select: none; }
+.icon-controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
+/* Магазин навыков и инструментов: витрина как в App Store */
+.wb-store-page { height: 100%; overflow: auto; padding: var(--space-5) var(--space-4); }
+.store { display: grid; gap: var(--space-4); width: min(100%, 760px); margin: 0 auto; }
+.store-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.store-head h1 { margin: 0; font-size: var(--text-2xl, 28px); font-weight: var(--weight-bold); letter-spacing: -0.02em; }
+.store-head p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+.store-publish-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 14px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-main); font-weight: var(--weight-semibold); font-size: var(--text-sm); cursor: pointer; }
+.store-publish-toggle[aria-expanded="true"] { border-color: var(--accent-color); color: var(--accent-color); }
+.store-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.store-tabs { display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--element-bg); border: var(--border-width) solid var(--border-color); }
+.store-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-muted); font-weight: var(--weight-semibold); font-size: var(--text-sm); cursor: pointer; }
+.store-tabs button.is-active { background: var(--container-bg); color: var(--text-main); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+.store-tabs button b { font-weight: var(--weight-regular, 400); color: var(--text-muted); font-size: var(--text-xs); }
+.store-search { display: inline-flex; align-items: center; gap: 8px; min-width: 200px; height: 32px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-pill); background: var(--element-bg); color: var(--text-muted); }
+.store-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.store-list { display: grid; }
+.store-app { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: var(--border-width) solid var(--border-color); }
+.store-app:last-child { border-bottom: 0; }
+.store-app-text { display: grid; gap: 2px; min-width: 0; }
+.store-app-text strong { overflow: hidden; font-size: var(--text-md, 15px); text-overflow: ellipsis; white-space: nowrap; }
+.store-app-summary { overflow: hidden; color: var(--text-muted); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.store-app-text small { color: var(--text-muted); font-size: var(--text-xs); }
+.store-get { min-width: 84px; min-height: 30px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 16%, transparent); color: var(--accent-color); font-weight: var(--weight-bold); font-size: var(--text-sm); cursor: pointer; }
+.store-get:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-color) 26%, transparent); }
+.store-get.is-quiet { background: var(--element-bg); color: var(--text-muted); font-weight: var(--weight-semibold); }
+.store-get:disabled { opacity: 0.55; cursor: default; }
+.store-publish-panel { padding: var(--space-4); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-lg); background: var(--element-bg); }
+.store-publish { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.store-publish-icon { display: grid; justify-items: start; gap: var(--space-2); }
+.store-publish-fields { display: grid; gap: var(--space-2); min-width: 0; }
+.store-publish-fields select, .store-publish-fields input { min-width: 0; height: 36px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--container-bg); color: var(--text-main); }
+.store-publish-empty { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+@media (max-width: 560px) { .store-publish { grid-template-columns: 1fr; } .store-app { grid-template-columns: auto minmax(0, 1fr); } .store-get { grid-column: 1 / -1; justify-self: stretch; } }
+.store-get.is-static { display: inline-grid; place-items: center; cursor: default; }
+.store-link { padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.store-link:hover:not(:disabled) { color: var(--danger-color, var(--text-main)); }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Pencil, Pin, PinOff, Plus, RefreshCw, Table2, Trash2, Upload, X } from "lucide-react";
+import { FileText, NotebookPen, Pencil, Pin, PinOff, Plus, Presentation, RefreshCw, Table2, Trash2, Upload, X } from "lucide-react";
 import { fetchJson } from "../../lib/api";
 import { formatBytes, formatSince } from "../../lib/format";
 import { askConfirm, askText } from "../../ui/askText";
@@ -8,7 +8,10 @@ import { WbMenu } from "./WbMenu";
 import type { TabsApi } from "./tabs";
 import { createDocAndOpen, docsStore, emitDocs, importDocx, patchDoc, refreshDocs, type DocRecord } from "./docsStore";
 
-export type SheetsDocsMode = "tables" | "docs";
+export type SheetsDocsMode = "notes" | "tables" | "docs" | "slides";
+
+/** Переключить раздел «Документы» снаружи (Ctrl+Alt+N открывает заметки). */
+export const SHEETS_MODE_EVENT = "mbox:sheets-mode";
 
 /**
  * Переключатель «Таблицы | Документы»: две вкладки на всю ширину с подписями, под шапкой списка. Раньше это
@@ -17,8 +20,10 @@ export type SheetsDocsMode = "tables" | "docs";
  */
 export function SheetsDocsSwitch({ mode, onMode, count }: { mode: SheetsDocsMode; onMode: (mode: SheetsDocsMode) => void; count?: number }) {
   const items: Array<{ id: SheetsDocsMode; label: string; icon: typeof FileText }> = [
+    { id: "notes", label: "Заметки", icon: NotebookPen },
     { id: "tables", label: "Таблицы", icon: Table2 },
     { id: "docs", label: "Документы", icon: FileText },
+    { id: "slides", label: "Презентации", icon: Presentation },
   ];
   return (
     <div
@@ -28,7 +33,8 @@ export function SheetsDocsSwitch({ mode, onMode, count }: { mode: SheetsDocsMode
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
-        onMode(mode === "tables" ? "docs" : "tables");
+        const order = items.map((item) => item.id);
+        onMode(order[(order.indexOf(mode) + (event.key === "ArrowRight" ? 1 : order.length - 1)) % order.length]);
       }}
     >
       {items.map(({ id, label, icon: Icon }) => (
@@ -128,7 +134,7 @@ export function DocumentsView({ tabs, defaultProjectId = null, onOpen, mode, onM
   return (
     <div className="wb-view wb-tables-view">
       <header className="wb-view-head">
-        <span className="wb-tables-heading">Таблицы и документы</span>
+        <span className="wb-tables-heading">Рабочее пространство</span>
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importRef.current?.click()} title={canCreate ? "Импорт Word (.docx)" : "Нет доступных проектов"} aria-label="Импорт Word"><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => void create()} title={canCreate ? "Новый документ" : "Нет доступных проектов"} aria-label="Новый документ"><Plus size={14} /></button>

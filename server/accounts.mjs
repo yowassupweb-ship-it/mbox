@@ -1,3 +1,4 @@
+import { projectScopeFor } from "./spaces.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -183,22 +184,24 @@ export async function handlePublicInvite({ req, res, url, query, readBody, sendJ
   return true;
 }
 
-// Командой управляют владелец и админ (role = 'admin': все проекты, приглашения, участники, без личного владельца).
+// Командой управляет владелец инстанса: приглашения, аккаунты, сброс пароля. Чужие проекты и навыки ему не открываются.
 const ownerOnly = (user, sendJson, res) => {
-  if (user?.role === "owner" || user?.role === "admin") return true;
+  if (user?.role === "owner") return true;
   sendJson(res, 403, { error: "owner_required" });
   return false;
 };
-
-/** Чужой аккаунт, который этот человек трогать не может: владельца — никто, админа — только владелец. */
-const protectedFor = (actor, target) => String(actor.id) !== String(target.id)
-  && (target.role === "owner" || (target.role === "admin" && actor.role !== "owner"));
 
 function looksLikePasswordHash(value) {
   return /^(pbkdf2_sha256|bcrypt|scrypt|argon2|sha256|sha512)\$/i.test(String(value || ""));
 }
 
-async function accountRows(query) {
+/** Какими проектами человек может распоряжаться: null — всеми (владелец до включения личных пространств), иначе своими. */
+async function manageableProjects(query, user) {
+  const scope = await projectScopeFor(query, user);
+  return scope.all ? null : scope.projectIds;
+}
+
+async function accountRows(query, manageable = null) {
   return (await query(
     `SELECT u.id::text, u.email, u.username, u.role, COALESCE((to_jsonb(u)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled, u.created_at::text,
             to_jsonb(u)->>'password_reset_at' AS password_reset_at,
@@ -206,15 +209,21 @@ async function accountRows(query) {
               ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects
      FROM users u
      LEFT JOIN project_memberships pm ON pm.user_id = u.id
-     LEFT JOIN projects p ON p.id = pm.project_id
+     LEFT JOIN projects p ON p.id = pm.project_id AND ($1::boolean OR p.id = ANY($2::bigint[]))
      GROUP BY u.id
-     ORDER BY CASE u.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, lower(u.username)` ,
+     ORDER BY CASE WHEN u.role = 'owner' THEN 0 ELSE 1 END, lower(u.username)` ,
+    [manageable === null, manageable || []],
   )).rows;
 }
 
-async function replaceMemberships(query, userId, projectIds) {
-  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : []).map(String).filter((id) => /^\d+$/.test(id)))];
-  await query("DELETE FROM project_memberships WHERE user_id = $1 AND NOT (project_id = ANY($2::bigint[]))", [userId, ids]);
+/** Меняет проекты человека, но только в пределах manageable: чужие проекты (его собственные, чужие) остаются как есть. */
+async function replaceMemberships(query, userId, projectIds, manageable = null) {
+  const allowed = manageable ? new Set(manageable.map(String)) : null;
+  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : []).map(String).filter((id) => /^\d+$/.test(id) && (!allowed || allowed.has(id))))];
+  await query(
+    "DELETE FROM project_memberships WHERE user_id = $1 AND NOT (project_id = ANY($2::bigint[])) AND ($3::boolean OR project_id = ANY($4::bigint[]))",
+    [userId, ids, manageable === null, manageable || []],
+  );
   for (const projectId of ids) {
     await query(
       `INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor')
@@ -431,7 +440,8 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (!ownerOnly(user, sendJson, res)) return true;
     const body = await readBody(req);
     const requested = Array.isArray(body.project_ids) ? body.project_ids.map(String).filter((id) => /^\d+$/.test(id)) : [];
-    const known = requested.length ? (await query("SELECT id::text FROM projects WHERE id = ANY($1::bigint[])", [requested])).rows.map((row) => row.id) : [];
+    const manageable = await manageableProjects(query, user);
+    const known = requested.length ? (await query("SELECT id::text FROM projects WHERE id = ANY($1::bigint[]) AND ($2::boolean OR id = ANY($3::bigint[]))", [requested, manageable === null, manageable || []])).rows.map((row) => row.id) : [];
     // Приглашение без проектов допустимо: человек получает пустой MBOX и своих агентов, чужое не видит.
     const uses = Math.min(Math.max(Number(body.uses) || 1, 1), 50);
     const days = Math.min(Math.max(Number(body.expires_days) || 7, 1), 60);
@@ -454,7 +464,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
   }
   if (url.pathname === "/api/mbox/admin/users" && req.method === "GET") {
     if (!ownerOnly(user, sendJson, res)) return true;
-    sendJson(res, 200, { users: await accountRows(query) });
+    sendJson(res, 200, { users: await accountRows(query, await manageableProjects(query, user)) });
     return true;
   }
   if (url.pathname === "/api/mbox/admin/users" && req.method === "POST") {
@@ -466,19 +476,18 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (invalid) { sendJson(res, 400, { error: invalid }); return true; }
     const email = String(body.email || `${username.toLowerCase().replace(/\s+/g, ".")}@mbox.local`).trim();
     if (await usernameTaken(query, username, email)) { sendJson(res, 409, { error: "account_already_exists" }); return true; }
-    const role = body.role === "admin" && user.role === "owner" ? "admin" : "member";
     const created = await query(
       `INSERT INTO users(email, username, password_hash, role, jarvis_enabled)
-       VALUES ($1, $2, crypt($3, gen_salt('bf')), $5, $4)
+       VALUES ($1, $2, crypt($3, gen_salt('bf')), 'member', $4)
        RETURNING id::text, email, username, role, created_at::text`,
-      [email, username, password, body.jarvis_enabled === true, role],
+      [email, username, password, body.jarvis_enabled === true],
     ).catch((error) => ({ error }));
     if (created.error) {
       sendJson(res, 409, { error: "account_already_exists" });
       return true;
     }
-    await replaceMemberships(query, created.rows[0].id, body.project_ids);
-    sendJson(res, 201, { user: (await accountRows(query)).find((row) => row.id === created.rows[0].id) });
+    await replaceMemberships(query, created.rows[0].id, body.project_ids, await manageableProjects(query, user));
+    sendJson(res, 201, { user: (await accountRows(query, await manageableProjects(query, user))).find((row) => row.id === created.rows[0].id) });
     return true;
   }
   // Сброс пароля участника владельцем: новый временный пароль показывается один раз, все входы участника закрываются.
@@ -488,7 +497,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (!ownerOnly(user, sendJson, res)) return true;
     const target = (await query("SELECT id::text, role FROM users WHERE id = $1", [resetMatch[1]])).rows[0];
     if (!target) { sendJson(res, 404, { error: "not_found" }); return true; }
-    if (target.role === "owner" || protectedFor(user, target)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
+    if (target.role === "owner") { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
     const password = temporaryPassword();
     await query("UPDATE users SET password_hash = crypt($2, gen_salt('bf')), password_reset_at = now() WHERE id = $1", [target.id, password]);
     const revoked = await query("DELETE FROM auth_sessions WHERE user_id = $1", [target.id]);
@@ -501,13 +510,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     const body = await readBody(req);
     const existing = (await query("SELECT id::text, role FROM users WHERE id = $1", [match[1]])).rows[0];
     if (!existing) { sendJson(res, 404, { error: "not_found" }); return true; }
-    if (protectedFor(user, existing)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
-    // Роль участник ↔ админ меняет только владелец, и не себе.
-    if (body.role !== undefined && body.role !== existing.role) {
-      if (user.role !== "owner" || existing.role === "owner" || !["member", "admin"].includes(body.role)) { sendJson(res, 403, { error: "role_change_forbidden" }); return true; }
-      await query("UPDATE users SET role = $1 WHERE id = $2", [body.role, match[1]]);
-      existing.role = body.role;
-    }
+    if (existing.role === "owner" && String(user.id) !== String(existing.id)) { sendJson(res, 400, { error: "owner_account_protected" }); return true; }
     const password = String(body.password || "");
     await query(
       `UPDATE users SET
@@ -518,10 +521,9 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
        WHERE id = $4`,
       [String(body.username || "").trim(), String(body.email || "").trim(), looksLikePasswordHash(password) ? "" : password, match[1]],
     );
-    // Проекты выбираются только участнику: админ и владелец видят все.
-    if (existing.role === "member" && Object.prototype.hasOwnProperty.call(body, "project_ids")) await replaceMemberships(query, match[1], body.project_ids);
+    if (existing.role !== "owner" && Object.prototype.hasOwnProperty.call(body, "project_ids")) await replaceMemberships(query, match[1], body.project_ids, await manageableProjects(query, user));
     if (existing.role !== "owner" && typeof body.jarvis_enabled === "boolean") await query("UPDATE users SET jarvis_enabled = $1 WHERE id = $2", [body.jarvis_enabled, match[1]]);
-    sendJson(res, 200, { user: (await accountRows(query)).find((row) => row.id === match[1]) });
+    sendJson(res, 200, { user: (await accountRows(query, await manageableProjects(query, user))).find((row) => row.id === match[1]) });
     return true;
   }
   return false;

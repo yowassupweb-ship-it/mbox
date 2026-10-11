@@ -20,17 +20,21 @@ import { ensureWorkspaceSchema, handleWorkspaceApi } from "./workspaces.mjs";
 import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi } from "./notes.mjs";
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
+import { ensurePresentationsSchema, handlePresentationsApi } from "./presentations.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
 import { handlePlannerApi, startPlannerAutomations } from "./planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
+import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./spaces.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storageForAgent, storagePutStream, storageSignedGet } from "./storage.mjs";
-import { ensureSkillOverridesSchema, handleSkillPackagesApi } from "./skill-overrides.mjs";
-import { allowedSkills, canWriteSkill, claimSkill, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
+import { ensureSkillOverridesSchema, handleSkillPackagesApi, packageSummaries } from "./skill-overrides.mjs";
+import { handleSkillStoreApi, ensureSkillStoreSchema } from "./skill-store.mjs";
+import { ensureItemIconsSchema, handleItemIconsApi } from "./item-icons.mjs";
+import { allowedSkills, canManageSkill, canWriteSkill, extraCatalogEntries, claimSkill, ensureSkillAccessSchema, handleSkillAccessApi, isCatalogSkillAllowed } from "./skill-access.mjs";
 import { handleEmailCheckerApi } from "./email-checker.mjs";
 import { documentToDocx, docxFileName } from "./docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
@@ -41,7 +45,7 @@ import { startSeoScheduler } from "./seo-scheduler.mjs";
 import { commitsForTodos, recordCommit } from "./todo-commits.mjs";
 import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
 import { ensureGmailSchema, gmailDraft, gmailRead, gmailSearch, gmailSend, handleGmailApi, handleGoogleCallback } from "./gmail.mjs";
-import { callIntegration, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
+import { callIntegration, canManageTool, ensureIntegrationsSchema, handleIntegrationsApi, listIntegrations } from "./integrations.mjs";
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
 import { publishAgentUsage, readAgentUsage } from "./agent-usage.mjs";
 import { buildShortAgentContext } from "./agent-context-short.mjs";
@@ -1096,22 +1100,15 @@ function isOwner(user) {
   return user?.role === "owner";
 }
 
-/** Админ видит все проекты и управляет командой, но не личное владельца: секреты, интеграции, почту, локальные папки. */
-function isAdmin(user) {
-  return user?.role === "owner" || user?.role === "admin";
-}
-
-async function projectScope(user) {
-  if (isAdmin(user)) return { all: true, projectIds: [] };
-  const result = await query(
-    "SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id",
-    [user.id],
-  );
-  return { all: false, projectIds: result.rows.map((row) => row.project_id) };
+/** Что видит человек: только свои проекты (server/spaces.mjs); владельцу «всё» остаётся, пока режим личных пространств не включён. */
+function projectScope(user) {
+  return projectScopeFor(query, user);
 }
 
 function hasProjectAccess(scope, projectId) {
-  return scope.all || (projectId != null && scope.projectIds.includes(String(projectId)));
+  // Запись без проекта — личная запись владельца инстанса; остальным она недоступна.
+  if (projectId == null) return scope.all || scope.owner === true;
+  return scope.all || scope.projectIds.includes(String(projectId));
 }
 
 function publicOrigin(req) {
@@ -1171,6 +1168,11 @@ function withChatDefaults(user) {
 function memberRouteAllowed(pathname) {
   return pathname === "/api/mbox/auth/me"
     || pathname === "/api/mbox/agent/skills"
+    // Свои навыки: автор сам решает, кому их открыть (server/skill-access.mjs).
+    || /^\/api\/mbox\/admin\/skills(?:\/[a-z0-9][a-z0-9-]*)?$/.test(pathname)
+    // Магазин навыков и инструментов: витрина для всей команды.
+    || /^\/api\/mbox\/icons\/(?:skill|tool)\/[a-z0-9_-]+$/.test(pathname)
+    || /^\/api\/mbox\/store(?:\/\d+(?:\/install)?)?$/.test(pathname)
     || pathname === "/api/mbox/agent/models"
     || pathname === "/api/mbox/agent/threads"
     || /^\/api\/mbox\/agent\/threads\/[A-Za-z0-9_-]{1,80}$/.test(pathname)
@@ -1178,7 +1180,7 @@ function memberRouteAllowed(pathname) {
     // Свой наблюдатель участника (claude-inbox-watcher под его аккаунтом) отмечается в ростере: запись привязана к нему.
     || pathname === "/api/mbox/agent/ping"
     || /^\/api\/mbox\/agents\/[^/]+$/.test(pathname)
-    || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history))?)?$/.test(pathname)
+    || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history|learnings))?)?$/.test(pathname)
     || pathname === "/api/mbox/email/check"
     || pathname.startsWith("/api/mbox/seo")
     || pathname === "/api/mbox/ui/open"
@@ -1195,6 +1197,8 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/notes"
     || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/documents"
+    || pathname === "/api/mbox/presentations"
+    || /^\/api\/mbox\/presentations\/\d+(?:\/slides|\/assets(?:\/\d+)?)?$/.test(pathname)
     || pathname === "/api/mbox/spotlight"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
@@ -1302,9 +1306,10 @@ async function handleApiWithContext(req, res, url) {
   const scope = await projectScope(user);
 
   if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user, publicOrigin })) return;
+  if (await handleSpacesApi({ req, res, url, query, readBody, sendJson, user })) return;
 
-  if (!scope.all && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
-  // Админ видит все проекты, но не личное владельца: пароли, локальные папки его компьютера, ключи SEO.
+  if (!isOwner(user) && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
+  // Пароли и ключи сервера — только владельцу инстанса.
   if (!isOwner(user) && /^\/api\/mbox\/(secrets|agent\/approved-secrets)(?:\/|$)/.test(url.pathname)) return sendJson(res, 403, { error: "owner_required" });
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: isOwner(user), broadcast: broadcastRealtime })) return;
@@ -1312,6 +1317,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime, actor: actorFromReq(req), userName: user.username })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handlePresentationsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleSpotlightApi({ req, res, url, query, sendJson, scope: { ...scope, userId: String(user.id) }, searchTerms })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
@@ -1389,14 +1395,17 @@ async function handleApiWithContext(req, res, url) {
 
   // Пакеты навыков: skills/ в репозитории плюс правки агентов из базы (server/skill-overrides.mjs).
   // scripts/sync-skills.mjs и наблюдатели ставят их в ~/.claude/skills и ~/.codex/skills; MCP get_skill/edit_skill_file.
+  if (await handleItemIconsApi({ req, res, url, query, readBody, sendJson, user, canManage: (kind, ref) => (kind === "skill" ? canManageSkill(query, user, ref) : canManageTool(query, ref, { owner: isOwner(user), userId: String(user.id) })) })) return;
+  if (await handleSkillStoreApi({ req, res, url, query, readBody, sendJson, user, owner: isOwner(user), isSkillMine: (id) => canManageSkill(query, user, id) })) return;
   const skillAllowed = await allowedSkills(query, user);
-  if (await handleSkillAccessApi({ req, res, url, query, readBody, sendJson, owner: isAdmin(user), actor: actorFromReq(req), skillsRoot: path.join(root, "skills") })) return;
+  if (await handleSkillAccessApi({ req, res, url, query, readBody, sendJson, user, actor: actorFromReq(req), skillsRoot: path.join(root, "skills") })) return;
   if (await handleSkillPackagesApi({
     req, res, url, query, skillsRoot: path.join(root, "skills"), actor: actorFromReq(req), sendJson, readBody,
     access: {
       allowed: skillAllowed,
-      canWrite: isAdmin(user) || ((id, exists) => canWriteSkill(query, user, id, exists)),
+      canWrite: (id, exists) => canWriteSkill(query, user, id, exists),
       onCreate: (id) => claimSkill(query, user, id),
+      userId: String(user.id),
     },
     onChange: (change) => {
       broadcastRealtime("skill_file_changed", change);
@@ -1436,13 +1445,14 @@ async function handleApiWithContext(req, res, url) {
     };
     const skillAllowedList = await allowedSkills(query, user);
     const catalog = [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG].filter((skill) => isCatalogSkillAllowed(skillAllowedList, skill.id));
-    const skills = catalog.map((skill) => ({ ...skill, ...withUsage(skill.id) }));
+    const extra = await extraCatalogEntries(query, user, await packageSummaries(query, path.join(root, "skills"), skillAllowedList), [...SKILL_CATALOG, ...UX_UI_SKILL_CATALOG].map((skill) => skill.id));
+    const skills = [...catalog, ...extra].map((skill) => ({ ...skill, ...withUsage(skill.id) }));
     const modes = Object.entries(SERVICE_MODES).map(([id, name]) => ({ id, name, ...withUsage(id) }));
     // Навык, который кто-то залогировал, но забыл описать в каталоге — иначе он молча пропал бы из UI.
-    const unknown = (skillAllowedList === null ? usage.rows : [])
+    const unknown = (skillAllowedList === null || isOwner(user) ? usage.rows : [])
       .filter((row) => row.purpose.startsWith("skill-") && !catalog.some((skill) => skill.id === row.purpose))
       .map((row) => ({ id: row.purpose, name: row.purpose, owner: "?", trigger: "", summary: "Навык есть в логе расхода, но не описан в каталоге сервера.", input: "", output: "", ...withUsage(row.purpose) }));
-    return sendJson(res, 200, { skills: [...skills, ...unknown], modes: skillAllowedList === null ? modes : [] });
+    return sendJson(res, 200, { skills: [...skills, ...unknown], modes: skillAllowedList === null || isOwner(user) ? modes : [] });
   }
 
   // Лимиты подписок агентов (окна 5 ч и неделя): наблюдатели присылают, интерфейс рисует кружок «осталось N%».
@@ -1613,7 +1623,7 @@ async function handleApiWithContext(req, res, url) {
        LEFT JOIN audited a ON a.name = n.name
        LEFT JOIN ran r ON r.name = n.name
        ORDER BY GREATEST(p.last_seen, a.last_seen, r.last_seen) DESC NULLS LAST`,
-      [scope.all, user.id, String(user.id)],
+      [isOwner(user), user.id, String(user.id)],
     );
 
     const now = Date.now();
@@ -2241,7 +2251,7 @@ async function handleApiWithContext(req, res, url) {
       if (!name || !sourceUrl) return sendJson(res, 400, { error: "name_and_url_required" });
       if (!body.project_id && !body.company_id) return sendJson(res, 400, { error: "project_id_or_company_id_required" });
       // Участник заводит источники только в своих проектах; компании — зона владельца.
-      if (!scope.all && (body.company_id || !hasProjectAccess(scope, body.project_id))) return sendForbidden(res);
+      if (body.company_id ? !isOwner(user) : !hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
       const result = await query(
         `INSERT INTO data_sources(project_id, company_id, name, url, schedule_minutes, access_level, kind)
          VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, 0), 1440), COALESCE(NULLIF($6, ''), 'agents'), COALESCE(NULLIF($7, ''), 'webpage'))
@@ -2384,13 +2394,8 @@ async function handleApiWithContext(req, res, url) {
          RETURNING id::text`,
         [String(body.name || "").trim(), String(body.status || ""), JSON.stringify(Array.isArray(body.stack) ? body.stack : []), String(body.git_url || ""), String(body.deploy_provider || ""), String(body.deploy_target || ""), String(body.color || "#2c2c2e"), String(body.access_level || ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
       );
-      // Проект участника принадлежит ему: без членства он не увидел бы собственный проект (а владелец видит всё).
-      if (!isOwner(user) && result.rows[0]) {
-        await query(
-          "INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor') ON CONFLICT (project_id, user_id) DO NOTHING",
-          [result.rows[0].id, user.id],
-        );
-      }
+      // Проект принадлежит тому, кто его создал: без членства он не увидел бы собственный проект.
+      await addProjectMember(query, result.rows[0]?.id, user.id);
       broadcastChange(req, "create", "projects", String(body.name || "").trim());
       return sendJson(res, 201, { project: result.rows[0] });
     }
@@ -2546,6 +2551,7 @@ async function handleApiWithContext(req, res, url) {
   }
 
   const projectMatch = url.pathname.match(/^\/api\/mbox\/projects\/(\d+)$/);
+  if (projectMatch && ["PATCH", "DELETE"].includes(req.method) && !hasProjectAccess(scope, projectMatch[1])) return sendForbidden(res);
   if (projectMatch && req.method === "PATCH") {
     const body = await readBody(req);
     const color = typeof body.color === "string" ? body.color.trim() : "";
@@ -3459,9 +3465,12 @@ ensureChatThreadsSchema(query).catch((error) => console.error(`chat threads sche
 ensureBrowserStateSchema(query).catch((error) => console.error(`browser state schema: ${error.message}`));
 ensureGmailSchema(query).catch((error) => console.error(`gmail schema: ${error.message}`));
 ensureIntegrationsSchema(query).catch((error) => console.error(`integrations schema: ${error.message}`));
+ensureSpacesSchema(query).catch((error) => console.error(`spaces schema: ${error.message}`));
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
-ensureSkillAccessSchema(query).catch((error) => console.error(`skill access schema: ${error.message}`));
+ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
+ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
+ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
 // Расписание сборов SEO Wizard — только при SEO_AUTORUN=1 на сервере (иначе сбор запускается кнопкой).

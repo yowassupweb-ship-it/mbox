@@ -9,6 +9,7 @@
 //   POST   /api/mbox/integrations/:service/call    { method, path, query, body } — вызов API с подстановкой ключа
 // Всё — только владельцу.
 
+import { iconsFor } from "./item-icons.mjs";
 import { getSeoSettings, saveSeoSettings } from "./seo-wizard.mjs";
 import { gmailStatus } from "./gmail.mjs";
 import { googleCall } from "./google-docs.mjs";
@@ -114,6 +115,41 @@ export async function ensureIntegrationsSchema(query) {
   )`);
   // Своё API есть у каждого аккаунта: NULL — владелец MBOX, иначе id участника. Код сервиса общий на всех.
   await query("ALTER TABLE integrations ADD COLUMN IF NOT EXISTS owner_user_id BIGINT REFERENCES users(id) ON DELETE CASCADE");
+  // Готовый сервис, поставленный участником из магазина: его собственные поля (ключи — зашифрованы одним JSON).
+  await query(`CREATE TABLE IF NOT EXISTS integration_installs (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service TEXT NOT NULL,
+    values_ciphertext BYTEA,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, service)
+  )`);
+}
+
+/** Поля готового сервиса у участника, поставившего его из магазина; null — не ставил. */
+async function memberBuiltin(query, id, userId) {
+  const row = (await query(
+    "SELECT CASE WHEN values_ciphertext IS NULL THEN '' ELSE pgp_sym_decrypt(values_ciphertext, $3) END AS raw FROM integration_installs WHERE user_id = $1 AND service = $2",
+    [String(userId || 0), id, secretKey()],
+  )).rows[0];
+  if (!row) return null;
+  try { return row.raw ? JSON.parse(row.raw) : {}; } catch { return {}; }
+}
+
+async function writeMemberBuiltin(query, id, userId, values) {
+  await query(
+    `INSERT INTO integration_installs(user_id, service, values_ciphertext) VALUES ($1, $2, pgp_sym_encrypt($3, $4))
+     ON CONFLICT (user_id, service) DO UPDATE SET values_ciphertext = EXCLUDED.values_ciphertext, updated_at = now()`,
+    [String(userId), id, JSON.stringify(values), secretKey()],
+  );
+}
+
+export const isBuiltinTool = (id) => Boolean(BUILTIN[id]);
+
+/** Поставить готовый сервис участнику: пустая копия, ключи он вносит свои. */
+export async function installBuiltin(query, id, userId) {
+  if (!BUILTIN[id]) throw new Error("Это не готовый сервис");
+  if (!(await memberBuiltin(query, id, userId))) await writeMemberBuiltin(query, id, userId, {});
 }
 
 /** Чьи свои API видит и правит человек: владелец — строки без хозяина, остальные — свои. $N — номер параметра. */
@@ -121,8 +157,14 @@ const ownerFilter = (ctx = {}, n = 1) => ctx.owner !== false
   ? { sql: "owner_user_id IS NULL", values: [] }
   : { sql: `owner_user_id = ${n}`, values: [String(ctx.userId || 0)] };
 
-async function builtinValues(query, id) {
+async function builtinValues(query, id, ctx = {}) {
   const spec = BUILTIN[id];
+  if (ctx.owner === false) {
+    const own = (await memberBuiltin(query, id, ctx.userId)) || {};
+    const values = Object.fromEntries(spec.fields.map((field) => [field.key, String(own[field.key] || "")]));
+    const from = Object.fromEntries(spec.fields.map((field) => [field.key, values[field.key] ? "mbox" : ""]));
+    return { values, from };
+  }
   const settings = await getSeoSettings(query, true).catch(() => ({ config: {}, secrets: {} }));
   const values = {};
   const from = {};
@@ -149,8 +191,10 @@ export async function listIntegrations(query, userId, ctx = { owner: true }) {
   const out = [];
   const owner = ctx.owner !== false;
   // Готовые сервисы и Google работают на ключах и входе владельца — участнику их не показываем.
-  for (const [id, spec] of owner ? Object.entries(BUILTIN) : []) {
-    const { values, from } = await builtinValues(query, id);
+  // Участник видит готовые сервисы, которые поставил себе из магазина, — со своими ключами.
+  const installed = owner ? null : new Set((await query("SELECT service FROM integration_installs WHERE user_id = $1", [String(userId || 0)]).catch(() => ({ rows: [] }))).rows.map((row) => row.service));
+  for (const [id, spec] of Object.entries(BUILTIN).filter(([id]) => owner || installed.has(id))) {
+    const { values, from } = await builtinValues(query, id, { owner, userId });
     out.push({
       service: id, label: spec.label, kind: "builtin", base_url: spec.base, docs: spec.docs, hint: spec.hint,
       configured: spec.required.every((key) => Boolean(values[key])),
@@ -170,7 +214,24 @@ export async function listIntegrations(query, userId, ctx = { owner: true }) {
       fields: [{ key: "secret", label: "Ключ", secret: true, optional: false, filled: Boolean(row.has_secret), source: row.has_secret ? "mbox" : "", value: "" }],
     });
   }
-  return out;
+  const icons = await iconsFor(query, "tool", out.map((item) => item.service));
+  return out.map((item) => ({ ...item, icon: icons.get(item.service) || "" }));
+}
+
+/** Распоряжается ли человек этим API: своё, а владелец инстанса — ещё и готовые сервисы. */
+export async function canManageTool(query, id, ctx = {}) {
+  if (BUILTIN[id] || GOOGLE_API[id]) return ctx.owner !== false;
+  const own = ownerFilter(ctx, 2);
+  return Boolean((await query(`SELECT 1 FROM integrations WHERE service = $1 AND ${own.sql}`, [id, ...own.values])).rows[0]);
+}
+
+/** Шаблон своего API для магазина: всё, кроме ключа. Ключ каждый вносит сам. */
+export async function integrationTemplate(query, id, ctx = {}) {
+  // Готовый сервис публикует только владелец: в шаблоне нет ничего, кроме кода, ключей в нём нет вовсе.
+  if (BUILTIN[id]) return ctx.owner !== false ? { service: id, builtin: true, label: BUILTIN[id].label, notes: BUILTIN[id].hint, base_url: BUILTIN[id].base } : null;
+  const row = await customRow(query, id, ctx);
+  if (!row) return null;
+  return { service: id, label: row.label, base_url: row.base_url, auth_type: row.auth_type, auth_name: row.auth_name, notes: row.notes };
 }
 
 function validateBase(raw) {
@@ -183,7 +244,19 @@ function validateBase(raw) {
 
 export async function saveIntegration(query, id, input = {}, ctx = { owner: true }) {
   const owner = ctx.owner !== false;
-  if ((BUILTIN[id] || GOOGLE_API[id]) && !owner) throw new Error("Готовые сервисы настраивает владелец MBOX — добавьте своё API под другим кодом");
+  if (GOOGLE_API[id] && !owner) throw new Error("Google подключает владелец MBOX");
+  if (BUILTIN[id] && !owner) {
+    const current = await memberBuiltin(query, id, ctx.userId);
+    if (!current) throw new Error("Сначала поставьте этот сервис из магазина");
+    const next = { ...current };
+    for (const field of BUILTIN[id].fields) {
+      const value = input.fields?.[field.key];
+      if (typeof value !== "string" || (!value.trim() && field.secret)) continue;
+      next[field.key] = value.trim();
+    }
+    await writeMemberBuiltin(query, id, ctx.userId, next);
+    return;
+  }
   if (BUILTIN[id]) {
     const spec = BUILTIN[id];
     const config = {};
@@ -215,6 +288,10 @@ export async function saveIntegration(query, id, input = {}, ctx = { owner: true
 }
 
 export async function deleteIntegration(query, id, ctx = { owner: true }) {
+  if (BUILTIN[id] && ctx.owner === false) {
+    await query("DELETE FROM integration_installs WHERE user_id = $1 AND service = $2", [String(ctx.userId || 0), id]);
+    return;
+  }
   if (BUILTIN[id]) throw new Error("Готовый сервис удалить нельзя — очистите поля");
   const own = ownerFilter(ctx, 2);
   await query(`DELETE FROM integrations WHERE service = $1 AND ${own.sql}`, [id, ...own.values]);
@@ -234,7 +311,8 @@ function buildUrl(base, path, params) {
 /** Вызов API сервиса с подстановкой ключа. Возвращает { ok, status, data, truncated } и никогда — секрет. */
 export async function callIntegration(query, id, { method, path, query: params, body, max_chars: maxChars } = {}, ctx = {}) {
   const owner = ctx.owner !== false;
-  if ((BUILTIN[id] || GOOGLE_API[id]) && !owner) return { ok: false, error: "owner_only", message: "Готовые сервисы работают на ключах владельца MBOX. Своё API добавьте в «Настройки → Интеграции»." };
+  if (GOOGLE_API[id] && !owner) return { ok: false, error: "owner_only", message: "Google подключён только у владельца MBOX." };
+  if (BUILTIN[id] && !owner && !(await memberBuiltin(query, id, ctx.userId))) return { ok: false, error: "not_installed", message: `${BUILTIN[id].label} не установлен: поставьте его из магазина (раздел «Инструменты») и впишите свои ключи.` };
   if (GOOGLE_API[id]) {
     if (!ctx.userId) return { ok: false, error: "no_user", message: "Google доступен только от имени владельца" };
     try {
@@ -253,7 +331,7 @@ export async function callIntegration(query, id, { method, path, query: params, 
   let prepareBody = null;
   if (BUILTIN[id]) {
     const spec = BUILTIN[id];
-    const { values } = await builtinValues(query, id);
+    const { values } = await builtinValues(query, id, ctx);
     const missing = spec.required.filter((key) => !values[key]);
     if (missing.length) return { ok: false, error: "not_configured", message: `${spec.label}: не заполнено — ${missing.map((key) => spec.fields.find((field) => field.key === key)?.label).join(", ")}. Владелец вносит ключи в «Настройки → Интеграции».` };
     base = spec.base;
@@ -315,7 +393,7 @@ export async function testIntegration(query, id, ctx = {}) {
   }
   if (BUILTIN[id]) {
     const probe = BUILTIN[id].test;
-    const result = await callIntegration(query, id, { method: probe.method, path: probe.path, query: probe.query, body: probe.body, max_chars: 2000 });
+    const result = await callIntegration(query, id, { method: probe.method, path: probe.path, query: probe.query, body: probe.body, max_chars: 2000 }, ctx);
     if (result.ok) return { ok: true, message: "Подключение работает" };
     const detail = typeof result.data === "string" ? result.data.slice(0, 200) : JSON.stringify(result.data || "").slice(0, 200);
     return { ok: false, message: result.message || `API ответило ${result.status}${detail ? `: ${detail}` : ""}` };

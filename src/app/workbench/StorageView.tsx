@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, FolderPlus, LayoutList, RefreshCw, Upload, X } from "lucide-react";
 import { fetchJson } from "../../lib/api";
@@ -6,10 +7,11 @@ import { uploadToStorage } from "../../lib/storageUpload";
 import { askConfirm, askText } from "../../ui/askText";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
 import { STORAGE_SHEET_TAB, isSheetFile } from "./StorageSheetDocument";
+import { isOpenableInApp } from "./StorageFileDocument";
 import { WbMenu } from "./WbMenu";
 import { usePersistentState, type TabsApi } from "./tabs";
 import {
-  STORAGE_CHANGED_EVENT, createStorageFolder, deleteStorageObject, listStorage, notifyStorageChanged, openSheetTab, parentPrefix, storageLink, uploadLabel,
+  STORAGE_CHANGED_EVENT, STORAGE_FILE_TAB, createStorageFolder, deleteStorageObject, listStorage, notifyStorageChanged, openFileTab, openSheetTab, parentPrefix, storageLink, uploadLabel,
   type Listing, type StorageConfig, type UploadItem,
 } from "./storageApi";
 
@@ -30,7 +32,7 @@ function cleanError(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-export function StorageView({ tabs }: { tabs: TabsApi }) {
+export function StorageView({ tabs, switcher }: { tabs: TabsApi; switcher?: ReactNode }) {
   const [config, setConfig] = useState<StorageConfig | null>(null);
   const [expanded, setExpanded] = usePersistentState<string[]>("mbox.storage.expanded", [""]);
   const [nodes, setNodes] = useState<Record<string, Listed>>({});
@@ -156,8 +158,8 @@ export function StorageView({ tabs }: { tabs: TabsApi }) {
     try {
       await deleteStorageObject(target.key);
       for (const tab of tabs.tabs) {
-        const key = `${STORAGE_SHEET_TAB}${target.key}`;
-        if (tab.key === key || (folder && tab.key.startsWith(key))) tabs.close(tab.key);
+        const keys = [`${STORAGE_SHEET_TAB}${target.key}`, `${STORAGE_FILE_TAB}${target.key}`];
+        if (keys.some((key) => tab.key === key || (folder && tab.key.startsWith(key)))) tabs.close(tab.key);
       }
       setSelected(null);
       if (folder) setExpanded((current) => current.filter((item) => !item.startsWith(target.key)));
@@ -170,6 +172,7 @@ export function StorageView({ tabs }: { tabs: TabsApi }) {
   async function openFile(key: string, download = false) {
     setMenu(null);
     if (!download && isSheetFile(key)) { openSheetTab(key); return; }
+    if (!download && isOpenableInApp(key)) { openFileTab(key); return; }
     try {
       const url = await storageLink(key, download);
       window.open(url, "_blank", "noopener");
@@ -291,13 +294,14 @@ export function StorageView({ tabs }: { tabs: TabsApi }) {
         {node.objects.map((object) => {
           const target: Target = { type: "file", key: object.key };
           const sheet = isSheetFile(object.key);
+          const inApp = isOpenableInApp(object.key);
           return (
             <li key={object.key} role="treeitem" aria-selected={selected?.key === object.key && selected.type === "file"}>
               <div
-                className={rowClass(target, tabs.active === `${STORAGE_SHEET_TAB}${object.key}` ? "is-active" : "")}
+                className={rowClass(target, tabs.active === `${STORAGE_SHEET_TAB}${object.key}` || tabs.active === `${STORAGE_FILE_TAB}${object.key}` ? "is-active" : "")}
                 style={style}
-                title={`${object.key}\n${formatBytes(object.size)}${sheet ? "" : "\nДвойной щелчок — открыть"}`}
-                onClick={() => { setSelected(target); if (sheet) openSheetTab(object.key); }}
+                title={`${object.key}\n${formatBytes(object.size)}${sheet || inApp ? "" : "\nДвойной щелчок — открыть"}`}
+                onClick={() => { setSelected(target); if (sheet) openSheetTab(object.key); else if (inApp) openFileTab(object.key); }}
                 onDoubleClick={() => void openFile(object.key)}
                 onContextMenu={(event) => openMenu(event, target)}
               >
@@ -319,8 +323,9 @@ export function StorageView({ tabs }: { tabs: TabsApi }) {
   }
 
   const header = (
+    <>
     <header className="wb-view-head">
-      <span>Хранилище S3</span>
+      <span>{switcher ? "Папки" : "Хранилище S3"}</span>
       <div className="wb-view-actions">
         {configured && (
           <>
@@ -332,6 +337,8 @@ export function StorageView({ tabs }: { tabs: TabsApi }) {
         <button type="button" onClick={() => tabs.open("storage", true)} title="Таблица и настройки подключения" aria-label="Таблица и настройки подключения"><LayoutList size={14} /></button>
       </div>
     </header>
+    {switcher}
+    </>
   );
 
   if (!config) {
@@ -410,7 +417,7 @@ export function StorageView({ tabs }: { tabs: TabsApi }) {
           )}
           {menu.target.type === "file" && (
             <>
-              <button type="button" onClick={() => void openFile(menu.target.key)}>{isSheetFile(menu.target.key) ? "Открыть таблицу в редакторе" : "Открыть в новом окне"}</button>
+              <button type="button" onClick={() => void openFile(menu.target.key)}>{isSheetFile(menu.target.key) ? "Открыть таблицу в редакторе" : isOpenableInApp(menu.target.key) ? "Открыть" : "Открыть в новом окне"}</button>
               <button type="button" onClick={() => void openFile(menu.target.key, true)}>Скачать</button>
               <div className="wb-menu-sep" />
               <button type="button" onClick={() => void copyLink(menu.target.key, 3600)}>Копировать ссылку на 1 час</button>

@@ -258,16 +258,30 @@ node scripts/publish-repo-structure.mjs [проект]  # публикует git
    .xlsx (`extractText`) и картинки до 5 МБ; pdf и прочее — только ссылкой. Запись — текст/base64 до 25 МБ, `overwrite=false` по умолчанию.
    Участник видит и пишет только `projects/<его id>/` и доступные заметки; настройки бакета и ключи агентам не отдаются.
 
-33. **Роли: owner, admin, member.** `users.role` без CHECK. Админ (`isAdmin` в `server/mbox-server.mjs`, `devProjectScope` в `vite.config.ts`)
-   видит все проекты (`projectScope` → `all`), управляет командой (`ownerOnly` в `server/accounts.mjs` пускает и его; владельца и других админов
-   не трогает — `protectedFor`) и доступом к навыкам. Роль member ↔ admin меняет только владелец (`PATCH /admin/users/:id` с `role`).
-   Личное владельца админу закрыто отдельно, хотя `scope.all`: `/secrets` и `/agent/approved-secrets`, пароли в `/agent/context`, локальные
-   папки (`handleWorkspaceApi allowed: isOwner`), настройки бакета (S3 для админа — как участнику, но по всем проектам), SEO-мастер, Gmail/Google,
-   готовые интеграции. Джарвис различает владельца по `viewer.owner` (из `props.mbox_owner`), а не по `viewer.all`.
-   У каждого аккаунта своё: браузер и агент в нём (`/browser/agent|help`, операции и просьбы сверяются с `user.id`), свои API
-   (`integrations.owner_user_id`, NULL — владелец; код сервиса общий, чужой занятый → ошибка) и свои навыки: участник создаёт новый id
-   и правит только свои (`skill_owners`, `canWriteSkill`/`claimSkill` в `server/skill-access.mjs`), админ — любые.
+33. **Личные пространства, роли owner и member.** `users.role` без CHECK. Режим «у каждого свой MBOX» (`server/spaces.mjs`, флаг
+   `spaces_v1` в `mbox_flags`): `projectScopeFor` не отдаёт «всё» никому, включая владельца, — видны проекты из `project_memberships`;
+   создатель проекта сразу его участник (`addProjectMember`). Пока флага нет, владелец видит всё, как раньше. Включение — кнопка в
+   «Настройки → Команда» или `node scripts/migrate-spaces.mjs [--dry]`: владелец становится участником всех проектов, записи без проекта
+   (память, решения, артефакты) переезжают в проект «Общее»; выключение — та же кнопка, данные не меняются. Роли admin нет. Владелец
+   инстанса распоряжается командой (`ownerOnly` в `server/accounts.mjs`, проекты участникам он раздаёт только из своих —
+   `manageableProjects`) и личным: секреты, локальные папки, бакет, SEO-мастер, Gmail/Google, готовые API.
+   **Навык = инструкция агенту (SKILL.md), инструмент = подключение к API. Больше ничего.** Навык принадлежит автору (`skill_owners`),
+   личный по умолчанию; автор открывает его всей команде (`skill_settings.is_base`), выбранным людям (`skill_access`) или публикует в
+   магазине (`server/skill-store.mjs`: установка навыка = доступ к навыку автора, инструмент = шаблон API без ключа, ключ у каждого свой).
+   Права — `server/skill-access.mjs`. Агент создаёт навык через `write_skill_files` (личный), публикует — `skill_store_publish`.
+   Инструменты — только API (`integrations.owner_user_id`, NULL — владелец; раздел «Инструменты»); программы и MCP (бот, фид, браузеры)
+   — справочные карточки в «Навыки → Программы и MCP». Значки навыков и API — `server/item-icons.mjs` (своя картинка или плитка с инициалами).
+   Файлы S3 открываются вкладкой `s3file:<ключ>` (`StorageFileDocument`: картинка, PDF, видео, Word, правка текста), таблицы — `s3sheet:`.
+   У каждого аккаунта своё: браузер и агент в нём (`/browser/agent|help`, операции и просьбы сверяются с `user.id`).
    Закладки MBOX Desktop: `serverState.ensureOn()` перепроверяет связь с сервером раз в 10 с, если проба при старте не прошла.
+34. **Рабочее пространство и презентации.** Раздел «Рабочее пространство» (rail `tables`) — переключатель Заметки | Таблицы |
+   Документы | Презентации (`SheetsDocsMode`, событие `SHEETS_MODE_EVENT`); «Папки» — Это устройство | Облако S3 (`FoldersView`).
+   Презентация — JSON `{ version, size?, theme, slides[{ elements }] }` (слайд 960×540 или свой `size`, вертикальный из PDF),
+   `server/presentations.mjs`; картинки слайдов — в `presentation_assets`, в JSON только ссылка `/api/mbox/presentations/:id/assets/:n`
+   (data:-ссылки сервер выносит сам). Вкладка `slides:<id>` (`PresentationDocument`: миниатюры, холст с react-moveable, колесо — масштаб,
+   рука/стрелка, показ, PPTX через pptxgenjs, PDF печатью, импорт PDF). Агент: MCP `presentation_list|create|read|slide|write|set_template`,
+   правит слайд за слайдом — открытая вкладка подсвечивает изменённый слайд. Навык `skills/presentations`. Панель значков в шапках
+   редакторов — общий `IconToolbar` (им же сделана панель заметок).
 
 ## Работа агента с MBOX
 

@@ -32,6 +32,13 @@ export function uploadLabel(item: UploadItem) {
   return `${formatBytes(item.loaded)} из ${formatBytes(item.total)} · ${formatBytes(speed)}/с · осталось ${eta}`;
 }
 
+/** Вкладка с файлом из хранилища (картинка, PDF, Word, текст…): ключ вкладки — s3file:<ключ объекта>. */
+export const STORAGE_FILE_TAB = "s3file:";
+
+export function openFileTab(key: string) {
+  window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: { kind: "tab", key: `${STORAGE_FILE_TAB}${key}`, actor: "", reply_to: "", title: "", note: "", quiet: true } }));
+}
+
 /** Таблица из хранилища открывается во вкладке редактора, а не скачивается. */
 export function openSheetTab(key: string) {
   window.dispatchEvent(new CustomEvent("mbox:open-tab", { detail: { kind: "tab", key: `${STORAGE_SHEET_TAB}${key}`, actor: "", reply_to: "", title: "", note: "", quiet: true } }));

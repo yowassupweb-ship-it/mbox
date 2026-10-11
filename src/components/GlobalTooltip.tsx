@@ -9,6 +9,8 @@ import { useEffect } from "react";
  * Внутри редакторов Univer и элементов с data-native-title остаётся нативное поведение.
  */
 const SHOW_DELAY_MS = 350;
+/** Своя задержка для области: data-tip-delay="2000" на предке (боковая панель, редактор презентаций — там подсказки мешали). */
+const delayFor = (el: HTMLElement) => Number(el.closest<HTMLElement>("[data-tip-delay]")?.dataset.tipDelay) || SHOW_DELAY_MS;
 const GAP = 6;
 const EDGE = 8;
 const SKIP = ".wb-univer-sheet, .wb-univer-doc, .wb-univer-mount, [data-native-title]";
@@ -75,7 +77,7 @@ export function GlobalTooltip() {
     const onOver = (event: PointerEvent) => {
       if (event.pointerType !== "mouse") return;
       const el = titled(event.target);
-      if (el) arm(el, SHOW_DELAY_MS);
+      if (el) arm(el, delayFor(el));
     };
     const onOut = (event: PointerEvent) => {
       if (!target) return;

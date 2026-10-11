@@ -2589,8 +2589,8 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
       `INSERT INTO projects(name, status, stack, git_url, access_level, props) VALUES ($1, 'active', $2, $3, 'private', '{}') RETURNING id::text`,
       [projectName, JSON.stringify(stack), gitUrl],
     );
-    // Проект создаёт тот, кто попросил: участнику он достаётся сразу (иначе проект видел бы только владелец).
-    if (viewer?.userId && !viewer.all) {
+    // Проект создаёт тот, кто попросил: он сразу его участник (иначе проект никто бы не увидел).
+    if (viewer?.userId) {
       await client.query(
         "INSERT INTO project_memberships(project_id, user_id, role) VALUES ($1, $2, 'editor') ON CONFLICT (project_id, user_id) DO NOTHING",
         [inserted.rows[0].id, viewer.userId],

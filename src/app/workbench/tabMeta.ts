@@ -1,3 +1,4 @@
+import { presentationTitle } from "./presentationsStore";
 import { projectEntityKinds, type ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fileIcon, fileKind } from "./Files";
@@ -62,10 +63,17 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: titles[key] || "Документ", hint: "Документ Word", icon: `${NAVIGATION}/documents.png` };
     case "table":
       return { title: tableTitle(key) || "Таблица", hint: "Таблица", icon: "/icons/sheets.png" };
+    case "slides":
+      return { title: presentationTitle(key) || "Презентация", hint: "Презентация", icon: `${PROJECT}/documents.png` };
     case "doc":
       return { title: docTitle(key) || "Документ", hint: "Документ", icon: `${PROJECT}/documents.png` };
     case "storage":
       return { title: "Хранилище S3", hint: "Yandex Object Storage", icon: `${NAVIGATION}/storage.png` };
+    case "s3file": {
+      const storageKey = key.slice("s3file:".length);
+      const name = storageKey.split("/").pop() || storageKey;
+      return { title: name, hint: `Хранилище › ${storageKey}`, icon: fileIcon("text", name) };
+    }
     case "s3sheet": {
       const storageKey = key.slice("s3sheet:".length);
       const name = storageKey.split("/").pop() || storageKey;
@@ -90,6 +98,10 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: `Коммит ${key.split(":").slice(2).join(":").slice(0, 7)}`, hint: "git show", icon: `${SYSTEM}/history.png` };
     case "skill":
       return { title: titles[key] ?? first, hint: "Навык", icon: `${NAVIGATION}/skills.png` };
+    case "api":
+      return { title: first ? first : "Инструменты · API", hint: "Подключение к API", icon: `${NAVIGATION}/tools.png` };
+    case "skillstore":
+      return { title: "Магазин навыков", hint: "Навыки и инструменты команды", icon: `${NAVIGATION}/skills.png` };
     case "seo":
       return { title: "SEO Wizard", hint: "vs-travel.ru", icon: `${NAVIGATION}/skills.png` };
     case "web": {

@@ -3,7 +3,7 @@ import { warmUpEditors } from "./warmup";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { usageOf, useAgentUsage } from "../../hooks/useAgentUsage";
 import { UsageMeters } from "../../components/UsageMeters";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Columns2, Database, Globe2, MessageSquare, PanelBottom, PanelLeft, PanelRight, Plus, Power, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Archive, Bot, CalendarDays, Cloud, Columns2, Database, ExternalLink, FilePlus2, FileText, FolderKanban, Globe2, History, LayoutDashboard, ListTodo, SlidersHorizontal, TerminalSquare, HardDrive, MessageSquare, NotebookPen, PanelBottom, PanelLeft, PanelRight, Plug, Plus, Power, Presentation, RefreshCw, RotateCcw, Search, Sparkles, Store, Table2, Trash2, X, type LucideIcon } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -48,6 +48,14 @@ import { SshView } from "./SshView";
 import { StorageDocument } from "./Storage";
 import { StorageView } from "./StorageView";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
+import { StorageFileDocument } from "./StorageFileDocument";
+import { PresentationDocument } from "./PresentationDocument";
+import { SHEETS_MODE_EVENT } from "./DocumentsView";
+import { FOLDERS_MODE_EVENT, FoldersView } from "./FoldersView";
+import { createPresentationAndOpen } from "./presentationsStore";
+import { SkillStoreBoard } from "../../features/skills/SkillStoreBoard";
+import { IntegrationsBoard } from "../../features/integrations/IntegrationsBoard";
+import { STORAGE_FILE_TAB } from "./storageApi";
 import { ProjectMemories } from "./ProjectMemories";
 import { TodoBoard, TodoDocument } from "./Todos";
 import { CommitDocument, GitDiffDocument, LocalFileDocument } from "./LocalFileDocument";
@@ -72,12 +80,12 @@ type ConsoleDock = "bottom" | "right";
 /** Телефон: из какого списка открыт документ — туда ведёт «Назад» в шапке модального окна. */
 function phoneListOf(key: string): Activity | null {
   const kind = key.split(":")[0];
-  if (kind === "note") return "notes";
-  if (kind === "table" || kind === "doc" || kind === "s3sheet") return "tables";
+  if (kind === "note") return "tables";
+  if (kind === "table" || kind === "doc" || kind === "slides" || kind === "s3sheet" || kind === "s3file") return "tables";
   if (kind === "file") return "files";
   if (kind === "local" || kind === "gitdiff") return "local";
-  if (kind === "skill" || kind === "skillpage" || kind === "skillblocks") return "skills";
-  if (kind === "tool") return "tools";
+  if (kind === "skill" || kind === "skillpage" || kind === "skillblocks" || kind === "skillstore") return "skills";
+  if (kind === "tool" || kind === "api") return "tools";
   if (kind === "project" || kind === "todos" || kind === "todo" || kind === "memory" || kind === "folder") return "explorer";
   return null;
 }
@@ -226,6 +234,11 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   useEffect(() => { installScrollMemory(); }, []);
   useVisualViewport();
   const [activity, setActivity] = usePersistentState<Activity>("mbox.wb.activity", "explorer");
+  // Заметки переехали в «Рабочее пространство», хранилище S3 — в «Папки»: сохранённый старый раздел ведём на новое место.
+  useEffect(() => {
+    if (activity === "notes") { setActivity("tables"); window.dispatchEvent(new CustomEvent(SHEETS_MODE_EVENT, { detail: "notes" })); }
+    if (activity === "storage") { setActivity("local"); window.setTimeout(() => window.dispatchEvent(new CustomEvent(FOLDERS_MODE_EVENT, { detail: "s3" })), 0); }
+  }, [activity, setActivity]);
   const [sidebarOpen, setSidebarOpen] = usePersistentState("mbox.wb.sidebarOpen", true);
   const [sidebarWidth, setSidebarWidth] = usePersistentState("mbox.wb.sidebarWidth", 300);
   const [panelOpen, setPanelOpen] = usePersistentState("mbox.wb.panelOpen", true);
@@ -483,6 +496,77 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     else showActivity(id as Activity);
   }
 
+  // ── Панель разделов в духе Dock: значок под курсором и соседние растут, у наведённого — меню действий ──────────
+  const [dock, setDock] = useState<{ id: RailItemId; label: string; top: number; left: number } | null>(null);
+  const dockTimer = useRef(0);
+  const openDock = (id: RailItemId, label: string, target: HTMLElement) => {
+    window.clearTimeout(dockTimer.current);
+    const rect = target.getBoundingClientRect();
+    // Каждое меню всплывает, только если задержать курсор на значке 2 с; прежнее закрывается сразу, как только ушли на другой.
+    if (dock && dock.id !== id) setDock(null);
+    dockTimer.current = window.setTimeout(() => setDock({ id, label, top: rect.top + rect.height / 2, left: rect.right + 10 }), 2000);
+  };
+  const closeDock = () => { window.clearTimeout(dockTimer.current); dockTimer.current = window.setTimeout(() => setDock(null), 220); };
+  const keepDock = () => window.clearTimeout(dockTimer.current);
+
+  /**
+   * Увеличение по расстоянию до курсора: ближайший значок ×1.28, соседи чуть меньше, дальше 70 px — обычный размер.
+   * Раз в кадр и только масштабом: раскладка не двигается, поэтому значки не прыгают под курсором.
+   */
+  const dockFrame = useRef(0);
+  function magnify(event: React.MouseEvent<HTMLElement>) {
+    if (!window.matchMedia("(hover: hover) and (min-width: 721px)").matches) return;
+    // Меню действий лежит внутри панели: движение по нему — не движение по значкам.
+    if ((event.target as HTMLElement).closest(".wb-dock-menu")) return;
+    const bar = event.currentTarget;
+    const y = event.clientY;
+    cancelAnimationFrame(dockFrame.current);
+    dockFrame.current = requestAnimationFrame(() => {
+      for (const button of bar.querySelectorAll<HTMLElement>(".wb-activity")) {
+        const rect = button.getBoundingClientRect();
+        const strength = Math.max(0, 1 - Math.abs(y - (rect.top + rect.height / 2)) / 70);
+        button.style.setProperty("--dock", (1 + 0.28 * strength * strength).toFixed(3));
+      }
+    });
+  }
+  function unmagnify(event: React.MouseEvent<HTMLElement>) {
+    cancelAnimationFrame(dockFrame.current);
+    for (const button of event.currentTarget.querySelectorAll<HTMLElement>(".wb-activity")) button.style.removeProperty("--dock");
+  }
+
+  function dockActions(id: RailItemId): Array<{ label: string; icon: LucideIcon; run: () => void }> {
+    const sheets = (mode: string) => () => { openRail("tables"); window.setTimeout(() => window.dispatchEvent(new CustomEvent(SHEETS_MODE_EVENT, { detail: mode })), 0); };
+    const folders = (mode: string) => () => { openRail("local"); window.setTimeout(() => window.dispatchEvent(new CustomEvent(FOLDERS_MODE_EVENT, { detail: mode })), 0); };
+    if (id === "tables") return [
+      { label: "Заметки", icon: NotebookPen, run: sheets("notes") },
+      { label: "Таблицы", icon: Table2, run: sheets("tables") },
+      { label: "Документы", icon: FileText, run: sheets("docs") },
+      { label: "Презентации", icon: Presentation, run: sheets("slides") },
+      { label: "Новая заметка", icon: FilePlus2, run: () => { sheets("notes")(); if (defaultNoteProjectId !== undefined) void createNoteAndOpen(tabs, defaultNoteProjectId); } },
+      { label: "Новая таблица", icon: Plus, run: () => { sheets("tables")(); if (defaultNoteProjectId !== undefined) void createTableAndOpen(tabs, defaultNoteProjectId ?? null); } },
+      { label: "Новый документ", icon: Plus, run: () => { sheets("docs")(); if (defaultNoteProjectId !== undefined) void createDocAndOpen(tabs, defaultNoteProjectId ?? null); } },
+      { label: "Новая презентация", icon: Plus, run: () => { sheets("slides")(); if (defaultNoteProjectId !== undefined) void createPresentationAndOpen(tabs, defaultNoteProjectId); } },
+    ];
+    if (id === "explorer") return [{ label: "Все проекты", icon: FolderKanban, run: () => openRail("explorer") }, { label: "Обзор", icon: LayoutDashboard, run: () => tabs.open("welcome", true) }];
+    if (id === "planner") return [
+      { label: "Задачи", icon: ListTodo, run: () => { setPlannerMode("tasks"); openRail("planner"); } },
+      { label: "Календарь", icon: CalendarDays, run: () => { setPlannerMode("calendar"); openRail("planner"); } },
+    ];
+    if (id === "browser") return [
+      { label: "Новая вкладка", icon: Plus, run: () => { openRail("browser"); tabs.open(browserBlankTabKey(), true); } },
+      { label: "Открытые вкладки", icon: Globe2, run: () => openRail("browser") },
+    ];
+    if (id === "search") return [{ label: "Поиск по памяти", icon: Search, run: () => openRail("search") }, { label: "Расширенный поиск", icon: SlidersHorizontal, run: openMemorySearch }];
+    if (id === "agents") return [{ label: "Агенты", icon: Bot, run: () => openRail("agents") }, { label: "Чат с агентами", icon: MessageSquare, run: () => toggleConsole() }];
+    if (id === "files") return [{ label: "Артефакты", icon: Archive, run: () => openRail("files") }];
+    if (id === "ssh") return [{ label: "Подключения SSH", icon: TerminalSquare, run: () => openRail("ssh") }];
+    if (id === "history") return [{ label: "История событий", icon: History, run: () => openRail("history") }];
+    if (id === "local") return [{ label: "Это устройство", icon: HardDrive, run: folders("device") }, { label: "Облако S3", icon: Cloud, run: folders("s3") }];
+    if (id === "skills") return [{ label: "Все навыки", icon: Sparkles, run: () => openRail("skills") }, { label: "Магазин навыков", icon: Store, run: () => tabs.open("skillstore", true) }];
+    if (id === "tools") return [{ label: "Подключённые API", icon: Plug, run: () => openRail("tools") }, { label: "Подключить своё API", icon: Plus, run: () => tabs.open("api:", true) }, { label: "Магазин инструментов", icon: Store, run: () => tabs.open("skillstore", true) }];
+    return [{ label: "Открыть", icon: ExternalLink, run: () => openRail(id) }];
+  }
+
   /** Галочка на карточке «Требует внимания»: задача уходит в «Готово» без открытия. */
   const resolveTodo = useCallback(async (todoId: string) => {
     await saveEntity("/api/mbox/todos", todoId, { status: "done" });
@@ -673,7 +757,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       else if (event.altKey && event.code === "KeyW" && tabs.active) { event.preventDefault(); closeTab(tabs.active); }
       else if (mod && event.altKey && event.code === "KeyN") {
         event.preventDefault();
-        setActivity("notes");
+        setActivity("tables");
+        window.dispatchEvent(new CustomEvent(SHEETS_MODE_EVENT, { detail: "notes" }));
         setSidebarOpen(true);
         if (defaultNoteProjectId !== undefined) void createNoteAndOpen(tabs, defaultNoteProjectId);
       }
@@ -828,10 +913,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <NoteDocument noteId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "table":
         return <TableDocument tableId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
+      case "slides":
+        return <PresentationDocument presentationId={first} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "doc":
         return <DocDocument docId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":
         return <StorageDocument />;
+      case "s3file":
+        return <StorageFileDocument storageKey={key.slice(STORAGE_FILE_TAB.length)} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "s3sheet":
         return <StorageSheetDocument storageKey={key.slice(STORAGE_SHEET_TAB.length)} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "web":
@@ -850,6 +939,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <CommitDocument rootKey={first} hash={rest} />;
       case "skill":
         return <SkillDocument skillId={first} tabs={tabs} />;
+      case "api":
+        return <div className="wb-store-page"><IntegrationsBoard only={first || undefined} /></div>;
+      case "skillstore":
+        return <div className="wb-store-page"><SkillStoreBoard /></div>;
       case "seo":
         return <SeoBoard mode="dashboard" />;
       case "skillblocks":
@@ -918,6 +1011,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         case "note":
         case "table":
         case "doc":
+        case "slides":
         case "todo":
         case "memory":
           return [{ key, kind, title, id: first }];
@@ -925,6 +1019,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           return [{ key, kind: "mbox-file", title, id: first }];
         case "s3sheet":
           return [{ key, kind: "storage", title, detail: key.slice("s3sheet:".length) }];
+        case "s3file":
+          return [{ key, kind: "storage", title, detail: key.slice(STORAGE_FILE_TAB.length) }];
         case "web": {
           const url = browserUrls[key] || browserTabUrl(key);
           return url ? [{ key, kind: "web", title, detail: url }] : [];
@@ -1012,7 +1108,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         },
       })}</div>
 
-      <nav className="wb-activitybar" aria-label="Разделы" ref={activityRef}>
+      <nav className="wb-activitybar is-dock" aria-label="Разделы" ref={activityRef} data-tip-delay="2000" onMouseMove={magnify} onMouseLeave={(event) => { unmagnify(event); closeDock(); }}>
         {/* Состав и порядок — в rail.ts: группы разделены чертой, лишнее выключается в настройках.
             Браузер живёт только в приложении: сайт показывает главный процесс Electron. */}
         {RAIL_GROUPS.map((group) => {
@@ -1033,12 +1129,33 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                     setRailMenu({ id: item.id, x: event.clientX, y: event.clientY });
                   } : undefined}
                   badge={item.id === "agents" ? needsHuman.length : undefined}
+                  onHover={(target) => openDock(item.id, item.label, target)}
+                  onLeave={closeDock}
                 />
               ))}
             </div>
           );
         })}
         <span className="wb-activity-fill" />
+        {dock && (
+          <div
+            className="wb-dock-menu"
+            role="menu"
+            aria-label={dock.label}
+            style={{ top: dock.top, left: dock.left }}
+            onMouseEnter={(event) => {
+              keepDock();
+              cancelAnimationFrame(dockFrame.current);
+              event.currentTarget.closest(".wb-activitybar")?.querySelectorAll<HTMLElement>(".wb-activity").forEach((button) => button.style.removeProperty("--dock"));
+            }}
+            onMouseLeave={closeDock}
+          >
+            <div className="wb-dock-menu-title">{dock.label}</div>
+            {dockActions(dock.id).map((action) => (
+              <button key={action.label} type="button" role="menuitem" onClick={() => { setDock(null); action.run(); }}><action.icon size={15} aria-hidden="true" />{action.label}</button>
+            ))}
+          </div>
+        )}
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Чат с агентами">
           <span className="wb-activity-icon" aria-hidden="true"><img src="/icons/dialog.png" alt="" draggable={false} /></span>
           <span className="wb-activity-label" aria-hidden="true">Чат</span>
@@ -1052,12 +1169,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "planner" && <PlannerSidebar />}
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}
-        {activity === "notes" && <NotesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         {activity === "tables" && <TablesView tabs={tabs} defaultProjectId={defaultNoteProjectId} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
-        {activity === "local" && <LocalFoldersView tabs={tabs} />}
+        {activity === "local" && <FoldersView tabs={tabs} />}
         {activity === "files" && <FilesView data={data} tabs={tabs} />}
         {activity === "browser" && <BrowserTabsView tabs={tabs} urls={browserUrls} titles={titles} onOpen={() => { if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
-        {activity === "storage" && <StorageView tabs={tabs} />}
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
@@ -1375,9 +1490,9 @@ function placeActivityTip(event: { currentTarget: HTMLElement }) {
   event.currentTarget.style.setProperty("--tip-top", `${Math.round(rect.top + rect.height / 2)}px`);
 }
 
-function ActivityButton({ label, short, icon, active, onClick, onContextMenu, badge }: { label: string; short?: string; icon: ReactNode; active: boolean; onClick: () => void; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; badge?: number }) {
+function ActivityButton({ label, short, icon, active, onClick, onContextMenu, badge, onHover, onLeave }: { label: string; short?: string; icon: ReactNode; active: boolean; onClick: () => void; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; badge?: number; onHover?: (target: HTMLElement) => void; onLeave?: () => void }) {
   return (
-    <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} onContextMenu={onContextMenu} aria-label={label} aria-pressed={active} onMouseEnter={placeActivityTip} onFocus={placeActivityTip}>
+    <button type="button" className={active ? "wb-activity is-active" : "wb-activity"} onClick={onClick} onContextMenu={onContextMenu} aria-label={label} aria-pressed={active} onMouseEnter={(event) => { placeActivityTip(event); onHover?.(event.currentTarget); }} onMouseLeave={onLeave} onFocus={placeActivityTip}>
       <span className="wb-activity-icon" aria-hidden="true">{icon}</span>
       {/* Подпись видна только в нижнем меню телефона (см. mobile.css); на компьютере — подсказка. */}
       <span className="wb-activity-label" aria-hidden="true">{short || label}</span>

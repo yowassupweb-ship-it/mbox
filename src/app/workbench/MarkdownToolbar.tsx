@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { Bold, Code, Heading1, Heading2, Heading3, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, MoreHorizontal, Pilcrow, Quote, Strikethrough } from "lucide-react";
-import { WbMenu } from "./WbMenu";
+import { useRef, useState, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { Bold, Code, Heading1, Heading2, Heading3, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Pilcrow, Quote, Strikethrough } from "lucide-react";
+import { IconToolbar, type ToolItem } from "./IconToolbar";
 import { storageFileUrl, uploadToStorage } from "../../lib/storageUpload";
 
 /**
@@ -154,10 +154,6 @@ export function useImageInsert(targetRef: RefObject<HTMLTextAreaElement | null>,
   };
 }
 
-type ToolItem = { key: string; title: string; icon: React.ReactNode; run: () => void; group: number; badge?: number };
-
-const BUTTON_WIDTH = 27;
-const GAP_WIDTH = 9;
 
 /**
  * Панель помещается в шапку любой ширины: кнопки, которым не хватило места, уходят в «⋯». Раньше шапка
@@ -174,20 +170,7 @@ export function MarkdownToolbarBay({ active, ...props }: { active: boolean; targ
 
 export function MarkdownToolbar({ targetRef, onPickImages, uploading = 0 }: { targetRef: RefObject<HTMLTextAreaElement | null>; onPickImages?: (files: File[]) => void; uploading?: number }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const run = (action: MarkdownAction) => { const el = targetRef.current; if (el) applyMarkdownAction(el, action); };
-
-  useLayoutEffect(() => {
-    const el = boxRef.current;
-    if (!el) return;
-    const measure = () => setWidth(el.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   const items: ToolItem[] = [
     { key: "h0", title: "Обычный текст (Ctrl+0)", icon: <Pilcrow size={14} />, run: () => run("h0"), group: 0 },
@@ -203,53 +186,14 @@ export function MarkdownToolbar({ targetRef, onPickImages, uploading = 0 }: { ta
     { key: "ol", title: "Нумерованный список (Ctrl+Shift+7)", icon: <ListOrdered size={14} />, run: () => run("ol"), group: 2 },
     { key: "quote", title: "Цитата", icon: <Quote size={14} />, run: () => run("quote"), group: 2 },
     { key: "link", title: "Ссылка (Ctrl+K)", icon: <Link size={14} />, run: () => run("link"), group: 2 },
-    ...(onPickImages ? [{ key: "image", title: "Картинка — или вставьте из буфера / перетащите", icon: <ImagePlus size={14} />, run: () => fileRef.current?.click(), group: 2, badge: uploading }] : []),
+    ...(onPickImages ? [{ key: "image", title: "Картинка — или вставьте из буфера / перетащите", icon: <ImagePlus size={14} />, run: () => fileRef.current?.click(), group: 2, badge: uploading || undefined }] : []),
   ];
 
-  // Сколько кнопок влезает: с разделителями между группами, с местом под «⋯», если влезают не все.
-  const widthOf = (count: number) => items.slice(0, count).reduce((sum, item, index) => sum + BUTTON_WIDTH + (index > 0 && item.group !== items[index - 1].group ? GAP_WIDTH : 0), 0);
-  let visible = items.length;
-  if (width && widthOf(items.length) > width) {
-    visible = 0;
-    while (visible < items.length && widthOf(visible + 1) + BUTTON_WIDTH + 2 <= width) visible += 1;
-  }
-  const hidden = items.slice(visible);
-
-  const renderButton = (item: ToolItem, index: number) => (
-    <span key={item.key} className="wb-md-slot">
-      {index > 0 && item.group !== items[index - 1].group && <i />}
-      <button type="button" title={item.title} aria-label={item.title} onMouseDown={(event) => event.preventDefault()} onClick={item.run}>
-        {item.icon}{item.badge ? <b>{item.badge}</b> : null}
-      </button>
-    </span>
-  );
-
   return (
-    <div ref={boxRef} className="wb-md-toolbar" role="toolbar" aria-label="Форматирование">
-      {items.slice(0, visible).map(renderButton)}
-      {hidden.length > 0 && (
-        <button
-          type="button"
-          className="wb-md-more"
-          title="Ещё форматирование"
-          aria-label="Ещё форматирование"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ x: rect.left, y: rect.bottom + 4 }); }}
-        >
-          <MoreHorizontal size={14} />{uploading > 0 && hidden.some((item) => item.key === "image") ? <b>{uploading}</b> : null}
-        </button>
-      )}
-      {menu && (
-        <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
-          {hidden.map((item) => (
-            <button key={item.key} type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => { setMenu(null); item.run(); }}>
-              <span className="wb-md-menu-item">{item.icon}{item.title}</span>
-            </button>
-          ))}
-        </WbMenu>
-      )}
+    <>
+      <IconToolbar items={items} label="Форматирование" />
       {onPickImages && <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(event) => { onPickImages([...(event.target.files ?? [])]); event.target.value = ""; }} />}
-    </div>
+    </>
   );
 }
 

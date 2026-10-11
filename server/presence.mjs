@@ -11,7 +11,7 @@ import { canAccessNote } from "./notes.mjs";
 import { scopeWhere as documentScopeWhere } from "./documents.mjs";
 import { tableScopeWhere } from "./tables.mjs";
 
-const DOC_KEY = /^(note|table|doc):(\d{1,18})$/;
+const DOC_KEY = /^(note|table|doc|slides):(\d{1,18})$/;
 const MAX_STATE_BYTES = 1000;
 const MAX_PER_SECOND = 40;
 const ALLOWED_STATE = ["sheet", "cell", "range", "anchor", "head", "field", "typing", "scroll"];

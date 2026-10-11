@@ -59,9 +59,8 @@ export const RAIL_GROUPS: Array<{ id: string; title: string; items: RailItem[] }
     id: "documents",
     title: "Документы",
     items: [
-      { id: "notes", label: "Заметки (Ctrl+Alt+N — новая)", short: "Заметки", icon: `${NAVIGATION}/notes.png` },
-      { id: "tables", label: "Таблицы и документы", short: "Таблицы", icon: "/icons/tables%20and%20docs.png" },
-      { id: "local", label: "Папки (локальные файлы и git)", short: "Папки", icon: `${NAVIGATION}/folders.png` },
+      { id: "tables", label: "Рабочее пространство", short: "Пространство", icon: "/icons/tables%20and%20docs.png" },
+      { id: "local", label: "Папки: это устройство и облако S3", short: "Папки", icon: `${NAVIGATION}/folders.png` },
       { id: "files", label: "Артефакты", short: "Артефакты", icon: `${NAVIGATION}/artifacts.png` },
       { id: "browser", label: "Браузер", short: "Браузер", icon: `${NAVIGATION}/browser.png`, desktopOnly: true },
     ],
@@ -71,7 +70,6 @@ export const RAIL_GROUPS: Array<{ id: string; title: string; items: RailItem[] }
     title: "Память и хранилище",
     items: [
       { id: "search", label: "Поиск по памяти (Ctrl+K)", short: "Поиск", icon: `${NAVIGATION}/memory.png` },
-      { id: "storage", label: "Хранилище S3", short: "Хранилище", icon: `${NAVIGATION}/storage.png` },
     ],
   },
   {

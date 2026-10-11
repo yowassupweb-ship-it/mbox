@@ -11,7 +11,9 @@ import { DocShell } from "./docLayout";
 import { bytesToBase64, base64ToArrayBuffer } from "./officeFormat";
 import { WbMenu } from "./WbMenu";
 import { usePersistentState, type TabsApi } from "./tabs";
-import { DocumentsView, SheetsDocsSwitch, type SheetsDocsMode } from "./DocumentsView";
+import { DocumentsView, SHEETS_MODE_EVENT, SheetsDocsSwitch, type SheetsDocsMode } from "./DocumentsView";
+import { NotesView } from "./Notes";
+import { PresentationsView } from "./PresentationsView";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
 import { usePresence } from "./presence";
 import { PresenceAvatars } from "./PresenceAvatars";
@@ -111,7 +113,15 @@ export async function createTableAndOpen(tabs: TabsApi, projectId: string | null
 
 /** Раздел «Таблицы и документы»: две сущности под одним переключателем, список каждой — свой. */
 export function TablesView({ tabs, defaultProjectId = null, onOpen }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void }) {
-  const [mode, setMode] = usePersistentState<SheetsDocsMode>("mbox.sheets.mode", "tables");
+  // Заметки, таблицы, документы и презентации — один раздел «Документы» с переключателем; заметки первыми.
+  const [mode, setMode] = usePersistentState<SheetsDocsMode>("mbox.sheets.mode", "notes");
+  useEffect(() => {
+    const onMode = (event: Event) => setMode((event as CustomEvent<SheetsDocsMode>).detail);
+    window.addEventListener(SHEETS_MODE_EVENT, onMode);
+    return () => window.removeEventListener(SHEETS_MODE_EVENT, onMode);
+  }, [setMode]);
+  if (mode === "notes") return <NotesView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} switcher={<SheetsDocsSwitch mode={mode} onMode={setMode} />} />;
+  if (mode === "slides") return <PresentationsView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />;
   return mode === "docs"
     ? <DocumentsView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />
     : <TablesList tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />;
@@ -200,7 +210,7 @@ function TablesList({ tabs, defaultProjectId = null, onOpen, mode, onMode }: { t
   return (
     <div className="wb-view wb-tables-view">
       <header className="wb-view-head">
-        <span className="wb-tables-heading">Таблицы и документы</span>
+        <span className="wb-tables-heading">Рабочее пространство</span>
         <div className="wb-view-actions">
           <button type="button" disabled={!canCreate || importing} onClick={() => importRef.current?.click()} title={canCreate ? "Импорт Excel (.xlsx)" : "Нет доступных проектов для таблиц"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createTableAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая таблица" : "Нет доступных проектов для таблиц"}><Plus size={14} /></button>
