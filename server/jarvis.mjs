@@ -3753,7 +3753,8 @@ export async function replyAsJarvis(item) {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await client.connect();
-    await client.query("SELECT set_config('mbox.actor', $1, false)", [JARVIS_NAME]);
+    // Аккаунт, которому отвечает Джарвис: его ответ попадёт в историю этого человека, а не всем (server/audit-scope.mjs).
+    await client.query("SELECT set_config('mbox.actor', $1, false), set_config('mbox.user_id', $2, false)", [JARVIS_NAME, /^\d+$/.test(String(item.props?.mbox_user_id || "")) ? String(item.props.mbox_user_id) : ""]);
     // Пока идёт цикл (до минуты с лишним), резервный cron в scripts/mbox-archivist.mjs видел вопрос «не
     // done» и отвечал на него второй раз — отсюда пары одинаковых ответов 1, 9 и 11 сентября. doing —
     // «уже взят»: архивариус берёт только open и зависшие doing старше 10 минут.

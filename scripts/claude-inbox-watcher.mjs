@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncSkills } from "./sync-skills.mjs";
+import { locateMcpServer } from "./mcp-locate.mjs";
 import { createInboxWake } from "./inbox-wake.mjs";
 import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
 import { claudeWindowsFromEvent, postUsage } from "./usage-report.mjs";
@@ -118,14 +119,20 @@ const CONTEXT_CHARS_TOTAL = 12000;
 // иначе агент потеряет все остальные свои MCP. Пароль здесь тот же, что уже лежит в ~/.claude.json,
 // новой утечки файл не создаёт, но и класть его куда-то ещё не нужно — только во временный каталог.
 const mcpConfigPath = path.join(os.tmpdir(), `claude-inbox-watcher-mcp-${accountKey}-${agentName}.json`);
-function writeMcpConfig() {
+async function writeMcpConfig() {
+  // Сервер ищем, а не берём «рядом»: у человека с одним MBOX Desktop рядом его нет (см. scripts/mcp-locate.mjs).
+  const server = await locateMcpServer({ baseUrl, headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {}, log: (text) => console.log(`${logPrefix} ${text}`) });
+  if (!server) {
+    console.error(`${logPrefix} MCP mbox-prod недоступен: агент ответит без инструментов MBOX. Поставьте набор агента: node mbox-agent.mjs install`);
+    return false;
+  }
   const env = {
     MBOX_URL: baseUrl,
     MBOX_AGENT_NAME: agentName,
     MBOX_AGENT_CLIENT: "claude-inbox-watcher",
     ...(accessToken ? { MBOX_TOKEN: accessToken } : { MBOX_USERNAME: username, MBOX_PASSWORD: password }),
   };
-  const config = { mcpServers: { "mbox-prod": { command: "node", args: [path.resolve(__dirname, "mbox-mcp-server.mjs")], env } } };
+  const config = { mcpServers: { "mbox-prod": { command: process.execPath, args: [server], env } } };
   try {
     fs.writeFileSync(mcpConfigPath, JSON.stringify(config));
     return true;
@@ -134,7 +141,7 @@ function writeMcpConfig() {
     return false;
   }
 }
-const mcpConfigReady = writeMcpConfig();
+const mcpConfigReady = await writeMcpConfig();
 // Правила чата — системным промптом на каждом ходе, в том числе после --resume (см. chatRules).
 // Файл, а не аргумент: многострочный текст через cmd.exe не передать без поломки кавычек.
 const rulesPath = path.join(os.tmpdir(), `claude-inbox-watcher-rules-${accountKey}-${agentName}.md`);

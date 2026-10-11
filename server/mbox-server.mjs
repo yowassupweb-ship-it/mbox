@@ -28,6 +28,7 @@ import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
 import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./spaces.mjs";
+import { auditVisibility, ensureAuditScopeSchema } from "./audit-scope.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storageForAgent, storagePutStream, storageSignedGet } from "./storage.mjs";
@@ -214,9 +215,12 @@ function broadcastRealtime(type, payload = {}) {
   const full = { type, ...payload, at: new Date().toISOString() };
   const message = JSON.stringify(full);
   let redacted = null;
+  // Подробности (кто, что, текст) — только самому человеку, который сделал изменение, и его окнам. Остальные получают
+  // лишь сигнал «обнови список»: раньше владелец видел уведомления о сообщениях участников, а участник — о действиях владельца.
+  const actingUser = requestContext.getStore()?.user?.id;
   for (const client of realtimeClients) {
     if (client.readyState !== 1) continue;
-    if (client.mboxOwner) {
+    if (actingUser ? client.mboxUserId === String(actingUser) : client.mboxOwner) {
       client.send(message);
       continue;
     }
@@ -979,14 +983,16 @@ function getPool() {
 
 async function query(sql, values = []) {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not configured");
-  const actor = requestContext.getStore()?.actor;
+  const store = requestContext.getStore();
+  const actor = store?.actor;
   if (!actor) return getPool().query(sql, values);
   // Актор ставится сессионно и переживает возврат соединения в пул, но каждый запрос с актором
   // выставляет свой перед обращением, а аудит пишется только на мутациях — чужой актор протечь
   // в audit_events не может.
   const client = await getPool().connect();
   try {
-    await client.query("SELECT set_config('mbox.actor', $1, false)", [actor]);
+    // Вместе с актором — аккаунт: по нему «История» показывает человеку только его события (server/audit-scope.mjs).
+    await client.query("SELECT set_config('mbox.actor', $1, false), set_config('mbox.user_id', $2, false)", [actor, store?.user?.id ? String(store.user.id) : ""]);
     return await client.query(sql, values);
   } finally {
     client.release();
@@ -2701,17 +2707,19 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/history") {
+    // История — только своя: события этого аккаунта и его агентов (server/audit-scope.mjs), без чужих сообщений и действий.
+    const others = (await query("SELECT username FROM users WHERE id <> $1 AND username <> ''", [user.id])).rows.map((row) => row.username);
     const result = await query(
       `SELECT id::text, actor, action, entity_type, entity_id::text, project_id::text, summary, metadata,
               pg_column_size(audit_events)::int AS memory_bytes,
               created_at::text
        FROM audit_events
-       WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
+       WHERE ${auditVisibility("audit_events", 2)}
          AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
           OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%')
        ORDER BY created_at DESC
        LIMIT 200`,
-      [q, scope.all, scope.projectIds],
+      [q, String(user.id), isOwner(user), String(user.username || ""), others],
     );
     return sendJson(res, 200, { events: result.rows });
   }
@@ -3468,6 +3476,7 @@ ensureIntegrationsSchema(query).catch((error) => console.error(`integrations sch
 ensureSpacesSchema(query).catch((error) => console.error(`spaces schema: ${error.message}`));
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
+ensureAuditScopeSchema(query).catch((error) => console.error(`audit scope schema: ${error.message}`));
 ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
 ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
 ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));

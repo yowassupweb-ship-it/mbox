@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.68",
+  "version": "0.1.69",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
@@ -61,7 +61,8 @@
           "model-catalog.mjs",
           "usage-report.mjs",
           "focus-excerpt.mjs",
-          "sync-skills.mjs"
+          "sync-skills.mjs",
+          "mcp-locate.mjs"
         ]
       }
     ],

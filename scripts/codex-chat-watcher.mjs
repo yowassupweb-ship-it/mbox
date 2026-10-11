@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInboxWake } from "./inbox-wake.mjs";
+import { locateMcpServer } from "./mcp-locate.mjs";
 import { enrichFocus } from "./focus-excerpt.mjs";
 import { chatRules, clipError, codexContextUsage, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, RESUME_REMINDER, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 import { codexCachedModels, publishModelCatalog } from "./model-catalog.mjs";
@@ -89,7 +90,7 @@ let lockFd = null;
 
 acquireSingleInstanceLock();
 setInterval(touchLock, LOCK_TOUCH_MS).unref();
-ensureCodexMcp();
+await ensureCodexMcp();
 
 process.on("SIGINT", () => {
   stopping = true;
@@ -229,12 +230,21 @@ function releaseSingleInstanceLock() {
  * его не было — CodexCloud честно отвечал «инструментов mbox-prod нет». Дописываем блок, если его нет:
  * тот же сервер и вход, что у самого наблюдателя. Есть — не трогаем.
  */
-function ensureCodexMcp() {
+async function ensureCodexMcp() {
   const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   const file = path.join(home, "config.toml");
   let text = "";
   try { text = fs.readFileSync(file, "utf8"); } catch { /* конфига ещё нет */ }
-  if (/\[mcp_servers\.mbox-prod\]/.test(text)) return;
+  // Блок уже есть и его сервер на месте — не трогаем (у владельца он вписан руками). Указывает в пустоту (MBOX Desktop
+  // без сервера рядом — Codex получал «Connection closed») — вырезаем и пишем заново с найденным сервером.
+  const existing = text.match(/\[mcp_servers\.mbox-prod\][\s\S]*?args\s*=\s*\[\s*"((?:[^"\\]|\\.)*)"/);
+  if (existing && fs.existsSync(JSON.parse(`"${existing[1]}"`))) return;
+  const server = await locateMcpServer({ baseUrl, headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {}, log: (line) => console.log(`${logPrefix} ${line}`) });
+  if (!server) {
+    console.error(`${logPrefix} MCP mbox-prod недоступен: Codex ответит без инструментов MBOX. Поставьте набор агента: node mbox-agent.mjs install`);
+    return;
+  }
+  if (existing) text = stripTomlTables(text, "mcp_servers.mbox-prod");
   const toml = (value) => JSON.stringify(String(value));
   const env = {
     MBOX_URL: baseUrl,
@@ -248,7 +258,7 @@ function ensureCodexMcp() {
     "# MBOX: дописано наблюдателем codex-chat-watcher — инструменты MBOX для Codex.",
     "[mcp_servers.mbox-prod]",
     `command = ${toml(process.execPath)}`,
-    `args = [${toml(path.join(__dirname, "mbox-mcp-server.mjs"))}]`,
+    `args = [${toml(server)}]`,
     "",
     "[mcp_servers.mbox-prod.env]",
     ...Object.entries(env).map(([key, value]) => `${key} = ${toml(value)}`),
@@ -256,11 +266,24 @@ function ensureCodexMcp() {
   ].join("\n");
   try {
     fs.mkdirSync(home, { recursive: true });
-    fs.appendFileSync(file, block, { mode: 0o600 });
-    console.log(`${logPrefix} MCP mbox-prod добавлен в ${file}`);
+    fs.writeFileSync(file, `${text.replace(/\s*$/, "")}\n${block}`, { mode: 0o600 });
+    console.log(`${logPrefix} MCP mbox-prod ${existing ? "исправлен" : "добавлен"} в ${file}`);
   } catch (error) {
-    console.error(`${logPrefix} не удалось дописать MCP в ${file}: ${error.message}`);
+    console.error(`${logPrefix} не удалось записать MCP в ${file}: ${error.message}`);
   }
+}
+
+/** Убрать из TOML таблицу name и все её подтаблицы (name.*), остальное — как было. */
+function stripTomlTables(text, name) {
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (header) skipping = header[1] === name || header[1].startsWith(`${name}.`);
+    if (!skipping) out.push(line);
+  }
+  return out.join("\n").replace(/\n# MBOX: дописано наблюдателем codex-chat-watcher[^\n]*\n(?=\s*(\n|$))/g, "\n");
 }
 
 function loadConfig() {
