@@ -484,6 +484,9 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
   // Пока страница спрятана под меню, на её месте держим последний снимок — иначе под попапом
   // зияет пустое место и кажется, что вкладка перезагрузилась.
   const [frozen, setFrozen] = useState("");
+  // Нативная страница кладётся по округлённым координатам области, а сама область дробная: снимок рисуем по тем же
+  // округлённым границам, иначе при подмене страницы на снимок картинка сдвигается на пару пикселей.
+  const [frozenBox, setFrozenBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const lastFrozen = useRef("");
   // Пустая вкладка — стартовая страница MBOX вместо белого about:blank; плавающие окна (папка, история,
   // настройки) тоже прячут страницу: её рисует главный процесс поверх окна, и она закрыла бы их собой.
@@ -512,19 +515,26 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
         return () => { cancelled = true; };
       }
       const capture = bridge.capture?.(tabKey) ?? Promise.resolve("");
-      const limit = new Promise<string>((resolve) => window.setTimeout(() => resolve(""), 350));
-      void Promise.race([capture, limit]).then((shot) => {
+      const limit = new Promise<string>((resolve) => window.setTimeout(() => resolve(""), 900));
+      void Promise.race([capture, limit]).then(async (shot) => {
         if (cancelled) return;
-        if (shot) {
-          lastFrozen.current = shot;
-          setFrozen(shot);
-        } else if (lastFrozen.current) setFrozen(lastFrozen.current);
-        // Кадр со снимком должен успеть нарисоваться до того, как уйдёт живая страница.
-        window.requestAnimationFrame(() => { if (!cancelled && hiddenRef.current) void bridge.hide(tabKey); });
+        const picture = shot || lastFrozen.current;
+        if (picture) {
+          // Картинка должна быть декодирована и нарисована, пока живая страница ещё на месте: иначе на кадр виден пустой фон.
+          try { const probe = new Image(); probe.src = picture; await probe.decode(); } catch { /* покажем как есть */ }
+          if (cancelled) return;
+          if (shot) lastFrozen.current = shot;
+          const rect = stageRef.current?.getBoundingClientRect();
+          setFrozenBox(rect ? { left: Math.round(rect.left) - rect.left, top: Math.round(rect.top) - rect.top, width: Math.round(rect.width), height: Math.round(rect.height) } : null);
+          setFrozen(picture);
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+        }
+        if (!cancelled && hiddenRef.current) void bridge.hide(tabKey);
       }).catch(() => { if (!cancelled) void bridge.hide(tabKey); });
       return () => { cancelled = true; };
     }
-    setFrozen("");
+    // Страницу показываем первой, снимок убираем чуть позже: иначе между ними на кадр виден пустой фон.
+    const unfreeze = window.setTimeout(() => setFrozen(""), 160);
     report();
     const releaseVisible = claimVisibleBrowser(bridge, tabKey);
     const frame = window.requestAnimationFrame(report);
@@ -536,6 +546,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     const timer = window.setInterval(report, 1500);
     window.addEventListener("resize", report);
     return () => {
+      window.clearTimeout(unfreeze);
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.clearInterval(timer);
@@ -573,6 +584,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     if (picked) { pickRow(picked); return; }
     setOmniOpen(false);
     setEditing(false);
+    // Фокус из поля убираем: иначе оно остаётся «живым» под наложенным доменом, и текст двоится.
+    addressRef.current?.blur();
     void bridge!.act(tabKey, "navigate", address).then((next) => {
       if (!next) return;
       setState(next);
@@ -1264,7 +1277,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
       {/* Пустое место под страницу: её рисует поверх главный процесс по этим координатам. */}
       <div ref={stageRef} className="wb-browser-stage" data-scroll-memory="off">
         {isBlank && !state?.auth && <BrowserStartPage engine={engineLabel} bookmarks={bookmarks} history={bridge.history} onNavigate={navigate} incognito={incognito} />}
-        {frozen && !isBlank && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} />}
+        {frozen && !isBlank && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} style={frozenBox ? { left: frozenBox.left, top: frozenBox.top, right: "auto", bottom: "auto", width: frozenBox.width, height: frozenBox.height, objectFit: "fill" } : undefined} />}
         {state?.auth && bridge?.auth && <BrowserAuthForm key={state.auth.id} auth={state.auth} answer={bridge.auth} />}
       </div>
     </div>
@@ -1324,6 +1337,15 @@ function visitedLabel(iso: string) {
 }
 
 /** Новая вкладка: большая строка поиска, закладки плитками, недавнее — вместо белого листа. */
+/** Приветствие по времени суток для стартовой страницы. */
+function greetingFor(date: Date) {
+  const hour = date.getHours();
+  if (hour < 5) return "Доброй ночи";
+  if (hour < 12) return "Доброе утро";
+  if (hour < 18) return "Добрый день";
+  return "Добрый вечер";
+}
+
 function BrowserStartPage({ engine, bookmarks, history, onNavigate, incognito = false }: {
   engine: string;
   bookmarks: BrowserBookmark[];
@@ -1342,6 +1364,12 @@ function BrowserStartPage({ engine, bookmarks, history, onNavigate, incognito = 
   const tiles = incognito ? [] : bookmarks.filter((item) => item.source === "bookmark_bar" && !item.folder).slice(0, 12);
   return (
     <div className={incognito ? "wb-browser-start is-incognito" : "wb-browser-start"}>
+      {!incognito && (
+        <header className="wb-browser-start-hello">
+          <span className="wb-browser-start-greeting">{greetingFor(new Date())}</span>
+          <span className="wb-browser-start-date">{new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</span>
+        </header>
+      )}
       {incognito && (
         <header className="wb-browser-start-incognito">
           <VenetianMask size={44} aria-hidden="true" />

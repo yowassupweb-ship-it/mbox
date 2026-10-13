@@ -33,6 +33,9 @@ type Op = { id: string; workspace_id: string; op: string; path: string; content:
 export type WorkspaceBridge = {
   info: () => Promise<{ deviceId: string; deviceName: string; roots: WorkspaceRoot[] }>;
   add: () => Promise<{ deviceId: string; deviceName: string; roots: WorkspaceRoot[] }>;
+  /** Диски компьютера и подключение диска целиком (MBOX Desktop 0.1.71+). */
+  drives?: () => Promise<Array<{ path: string; label: string }>>;
+  addDrive?: (path: string) => Promise<{ deviceId: string; deviceName: string; roots: WorkspaceRoot[] }>;
   remove: (key: string) => Promise<{ deviceId: string; deviceName: string; roots: WorkspaceRoot[] }>;
   list: (key: string, rel: string) => Promise<DirEntry[]>;
   read: (key: string, rel: string) => Promise<FileRead>;
@@ -266,6 +269,7 @@ export function useLocalWorkspace() {
     refresh: () => void register(),
     refreshGit: (key: string) => void refreshGit(key),
     add: async () => { await workspaceBridge()?.add(); await register(); },
+    addDrive: async (path: string) => { await workspaceBridge()?.addDrive?.(path); await register(); },
     remove: async (key: string) => {
       const id = store.serverIds.get(key);
       await workspaceBridge()?.remove(key);

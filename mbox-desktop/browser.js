@@ -420,7 +420,9 @@ async function capture(key) {
   if (!tab || !tab.visible) return "";
   try {
     const image = await tab.view.webContents.capturePage();
-    return image.isEmpty() ? "" : image.toDataURL();
+    // PNG без потерь: JPEG размывал края текста, и страница под меню выглядела «толще на пиксель-два». Кодирование
+    // занимает около 80 мс на полный экран, пока живая страница ещё на месте, так что подмены кадров никто не видит.
+    return image.isEmpty() ? "" : `data:image/png;base64,${image.toPNG().toString("base64")}`;
   } catch {
     return "";
   }

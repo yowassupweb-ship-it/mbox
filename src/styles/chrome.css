@@ -136,3 +136,13 @@
 .bug-severity button.is-on.is-high { color: var(--state-danger); }
 .bug-severity button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 .ask-actions button:disabled { opacity: 0.55; cursor: default; }
+
+/* Значок локальных агентов — линейный, в цвет остальных значков шапки */
+.wb-titlebar .desktop-pill-logo { color: var(--text-2); object-fit: initial; filter: none; }
+.wb-titlebar .desktop-pill:hover .desktop-pill-logo,
+.wb-titlebar .desktop-pill[aria-expanded="true"] .desktop-pill-logo { color: var(--text-main); }
+
+/* Счётчик локальных агентов — такой же кружок, как у колокольчика уведомлений */
+.wb-titlebar .desktop-pill { width: 28px; padding: 0; justify-content: center; }
+.wb-titlebar .desktop-pill .desktop-pill-count:not(.is-zero) { top: 1px; right: 0; background: var(--accent-fill); color: var(--on-accent); }
+.wb-titlebar .desktop-pill .desktop-pill-count.is-zero { top: 1px; right: 0; }

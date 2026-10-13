@@ -587,3 +587,84 @@
 .wb-browser-pop-folder-row.is-drop-target { background: color-mix(in srgb, var(--accent-color) 16%, transparent); }
 .wb-browser-pop-row[draggable="true"] { cursor: grab; }
 .wb-browser-pop-row[draggable="true"]:active { cursor: grabbing; }
+
+/* ═══ Визуальный проход: панель, закладки, стартовая страница ═══ */
+.wb-browser-bar { min-height: 56px; padding: 9px 14px; }
+.wb-browser-nav { padding: 2px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--text-main) 5%, transparent); }
+.wb-browser-nav button { width: 30px; height: 30px; border-radius: var(--radius-pill); }
+.wb-browser-address { height: 38px; max-width: 700px; padding-right: 8px; border-color: var(--wb-line); background: color-mix(in srgb, var(--text-main) 6%, transparent); box-shadow: inset 0 1px 2px color-mix(in srgb, #000 12%, transparent); }
+.wb-browser-address:hover:not(.is-editing) { border-color: color-mix(in srgb, var(--text-main) 22%, transparent); }
+.wb-browser-address.is-editing { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-color) 20%, transparent); }
+.wb-browser-urltext { font-size: var(--text-md); letter-spacing: 0.005em; }
+.wb-browser-actions { gap: 2px; padding: 2px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--text-main) 5%, transparent); }
+.wb-browser-actions button { width: 30px; height: 30px; border-radius: var(--radius-pill); }
+.wb-browser-actions button.is-on { background: color-mix(in srgb, var(--accent-color) 22%, transparent); }
+
+/* Закладки: чипы с иконками, папки заметнее */
+.wb-browser-bookmarks { min-height: 38px; gap: 6px; padding: 4px 14px; background: var(--wb-surface); border-bottom: 1px solid var(--wb-line); }
+.wb-browser-bookmarks > svg { display: none; }
+.wb-browser-bookmarks button { min-height: 28px; padding: 0 10px; border-radius: var(--radius-pill); color: var(--text-2); font-size: var(--text-sm); transition: background var(--duration-fast) var(--ease-out); }
+.wb-browser-bookmarks button .wb-browser-favicon, .wb-browser-bookmarks button .wb-favicon-tile { width: 16px; height: 16px; border-radius: var(--radius-xs); }
+.wb-browser-bookmarks button:not(:has(span)) { padding: 0 7px; }
+.wb-browser-bookmarks .wb-bookmark-folder { background: color-mix(in srgb, var(--text-main) 6%, transparent); }
+.wb-browser-bookmarks .wb-bookmark-folder[aria-expanded="true"], .wb-browser-bookmarks .wb-bookmark-folder:hover { background: color-mix(in srgb, var(--accent-color) 18%, transparent); color: var(--text-main); }
+
+/* Стартовая страница: приветствие, крупный поиск, плитки закладок и карточки недавнего */
+.wb-browser-start {
+  gap: 30px;
+  padding: min(12vh, 96px) 28px 48px;
+  background: radial-gradient(1000px 460px at 50% -120px, color-mix(in srgb, var(--accent-color) 17%, transparent), transparent 72%), var(--bg-color);
+}
+.wb-browser-start > * { width: min(780px, 100%); }
+.wb-browser-start-hello { display: grid; justify-items: center; gap: 4px; text-align: center; }
+.wb-browser-start-greeting { color: var(--text-main); font-size: 30px; font-weight: var(--weight-semibold); letter-spacing: -0.02em; line-height: 1.15; }
+.wb-browser-start-date { color: var(--text-muted); font-size: var(--text-md); text-transform: capitalize; }
+.wb-browser-start-search { height: 56px; padding: 0 24px; gap: 14px; background: var(--surface-panel); box-shadow: 0 10px 30px color-mix(in srgb, #000 22%, transparent), 0 0 0 1px var(--border-color); }
+.wb-browser-start-search svg { color: var(--text-muted); }
+.wb-browser-start-search input { font-size: var(--text-xl); }
+.wb-browser-start h3 { padding-left: 6px; text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--text-2xs); }
+.wb-browser-start-tiles { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+.wb-browser-start-tiles button { gap: 10px; padding: 16px 8px 12px; border: 1px solid transparent; border-radius: 20px; background: color-mix(in srgb, var(--text-main) 4%, transparent); transition: transform var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out); }
+.wb-browser-start-tiles button:hover { transform: translateY(-3px); background: color-mix(in srgb, var(--text-main) 8%, transparent); box-shadow: 0 12px 26px color-mix(in srgb, #000 22%, transparent); }
+.wb-browser-start-tiles button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.wb-browser-start-icon { width: 60px; height: 60px; border-radius: 16px; background: var(--surface-panel); box-shadow: 0 4px 12px color-mix(in srgb, #000 20%, transparent), 0 0 0 1px var(--border-color); }
+.wb-browser-start-icon .wb-browser-favicon, .wb-browser-start-icon .wb-favicon-tile { width: 30px; height: 30px; border-radius: var(--radius-sm); }
+.wb-browser-start-label { font-size: var(--text-sm); }
+.wb-browser-start-recent { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.wb-browser-start-recent button { padding: 12px 14px; border: 1px solid var(--wb-line); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--text-main) 3%, transparent); transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out); }
+.wb-browser-start-recent button:hover { border-color: color-mix(in srgb, var(--text-main) 24%, transparent); background: color-mix(in srgb, var(--text-main) 7%, transparent); }
+.wb-browser-start-recent button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-browser-start-recent button > :is(.wb-browser-favicon, .wb-favicon-tile, svg) { width: 20px; height: 20px; }
+.wb-browser-start.is-incognito { background: radial-gradient(900px 420px at 50% -100px, color-mix(in srgb, var(--incognito-accent) 22%, transparent), transparent 72%), var(--bg-color); }
+
+/* Папки и закладки на панели без «пилюль»: плоские кнопки с небольшим скруглением, фон только при наведении. */
+.wb-browser-bookmarks button,
+.wb-browser-bookmarks .wb-bookmark-folder { border-radius: var(--radius-sm); }
+.wb-browser-bookmarks .wb-bookmark-folder { background: none; }
+.wb-browser-bookmarks .wb-bookmark-folder:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-browser-bookmarks .wb-bookmark-folder[aria-expanded="true"] { background: var(--wb-selected); color: var(--text-main); }
+
+/* Перетаскивание вкладок в боковом списке «Браузер» */
+.wb-browser-tab-item[draggable="true"] { cursor: grab; }
+.wb-browser-tab-item[draggable="true"]:active { cursor: grabbing; }
+.wb-browser-tab-item.is-dragging { opacity: 0.45; }
+.wb-browser-tab-item.is-drop-target { box-shadow: inset 0 2px 0 var(--accent-color); }
+.wb-browser-tabs-view .wb-view-body.is-drop-end { box-shadow: inset 0 -2px 0 var(--accent-color); }
+
+/* Снимок страницы под меню: без сглаживания при растяжении на доли процента, иначе текст «толстеет». */
+.wb-browser-frozen { image-rendering: pixelated; }
+
+/* Скриншоты в баг-репорте */
+.bug-dialog.is-dragging { box-shadow: 0 0 0 2px var(--accent-color), var(--float); }
+.bug-shots { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bug-shot { position: relative; margin: 0; width: 88px; height: 60px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-color); }
+.bug-shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bug-shot button { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, #000 62%, transparent); color: #fff; cursor: pointer; opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.bug-shot:hover button, .bug-shot button:focus-visible { opacity: 1; }
+.bug-attach { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px dashed var(--border-color); border-radius: var(--radius-pill); background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.bug-attach:hover { background: var(--wb-hover); color: var(--text-main); }
+
+/* Страховка от двоения текста: пока в поле фокус, показываем только само поле, а домен-наложение прячем. */
+.wb-browser-address:focus-within .wb-browser-urltext { display: none; }
+.wb-browser-address input.is-idle:focus { color: var(--text-main); caret-color: auto; text-align: left; }
+.wb-browser-address input.is-idle:focus::placeholder { color: var(--text-muted); }

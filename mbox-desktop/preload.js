@@ -114,9 +114,13 @@ const desktopApi = {
     }
   },
   // Локальные рабочие папки: ключ папки + путь внутри неё, абсолютные пути страница не передаёт.
+  /** Снимок окна MBOX в виде data:image/jpeg (для баг-репорта). Есть у Desktop 0.1.71+. */
+  captureWindow: () => ipcRenderer.invoke("mbox-desktop:capture-window"),
   workspace: {
     info: () => ipcRenderer.invoke("mbox-desktop:ws-info"),
     add: () => ipcRenderer.invoke("mbox-desktop:ws-add"),
+    drives: () => ipcRenderer.invoke("mbox-desktop:ws-drives"),
+    addDrive: (drivePath) => ipcRenderer.invoke("mbox-desktop:ws-add-drive", drivePath),
     remove: (key) => ipcRenderer.invoke("mbox-desktop:ws-remove", key),
     list: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-list", key, rel),
     read: (key, rel) => ipcRenderer.invoke("mbox-desktop:ws-read", key, rel),

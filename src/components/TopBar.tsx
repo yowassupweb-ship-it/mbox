@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Download, FolderOpen, LogOut, MessagesSquare, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square } from "lucide-react";
+import { AlertTriangle, Bot, Check, Download, FolderOpen, LogOut, MessagesSquare, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS, AgentName } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
@@ -297,12 +297,12 @@ export function TopBar({
             title={`Локальные агенты MBOX Desktop: запущено ${desktopRows.length}`}
             aria-label={`Локальные агенты: запущено ${desktopRows.length}`}
           >
-            <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
+            <Bot className="desktop-pill-logo" size={17} strokeWidth={1.75} aria-hidden="true" />
             <span className={desktopRows.length ? "desktop-pill-count" : "desktop-pill-count is-zero"}>{desktopRows.length}</span>
           </button>
         ) : isDesktopShell ? (
           <button className="desktop-pill bridge-missing" type="button" disabled title="MBOX Desktop IPC не подключился">
-            <img className="desktop-pill-logo" src="/mbox-desktop-icon.png" alt="" />
+            <Bot className="desktop-pill-logo" size={17} strokeWidth={1.75} aria-hidden="true" />
             <strong>Приложение</strong>
             <span>мост не подключен</span>
           </button>

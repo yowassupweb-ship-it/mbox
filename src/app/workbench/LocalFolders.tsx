@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { Bot, ChevronRight, FilePlus2, FolderPlus, GitBranch, RefreshCw, X } from "lucide-react";
+import { Bot, ChevronRight, FilePlus2, FolderPlus, GitBranch, HardDrive, RefreshCw, X } from "lucide-react";
 import { formatSince } from "../../lib/format";
 import { gitStatusOf, onWorkspaceChange, useLocalWorkspace, workspaceBridge, type DirEntry, type GitSummary, type WorkspaceRoot } from "./localWorkspace";
 import { usePersistentState, type TabsApi } from "./tabs";
@@ -44,6 +44,8 @@ export function LocalFoldersView({ tabs, switcher }: { tabs: TabsApi; switcher?:
   const [filter, setFilter] = usePersistentState("mbox.local.filter", "");
   const [found, setFound] = useState<Array<{ rootKey: string; path: string }>>([]);
   const [menu, setMenu] = useState<Menu | null>(null);
+  // Меню «Подключить»: выбрать папку или целый диск (список дисков запрашивается при открытии).
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number; drives: Array<{ path: string; label: string }> } | null>(null);
   const [gitOpen, setGitOpen] = usePersistentState("mbox.local.gitOpen", true);
   const [notice, setNotice] = useState("");
   const [selection, setSelection] = usePersistentState<Selection[]>("mbox.local.selection", []);
@@ -98,6 +100,12 @@ export function LocalFoldersView({ tabs, switcher }: { tabs: TabsApi; switcher?:
   function toggle(rootKey: string, rel: string) {
     const id = `${rootKey}:${rel}`;
     setExpanded((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }
+
+  /** «Подключить»: выбрать папку диалогом или подключить целый диск (диски C, D, E… запрашиваются у приложения при открытии). */
+  async function openAddMenu(rect: DOMRect) {
+    const drives = bridge?.drives ? await bridge.drives().catch(() => []) : [];
+    setAddMenu({ x: rect.left, y: rect.bottom + 4, drives });
   }
 
   async function act(action: () => Promise<unknown>, reloadDir?: { rootKey: string; rel: string }) {
@@ -278,7 +286,7 @@ export function LocalFoldersView({ tabs, switcher }: { tabs: TabsApi; switcher?:
       <header className="wb-view-head">
         <span>Папки{selection.length > 1 ? ` · выбрано ${selection.length}` : ""}</span>
         <div className="wb-view-actions">
-          <button type="button" onClick={() => void act(ws.add)} title="Подключить папку"><FolderPlus size={14} /></button>
+          <button type="button" onClick={(event) => openAddMenu(event.currentTarget.getBoundingClientRect())} title="Подключить папку или диск" aria-label="Подключить папку или диск"><FolderPlus size={14} /></button>
           <button type="button" onClick={() => { ws.refresh(); for (const id of expanded) { const [rootKey, ...rest] = id.split(":"); void load(rootKey, rest.join(":")); } }} title="Обновить"><RefreshCw size={13} /></button>
         </div>
       </header>
@@ -339,7 +347,7 @@ export function LocalFoldersView({ tabs, switcher }: { tabs: TabsApi; switcher?:
         }) : (
           <div className="wb-session-empty">
             <p>Подключи папку — её файлы можно будет читать и править здесь, а агенты получат к ним доступ с историей версий.</p>
-            <button type="button" onClick={() => void act(ws.add)}><FolderPlus size={13} /> Подключить папку</button>
+            <button type="button" onClick={(event) => openAddMenu(event.currentTarget.getBoundingClientRect())}><FolderPlus size={13} /> Подключить папку или диск</button>
           </div>
         )}
       </div>
@@ -357,6 +365,20 @@ export function LocalFoldersView({ tabs, switcher }: { tabs: TabsApi; switcher?:
             </div>
           )}
         </section>
+      )}
+      {addMenu && (
+        <WbMenu x={addMenu.x} y={addMenu.y} onClose={() => setAddMenu(null)}>
+          <button type="button" role="menuitem" onClick={() => { setAddMenu(null); void act(ws.add); }}><span><FolderPlus size={14} />Выбрать папку…</span></button>
+          {addMenu.drives.length > 0 && <div className="wb-menu-sep" role="separator" />}
+          {addMenu.drives.map((drive) => {
+            const connected = ws.roots.some((root) => root.path.toLowerCase() === drive.path.toLowerCase());
+            return (
+              <button key={drive.path} type="button" role="menuitem" disabled={connected} onClick={() => { setAddMenu(null); void act(() => ws.addDrive(drive.path)); }}>
+                <span><HardDrive size={14} />{drive.label}{connected ? " · подключён" : ""}</span>
+              </button>
+            );
+          })}
+        </WbMenu>
       )}
       {menu && bridge && (
         <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>

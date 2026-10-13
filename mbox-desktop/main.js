@@ -1745,7 +1745,7 @@ function workspaceInfo() {
   return {
     deviceId: config.deviceId,
     deviceName: os.hostname(),
-    roots: config.roots.filter((root) => fs.existsSync(root.path)).map((root) => ({ key: root.key, name: root.name, path: root.path }))
+    roots: config.roots.filter((root) => fs.existsSync(root.path)).map((root) => ({ key: root.key, name: root.name, path: root.path, drive: Boolean(root.drive) }))
   };
 }
 
@@ -1770,17 +1770,54 @@ function assertWritable(rel, target) {
   if (BLOCKED_WRITE_EXT.has(path.extname(target).toLowerCase())) throw new Error(`Файлы ${path.extname(target)} из MBOX не записываются — их Windows выполняет напрямую`);
 }
 
-async function addWorkspaceRoot() {
-  const result = await dialog.showOpenDialog(mainWindow, { title: "Подключить папку к MBOX", properties: ["openDirectory"] });
-  if (result.canceled || !result.filePaths[0]) return workspaceInfo();
-  const folder = path.resolve(result.filePaths[0]);
+/** Подключить папку (или целый диск, drive = true) к MBOX. Повторное подключение того же пути ничего не меняет. */
+function connectWorkspaceFolder(folder, drive = false) {
   const config = loadWorkspaceConfig();
   if (!config.roots.some((root) => path.resolve(root.path).toLowerCase() === folder.toLowerCase())) {
-    config.roots.push({ key: crypto.randomBytes(4).toString("hex"), name: path.basename(folder) || folder, path: folder });
+    const driveLetter = process.platform === "win32" ? folder.match(/^([A-Za-z]):\\?$/) : null;
+    const name = driveLetter ? `Диск ${driveLetter[1].toUpperCase()}:` : path.basename(folder) || folder;
+    config.roots.push({ key: crypto.randomBytes(4).toString("hex"), name, path: folder, ...(drive ? { drive: true } : {}) });
     saveWorkspaceConfig(config);
   }
   syncWorkspaceWatchers();
   return workspaceInfo();
+}
+
+async function addWorkspaceRoot() {
+  const result = await dialog.showOpenDialog(mainWindow, { title: "Подключить папку к MBOX", properties: ["openDirectory"] });
+  if (result.canceled || !result.filePaths[0]) return workspaceInfo();
+  return connectWorkspaceFolder(path.resolve(result.filePaths[0]));
+}
+
+/** Диски компьютера: на Windows все буквы A–Z, до которых можно достучаться (отключённый сетевой диск не должен подвесить список), на macOS и Linux — точки монтирования. */
+async function listDrives() {
+  const probe = (target) => Promise.race([
+    fs.promises.access(target).then(() => target, () => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), 700)),
+  ]);
+  if (process.platform === "win32") {
+    const found = (await Promise.all("ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => probe(`${letter}:\\`)))).filter(Boolean);
+    return found.map((drive) => ({ path: drive, label: `Диск ${drive.slice(0, 2)}` }));
+  }
+  const mounts = [{ path: "/", label: "Корень системы" }];
+  for (const base of process.platform === "darwin" ? ["/Volumes"] : ["/media", "/mnt", `/run/media/${os.userInfo().username}`]) {
+    try {
+      for (const entry of await fs.promises.readdir(base, { withFileTypes: true })) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) mounts.push({ path: path.join(base, entry.name), label: entry.name });
+      }
+    } catch {
+      // такой точки монтирования нет
+    }
+  }
+  return mounts;
+}
+
+/** Подключить диск из списка listDrives: произвольный путь страница передать не может. */
+async function addDriveRoot(drivePath) {
+  const wanted = String(drivePath || "").toLowerCase();
+  const drive = (await listDrives()).find((item) => item.path.toLowerCase() === wanted);
+  if (!drive) throw new Error("Такого диска нет или он недоступен");
+  return connectWorkspaceFolder(path.resolve(drive.path), true);
 }
 
 function removeWorkspaceRoot(key) {
@@ -2127,7 +2164,8 @@ function syncWorkspaceWatchers() {
     }
   }
   for (const root of roots) {
-    if (workspaceWatchers.has(root.key) || !fs.existsSync(root.path)) continue;
+    // За целым диском рекурсивно не следим: это тысячи событий и нагрузка; список папок перечитывается по запросу.
+    if (root.drive || workspaceWatchers.has(root.key) || !fs.existsSync(root.path)) continue;
     const pending = new Set();
     let timer = null;
     try {
@@ -2229,6 +2267,14 @@ function openWorkspaceEntry(key, rel) {
 
 ipcMain.handle("mbox-desktop:ws-info", async () => { syncWorkspaceWatchers(); return workspaceInfo(); });
 ipcMain.handle("mbox-desktop:ws-add", async () => addWorkspaceRoot());
+// Снимок окна MBOX для баг-репорта: диалог открывается поверх, поэтому снимать надо до него. Только главное окно приложения.
+ipcMain.handle("mbox-desktop:capture-window", async (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Недоступно для сайта");
+  const image = await mainWindow.webContents.capturePage();
+  return image.isEmpty() ? "" : `data:image/jpeg;base64,${image.toJPEG(85).toString("base64")}`;
+});
+ipcMain.handle("mbox-desktop:ws-drives", async () => listDrives());
+ipcMain.handle("mbox-desktop:ws-add-drive", async (_event, drivePath) => addDriveRoot(String(drivePath || "")));
 ipcMain.handle("mbox-desktop:ws-remove", async (_event, key) => removeWorkspaceRoot(String(key || "")));
 ipcMain.handle("mbox-desktop:ws-list", async (_event, key, rel) => listWorkspaceDir(key, rel));
 ipcMain.handle("mbox-desktop:ws-read", async (_event, key, rel) => readWorkspaceFile(key, rel));

@@ -162,6 +162,10 @@ function BrowserTabsView({ tabs, urls, titles, onOpen }: {
 }) {
   const browserTabs = tabs.tabs.filter((tab) => tab.key.startsWith("web:"));
   const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  // Порядок вкладок меняется перетаскиванием прямо в списке: «dragKey» — что тащим, «dropKey» — перед чем встанет ("end" — в конец).
+  const [dragKey, setDragKey] = useState("");
+  const [dropKey, setDropKey] = useState("");
+  const endDrag = () => { setDragKey(""); setDropKey(""); };
   const open = (key: string) => { tabs.open(key, true); onOpen?.(); };
   const refresh = (key: string) => { void browserBridge()?.act(key, "reload"); };
   return (
@@ -172,7 +176,12 @@ function BrowserTabsView({ tabs, urls, titles, onOpen }: {
           <button type="button" onClick={() => open(browserBlankTabKey())} title="Новая вкладка"><Plus size={14} /></button>
         </div>
       </header>
-      <div className="wb-view-body">
+      <div
+        className={dropKey === "end" ? "wb-view-body is-drop-end" : "wb-view-body"}
+        onDragOver={(event) => { if (dragKey && event.target === event.currentTarget) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropKey("end"); } }}
+        onDragLeave={(event) => { if (event.target === event.currentTarget && dropKey === "end") setDropKey(""); }}
+        onDrop={(event) => { if (!dragKey || event.target !== event.currentTarget) return; event.preventDefault(); tabs.move(dragKey, ""); endDrag(); }}
+      >
         {browserTabs.map((tab) => {
           const url = urls[tab.key] || browserTabUrl(tab.key);
           const fallbackTitle = url ? new URL(url).hostname : "Новая вкладка";
@@ -181,8 +190,14 @@ function BrowserTabsView({ tabs, urls, titles, onOpen }: {
             <div
               role="button"
               tabIndex={0}
-              className={tabs.active === tab.key ? "wb-browser-tab-item is-active" : "wb-browser-tab-item"}
+              className={["wb-browser-tab-item", tabs.active === tab.key ? "is-active" : "", dragKey === tab.key ? "is-dragging" : "", dropKey === tab.key ? "is-drop-target" : ""].filter(Boolean).join(" ")}
               key={tab.key}
+              draggable
+              onDragStart={(event) => { setDragKey(tab.key); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", tab.key); }}
+              onDragOver={(event) => { if (dragKey && dragKey !== tab.key) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropKey(tab.key); } }}
+              onDragLeave={() => { if (dropKey === tab.key) setDropKey(""); }}
+              onDrop={(event) => { event.preventDefault(); event.stopPropagation(); if (dragKey && dragKey !== tab.key) tabs.move(dragKey, tab.key); endDrag(); }}
+              onDragEnd={endDrag}
               onClick={() => open(tab.key)}
               onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(tab.key); } }}
               onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); tabs.close(tab.key); } }}
@@ -1162,7 +1177,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   key={item.id}
                   label={item.label}
                   short={item.short}
-                  icon={item.id === "agents" ? <Bot size={26} strokeWidth={1.75} aria-hidden="true" /> : <img src={item.icon} alt="" draggable={false} />}
+                  icon={<img src={item.icon} alt="" draggable={false} />}
                   active={railActive(item.id)}
                   onClick={() => { closePhoneChat(); openRail(item.id); }}
                   onContextMenu={item.id === "browser" ? (event) => {
@@ -1465,7 +1480,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           type="button"
           className="wb-status-item"
           onClick={async () => {
-            const result = await askBugReport({ projects: data.projects.map((project) => ({ id: project.id, name: project.name })), defaultProjectId: activeProjectId, tabTitle: activeTabMeta.title });
+            // Снимок окна делаем до диалога: потом он закроет собой то, что человек хочет показать.
+            const capture = (window as unknown as { mboxDesktop?: { captureWindow?: () => Promise<string> } }).mboxDesktop?.captureWindow;
+            const initialShot = capture ? await capture().catch(() => "") : "";
+            const result = await askBugReport({ projects: data.projects.map((project) => ({ id: project.id, name: project.name })), defaultProjectId: activeProjectId, tabTitle: activeTabMeta.title, initialShot });
             if (result) setAgentNotice({ tone: "ok", text: `Баг-репорт записан в память: #${result.id}` });
           }}
           title="Сообщить о проблеме: запишется в память проекта"

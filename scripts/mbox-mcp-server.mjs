@@ -804,15 +804,16 @@ server.registerTool(
       severity: z.enum(["low", "normal", "high"]).default("normal"),
       project: z.string().default("MBOX"),
       url: z.string().default("").describe("Page, endpoint or tool where it happened"),
+      attachments: z.array(z.string()).default([]).describe("MBOX storage keys of screenshots/files already uploaded (projects/<id>/...)"),
     },
   },
-  async ({ title, description, steps, expected, actual, severity, project, url }) => {
+  async ({ title, description, steps, expected, actual, severity, project, url, attachments }) => {
     const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
     const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
     if (!target) throw new Error(`Project not found: ${project}`);
     const data = await mboxFetch("/api/mbox/bug-reports", {
       method: "POST",
-      body: JSON.stringify({ title, description, steps, expected, actual, severity, project_id: target.id, source: "mcp", context: { url, app: `MCP · ${agentName}` } }),
+      body: JSON.stringify({ title, description, steps, expected, actual, severity, project_id: target.id, source: "mcp", context: { url, app: `MCP · ${agentName}` }, attachments: attachments.map((key) => ({ key, name: key.split("/").pop() })) }),
     });
     return withPush({ content: [{ type: "text", text: `Баг-репорт записан в память: #${data.memory.id} «${data.title}» (проект ${target.name})` }] });
   },
