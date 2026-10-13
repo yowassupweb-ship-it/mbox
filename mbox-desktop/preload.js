@@ -103,6 +103,10 @@ const desktopApi = {
     credentials: (url) => ipcRenderer.invoke("mbox-desktop:browser-credentials", url),
     fillPassword: (key, username) => ipcRenderer.invoke("mbox-desktop:browser-fill-password", key, username),
     auth: (id, username, password) => ipcRenderer.invoke("mbox-desktop:browser-auth", id, username, password),
+    permission: (id, decision, remember) => ipcRenderer.invoke("mbox-desktop:browser-permission", id, decision, remember),
+    siteInfo: (key) => ipcRenderer.invoke("mbox-desktop:browser-site-info", key),
+    sitePermission: (key, kind, decision) => ipcRenderer.invoke("mbox-desktop:browser-site-permission", key, kind, decision),
+    suggest: (query) => ipcRenderer.invoke("mbox-desktop:browser-suggest", query),
     onEvent: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on("mbox-desktop:browser", listener);

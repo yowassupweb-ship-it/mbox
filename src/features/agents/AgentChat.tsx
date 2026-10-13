@@ -1431,7 +1431,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       )}
 
       {!embedded && <button className="agent-chat-toggle" type="button" onClick={() => setOpen((value) => !value)} aria-label={unread > 0 ? `Чат с агентами, ${unread} непрочитанных` : "Чат с агентами"} title="Чат с агентами">
-        <img className="agent-chat-toggle-icon" src="/icons/dialog.png" alt="" draggable={false} />
+        <MessagesSquare className="agent-chat-toggle-icon" size={16} strokeWidth={1.75} aria-hidden="true" />
         <span className="agent-chat-toggle-label">Чат</span>
         {working.length > 0 && <i className="chat-dot state-working" />}
         {unread > 0 && <b>{unread}</b>}

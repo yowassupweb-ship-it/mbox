@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Brain, Calculator, CornerDownLeft, File as FileIcon, FileText, FolderKanban, Globe, Package, Search, SquareCheck, StickyNote, Table2, Zap } from "lucide-react";
+import { Brain, Calculator, Clock3, Cloud, CornerDownLeft, File as FileIcon, FileText, FolderKanban, Globe, Package, Presentation, Search, SquareCheck, StickyNote, Table2, Zap } from "lucide-react";
 import { formatSince } from "../../lib/format";
 import { highlight, queryStems } from "./highlight";
-import { markOverlay, browserBridge, browserTabKey } from "./BrowserDocument";
+import { markOverlay, browserBridge, browserTabKey, Favicon } from "./BrowserDocument";
+import { readVisits, type Visit } from "./recentVisits";
 import { readBrowserSettings } from "./browserSettings";
 import { useLocalWorkspace, workspaceBridge } from "./localWorkspace";
 import type { TabsApi } from "./tabs";
@@ -37,7 +38,8 @@ type Item = {
 
 const GROUPS: Array<{ id: string; label: string; limit: number }> = [
   { id: "top", label: "Лучшее совпадение", limit: 1 },
-  { id: "recent", label: "Недавние", limit: 8 },
+  { id: "recent", label: "Недавние", limit: 12 },
+  { id: "visited", label: "Открывали", limit: 6 },
   { id: "action", label: "Действия", limit: 5 },
   { id: "note", label: "Заметки", limit: 6 },
   { id: "doc", label: "Документы", limit: 5 },
@@ -47,6 +49,7 @@ const GROUPS: Array<{ id: string; label: string; limit: number }> = [
   { id: "memory", label: "Память", limit: 5 },
   { id: "artifact", label: "Артефакты", limit: 4 },
   { id: "file", label: "Файлы", limit: 6 },
+  { id: "history", label: "История браузера", limit: 5 },
   { id: "web", label: "Интернет", limit: 2 },
 ];
 
@@ -122,6 +125,34 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 10 }).format(value);
 }
 
+/** Название вида места по ключу вкладки — для подписи в списке. */
+function visitKindLabel(key: string) {
+  const prefix = key.split(":")[0];
+  const labels: Record<string, string> = {
+    web: "Сайт", note: "Заметка", doc: "Документ", table: "Таблица", slides: "Презентация", local: "Файл на компьютере", s3file: "Файл в облаке",
+    s3sheet: "Таблица в облаке", todos: "Задачи", todo: "Задача", entity: "Раздел проекта", folder: "Папка проекта", memory: "Память",
+    file: "Файл", skill: "Навык", tool: "Инструмент", project: "Проект", ssh: "SSH",
+  };
+  return labels[prefix] || "Место";
+}
+
+function visitIcon(visit: Visit): ReactNode {
+  const prefix = visit.key.split(":")[0];
+  if (prefix === "web" && visit.url) return <Favicon url={visit.url} size={16} />;
+  const icons: Record<string, ReactNode> = {
+    web: <Globe size={16} aria-hidden="true" />, note: <StickyNote size={16} aria-hidden="true" />, doc: <FileText size={16} aria-hidden="true" />,
+    table: <Table2 size={16} aria-hidden="true" />, slides: <Presentation size={16} aria-hidden="true" />, local: <FileIcon size={16} aria-hidden="true" />,
+    s3file: <Cloud size={16} aria-hidden="true" />, s3sheet: <Cloud size={16} aria-hidden="true" />, todos: <SquareCheck size={16} aria-hidden="true" />,
+    todo: <SquareCheck size={16} aria-hidden="true" />, memory: <Brain size={16} aria-hidden="true" />, file: <Package size={16} aria-hidden="true" />,
+    project: <FolderKanban size={16} aria-hidden="true" />, folder: <FolderKanban size={16} aria-hidden="true" />,
+  };
+  return icons[prefix] ?? <Clock3 size={16} aria-hidden="true" />;
+}
+
+function hostOf(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
+}
+
 const URL_LIKE = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(\/\S*)?$/i;
 
 function fuzzy(command: SpotlightCommand, query: string) {
@@ -140,6 +171,8 @@ export function Spotlight({ open, onClose, tabs, commands, scope = "all" }: { op
   const [query, setQuery] = useState("");
   const [data, setData] = useState<Response | null>(null);
   const [files, setFiles] = useState<Array<{ rootKey: string; path: string; root: string }>>([]);
+  const [webHistory, setWebHistory] = useState<Array<{ url: string; title: string; visited_at: string }>>([]);
+  const visits = useMemo(() => (open ? readVisits() : []), [open]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [cursor, setCursor] = useState(0);
@@ -199,6 +232,17 @@ export function Spotlight({ open, onClose, tabs, commands, scope = "all" }: { op
     return () => { alive = false; window.clearTimeout(timer); };
   }, [open, trimmed, ws.roots, contentOnly]);
 
+  // История встроенного браузера (общая, на сервере): сайты, где вы были, находятся из поиска так же, как заметки.
+  useEffect(() => {
+    const history = browserBridge()?.history;
+    if (!open || contentOnly || !history || trimmed.length < 2) { setWebHistory([]); return; }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void history(trimmed, 6).then((rows) => { if (alive) setWebHistory(rows); }).catch(() => { if (alive) setWebHistory([]); });
+    }, 140);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [open, trimmed, contentOnly]);
+
   const finish = useCallback((action: () => void) => { onClose(); window.setTimeout(action, 0); }, [onClose]);
   const stems = useMemo(() => queryStems(trimmed), [trimmed]);
 
@@ -218,9 +262,29 @@ export function Spotlight({ open, onClose, tabs, commands, scope = "all" }: { op
     for (const command of matchedCommands) {
       list.push({ id: `cmd:${command.id}`, group: "action", title: command.title, subtitle: command.hint, icon: command.icon ?? <Zap size={16} aria-hidden="true" />, badge: command.shortcut, note: command.hint, run: () => finish(command.run) });
     }
+    // Места, где вы были: без запроса — «Недавние», с запросом — совпадения по названию и адресу.
+    const words = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+    const serverKeys = new Set((data?.results ?? []).map((hit) => hit.key));
+    const visitKeys = new Set<string>();
+    const shownVisits = visits
+      .filter((visit) => !words.length || words.every((word) => `${visit.title} ${visit.hint} ${visit.url ?? ""}`.toLowerCase().includes(word)))
+      .filter((visit) => !trimmed || !serverKeys.has(visit.key))
+      .slice(0, trimmed ? 8 : 12);
+    for (const visit of shownVisits) {
+      visitKeys.add(visit.key);
+      list.push({
+        id: `visit:${visit.key}`,
+        group: trimmed ? "visited" : "recent",
+        title: visit.title || visit.key,
+        subtitle: [visitKindLabel(visit.key), visit.url ? hostOf(visit.url) : visit.hint, formatSince(new Date(visit.at).toISOString())].filter(Boolean).join(" · "),
+        icon: visitIcon(visit),
+        run: () => finish(() => tabs.open(visit.key, true)),
+      });
+    }
     for (const hit of data?.results ?? []) {
       const meta = KIND[hit.kind];
       if (!meta) continue;
+      if (!trimmed && visitKeys.has(hit.key)) continue;
       list.push({
         id: `${hit.kind}:${hit.id}`,
         group: data?.recent ? "recent" : meta.group,
@@ -231,6 +295,14 @@ export function Spotlight({ open, onClose, tabs, commands, scope = "all" }: { op
         icon: meta.icon,
         badge: hit.status,
         run: () => finish(() => tabs.open(hit.key, true)),
+      });
+    }
+    const shownUrls = new Set(shownVisits.map((visit) => visit.url).filter(Boolean));
+    for (const row of webHistory) {
+      if (shownUrls.has(row.url)) continue;
+      list.push({
+        id: `history:${row.url}`, group: "history", title: row.title || hostOf(row.url), subtitle: `${hostOf(row.url)} · ${formatSince(row.visited_at)}`,
+        icon: <Favicon url={row.url} size={16} />, run: () => finish(() => tabs.open(browserTabKey(row.url), true)),
       });
     }
     for (const file of files) {
@@ -247,7 +319,7 @@ export function Spotlight({ open, onClose, tabs, commands, scope = "all" }: { op
       list.push({ id: "web:search", group: "web", title: `Искать «${trimmed}» в интернете`, subtitle: "Поиск в браузере", icon: <Search size={16} aria-hidden="true" />, run: () => open((SEARCH_URLS[engine] ?? SEARCH_URLS.duckduckgo)(encodeURIComponent(trimmed))) });
     }
     return list;
-  }, [commands, contentOnly, data, files, finish, onClose, tabs, trimmed]);
+  }, [commands, contentOnly, data, files, finish, onClose, tabs, trimmed, visits, webHistory]);
 
   // Порядок на экране: лучшее совпадение, затем группы по порядку; каждая группа ограничена.
   const sections = useMemo(() => {

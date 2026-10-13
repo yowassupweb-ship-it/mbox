@@ -1,4 +1,5 @@
 import { presentationTitle } from "./presentationsStore";
+import { incognitoTabUrl, isIncognitoKey } from "./incognito";
 import { projectEntityKinds, type ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fileIcon, fileKind } from "./Files";
@@ -105,6 +106,11 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
     case "seo":
       return { title: "SEO Wizard", hint: "vs-travel.ru", icon: `${NAVIGATION}/skills.png` };
     case "web": {
+      if (isIncognitoKey(key)) {
+        const target = incognitoTabUrl(key);
+        const targetHost = target.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+        return { title: titles[key] || targetHost || "Новая вкладка инкогнито", hint: target || "Режим инкогнито: следов не остаётся", icon: "/assets/icons/navigation/browser.png", glyph: target ? undefined : "incognito" };
+      }
       // Пока сайт не загрузился, заголовка нет — показываем домен, он уже в ключе вкладки.
       const address = key.slice(4);
       const isBlank = address.startsWith("blank-");
@@ -135,6 +141,7 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
         title,
         hint: isChatPane(pane) ? "Чат в редакторе — вернуть в панель можно кнопкой в заголовке" : "Терминал в редакторе — вернуть в панель можно кнопкой в заголовке",
         icon: pane.startsWith("ssh:") ? `${PROJECT}/ssh.png` : isChatPane(pane) ? "/icons/dialog.png" : `${SYSTEM}/console.png`,
+        glyph: isChatPane(pane) ? "chat" : undefined,
       };
     }
     default:

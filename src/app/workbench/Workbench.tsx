@@ -3,7 +3,7 @@ import { warmUpEditors } from "./warmup";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { usageOf, useAgentUsage } from "../../hooks/useAgentUsage";
 import { UsageMeters } from "../../components/UsageMeters";
-import { AlertTriangle, ArrowLeft, Bug, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Archive, Bot, CalendarDays, Cloud, Columns2, Database, ExternalLink, FilePlus2, FileText, FolderKanban, Globe2, History, LayoutDashboard, ListTodo, SlidersHorizontal, TerminalSquare, HardDrive, MessageSquare, NotebookPen, PanelBottom, PanelLeft, PanelRight, Plug, Plus, Power, Presentation, RefreshCw, RotateCcw, Search, Sparkles, Store, Table2, Trash2, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Bug, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Archive, Bot, CalendarDays, Cloud, Columns2, Database, ExternalLink, FilePlus2, FileText, FolderKanban, Globe2, History, LayoutDashboard, ListTodo, SlidersHorizontal, TerminalSquare, HardDrive, MessageSquare, NotebookPen, ArrowRightToLine, ArrowUpRight, CircleX, Copy, Layers, Link2, MessagesSquare, Pin, Star, RotateCw, VenetianMask, PanelBottom, PanelLeft, PanelRight, Plug, Plus, Power, Presentation, RefreshCw, RotateCcw, Search, Sparkles, Store, Table2, Trash2, X, type LucideIcon } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -28,6 +28,8 @@ import { serverOrigin } from "../../lib/serverOrigin";
 import { mboxTabOfUrl } from "../../lib/mboxLinks";
 import { fetchJson, saveEntity } from "../../lib/api";
 import { askBugReport } from "../../ui/bugReport";
+import { recordVisit } from "./recentVisits";
+import { incognitoTabKey, incognitoTabUrl, isIncognitoKey } from "./incognito";
 import { LocalImageDocument } from "./LocalImageDocument";
 import { LocalMediaDocument } from "./LocalMediaDocument";
 import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail, type BrowserState } from "./BrowserDocument";
@@ -126,6 +128,31 @@ type Props = {
   onProjectContext: (project: Project, position: { x: number; y: number }) => void;
 };
 
+/** Пункты меню вкладки браузера про адрес: закладка, копирование, системный браузер. Пусто, если у вкладки нет веб-адреса. */
+function BrowserTabMenuItems({ tabKey, url, title, onDone }: { tabKey: string; url: string; title: string; onDone: () => void }) {
+  const bridge = browserBridge();
+  const [saved, setSaved] = useState(false);
+  const web = /^https?:\/\//i.test(url);
+  useEffect(() => {
+    if (!bridge || !web) return;
+    let alive = true;
+    void bridge.bookmarks().then((rows) => { if (alive) setSaved(rows.some((row) => row.url === url)); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [bridge, url, web]);
+  if (!bridge || !web) return null;
+  const toggleBookmark = () => {
+    onDone();
+    void (saved ? bridge.removeBookmark(url) : bridge.addBookmark({ title: title || new URL(url).hostname, url })).catch(() => undefined);
+  };
+  return (
+    <>
+      <button type="button" role="menuitem" onClick={toggleBookmark}><span><Star size={14} fill={saved ? "currentColor" : "none"} />{saved ? "Убрать из закладок" : "Добавить в закладки"}</span></button>
+      <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(url); onDone(); }}><span><Copy size={14} />Копировать адрес</span></button>
+      <button type="button" role="menuitem" onClick={() => { void bridge.act(tabKey, "open-external"); onDone(); }}><span><ExternalLink size={14} />Открыть в системном браузере</span></button>
+    </>
+  );
+}
+
 /** Открытые страницы — это тот же список документов, только с адресом и фавиконом вместо текста. */
 function BrowserTabsView({ tabs, urls, titles, onOpen }: {
   tabs: TabsApi;
@@ -177,12 +204,15 @@ function BrowserTabsView({ tabs, urls, titles, onOpen }: {
       </div>
       {menu && <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
         <div className="wb-note-menu">
-          <button type="button" role="menuitem" onClick={() => { open(menu.key); setMenu(null); }}>Открыть</button>
-          <button type="button" role="menuitem" onClick={() => { refresh(menu.key); setMenu(null); }}>Обновить</button>
-          <button type="button" role="menuitem" onClick={() => { tabs.pin(menu.key); setMenu(null); }}>Закрепить</button>
+          <button type="button" role="menuitem" onClick={() => { open(menu.key); setMenu(null); }}><span><ArrowUpRight size={14} />Открыть</span></button>
+          <button type="button" role="menuitem" onClick={() => { refresh(menu.key); setMenu(null); }}><span><RotateCw size={14} />Обновить</span></button>
+          {!browserTabs.find((item) => item.key === menu.key)?.pinned && <button type="button" role="menuitem" onClick={() => { tabs.pin(menu.key); setMenu(null); }}><span><Pin size={14} />Закрепить</span></button>}
           <div className="wb-menu-sep" role="separator" />
-          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(menu.key); setMenu(null); }}>Закрыть все, кроме этой</button>
-          <button type="button" role="menuitem" className="is-danger" onClick={() => { tabs.close(menu.key); setMenu(null); }}>Закрыть вкладку</button>
+          <BrowserTabMenuItems tabKey={menu.key} url={urls[menu.key] || browserTabUrl(menu.key)} title={titles[menu.key] || ""} onDone={() => setMenu(null)} />
+          <div className="wb-menu-sep" role="separator" />
+          {browserTabs.findIndex((item) => item.key === menu.key) < browserTabs.length - 1 && <button type="button" role="menuitem" onClick={() => { tabs.closeRight(menu.key); setMenu(null); }}><span><ArrowRightToLine size={14} />Закрыть вкладки справа</span></button>}
+          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(menu.key); setMenu(null); }}><span><CircleX size={14} />Закрыть все, кроме этой</span></button>
+          <button type="button" role="menuitem" className="is-danger" onClick={() => { tabs.close(menu.key); setMenu(null); }}><span><X size={14} />Закрыть вкладку</span></button>
         </div>
       </WbMenu>}
     </div>
@@ -210,7 +240,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   useEffect(() => warmUpEditors(), []);
   setWorkbenchStorageUser(user.username);
   const tabsState = useTabs();
-  const [browserUrls, setBrowserUrls] = usePersistentState<Record<string, string>>("mbox.browser.urls", {});
+  const [browserUrls, setBrowserUrls] = usePersistentState<Record<string, string>>("mbox.browser.urls", {}, (urls) => Object.fromEntries(Object.entries(urls).filter(([key]) => !isIncognitoKey(key))));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const defaultNoteProjectId = user.role === "owner" ? null : data.projects[0]?.id;
 
@@ -686,7 +716,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const tabsApiRef = useRef(tabs);
   tabsApiRef.current = tabs;
   const openFromBrowser = useCallback((fromKey: string, url: string) => {
-    const key = browserTabKey(url);
+    const key = isIncognitoKey(fromKey) ? incognitoTabKey(url) : browserTabKey(url);
     const api = tabsApiRef.current;
     if (splitKeysRef.current.has(fromKey)) {
       const mainActive = api.active;
@@ -756,6 +786,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       else if (mod && !event.shiftKey && event.code === "KeyJ") { event.preventDefault(); setPanelOpen((value) => !value); }
       else if (mod && event.code === "Backquote") { event.preventDefault(); toggleConsole(); }
       else if (event.altKey && event.code === "KeyW" && tabs.active) { event.preventDefault(); closeTab(tabs.active); }
+      else if (mod && event.shiftKey && !event.altKey && event.code === "KeyN" && hasBrowser) { event.preventDefault(); tabs.open(incognitoTabKey(), true); }
       else if (mod && event.altKey && event.code === "KeyN") {
         event.preventDefault();
         setActivity("tables");
@@ -829,6 +860,12 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     return map;
   }, [titles, skillsCatalog.data.skills, toolsCatalog.data.tools]);
   const activeTabMeta = tabMeta(tabs.active, data, catalogTitles);
+  // Журнал «где я был» для поиска (Ctrl+K): запись обновляется и при смене названия страницы.
+  const activeVisitUrl = tabs.active.startsWith("web:") ? (browserUrls[tabs.active] || browserTabUrl(tabs.active)) : "";
+  useEffect(() => {
+    if (!tabs.active) return;
+    recordVisit({ key: tabs.active, title: activeTabMeta.title, hint: activeTabMeta.hint, url: activeVisitUrl || undefined });
+  }, [tabs.active, activeTabMeta.title, activeTabMeta.hint, activeVisitUrl]);
 
   /**
    * Открытые вкладки остаются в DOM, чтобы не терять прокрутку и состояние редакторов. Но при
@@ -1073,7 +1110,10 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       { id: "new-table", title: "Новая таблица", hint: "Пустая таблица", keywords: "создать таблица excel sheet", run: () => void createTableAndOpen(tabs, defaultNoteProjectId ?? null) },
       { id: "new-doc", title: "Новый документ", hint: "Документ с листами A4", keywords: "создать документ word docs", run: () => void createDocAndOpen(tabs, defaultNoteProjectId ?? null) },
     ] : []),
-    ...(hasBrowser ? [{ id: "new-web", title: "Новая вкладка браузера", hint: "Встроенный браузер", keywords: "браузер сайт интернет", run: () => tabs.open(browserBlankTabKey(), true) }] : []),
+    ...(hasBrowser ? [
+      { id: "new-web", title: "Новая вкладка браузера", hint: "Встроенный браузер", keywords: "браузер сайт интернет", run: () => tabs.open(browserBlankTabKey(), true) },
+      { id: "new-incognito", title: "Новая вкладка инкогнито", hint: "История, куки и разрешения не сохраняются", keywords: "инкогнито приватный private incognito браузер", shortcut: "Ctrl Shift N", icon: <VenetianMask size={16} aria-hidden="true" />, run: () => tabs.open(incognitoTabKey(), true) },
+    ] : []),
     ...RAIL_GROUPS.flatMap((group) => group.items)
       .filter((item) => !railHidden.includes(item.id) && (!item.desktopOnly || hasBrowser))
       .map((item) => ({ id: `go-${item.id}`, title: `Перейти: ${item.label.replace(/\s*\(.*\)$/, "")}`, hint: "Раздел боковой панели", keywords: `открыть раздел ${item.short}`, run: () => openRail(item.id) })),
@@ -1122,7 +1162,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   key={item.id}
                   label={item.label}
                   short={item.short}
-                  icon={<img src={item.icon} alt="" draggable={false} />}
+                  icon={item.id === "agents" ? <Bot size={26} strokeWidth={1.75} aria-hidden="true" /> : <img src={item.icon} alt="" draggable={false} />}
                   active={railActive(item.id)}
                   onClick={() => { closePhoneChat(); openRail(item.id); }}
                   onContextMenu={item.id === "browser" ? (event) => {
@@ -1158,7 +1198,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           </div>
         )}
         <button type="button" className={consoleVisible ? "wb-activity is-mobile-only is-active" : "wb-activity is-mobile-only"} onClick={() => { setSidebarOpen(false); toggleConsole(); }} aria-label="Чат с агентами">
-          <span className="wb-activity-icon" aria-hidden="true"><img src="/icons/dialog.png" alt="" draggable={false} /></span>
+          <span className="wb-activity-icon" aria-hidden="true"><MessagesSquare size={26} strokeWidth={1.75} /></span>
           <span className="wb-activity-label" aria-hidden="true">Чат</span>
           <span className="wb-activity-tip" role="tooltip">Чат с агентами</span>
         </button>
@@ -1191,7 +1231,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
               </button>
               <strong className="wb-phone-title">{dirty[tabs.active] ? "● " : ""}{activeTabMeta.title}</strong>
               <button type="button" onClick={openSearch} aria-label="Поиск"><Search size={19} /></button>
-              <button type="button" onClick={() => toggleConsole(true)} aria-label="Чат с агентами"><img src="/icons/dialog.png" width={26} height={26} alt="" /></button>
+              <button type="button" onClick={() => toggleConsole(true)} aria-label="Чат с агентами"><MessagesSquare size={22} strokeWidth={1.75} /></button>
               <button type="button" onClick={async () => { phoneKeepListRef.current = true; if (await closeTab(tabs.active)) phoneBack(); else phoneKeepListRef.current = false; }} aria-label={`Закрыть ${activeTabMeta.title}`}><X size={20} /></button>
             </header>
           )}
@@ -1237,7 +1277,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   role="tab"
                   aria-selected={active}
                   data-tab-group={groupTabs ? group : undefined}
-                  className={["wb-tab", active ? "is-active" : "", tab.pinned ? "" : "is-preview", dirty[tab.key] ? "is-dirty" : "", draggedTab && draggedTab !== tab.key ? "is-drop-zone" : "", groupStart ? "is-group-start" : ""].filter(Boolean).join(" ")}
+                  className={["wb-tab", active ? "is-active" : "", isIncognitoKey(tab.key) ? "is-incognito" : "", tab.pinned ? "" : "is-preview", dirty[tab.key] ? "is-dirty" : "", draggedTab && draggedTab !== tab.key ? "is-drop-zone" : "", groupStart ? "is-group-start" : ""].filter(Boolean).join(" ")}
                   title={meta.hint}
                   onClick={() => tabs.open(tab.key)}
                   onDoubleClick={() => tabs.pin(tab.key)}
@@ -1312,7 +1352,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                   return (
                     <div
                       key={key}
-                      className={["wb-tab", key === splitActive ? "is-active" : "", dirty[key] ? "is-dirty" : "", draggedTab && draggedTab !== key ? "is-drop-zone" : ""].filter(Boolean).join(" ")}
+                      className={["wb-tab", key === splitActive ? "is-active" : "", isIncognitoKey(key) ? "is-incognito" : "", dirty[key] ? "is-dirty" : "", draggedTab && draggedTab !== key ? "is-drop-zone" : ""].filter(Boolean).join(" ")}
                       role="tab"
                       aria-selected={key === splitActive}
                       title={meta.hint}
@@ -1413,7 +1453,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <i className="wb-state-dot" />{status.label}
         </button>
         <button type="button" className={consoleVisible ? "wb-status-item is-on" : "wb-status-item"} onClick={() => toggleConsole()} title="Чат с агентами (Ctrl+`)">
-          <img className="wb-status-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
+          <MessagesSquare size={12} aria-hidden="true" />
         </button>
         <span className="wb-status-fill" />
         {attentionCount > 0 && (
@@ -1463,21 +1503,26 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
 
       {tabMenu && (
         <WbMenu x={tabMenu.x} y={tabMenu.y} onClose={() => setTabMenu(null)}>
-          <button type="button" role="menuitem" onClick={() => { closeTab(tabMenu.key); setTabMenu(null); }}>Закрыть</button>
-          {tabMenu.key.startsWith("web:") && <button type="button" role="menuitem" onClick={() => { void browserBridge()?.act(tabMenu.key, "reload"); setTabMenu(null); }}>Обновить</button>}
-          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}>Закрыть все, кроме этой</button>
-          <button type="button" role="menuitem" onClick={() => { tabs.pin(tabMenu.key); setTabMenu(null); }}>Закрепить</button>
+          {tabMenu.key.startsWith("web:") && <button type="button" role="menuitem" onClick={() => { void browserBridge()?.act(tabMenu.key, "reload"); setTabMenu(null); }}><span><RotateCw size={14} />Обновить</span></button>}
+          {tabs.tabs.find((item) => item.key === tabMenu.key)?.pinned === false && <button type="button" role="menuitem" onClick={() => { tabs.pin(tabMenu.key); setTabMenu(null); }}><span><Pin size={14} />Закрепить</span></button>}
+          {tabMenu.key.startsWith("web:") && <BrowserTabMenuItems tabKey={tabMenu.key} url={browserUrls[tabMenu.key] || browserTabUrl(tabMenu.key)} title={titles[tabMenu.key] || ""} onDone={() => setTabMenu(null)} />}
+          <div className="wb-menu-sep" role="separator" />
           <button type="button" role="menuitem" onClick={() => { splitKeys.has(tabMenu.key) ? moveToMain(tabMenu.key) : splitTab(tabMenu.key); setTabMenu(null); }}>
-            {splitKeys.has(tabMenu.key) ? "Перенести в основную область" : "Открыть во второй области"}
+            <span><Columns2 size={14} />{splitKeys.has(tabMenu.key) ? "Перенести в основную область" : "Открыть во второй области"}</span>
           </button>
-          {splitOpen && <button type="button" role="menuitem" onClick={() => { collapseSplit(); setTabMenu(null); }}>Убрать вторую область</button>}
-          <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}>Копировать ссылку</button>
-          <button type="button" role="menuitemcheckbox" aria-checked={groupTabs} onClick={() => { setGroupTabs(!groupTabs); setTabMenu(null); }}>{groupTabs ? "Не группировать вкладки" : "Группировать вкладки по видам"}</button>
+          {splitOpen && <button type="button" role="menuitem" onClick={() => { collapseSplit(); setTabMenu(null); }}><span><PanelRight size={14} />Убрать вторую область</span></button>}
+          <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(`${serverOrigin()}/?tab=${encodeTabParam(tabMenu.key)}`); setTabMenu(null); }}><span><Link2 size={14} />Копировать ссылку на вкладку</span></button>
+          <button type="button" role="menuitemcheckbox" aria-checked={groupTabs} onClick={() => { setGroupTabs(!groupTabs); setTabMenu(null); }}><span><Layers size={14} />{groupTabs ? "Не группировать вкладки" : "Группировать вкладки по видам"}</span></button>
+          <div className="wb-menu-sep" role="separator" />
+          <button type="button" role="menuitem" onClick={() => { tabs.closeRight(tabMenu.key); setTabMenu(null); }}><span><ArrowRightToLine size={14} />Закрыть вкладки справа</span></button>
+          <button type="button" role="menuitem" onClick={() => { tabs.closeOthers(tabMenu.key); setTabMenu(null); }}><span><CircleX size={14} />Закрыть все, кроме этой</span></button>
+          <button type="button" role="menuitem" className="is-danger" onClick={() => { closeTab(tabMenu.key); setTabMenu(null); }}><span><X size={14} />Закрыть</span></button>
         </WbMenu>
       )}
       {railMenu?.id === "browser" && (
         <WbMenu x={railMenu.x} y={railMenu.y} onClose={() => setRailMenu(null)}>
-          <button type="button" role="menuitem" onClick={() => { tabs.open(browserBlankTabKey(), true); setRailMenu(null); }}>Новая вкладка</button>
+          <button type="button" role="menuitem" onClick={() => { tabs.open(browserBlankTabKey(), true); setRailMenu(null); }}><span><Plus size={14} />Новая вкладка</span></button>
+          <button type="button" role="menuitem" onClick={() => { tabs.open(incognitoTabKey(), true); setRailMenu(null); }}><span><VenetianMask size={14} />Новая вкладка инкогнито<kbd>Ctrl Shift N</kbd></span></button>
         </WbMenu>
       )}
       {domFind && <DomFind root={domFind.root} focusKey={domFind.n} onClose={() => setDomFind(null)} />}

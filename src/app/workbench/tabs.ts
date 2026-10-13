@@ -9,6 +9,8 @@ import { useCallback, useEffect, useState } from "react";
 export type TabRef = { key: string; pinned: boolean };
 type TabsState = { tabs: TabRef[]; active: string };
 
+import { isIncognitoKey } from "./incognito";
+
 const STORAGE_KEY = "mbox.workbench.tabs.v1";
 const MAX_TABS = 24;
 let storageUser = "anonymous";
@@ -55,8 +57,9 @@ function readStored(): TabsState {
   try {
     const raw = JSON.parse(window.localStorage.getItem(scopedStorageKey(STORAGE_KEY)) || "null");
     if (raw && Array.isArray(raw.tabs)) {
-      const tabs = raw.tabs.filter((tab: TabRef) => tab && typeof tab.key === "string" && !["memory:new", "file:new", "agents"].includes(tab.key));
-      return { tabs, active: String(raw.active || "") };
+      const tabs = raw.tabs.filter((tab: TabRef) => tab && typeof tab.key === "string" && !["memory:new", "file:new", "agents"].includes(tab.key) && !isIncognitoKey(tab.key));
+      const active = String(raw.active || "");
+      return { tabs, active: isIncognitoKey(active) ? "" : active };
     }
   } catch {
     // пустое хранилище или приватный режим — начинаем с чистого листа
@@ -78,13 +81,14 @@ export function useTabs() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(scopedStorageKey(STORAGE_KEY), JSON.stringify(state));
+      const persisted = { tabs: state.tabs.filter((tab) => !isIncognitoKey(tab.key)), active: isIncognitoKey(state.active) ? "" : state.active };
+      window.localStorage.setItem(scopedStorageKey(STORAGE_KEY), JSON.stringify(persisted));
     } catch {
       // не критично: вкладки просто не переживут перезагрузку
     }
     // «.svg» в строке запроса dev-сервер Vite принимает за обращение к файлу и отвечает 403 (в том числе
     // в закодированном виде) — такую вкладку в адрес не пишем: после перезагрузки она откроется из localStorage.
-    const url = state.active && !/\.svg/i.test(state.active) ? `/?tab=${encodeTabParam(state.active)}` : "/";
+    const url = state.active && !isIncognitoKey(state.active) && !/\.svg/i.test(state.active) ? `/?tab=${encodeTabParam(state.active)}` : "/";
     if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState({}, "", url);
   }, [state]);
 
@@ -129,6 +133,16 @@ export function useTabs() {
     setState((current) => ({ tabs: current.tabs.filter((tab) => tab.key === key), active: key }));
   }, []);
 
+  /** Закрыть вкладки правее этой; закреплённые остаются. */
+  const closeRight = useCallback((key: string) => {
+    setState((current) => {
+      const index = current.tabs.findIndex((tab) => tab.key === key);
+      if (index < 0) return current;
+      const tabs = current.tabs.filter((tab, at) => at <= index || tab.pinned);
+      return { tabs, active: tabs.some((tab) => tab.key === current.active) ? current.active : key };
+    });
+  }, []);
+
   const pin = useCallback((key: string) => {
     setState((current) => ({ ...current, tabs: current.tabs.map((tab) => (tab.key === key ? { ...tab, pinned: true } : tab)) }));
   }, []);
@@ -155,7 +169,7 @@ export function useTabs() {
     });
   }, []);
 
-  return { tabs: state.tabs, active: state.active, open, close, closeOthers, pin, replace, move };
+  return { tabs: state.tabs, active: state.active, open, close, closeOthers, closeRight, pin, replace, move };
 }
 
 export type TabsApi = ReturnType<typeof useTabs>;
@@ -178,7 +192,7 @@ export function projectIdOfTab(key: string): string | undefined {
 }
 
 /** Состояние раскладки, которое переживает перезагрузку: ширины, высоты, что открыто. */
-export function usePersistentState<T>(key: string, fallback: T) {
+export function usePersistentState<T>(key: string, fallback: T, persistable: (value: T) => T = (value) => value) {
   const [value, setValue] = useState<T>(() => {
     try {
       const raw = window.localStorage.getItem(scopedStorageKey(key));
@@ -189,10 +203,12 @@ export function usePersistentState<T>(key: string, fallback: T) {
   });
   useEffect(() => {
     try {
-      window.localStorage.setItem(scopedStorageKey(key), JSON.stringify(value));
+      window.localStorage.setItem(scopedStorageKey(key), JSON.stringify(persistable(value)));
     } catch {
       // приватный режим — живём без памяти раскладки
     }
+    // persistable — чистая функция-фильтр, её идентичность на сохранение не влияет
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, value]);
   return [value, setValue] as const;
 }

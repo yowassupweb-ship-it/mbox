@@ -12,13 +12,17 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { WebContentsView, session, Menu, clipboard, shell, dialog, app } = require("electron");
+const { WebContentsView, session, Menu, clipboard, shell, dialog, app, net } = require("electron");
 const chromeImport = require("./import-chrome");
 const serverState = require("./server-state");
 const downloads = require("./browser-downloads");
 const contextMenu = require("./browser-menu");
+const permissions = require("./browser-permissions");
 
 const PARTITION = "persist:mbox-browser";
+// Инкогнито: раздел без префикса persist: живёт только в памяти — куки, кэш и вход пропадают вместе с последней такой вкладкой.
+const INCOGNITO_PARTITION = "mbox-incognito";
+const isIncognitoKey = (key) => String(key || "").startsWith("web:incog");
 const HOME = "about:blank";
 
 const tabs = new Map();
@@ -82,6 +86,8 @@ function stateOf(key) {
     zoom: Math.round((contents.getZoomFactor() || 1) * 100),
     favicon: currentFavicon(tab),
     find: tab.find || null,
+    incognito: Boolean(tab.incognito),
+    permission: tab.prompts?.[0] ? { id: tab.prompts[0].id, origin: tab.prompts[0].origin, kind: tab.prompts[0].kind, label: tab.prompts[0].label, queued: tab.prompts.length - 1 } : null,
     auth: tab.auth ? { id: tab.auth.id, host: tab.auth.host, realm: tab.auth.realm, isProxy: tab.auth.isProxy, failed: tab.auth.failed } : null,
   };
 }
@@ -102,9 +108,10 @@ function publish(key) {
 }
 
 function create(key) {
+  const incognito = isIncognitoKey(key);
   const view = new WebContentsView({
     webPreferences: {
-      partition: PARTITION,
+      partition: incognito ? INCOGNITO_PARTITION : PARTITION,
       preload: path.join(__dirname, "browser-tab-preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -113,7 +120,7 @@ function create(key) {
       spellcheck: false,
     },
   });
-  const tab = { view, bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", faviconOrigin: "", auth: null, authTries: 0, find: null };
+  const tab = { view, incognito, prompts: [], bounds: pendingBounds.get(key) || null, visible: false, error: "", pending: "", favicon: "", faviconOrigin: "", auth: null, authTries: 0, find: null };
   pendingBounds.delete(key);
   tabs.set(key, tab);
 
@@ -134,7 +141,7 @@ function create(key) {
   // Иконку нового сайта начинаем искать уже на старте перехода, параллельно с загрузкой страницы:
   // к коммиту она обычно в кэше и встаёт сразу, а не после разбора страницы.
   contents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) void favicon(details.url).catch(() => "");
+    if (details.isMainFrame && !details.isSameDocument && !incognito) void favicon(details.url).catch(() => "");
   });
   contents.on("did-navigate", (_event, url) => {
     const origin = originOf(url);
@@ -146,12 +153,16 @@ function create(key) {
       publish(key);
     };
     if (faviconCache.has(origin)) apply(faviconCache.get(origin));
-    else void favicon(url).then(apply).catch(() => undefined);
+    else if (!incognito) void favicon(url).then(apply).catch(() => undefined);
   });
   // История пишется на сервер — она общая для всех машин (см. server-state.js). Заголовок к моменту
   // did-navigate ещё не пришёл, поэтому отмечаем переход и на смене заголовка: запись одна, по адресу.
-  contents.on("did-navigate", (_event, url) => serverState.recordVisit(url, contents.getTitle()));
-  contents.on("page-title-updated", (_event, title) => serverState.recordVisit(contents.getURL(), title));
+  if (!incognito) {
+    contents.on("did-navigate", (_event, url) => serverState.recordVisit(url, contents.getTitle()));
+    contents.on("page-title-updated", (_event, title) => serverState.recordVisit(contents.getURL(), title));
+  }
+  // Ушли на другую страницу — вопросы прежней страницы про разрешения больше не нужны.
+  contents.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) dropPrompts(tab); });
   contents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
     // -3 = ERR_ABORTED: пользователь сам ушёл со страницы, это не ошибка.
     if (!isMainFrame || code === -3) return;
@@ -172,7 +183,7 @@ function create(key) {
   // вкладка попросила: только она открывает новую (раньше открывали все браузеры сразу), и если она во
   // второй области, новая встаёт туда же.
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) emit({ type: "open", url, from: key });
+    if (/^https?:/i.test(url)) emit({ type: "open", url, from: key, incognito });
     return { action: "deny" };
   });
 
@@ -240,9 +251,9 @@ function showContextMenu(key, params) {
     selectAll: () => contents.selectAll(),
     copyText: (text) => clipboard.writeText(String(text || "")),
     copyImage: () => contents.copyImageAt(params.x, params.y),
-    openTab: (url) => emit({ type: "open", url, from: key }),
+    openTab: (url) => emit({ type: "open", url, from: key, incognito: tab.incognito }),
     openExternal: (url) => { if (/^https?:/i.test(url)) void shell.openExternal(url); },
-    search: (text) => emit({ type: "open", url: searchUrl(text), from: key }),
+    search: (text) => emit({ type: "open", url: searchUrl(text), from: key, incognito: tab.incognito }),
     download: (url, saveAs) => { if (saveAs) downloads.expectSaveAs(url); contents.downloadURL(url); },
     back: () => contents.navigationHistory.canGoBack() && contents.navigationHistory.goBack(),
     forward: () => contents.navigationHistory.canGoForward() && contents.navigationHistory.goForward(),
@@ -266,11 +277,20 @@ function showContextMenu(key, params) {
 
 /** Сочетания клавиш, как в обычном браузере. Без этого страница поверх окна съедала их все, а Ctrl+R
  *  обновлял не сайт, а сам MBOX (пункт меню приложения). true — клавишу обработали, странице не отдаём. */
+/** Клавиша по физическому положению: на русской раскладке «к» и «l» — одна кнопка, а сочетания задуманы по латинице. */
+const CODE_CHAR = { Backquote: "`", BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Minus: "-", Equal: "=" };
+function latinKey(input) {
+  const code = String(input.code || "");
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  return CODE_CHAR[code] ?? String(input.key || "").toLowerCase();
+}
+
 function handleShortcut(key, tab, input) {
   if (input.type !== "keyDown") return false;
   const contents = tab.view.webContents;
   const mod = input.control || input.meta;
-  const k = String(input.key || "").toLowerCase();
+  const k = mod && !input.alt ? latinKey(input) : String(input.key || "").toLowerCase();
   if (mod && !input.alt) {
     if (k === "l" && !input.shift) { ask(key, "address"); return true; }
     if (k === "f" && !input.shift) { ask(key, "find"); return true; }
@@ -281,6 +301,9 @@ function handleShortcut(key, tab, input) {
     if (k === "=" || k === "+") { act(key, "zoom-in"); return true; }
     if (k === "-" || k === "_") { act(key, "zoom-out"); return true; }
     if (k === "0") { act(key, "zoom-reset"); return true; }
+    if (k === "t" && !input.shift) { ask(key, "new-tab"); return true; }
+    if (k === "w" && !input.shift) { ask(key, "close-tab"); return true; }
+    if (k === "n" && input.shift) { ask(key, "incognito"); return true; }
     return false;
   }
   if (k === "f5") { if (input.shift || input.control) contents.reloadIgnoringCache(); else contents.reload(); return true; }
@@ -477,6 +500,7 @@ function close(key) {
   for (const [pendingId, entry] of pendingAuth) {
     if (entry.key === key) { pendingAuth.delete(pendingId); try { entry.callback(); } catch { /* вкладка уже закрыта */ } }
   }
+  dropPrompts(tab);
   tabs.delete(key);
   visibleKeys.delete(key);
   try {
@@ -485,6 +509,7 @@ function close(key) {
   } catch {
     // окно уже закрыто
   }
+  if (tab.incognito && ![...tabs.values()].some((other) => other.incognito)) void clearIncognito();
 }
 
 function act(key, command, payload) {
@@ -542,10 +567,65 @@ function originOf(url) {
   }
 }
 
+// Иконки часто лежат не в /favicon.ico, а объявлены в <head> (PNG, SVG, apple-touch-icon): ищем там, потом по
+// обычным адресам. Опознаём картинку по содержимому, а не по заголовку Content-Type (многие сайты отдают .ico как
+// application/octet-stream). Неудача запоминается на 10 минут, а не навсегда: сайт мог быть недоступен.
+const faviconMisses = new Map();
+const FAVICON_MISS_MS = 10 * 60 * 1000;
+
+function sniffImageType(buffer) {
+  if (buffer.length < 4) return "";
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "image/png";
+  if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && buffer[3] === 0x00) return "image/x-icon";
+  if (buffer.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.subarray(0, 4).toString("latin1") === "RIFF" && buffer.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  const head = buffer.subarray(0, 512).toString("utf8").toLowerCase();
+  if (head.includes("<svg")) return "image/svg+xml";
+  return "";
+}
+
+async function fetchIcon(browserSession, href) {
+  try {
+    const response = await browserSession.fetch(href, { signal: AbortSignal.timeout(6000) });
+    if (!response.ok) return "";
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length || buffer.length > MAX_FAVICON_BYTES) return "";
+    const type = sniffImageType(buffer);
+    return type ? `data:${type};base64,${buffer.toString("base64")}` : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Адреса иконок из <link rel="icon">: сначала векторные и ближе к 48 px, apple-touch-icon — после обычных. */
+function iconCandidates(html, baseUrl) {
+  const found = [];
+  for (const match of String(html).matchAll(/<link\b[^>]*>/gi)) {
+    const tag = match[0];
+    const attr = (name) => (tag.match(new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i")) || []).slice(2).find((value) => value !== undefined) || "";
+    const rel = attr("rel").toLowerCase();
+    if (!/\bicon\b|apple-touch-icon/.test(rel) || /mask-icon/.test(rel)) continue;
+    const href = attr("href");
+    if (!href) continue;
+    let target = "";
+    try { target = new URL(href, baseUrl).href; } catch { continue; }
+    if (!/^https?:/i.test(target)) continue;
+    const sizes = attr("sizes").toLowerCase();
+    const size = Math.max(0, ...[...sizes.matchAll(/(\d+)x\d+/g)].map((item) => Number(item[1])));
+    const vector = /svg/i.test(attr("type")) || /\.svg(\?|$)/i.test(target);
+    let score = vector ? 40 : size ? -Math.abs(size - 48) / 4 : 0;
+    if (/apple-touch-icon/.test(rel)) score -= 12;
+    found.push({ target, score });
+  }
+  return [...new Map(found.sort((a, b) => b.score - a.score).map((item) => [item.target, item])).values()].slice(0, 4).map((item) => item.target);
+}
+
 async function favicon(url) {
   const origin = originOf(url);
   if (!origin) return "";
   if (faviconCache.has(origin)) return faviconCache.get(origin);
+  if ((faviconMisses.get(origin) || 0) > Date.now()) return "";
 
   for (const tab of tabs.values()) {
     const icon = currentFavicon(tab);
@@ -555,26 +635,181 @@ async function favicon(url) {
     }
   }
 
-  let result = "";
-  try {
-    const response = await session.fromPartition(PARTITION).fetch(`${origin}/favicon.ico`);
-    const type = response.headers.get("content-type") || "";
-    if (response.ok && /^image\//i.test(type)) {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.length && buffer.length <= MAX_FAVICON_BYTES) {
-        result = `data:${type.split(";")[0]};base64,${buffer.toString("base64")}`;
+  const browserSession = session.fromPartition(PARTITION);
+  let candidates = [];
+  // Сначала главная страница сайта, потом сама страница (у закладки адрес часто глубокий, а иконку объявляет только она).
+  for (const pageUrl of [...new Set([`${origin}/`, String(url)])]) {
+    try {
+      const page = await browserSession.fetch(pageUrl, { headers: { accept: "text/html" }, signal: AbortSignal.timeout(6000) });
+      if (page.ok && /html/i.test(page.headers.get("content-type") || "")) {
+        const html = (await page.text()).slice(0, 200_000);
+        candidates = iconCandidates(html, page.url || pageUrl);
       }
+    } catch {
+      // страница недоступна — остаются обычные адреса иконок
     }
-  } catch {
-    // сайт недоступен или не отдаёт иконку — запомним пустой результат, чтобы не ходить повторно
+    if (candidates.length) break;
   }
-  faviconCache.set(origin, result);
-  return result;
+  candidates.push(`${origin}/favicon.ico`, `${origin}/apple-touch-icon.png`);
+  for (const href of [...new Set(candidates)]) {
+    const icon = await fetchIcon(browserSession, href);
+    if (icon) {
+      faviconCache.set(origin, icon);
+      return icon;
+    }
+  }
+  faviconMisses.set(origin, Date.now() + FAVICON_MISS_MS);
+  return "";
+}
+
+
+// ─── Разрешения сайтов, как в Chrome ────────────────────────────────────────────────────────────
+// Камера, микрофон, геолокация, уведомления: сайт просит — над страницей появляется вопрос, ответ запоминается по сайту
+// (раздел «Сведения о сайте» в строке адреса позволяет передумать). В инкогнито решения живут только в памяти.
+
+let permissionStore = permissions.createPermissionStore(null);
+const incognitoPermissions = permissions.createPermissionStore(null);
+let promptSeq = 0;
+const storeFor = (incognito) => (incognito ? incognitoPermissions : permissionStore);
+const PERMISSION_TITLE = {
+  "media-video": "Камера", "media-audio": "Микрофон", "media-both": "Камера и микрофон", geolocation: "Местоположение",
+  notifications: "Уведомления", "clipboard-read": "Буфер обмена", midi: "MIDI-устройства",
+};
+
+function tabByContents(contents) {
+  if (!contents) return null;
+  for (const [key, tab] of tabs) if (tab.view.webContents.id === contents.id) return { key, tab };
+  return null;
+}
+
+function handlePermissionRequest(contents, permission, callback, details) {
+  if (permissions.ALWAYS_ALLOWED.has(permission)) return callback(true);
+  const info = permissions.describePermission(permission, details);
+  const found = tabByContents(contents);
+  const origin = found ? originOf(contents.getURL()) : "";
+  if (!info || !found || !origin) return callback(false);
+  const { key, tab } = found;
+  const store = storeFor(tab.incognito);
+  if (store.allows(origin, info.kind)) return callback(true);
+  if (store.blocks(origin, info.kind)) return callback(false);
+  // Тот же вопрос уже ждёт ответа (сайт спросил дважды) — отвечаем обоим сразу.
+  const same = tab.prompts.find((item) => item.kind === info.kind && item.origin === origin);
+  if (same) { same.callbacks.push(callback); return undefined; }
+  tab.prompts.push({ id: `${key}#${++promptSeq}`, origin, permission, kind: info.kind, label: info.label, callbacks: [callback] });
+  publish(key);
+  return undefined;
+}
+
+function handlePermissionCheck(contents, permission, requestingOrigin, details) {
+  if (permissions.ALWAYS_ALLOWED.has(permission)) return true;
+  const found = tabByContents(contents);
+  const origin = (contents && originOf(contents.getURL())) || originOf(requestingOrigin);
+  const store = storeFor(found ? found.tab.incognito : false);
+  if (permission === "media") return store.allows(origin, permissions.mediaKindOf(details?.mediaType));
+  const info = permissions.describePermission(permission, details);
+  return Boolean(info && store.allows(origin, info.kind));
+}
+
+/** Закрыть все вопросы вкладки отказом без запоминания: страница ушла или вкладку закрыли. */
+function dropPrompts(tab) {
+  if (!tab.prompts?.length) return;
+  const waiting = tab.prompts;
+  tab.prompts = [];
+  for (const prompt of waiting) for (const callback of prompt.callbacks) { try { callback(false); } catch { /* запрос уже закрыт */ } }
+}
+
+/** Ответ на вопрос: decision allow|deny, remember — запомнить для сайта («На этот раз» не запоминает). */
+function answerPermission(id, decision, remember) {
+  for (const [key, tab] of tabs) {
+    const index = tab.prompts.findIndex((item) => item.id === id);
+    if (index < 0) continue;
+    const [prompt] = tab.prompts.splice(index, 1);
+    const allow = decision === "allow";
+    if (remember) storeFor(tab.incognito).set(prompt.origin, prompt.kind, allow ? "allow" : "deny");
+    for (const callback of prompt.callbacks) { try { callback(allow); } catch { /* запрос уже закрыт */ } }
+    publish(key);
+    return { ok: true };
+  }
+  return { ok: false, error: "Вопрос уже закрыт" };
+}
+
+/** «Сведения о сайте»: защищено ли соединение, сколько куки, какие разрешения заданы. */
+async function siteInfo(key) {
+  const tab = tabs.get(key);
+  if (!tab) return null;
+  const contents = tab.view.webContents;
+  const url = contents.getURL();
+  const origin = originOf(url);
+  if (!origin) return { origin: "", host: "", secure: false, incognito: tab.incognito, cookies: 0, permissions: [] };
+  const own = storeFor(tab.incognito).list(origin);
+  let cookies = 0;
+  try { cookies = (await contents.session.cookies.get({ url })).length; } catch { /* сессия закрыта */ }
+  return {
+    origin,
+    host: new URL(origin).host,
+    secure: origin.startsWith("https:"),
+    incognito: tab.incognito,
+    cookies,
+    permissions: Object.entries(own).map(([kind, decision]) => ({ kind, title: PERMISSION_TITLE[kind] || kind, decision })),
+  };
+}
+
+/** Изменить решение для сайта вкладки: allow, deny или "" — снова спрашивать. */
+function sitePermission(key, kind, decision) {
+  const tab = tabs.get(key);
+  const origin = tab ? originOf(tab.view.webContents.getURL()) : "";
+  if (!tab || !origin || !PERMISSION_TITLE[kind]) return { ok: false };
+  storeFor(tab.incognito).set(origin, kind, decision === "allow" || decision === "deny" ? decision : "");
+  return { ok: true };
+}
+
+/** Последняя вкладка инкогнито закрыта — всё, что она накопила (куки, кэш, вход, решения), стирается. */
+async function clearIncognito() {
+  incognitoPermissions.clear();
+  const incognitoSession = session.fromPartition(INCOGNITO_PARTITION);
+  try {
+    await incognitoSession.clearStorageData();
+    await incognitoSession.clearCache();
+    await incognitoSession.clearAuthCache();
+    await incognitoSession.clearHostResolverCache();
+  } catch {
+    // сессия уже закрыта вместе с окном
+  }
+}
+
+// ─── Подсказки в строке адреса ──────────────────────────────────────────────────────────────────
+// Поисковые подсказки берутся у выбранной поисковой системы (как в Chrome): уходит только то, что набрано, и без куки.
+const suggestCache = new Map();
+const SUGGEST_URL = {
+  google: (q) => `https://suggestqueries.google.com/complete/search?client=firefox&q=${q}`,
+  duckduckgo: (q) => `https://duckduckgo.com/ac/?q=${q}&type=list`,
+  yandex: (q) => `https://suggest.yandex.ru/suggest-ff.cgi?part=${q}&uil=ru`,
+  bing: (q) => `https://api.bing.com/osjson.aspx?query=${q}`,
+};
+
+async function suggest(query) {
+  const text = String(query || "").trim().slice(0, 120);
+  if (!text) return [];
+  const cacheKey = `${searchEngine}:${text.toLowerCase()}`;
+  if (suggestCache.has(cacheKey)) return suggestCache.get(cacheKey);
+  const build = SUGGEST_URL[searchEngine] || SUGGEST_URL.duckduckgo;
+  try {
+    const response = await net.fetch(build(encodeURIComponent(text)), { signal: AbortSignal.timeout(1800), credentials: "omit", headers: { accept: "application/json" } });
+    if (!response.ok) return [];
+    const data = await response.json();
+    const list = Array.isArray(data?.[1]) ? data[1].map((item) => String(item?.phrase ?? item)).filter(Boolean).slice(0, 6) : [];
+    if (suggestCache.size > 200) suggestCache.clear();
+    suggestCache.set(cacheKey, list);
+    return list;
+  } catch {
+    return [];
+  }
 }
 
 async function fillPassword(key, username) {
   const tab = tabs.get(key);
   if (!tab) return { ok: false, error: "Вкладка закрыта" };
+  if (tab.incognito) return { ok: false, error: "В режиме инкогнито пароли не подставляются" };
   const contents = tab.view.webContents;
   const pageUrl = contents.getURL();
   const entries = chromeImport.credentialsFor(pageUrl);
@@ -990,20 +1225,22 @@ function attach(mainWindow, sendToUi) {
     if (mainWindow && !mainWindow.isDestroyed()) sendToUi(payload);
   };
 
-  const browserSession = session.fromPartition(PARTITION);
-  browserSession.setUserAgent(chromeUserAgent());
-  installChromeIdentity(browserSession);
-
-  // Сайты не получают разрешений (камера, геолокация, уведомления) и доступа к мосту MBOX. Исключение —
-  // запись текста в буфер обмена: без неё не работают кнопки «Копировать» на сайтах. Чтение буфера закрыто.
-  const allowed = (permission) => permission === "clipboard-sanitized-write";
-  browserSession.setPermissionRequestHandler((_contents, permission, callback) => callback(allowed(permission)));
-  browserSession.setPermissionCheckHandler((_contents, permission) => allowed(permission));
-  downloads.attach(browserSession, emit);
+  permissionStore = permissions.createPermissionStore(app.getPath("userData"));
+  // Обычный раздел и раздел инкогнито настраиваются одинаково: Chrome-подобный User-Agent, вопросы про разрешения, загрузки.
+  // Сайты не получают разрешений (камера, геолокация, уведомления) без вопроса человеку и доступа к мосту MBOX; запись
+  // текста в буфер обмена разрешена всегда — без неё не работают кнопки «Копировать». Чтение буфера — только с вопросом.
+  for (const partition of [PARTITION, INCOGNITO_PARTITION]) {
+    const browserSession = session.fromPartition(partition);
+    browserSession.setUserAgent(chromeUserAgent());
+    installChromeIdentity(browserSession);
+    browserSession.setPermissionRequestHandler(handlePermissionRequest);
+    browserSession.setPermissionCheckHandler(handlePermissionCheck);
+    downloads.attach(browserSession, emit);
+  }
 
   // Масштаб интерфейса меняется — прямоугольник в пикселях окна становится другим.
   mainWindow.webContents.on("zoom-changed", () => { for (const tab of tabs.values()) applyBounds(tab); });
-  mainWindow.on("closed", () => { tabs.clear(); window = null; });
+  mainWindow.on("closed", () => { for (const tab of tabs.values()) dropPrompts(tab); tabs.clear(); window = null; void clearIncognito(); });
 }
 
-module.exports = { attach, downloads, setAgentControl, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, agentAction, setSearchEngine, clearCache, state: stateOf, PARTITION };
+module.exports = { attach, downloads, setAgentControl, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, answerPermission, siteInfo, sitePermission, suggest, agentAction, setSearchEngine, clearCache, state: stateOf, isIncognitoKey, PARTITION, INCOGNITO_PARTITION };

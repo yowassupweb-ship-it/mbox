@@ -58,6 +58,7 @@ import type {
   SecretSummary, SectionKey, ServerMetrics, Todo,
 } from "./types";
 import "./styles.css";
+import { installLayoutIndependentShortcuts } from "./lib/keyboard";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 
 type AppTheme = "light" | "graphite" | "black";
@@ -1298,6 +1299,7 @@ const sharedSeoLogin = /^\/seo-access\/?$/.test(window.location.pathname);
 const SharedDocumentPage = lazy(() => import("./pages/SharedDocumentPage").then((module) => ({ default: module.SharedDocumentPage })));
 const sharedDocumentToken = window.location.pathname.match(/^\/d\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 
+installLayoutIndependentShortcuts();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {sharedNoteToken ? (

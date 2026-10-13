@@ -1,4 +1,4 @@
-import { Brain, Database, FileText, Files, Figma, Folder, GitBranch, Layers, Lightbulb, Link2, ListTodo, Newspaper, Rocket, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { Brain, Database, MessagesSquare, VenetianMask, FileText, Files, Figma, Folder, GitBranch, Layers, Lightbulb, Link2, ListTodo, Newspaper, Rocket, ShieldCheck, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 /**
  * Символы сущностей проекта — монохромные, одного размера, как в боковой панели Finder и проводнике VS Code.
@@ -21,6 +21,8 @@ const TREE_GLYPHS: Record<string, LucideIcon> = {
   folder: Folder,
   posts: Newspaper,
   documents: FileText,
+  chat: MessagesSquare,
+  incognito: VenetianMask,
 };
 
 export function TreeGlyph({ kind, size = 16 }: { kind: string; size?: number }) {

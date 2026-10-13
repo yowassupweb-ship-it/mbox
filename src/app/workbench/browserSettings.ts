@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
  * превращается в поиск там (mbox-desktop/browser.js, normalizeUrl).
  */
 export type SearchEngineId = "yandex" | "google" | "duckduckgo" | "bing";
-export type BrowserSettings = { search: SearchEngineId; start: "mbox" | "url"; startUrl: string };
+export type BrowserSettings = { search: SearchEngineId; start: "mbox" | "url"; startUrl: string; suggestions: boolean };
 
 export const SEARCH_ENGINES: Array<{ id: SearchEngineId; label: string }> = [
   { id: "yandex", label: "Яндекс" },
@@ -17,7 +17,7 @@ export const SEARCH_ENGINES: Array<{ id: SearchEngineId; label: string }> = [
 
 const KEY = "mbox.browser.settings";
 const EVENT = "mbox:browser-settings";
-const DEFAULTS: BrowserSettings = { search: "yandex", start: "mbox", startUrl: "" };
+const DEFAULTS: BrowserSettings = { search: "yandex", start: "mbox", startUrl: "", suggestions: true };
 
 export function readBrowserSettings(): BrowserSettings {
   try {
@@ -26,6 +26,7 @@ export function readBrowserSettings(): BrowserSettings {
       search: SEARCH_ENGINES.some((item) => item.id === raw.search) ? (raw.search as SearchEngineId) : DEFAULTS.search,
       start: raw.start === "url" ? "url" : "mbox",
       startUrl: typeof raw.startUrl === "string" ? raw.startUrl : "",
+      suggestions: raw.suggestions !== false,
     };
   } catch {
     return DEFAULTS;

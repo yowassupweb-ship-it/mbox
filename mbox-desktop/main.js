@@ -1011,6 +1011,17 @@ ipcMain.handle("mbox-desktop:browser-auth", async (event, id, username, password
   assertBrowserHost(event);
   return browser.answerAuth(String(id || ""), username === null || username === undefined ? null : String(username), password === null || password === undefined ? "" : String(password));
 });
+// Разрешения сайтов (камера, микрофон, геолокация, уведомления), сведения о сайте и подсказки в строке адреса.
+ipcMain.handle("mbox-desktop:browser-permission", async (event, id, decision, remember) => {
+  assertBrowserHost(event);
+  return browser.answerPermission(String(id || ""), decision === "allow" ? "allow" : "deny", Boolean(remember));
+});
+ipcMain.handle("mbox-desktop:browser-site-info", async (event, key) => { assertBrowserHost(event); return browser.siteInfo(String(key || "")); });
+ipcMain.handle("mbox-desktop:browser-site-permission", async (event, key, kind, decision) => {
+  assertBrowserHost(event);
+  return browser.sitePermission(String(key || ""), String(kind || ""), String(decision || ""));
+});
+ipcMain.handle("mbox-desktop:browser-suggest", async (event, query) => { assertBrowserHost(event); return browser.suggest(String(query || "")); });
 // Закладки, история и куки живут на сервере (server/browser-state.mjs) — так они одни и те же на
 // всех компьютерах. Локальный файл остаётся запасным: без сети браузер обязан работать.
 ipcMain.handle("mbox-desktop:browser-bookmarks", async (event) => {

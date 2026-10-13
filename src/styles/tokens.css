@@ -384,3 +384,7 @@
   --hairline: rgba(255, 255, 255, 0.1);
   --glass: rgba(10, 10, 12, 0.84);
 }
+
+/* Режим инкогнито во встроенном браузере: фиолетовый акцент и тонированная панель, чтобы вкладку не спутать с обычной. */
+:root { --incognito-accent: hsl(262 85% 76%); --incognito-bar: hsl(262 20% 17%); }
+:root[data-theme="light"] { --incognito-accent: hsl(262 55% 46%); --incognito-bar: hsl(262 32% 92%); }

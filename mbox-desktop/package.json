@@ -1,7 +1,7 @@
 {
   "name": "mbox-desktop",
   "displayName": "MBOX Desktop",
-  "version": "0.1.70",
+  "version": "0.1.71",
   "description": "MBOX web mirror with local desktop responder controls.",
   "private": true,
   "type": "commonjs",
@@ -30,6 +30,7 @@
       "agent-kit.js",
       "browser-downloads.js",
       "browser-menu.js",
+      "browser-permissions.js",
       "browser-tab-preload.js",
       "import-chrome.js",
       "preload.js",
