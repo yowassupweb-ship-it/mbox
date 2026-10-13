@@ -22,6 +22,8 @@ import { handleSpotlightApi } from "./server/spotlight.mjs";
 import { handlePlannerApi } from "./server/planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
+import { ensureNotificationsSchema, handleNotificationsApi } from "./server/notifications.mjs";
+import { bugReportRow, insertBugReport } from "./server/bug-reports.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
 import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./server/spaces.mjs";
@@ -980,6 +982,7 @@ function mboxDevApi() {
       ensureTablesSchema(queryPostgres).catch((error: Error) => console.error(`tables schema: ${error.message}`));
       ensureDocumentsSchema(queryPostgres).catch((error: Error) => console.error(`documents schema: ${error.message}`));
       ensureChatThreadsSchema(queryPostgres).catch((error: Error) => console.error(`chat threads schema: ${error.message}`));
+      ensureNotificationsSchema(queryPostgres).catch((error: Error) => console.error(`notifications schema: ${error.message}`));
       ensureBrowserStateSchema(queryPostgres).catch((error: Error) => console.error(`browser state schema: ${error.message}`));
       ensureSpacesSchema(queryPostgres).catch((error: Error) => console.error(`spaces schema: ${error.message}`));
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
@@ -1146,6 +1149,7 @@ function mboxDevApi() {
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handlePresentationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
+          if (await handleNotificationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, scope: devScope, hasProjectAccess: devHasProjectAccess })) return;
           if (url.pathname.startsWith("/api/mbox/storage")) {
             // Зеркало прод-логики: папки хранилища по проектам, участнику — только свои (см. storageAccessFor на проде).
             const projects = (await queryPostgres<{ id: string; name: string }>(
@@ -1493,6 +1497,22 @@ function mboxDevApi() {
               await recordMemoryAction({ memoryId: link.rows[0].to_memory_id, actor: String(actorFromReq(req)), action: "link_delete", note: `unlinked memory ${link.rows[0].from_memory_id}`, metadata: link.rows[0] });
             }
             return sendJson(res, link.rows[0] ? 200 : 404, link.rows[0] ? { ok: true, link: link.rows[0] } : { error: "not_found" });
+          }
+
+          if (url.pathname === "/api/mbox/bug-reports" && req.method === "POST") {
+            const body = await readBody<Record<string, unknown>>(req);
+            if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "project_access_denied" });
+            let row;
+            try {
+              row = bugReportRow(body, { reporter: String(actorFromReq(req)), source: String(body.source || "ui").slice(0, 20) });
+            } catch (error) {
+              return sendJson(res, 400, { error: "invalid_bug_report", message: (error as Error).message });
+            }
+            const id = await insertBugReport(queryPostgres, row, body.project_id);
+            await recordMemoryAction({ memoryId: id, actor: String(actorFromReq(req)), action: "create", note: "bug report", metadata: { title: row.title } });
+            await refreshMemoryEmbeddings();
+            broadcastRealtime(realtimeClients, "entity_changed", { entity: "memories" });
+            return sendJson(res, 201, { memory: { id }, title: row.title });
           }
 
           if (url.pathname === "/api/mbox/memories") {

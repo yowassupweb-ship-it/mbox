@@ -88,3 +88,51 @@
 .wb-status-item.is-on { color: var(--accent-color); }
 .wb-status-item.is-warn { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); }
 .wb-state-dot { width: 6px; height: 6px; }
+
+/* ─── Уведомления по проектам (NotificationBell) ─── */
+.tb-notify { position: relative; display: inline-flex; }
+.tb-notify-trigger { position: relative; }
+.tb-notify-count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1.5px solid var(--wb-surface);
+  border-radius: var(--radius-pill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  line-height: 11px;
+  text-align: center;
+}
+.wb-titlebar .tb-pop-notify, .tb-pop-notify { right: 0; width: min(360px, calc(100vw - 24px)); }
+.tb-notify-list .tb-pop-rowbtn { grid-template-columns: 14px minmax(0, 1fr); align-items: start; width: 100%; }
+.tb-notify-list .tb-pop-rowbtn > .tb-dot { grid-row: span 2; align-self: start; margin-top: 4px; }
+.tb-notify-list .tb-pop-rowbtn.is-static { cursor: default; }
+.tb-notify-list .tb-pop-rowbtn.is-static:hover { background: none; }
+.tb-notify-text { grid-column: 2; min-width: 0; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.35; overflow-wrap: anywhere; }
+.tb-notify-text b { color: var(--text-2); font-weight: var(--weight-medium); }
+.tb-pop-row.is-unread .tb-notify-text { color: var(--text-2); }
+.tb-pop-row.is-unread .tb-notify-text b { color: var(--text-main); }
+.tb-notify-toggle { display: flex; align-items: center; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.tb-notify-toggle:hover { background: var(--wb-selected); color: var(--text-main); }
+.tb-notify-project { grid-template-columns: minmax(0, 1fr) auto auto; }
+.tb-notify-project.is-muted .tb-pop-name { color: var(--text-muted); }
+.tb-notify-pill { min-width: 16px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--accent-fill); color: var(--on-accent); font-size: var(--text-2xs); font-weight: var(--weight-bold); line-height: 16px; text-align: center; }
+
+/* ─── Баг-репорт (askBugReport) ─── */
+.bug-dialog { width: min(460px, calc(100vw - 32px)); }
+.bug-dialog textarea { min-height: 112px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--accent-color) 55%, var(--border-color)); border-radius: var(--radius-lg); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); line-height: var(--leading-normal); resize: vertical; }
+.bug-dialog textarea:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.bug-dialog select { height: 30px; min-width: 0; max-width: 170px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-pill); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.bug-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.bug-severity { display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--wb-hover); }
+.bug-severity button { height: 24px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: none; color: var(--text-muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.bug-severity button:hover { color: var(--text-main); }
+.bug-severity button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.bug-severity button.is-on.is-high { color: var(--state-danger); }
+.bug-severity button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.ask-actions button:disabled { opacity: 0.55; cursor: default; }

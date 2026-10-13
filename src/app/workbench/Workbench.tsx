@@ -3,7 +3,7 @@ import { warmUpEditors } from "./warmup";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { usageOf, useAgentUsage } from "../../hooks/useAgentUsage";
 import { UsageMeters } from "../../components/UsageMeters";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Archive, Bot, CalendarDays, Cloud, Columns2, Database, ExternalLink, FilePlus2, FileText, FolderKanban, Globe2, History, LayoutDashboard, ListTodo, SlidersHorizontal, TerminalSquare, HardDrive, MessageSquare, NotebookPen, PanelBottom, PanelLeft, PanelRight, Plug, Plus, Power, Presentation, RefreshCw, RotateCcw, Search, Sparkles, Store, Table2, Trash2, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Bug, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Archive, Bot, CalendarDays, Cloud, Columns2, Database, ExternalLink, FilePlus2, FileText, FolderKanban, Globe2, History, LayoutDashboard, ListTodo, SlidersHorizontal, TerminalSquare, HardDrive, MessageSquare, NotebookPen, PanelBottom, PanelLeft, PanelRight, Plug, Plus, Power, Presentation, RefreshCw, RotateCcw, Search, Sparkles, Store, Table2, Trash2, X, type LucideIcon } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
@@ -27,6 +27,7 @@ import { installScrollMemory } from "./uiMemory";
 import { serverOrigin } from "../../lib/serverOrigin";
 import { mboxTabOfUrl } from "../../lib/mboxLinks";
 import { fetchJson, saveEntity } from "../../lib/api";
+import { askBugReport } from "../../ui/bugReport";
 import { LocalImageDocument } from "./LocalImageDocument";
 import { LocalMediaDocument } from "./LocalMediaDocument";
 import { BROWSER_FAVICON_EVENT, BrowserDocument, browserBlankTabKey, browserBridge, browserFaviconOrigin, browserTabKey, browserTabUrl, cachedBrowserFavicon, Favicon, type BrowserFaviconDetail, type BrowserState } from "./BrowserDocument";
@@ -1420,6 +1421,18 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
             <AlertTriangle size={12} /> {attentionCount}
           </button>
         )}
+        <button
+          type="button"
+          className="wb-status-item"
+          onClick={async () => {
+            const result = await askBugReport({ projects: data.projects.map((project) => ({ id: project.id, name: project.name })), defaultProjectId: activeProjectId, tabTitle: activeTabMeta.title });
+            if (result) setAgentNotice({ tone: "ok", text: `Баг-репорт записан в память: #${result.id}` });
+          }}
+          title="Сообщить о проблеме: запишется в память проекта"
+          aria-label="Сообщить о проблеме"
+        >
+          <Bug size={12} />
+        </button>
         <button type="button" className="wb-status-item" onClick={() => setSidebarOpen((value) => !value)} title="Боковая панель (Ctrl+B)"><PanelLeft size={12} /></button>
         <button type="button" className="wb-status-item" onClick={() => setPanelOpen((value) => !value)} title="Нижняя панель (Ctrl+J)"><PanelBottom size={12} /></button>
         <button

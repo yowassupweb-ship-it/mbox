@@ -155,7 +155,7 @@ export async function installBuiltin(query, id, userId) {
 /** Чьи свои API видит и правит человек: владелец — строки без хозяина, остальные — свои. $N — номер параметра. */
 const ownerFilter = (ctx = {}, n = 1) => ctx.owner !== false
   ? { sql: "owner_user_id IS NULL", values: [] }
-  : { sql: `owner_user_id = ${n}`, values: [String(ctx.userId || 0)] };
+  : { sql: `owner_user_id = $${n}`, values: [String(ctx.userId || 0)] };
 
 async function builtinValues(query, id, ctx = {}) {
   const spec = BUILTIN[id];

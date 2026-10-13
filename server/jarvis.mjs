@@ -1,5 +1,6 @@
 import { changeEvent as plannerChangeEvent, createEvent as plannerCreateEvent, deleteEvent as plannerDeleteEvent, listAutomations as plannerAutomations, listEvents as plannerListEvents } from "./planner.mjs";
 import { Client } from "pg";
+import { bugReportRow, insertBugReport } from "./bug-reports.mjs";
 import { canAccessNote, createNote, listNotes, recordNoteVersion } from "./notes.mjs";
 import { scopeWhere as documentScope } from "./documents.mjs";
 import { appendMarkdown, markdownToSnapshot, snapshotToMarkdown } from "./doc-snapshot.mjs";
@@ -634,7 +635,7 @@ const TODO_PRIORITIES = ["low", "normal", "high", "urgent"];
 // удаление/объединение сущностей, то, что человек реально хочет видеть с первого взгляда.
 const HIGHLIGHT_TOOLS = new Set([
   "create_todo", "update_todo", "delete_todo", "merge_todos",
-  "record_memory", "update_memory", "delete_memory",
+  "record_memory", "report_bug", "update_memory", "delete_memory",
   "create_note", "update_note", "create_document", "update_document", "write_table_cells", "browser_navigate", "browser_click", "browser_fill", "browser_type", "browser_press", "gmail_draft", "gmail_send", "gdoc_append", "gdoc_replace", "gdoc_create", "gdoc_import",
   "workspace_write_file", "workspace_write_cells", "workspace_format_cells", "workspace_write_docx",
   "create_project", "create_company", "create_artifact",
@@ -792,6 +793,25 @@ export const JARVIS_TOOLS = [
           project_name: { type: "string", description: "Название проекта, если факт относится к конкретному проекту, необязательно" },
         },
         required: ["title", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "report_bug",
+      description: "Записать баг-репорт в память MBOX (как кнопка с жуком в нижней панели): что-то в MBOX или инструменте работает не так, и это должен увидеть человек или разработчик. Это только запись в память, задачу она не создаёт.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Короткое название бага" },
+          description: { type: "string", description: "Что пошло не так, с точным текстом ошибки" },
+          steps: { type: "string", description: "Как воспроизвести, необязательно" },
+          expected: { type: "string", description: "Что ожидалось, необязательно" },
+          severity: { type: "string", enum: ["low", "normal", "high"], description: "Важность: low — мелкая, normal — обычная, high — критичная" },
+          project_name: { type: "string", description: "Название проекта, необязательно" },
+        },
+        required: ["title", "description"],
       },
     },
   },
@@ -1907,7 +1927,7 @@ export const JARVIS_TOOLS = [
 export const TOOL_GROUPS = {
   core: {
     label: "ядро: поиск по памяти и задачам, задачи, запись фактов, карточка проекта",
-    tools: ["search_memory", "get_memory", "record_memory", "list_project_todos", "search_todos", "get_task", "create_todo", "update_todo", "delete_todo", "get_project_info"],
+    tools: ["search_memory", "get_memory", "record_memory", "report_bug", "list_project_todos", "search_todos", "get_task", "create_todo", "update_todo", "delete_todo", "get_project_info"],
   },
   tasks: {
     label: "массовая работа с задачами: объединение дублей, статус/приоритет/описание по заголовку",
@@ -2723,6 +2743,18 @@ export async function runJarvisTool(client, name, rawArgs, projectList, inboxId,
       [project?.id || null, title, content, JSON.stringify({ source_agent: JARVIS_NAME })],
     );
     return `записал в память: «${title}»${project ? ` (проект «${project.name}»)` : ""} (#${inserted.rows[0].id})`;
+  }
+
+  if (name === "report_bug") {
+    const project = args.project_name ? matchProjectFuzzy(args.project_name, projectList) : null;
+    let row;
+    try {
+      row = bugReportRow({ ...args, context: { app: `Джарвис` } }, { reporter: JARVIS_NAME, source: "jarvis" });
+    } catch (error) {
+      return `не записал баг-репорт — ${error.message}`;
+    }
+    const id = await insertBugReport((sql, params) => client.query(sql, params), row, project?.id);
+    return `записал баг-репорт в память: «${row.title}»${project ? ` (проект «${project.name}»)` : ""} (#${id})`;
   }
 
   if (name === "list_project_todos") {

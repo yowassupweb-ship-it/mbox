@@ -6,6 +6,7 @@ import { markOverlay } from "../app/workbench/BrowserDocument";
 import { TreeGlyph } from "../app/workbench/TreeGlyph";
 import { usageOf, useAgentUsage } from "../hooks/useAgentUsage";
 import { UsageMeters } from "./UsageMeters";
+import { NotificationBell } from "./NotificationBell";
 
 // Раньше burst длился 500мс — при интервале кадра 260мс это меньше двух кадров, ни одного
 // полного круга по 4 кадрам осьминога. Минимум — 4 полных круга, длительность считается от
@@ -285,6 +286,7 @@ export function TopBar({
             <img className="topbar-chat-icon" src="/icons/dialog.png" alt="" draggable={false} />
           </button>
         )}
+        <NotificationBell onOpenTodo={onOpenTodo} />
       <div className={isDesktopShell || desktopApi ? "desktop-slot is-desktop-shell" : "desktop-slot"}>
         {desktop ? (
           <button

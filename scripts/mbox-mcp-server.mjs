@@ -791,6 +791,34 @@ server.registerTool(
 );
 
 server.registerTool(
+  "report_bug",
+  {
+    title: "Report a bug to MBOX memory",
+    description: "Write a bug report into MBOX memory (entity_type bug, tags bug-report + severity:*), the same way as the bug button in the status bar. Use it when something in MBOX or a tool misbehaves and a person or developer must see it. Describe what happened, what you expected, and how to reproduce. This only records the report; it does not create a todo.",
+    inputSchema: {
+      title: z.string().describe("Short summary, e.g. 'integration_list returns 400 for members'"),
+      description: z.string().describe("What went wrong, with exact error text"),
+      steps: z.string().default("").describe("How to reproduce"),
+      expected: z.string().default(""),
+      actual: z.string().default(""),
+      severity: z.enum(["low", "normal", "high"]).default("normal"),
+      project: z.string().default("MBOX"),
+      url: z.string().default("").describe("Page, endpoint or tool where it happened"),
+    },
+  },
+  async ({ title, description, steps, expected, actual, severity, project, url }) => {
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    if (!target) throw new Error(`Project not found: ${project}`);
+    const data = await mboxFetch("/api/mbox/bug-reports", {
+      method: "POST",
+      body: JSON.stringify({ title, description, steps, expected, actual, severity, project_id: target.id, source: "mcp", context: { url, app: `MCP · ${agentName}` } }),
+    });
+    return withPush({ content: [{ type: "text", text: `Баг-репорт записан в память: #${data.memory.id} «${data.title}» (проект ${target.name})` }] });
+  },
+);
+
+server.registerTool(
   "get_task_trail",
   {
     title: "Get MBOX task trail",

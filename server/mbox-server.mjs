@@ -29,6 +29,8 @@ import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
 import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./spaces.mjs";
 import { auditVisibility, ensureAuditScopeSchema } from "./audit-scope.mjs";
+import { ensureNotificationsSchema, handleNotificationsApi } from "./notifications.mjs";
+import { bugReportRow, insertBugReport } from "./bug-reports.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
 import { ensureStorageSchema, handleStorageApi, storageForAgent, storagePutStream, storageSignedGet } from "./storage.mjs";
@@ -1218,6 +1220,13 @@ function memberRouteAllowed(pathname) {
     // Хранилище: участнику — только папки его проектов (проверка внутри handleStorageApi).
     || /^\/api\/mbox\/storage\/(config|objects|upload-url|upload|commit|folder|file|link|object|read|write)$/.test(pathname)
     || pathname === "/api/mbox/agent/inbox"
+    // Контекст проекта и следующая задача — только по проектам участника (проверка внутри обработчиков).
+    || pathname === "/api/mbox/agent/context"
+    || pathname === "/api/mbox/agent/next-task"
+    // Уведомления по своим проектам: лента, «прочитать всё», отключение проекта (server/notifications.mjs).
+    || /^\/api\/mbox\/notifications(?:\/(?:read|prefs))?$/.test(pathname)
+    // Баг-репорт в память своего проекта: кнопка в нижней панели и MCP report_bug (server/bug-reports.mjs).
+    || pathname === "/api/mbox/bug-reports"
     || /^\/api\/mbox\/artifacts\/\d+\/docx$/.test(pathname)
     || pathname === "/api/mbox/notes/import-docx"
     || /^\/api\/mbox\/notes\/\d+(?:\/(?:shares(?:\/(?:view|edit))?|versions(?:\/\d+)?|docx|import-docx))?$/.test(pathname)
@@ -1314,7 +1323,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleAccountsApi({ req, res, url, query, readBody, sendJson, user, publicOrigin })) return;
   if (await handleSpacesApi({ req, res, url, query, readBody, sendJson, user })) return;
 
-  if (!isOwner(user) && !memberRouteAllowed(url.pathname)) return sendForbidden(res);
+  if (!isOwner(user) && !memberRouteAllowed(url.pathname)) return sendJson(res, 403, { error: "project_access_denied", message: "Этот раздел доступен только владельцу MBOX" });
   // Пароли и ключи сервера — только владельцу инстанса.
   if (!isOwner(user) && /^\/api\/mbox\/(secrets|agent\/approved-secrets)(?:\/|$)/.test(url.pathname)) return sendJson(res, 403, { error: "owner_required" });
 
@@ -1719,9 +1728,26 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, link.rows[0] ? 200 : 404, link.rows[0] ? { ok: true, link: link.rows[0] } : { error: "not_found" });
   }
 
+  if (url.pathname === "/api/mbox/bug-reports" && req.method === "POST") {
+    const body = await readBody(req);
+    if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
+    let row;
+    try {
+      row = bugReportRow(body, { reporter: String(actorFromReq(req)), source: String(body.source || "ui").slice(0, 20) });
+    } catch (error) {
+      return sendJson(res, 400, { error: "invalid_bug_report", message: error.message });
+    }
+    const id = await insertBugReport(query, row, body.project_id);
+    await recordMemoryAction({ memoryId: id, actor: actorFromReq(req), action: "create", note: "bug report", metadata: { title: row.title } });
+    await refreshMemoryEmbeddings();
+    broadcastChange(req, "create", "memories", row.title);
+    return sendJson(res, 201, { memory: { id }, title: row.title });
+  }
+
   if (url.pathname === "/api/mbox/memories") {
     if (req.method === "POST") {
       const body = await readBody(req);
+      if (!hasProjectAccess(scope, body.project_id)) return sendForbidden(res);
       const result = await query(
         `INSERT INTO memories(folder_id, project_id, todo_id, agent_run_id, title, content, entity_type, access_level, tags, metadata)
          VALUES ($1, $2, $3, $4, $5, $6, COALESCE(NULLIF($7, ''), 'memory'), COALESCE(NULLIF($8, ''), 'private'), $9, $10)
@@ -2738,6 +2764,7 @@ async function handleApiWithContext(req, res, url) {
     );
     const project = projects.rows[0] || null;
     if (!project) return sendJson(res, 404, { error: "project_not_found" });
+    if (!hasProjectAccess(scope, project.id)) return sendForbidden(res);
     const todos = await query(
       `SELECT id::text, project_id::text, title, note, status, priority, props, claimed_by, claimed_until::text, heartbeat_at::text,
               pg_column_size(todos)::int AS memory_bytes
@@ -2761,6 +2788,10 @@ async function handleApiWithContext(req, res, url) {
        ORDER BY e.created_at DESC`,
       [project.id],
     );
+    if (!scope.all) {
+      const visible = new Set(scope.projectIds);
+      relations.rows = relations.rows.filter((edge) => (edge.from_entity !== "project" || visible.has(edge.from_id)) && (edge.to_entity !== "project" || visible.has(edge.to_id)));
+    }
     const decisions = await query("SELECT id::text, todo_id::text, agent_run_id::text, actor, title, decision, rationale, impact, props, created_at::text FROM decision_log WHERE project_id = $1 ORDER BY created_at DESC LIMIT 25", [project.id]);
     const inbox = await query("SELECT id::text, agent_name, item_type, title, body, status, priority, requires_human, props, created_at::text, updated_at::text FROM agent_inbox WHERE project_id = $1 AND status <> 'done' ORDER BY created_at DESC LIMIT 50", [project.id]);
     const runs = await query("SELECT id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 20", [project.id]);
@@ -2826,6 +2857,7 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (await handleChatThreadsApi({ req, res, url, query, readBody, sendJson, user, owner: isOwner(user), scopeAll: scope.all, projectIds: scope.projectIds })) return;
+  if (await handleNotificationsApi({ req, res, url, query, readBody, sendJson, user, scope, hasProjectAccess })) return;
 
   if (url.pathname === "/api/mbox/agent/inbox") {
     if (req.method === "POST") {
@@ -3167,12 +3199,13 @@ async function handleApiWithContext(req, res, url) {
        JOIN projects p ON p.id = t.project_id
        WHERE p.name = $1 AND t.status IN ('next', 'open', 'doing', 'blocked', 'review')
          AND (t.claimed_until IS NULL OR t.claimed_until < now() OR t.claimed_by = $2)
+         AND ($3::boolean OR p.id = ANY($4::bigint[]))
        ORDER BY
          CASE t.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
          CASE t.status WHEN 'doing' THEN 1 WHEN 'next' THEN 2 WHEN 'open' THEN 3 WHEN 'blocked' THEN 4 ELSE 5 END,
          t.updated_at DESC
        LIMIT 1`,
-      [projectName, agent],
+      [projectName, agent, scope.all, scope.projectIds],
     );
     const task = result.rows[0] || null;
     if (!task) return sendJson(res, 200, { task: null });
@@ -3476,7 +3509,7 @@ ensureIntegrationsSchema(query).catch((error) => console.error(`integrations sch
 ensureSpacesSchema(query).catch((error) => console.error(`spaces schema: ${error.message}`));
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
-ensureAuditScopeSchema(query).catch((error) => console.error(`audit scope schema: ${error.message}`));
+ensureAuditScopeSchema(query).then(() => ensureNotificationsSchema(query)).catch((error) => console.error(`audit scope schema: ${error.message}`));
 ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
 ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
 ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));
