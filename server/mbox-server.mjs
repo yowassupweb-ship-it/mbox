@@ -31,6 +31,7 @@ import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor 
 import { auditVisibility, ensureAuditScopeSchema } from "./audit-scope.mjs";
 import { ensureNotificationsSchema, handleNotificationsApi } from "./notifications.mjs";
 import { applyProjectCompany, ensureCompaniesSchema, handleCompaniesApi } from "./companies.mjs";
+import { configureTelegram, ensureTelegramSchema, handleTelegramApi, handleTelegramWebhook, startTelegramScheduler } from "./telegram-bot.mjs";
 import { bugReportRow, insertBugReport } from "./bug-reports.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
@@ -1196,6 +1197,8 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/projects"
     // Компании своих проектов — только чтение: правка компаний у владельца (server/companies.mjs).
     || pathname === "/api/mbox/companies"
+    // Свой Telegram-бот: чаты и выборка проектов только из своих (проверка внутри handleTelegramApi).
+    || /^\/api\/mbox\/telegram(?:\/(?:bot|chats\/\d+(?:\/digest)?))?$/.test(pathname)
     || pathname === "/api/mbox/memories"
     || pathname === "/api/mbox/memories/search"
     || pathname === "/api/mbox/folders"
@@ -1317,6 +1320,8 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/oauth/google/callback" && req.method === "GET") { await handleGoogleCallback({ res, url, query }); return; }
+  // Вебхук Telegram-бота: без сессии, подлинность — секрет бота в заголовке (server/telegram-bot.mjs).
+  if (await handleTelegramWebhook({ req, res, url, query, readBody })) return;
   if (await handlePublicInvite({ req, res, url, query, readBody, sendJson, startSession: createSessionForUser })) return;
 
   const user = await requireUser(req, res);
@@ -1358,6 +1363,8 @@ async function handleApiWithContext(req, res, url) {
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
   if (await handleGmailApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, origin: publicOrigin(req) })) return;
+  // Telegram-бот человека: свой бот, его чаты и выборка проектов чата (server/telegram-bot.mjs).
+  if (await handleTelegramApi({ req, res, url, query, readBody, sendJson, user, origin: publicOrigin(req) })) return;
   if (await handleGoogleDocsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, broadcast: broadcastRealtime })) return;
   if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), userId: user.id })) return;
   if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: isOwner(user) })) return;
@@ -3526,6 +3533,9 @@ ensureSpacesSchema(query).catch((error) => console.error(`spaces schema: ${error
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 ensureAuditScopeSchema(query).then(() => ensureNotificationsSchema(query)).then(() => ensureCompaniesSchema(query)).catch((error) => console.error(`audit scope schema: ${error.message}`));
+// Telegram-боты: таблицы, затем раз в минуту — разбор новых сообщений чатов в память проектов.
+configureTelegram({ broadcast: (entity) => broadcastRealtime("entity_changed", { entity }) });
+ensureTelegramSchema(query).then(() => startTelegramScheduler(query)).catch((error) => console.error(`telegram schema: ${error.message}`));
 ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
 ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
 ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));

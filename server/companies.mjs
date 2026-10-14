@@ -11,6 +11,14 @@
 
 export async function ensureCompaniesSchema(query) {
   await query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS company_id BIGINT REFERENCES companies(id) ON DELETE SET NULL`);
+  // Доступ к компании целиком: человек видит все её проекты, включая будущие (projectScopeFor в server/spaces.mjs).
+  await query(`CREATE TABLE IF NOT EXISTS company_memberships (
+    company_id BIGINT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (company_id, user_id)
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_company_memberships_user ON company_memberships(user_id)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)`);
   // Перенос старых связей owns → company_id: только там, где поле ещё пустое, поэтому повторный запуск ничего не меняет.
   await query(
@@ -45,10 +53,10 @@ async function listCompanies(query, scope, q, isOwner) {
     `SELECT ${COMPANY_COLUMNS}
      FROM companies c
      WHERE ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.props::text ILIKE '%' || $1 || '%')
-       AND ($2::boolean OR EXISTS (SELECT 1 FROM projects p WHERE p.company_id = c.id AND p.id = ANY($3::bigint[])))
+       AND ($2::boolean OR c.id = ANY($4::bigint[]) OR EXISTS (SELECT 1 FROM projects p WHERE p.company_id = c.id AND p.id = ANY($3::bigint[])))
      ORDER BY lower(c.name)
      LIMIT 200`,
-    [q, all, scope?.projectIds || []],
+    [q, all, scope?.projectIds || [], scope?.companyIds || []],
   );
   const projects = await query(
     `SELECT p.id::text AS project_id, p.name AS project_name, p.company_id::text AS company_id, p.status

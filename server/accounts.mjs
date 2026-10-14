@@ -68,6 +68,7 @@ export async function ensureAccountsSchema(query) {
     last_used_at TIMESTAMPTZ
   )`);
   await query("CREATE INDEX IF NOT EXISTS idx_account_invites_token ON account_invites(token_hash)");
+  await query("ALTER TABLE account_invites ADD COLUMN IF NOT EXISTS company_ids BIGINT[] NOT NULL DEFAULT '{}'");
   await query("ALTER TABLE account_invites ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT ''");
   // Джарвис по приглашению выдаётся осознанно: по умолчанию друг приходит без него (свои агенты работают как обычно).
   await query("ALTER TABLE account_invites ADD COLUMN IF NOT EXISTS jarvis_enabled BOOLEAN NOT NULL DEFAULT false");
@@ -179,6 +180,7 @@ export async function handlePublicInvite({ req, res, url, query, readBody, sendJ
   }
   const userId = created.rows[0].id;
   await replaceMemberships(query, userId, invite.project_ids);
+  await replaceCompanyMemberships(query, userId, invite.company_ids || []);
   await startSession(req, res, userId);
   sendJson(res, 201, { user: created.rows[0] });
   return true;
@@ -206,7 +208,9 @@ async function accountRows(query, manageable = null) {
     `SELECT u.id::text, u.email, u.username, u.role, COALESCE((to_jsonb(u)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled, u.created_at::text,
             to_jsonb(u)->>'password_reset_at' AS password_reset_at,
             COALESCE(jsonb_agg(jsonb_build_object('project_id', p.id::text, 'project_name', p.name, 'role', pm.role)
-              ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects
+              ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('company_id', c.id::text, 'company_name', c.name) ORDER BY c.name)
+              FROM company_memberships cm JOIN companies c ON c.id = cm.company_id WHERE cm.user_id = u.id), '[]'::jsonb) AS companies
      FROM users u
      LEFT JOIN project_memberships pm ON pm.user_id = u.id
      LEFT JOIN projects p ON p.id = pm.project_id AND ($1::boolean OR p.id = ANY($2::bigint[]))
@@ -230,6 +234,15 @@ async function replaceMemberships(query, userId, projectIds, manageable = null) 
        ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
       [projectId, userId],
     );
+  }
+}
+
+/** Доступ к компаниям целиком (выдаёт только владелец): все проекты компании, включая будущие. */
+async function replaceCompanyMemberships(query, userId, companyIds) {
+  const ids = [...new Set((Array.isArray(companyIds) ? companyIds : []).map(String).filter((id) => /^\d+$/.test(id)))];
+  await query("DELETE FROM company_memberships WHERE user_id = $1 AND NOT (company_id = ANY($2::bigint[]))", [userId, ids]);
+  for (const companyId of ids) {
+    await query("INSERT INTO company_memberships(company_id, user_id) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM companies WHERE id = $1) ON CONFLICT DO NOTHING", [companyId, userId]);
   }
 }
 
@@ -428,6 +441,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     const rows = (await query(
       `SELECT i.id::text, i.label, i.jarvis_enabled, i.uses_remaining, i.uses_total, i.expires_at::text, i.created_at::text, i.last_used_at::text, i.revoked_at::text,
               COALESCE(jsonb_agg(jsonb_build_object('id', p.id::text, 'name', p.name) ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS projects,
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('id', c.id::text, 'name', c.name) ORDER BY c.name) FROM companies c WHERE c.id = ANY(i.company_ids)), '[]'::jsonb) AS companies,
               (i.revoked_at IS NULL AND i.uses_remaining > 0 AND i.expires_at > now()) AS active
        FROM account_invites i LEFT JOIN projects p ON p.id = ANY(i.project_ids)
        WHERE i.created_at > now() - interval '60 days'
@@ -445,14 +459,17 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     // Приглашение без проектов допустимо: человек получает пустой MBOX и своих агентов, чужое не видит.
     const uses = Math.min(Math.max(Number(body.uses) || 1, 1), 50);
     const days = Math.min(Math.max(Number(body.expires_days) || 7, 1), 60);
+    // Компании целиком: человек получит все проекты компании, включая будущие.
+    const requestedCompanies = Array.isArray(body.company_ids) ? body.company_ids.map(String).filter((id) => /^\d+$/.test(id)) : [];
+    const companies = requestedCompanies.length ? (await query("SELECT id::text FROM companies WHERE id = ANY($1::bigint[])", [requestedCompanies])).rows.map((row) => row.id) : [];
     const token = `mbox_invite_${randomBytes(32).toString("base64url")}`;
     const created = await query(
-      `INSERT INTO account_invites(token_hash, created_by, project_ids, uses_remaining, expires_at, label, jarvis_enabled)
-       VALUES ($1, $2, $3::bigint[], $4, now() + make_interval(days => $5), $6, $7)
+      `INSERT INTO account_invites(token_hash, created_by, project_ids, uses_remaining, expires_at, label, jarvis_enabled, company_ids)
+       VALUES ($1, $2, $3::bigint[], $4, now() + make_interval(days => $5), $6, $7, $8::bigint[])
        RETURNING id::text, expires_at::text`,
-      [inviteHash(token), user.id, known, uses, days, String(body.label || "").trim().slice(0, 80), body.jarvis_enabled === true],
+      [inviteHash(token), user.id, known, uses, days, String(body.label || "").trim().slice(0, 80), body.jarvis_enabled === true, companies],
     );
-    sendJson(res, 201, { invite: { ...created.rows[0], url: `${publicOrigin(req)}/invite/${token}`, project_ids: known, uses_remaining: uses, jarvis_enabled: body.jarvis_enabled === true } });
+    sendJson(res, 201, { invite: { ...created.rows[0], url: `${publicOrigin(req)}/invite/${token}`, project_ids: known, company_ids: companies, uses_remaining: uses, jarvis_enabled: body.jarvis_enabled === true } });
     return true;
   }
   const inviteMatch = url.pathname.match(/^\/api\/mbox\/admin\/invites\/(\d+)$/);
@@ -487,6 +504,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
       return true;
     }
     await replaceMemberships(query, created.rows[0].id, body.project_ids, await manageableProjects(query, user));
+    if (Array.isArray(body.company_ids)) await replaceCompanyMemberships(query, created.rows[0].id, body.company_ids);
     sendJson(res, 201, { user: (await accountRows(query, await manageableProjects(query, user))).find((row) => row.id === created.rows[0].id) });
     return true;
   }
@@ -522,6 +540,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
       [String(body.username || "").trim(), String(body.email || "").trim(), looksLikePasswordHash(password) ? "" : password, match[1]],
     );
     if (existing.role !== "owner" && Object.prototype.hasOwnProperty.call(body, "project_ids")) await replaceMemberships(query, match[1], body.project_ids, await manageableProjects(query, user));
+    if (existing.role !== "owner" && Array.isArray(body.company_ids)) await replaceCompanyMemberships(query, match[1], body.company_ids);
     if (existing.role !== "owner" && typeof body.jarvis_enabled === "boolean") await query("UPDATE users SET jarvis_enabled = $1 WHERE id = $2", [body.jarvis_enabled, match[1]]);
     sendJson(res, 200, { user: (await accountRows(query, await manageableProjects(query, user))).find((row) => row.id === match[1]) });
     return true;

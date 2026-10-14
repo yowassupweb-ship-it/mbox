@@ -74,6 +74,9 @@ export function signRequest({ method, host, path, query = {}, headers = {}, payl
   };
 }
 
+/** До какого размера файл из хранилища сервер отдаёт сам, а не переадресацией в S3. */
+const PROXY_MAX_BYTES = 8 * 1024 * 1024;
+
 export function presignUrl({ method = "GET", endpoint, path, query = {}, accessKeyId, secretAccessKey, region, expires = 3600, now }) {
   const url = new URL(endpoint);
   const { amzDate, dateStamp } = amzDates(now);
@@ -472,12 +475,35 @@ export async function handleStorageApi({ req, res, url, query, readBody, sendJso
     }
     // Постоянная ссылка для картинок в заметках: ![](/api/mbox/storage/file?key=…) — каждый раз свежая
     // подписанная ссылка на час, поэтому картинка в тексте не протухает.
+    // Файлы до 8 МБ сервер отдаёт сам: раньше браузер уходил переадресацией прямо в Yandex Object Storage, и если
+    // у человека Яндекс недоступен (VPN, сеть офиса), пропадали все картинки — логотипы, картинки в заметках, превью.
+    // Большие файлы (видео, PDF) по-прежнему идут переадресацией, чтобы не гонять их через сервер.
     if (pathname === "/api/mbox/storage/file" && req.method === "GET") {
       const key = cleanKey(url.searchParams.get("key"));
       if (!key || key.endsWith("/")) { sendJson(res, 400, { error: "Нужен ключ файла" }); return true; }
       const location = presignUrl({ endpoint: config.endpoint, path: objectPath(config, key), accessKeyId: config.access_key_id, secretAccessKey: config.secret_access_key, region: config.region, expires: 3600 });
-      res.writeHead(302, { location, "cache-control": "private, max-age=3000" });
-      res.end();
+      const redirect = () => { res.writeHead(302, { location, "cache-control": "private, max-age=3000" }); res.end(); };
+      let upstream;
+      try {
+        upstream = await fetch(location, { signal: AbortSignal.timeout(20000) });
+      } catch {
+        redirect();
+        return true;
+      }
+      const size = Number(upstream.headers.get("content-length") || 0);
+      if (!upstream.ok || !upstream.body || !size || size > PROXY_MAX_BYTES) {
+        await upstream.body?.cancel().catch(() => undefined);
+        if (upstream.status === 404) { sendJson(res, 404, { error: "Файл не найден" }); return true; }
+        redirect();
+        return true;
+      }
+      res.writeHead(200, {
+        "content-type": upstream.headers.get("content-type") || "application/octet-stream",
+        "content-length": String(size),
+        "cache-control": "private, max-age=3600",
+        ...(upstream.headers.get("etag") ? { etag: upstream.headers.get("etag") } : {}),
+      });
+      Readable.fromWeb(upstream.body).on("error", () => res.destroy()).pipe(res);
       return true;
     }
     if (pathname === "/api/mbox/storage/link" && req.method === "GET") {

@@ -33,8 +33,24 @@ export const resetSpacesCache = () => { cached = { at: 0, value: false }; };
 export async function projectScopeFor(query, user) {
   const owner = user?.role === "owner";
   if (owner && !(await spacesEnabled(query))) return { all: true, owner, projectIds: [] };
-  const result = await query("SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id", [user.id]);
-  return { all: false, owner, projectIds: result.rows.map((row) => row.project_id) };
+  // Доступ к компании целиком (company_memberships, server/companies.mjs) открывает все её проекты — и те, что появятся
+  // потом. Таблицы ещё может не быть (первый запуск до миграции) — тогда считаем только проекты.
+  try {
+    const [projects, companies] = await Promise.all([
+      query(
+        `SELECT project_id::text FROM project_memberships WHERE user_id = $1
+         UNION
+         SELECT p.id::text FROM projects p JOIN company_memberships cm ON cm.company_id = p.company_id WHERE cm.user_id = $1
+         ORDER BY 1`,
+        [user.id],
+      ),
+      query("SELECT company_id::text FROM company_memberships WHERE user_id = $1", [user.id]),
+    ]);
+    return { all: false, owner, projectIds: projects.rows.map((row) => row.project_id), companyIds: companies.rows.map((row) => row.company_id) };
+  } catch {
+    const result = await query("SELECT project_id::text FROM project_memberships WHERE user_id = $1 ORDER BY project_id", [user.id]);
+    return { all: false, owner, projectIds: result.rows.map((row) => row.project_id), companyIds: [] };
+  }
 }
 
 /** Новый проект принадлежит тому, кто его создал: без членства он бы его не увидел. */

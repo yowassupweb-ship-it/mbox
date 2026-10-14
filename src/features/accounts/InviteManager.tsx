@@ -3,9 +3,10 @@ import type { FormEvent } from "react";
 import { Check, Copy, Link2 } from "lucide-react";
 import { fetchJson } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
-import type { Project } from "../../types";
+import type { Company, Project } from "../../types";
 import { Panel } from "../../ui";
 import { accountErrorText } from "./accountErrors";
+import { AccessPicker } from "./AccessPicker";
 
 type Invite = {
   id: string;
@@ -17,14 +18,16 @@ type Invite = {
   revoked_at: string | null;
   active: boolean;
   projects: Array<{ id: string; name: string }>;
+  companies?: Array<{ id: string; name: string }>;
 };
 type CreatedInvite = { id: string; url: string };
 
 /** Ссылки-приглашения: владелец выбирает проекты и Джарвиса, друг сам заводит себе логин и пароль. */
-export function InviteManager({ projects }: { projects: Project[] }) {
+export function InviteManager({ projects, companies }: { projects: Project[]; companies: Company[] }) {
   const [invites, setInvites] = useState<Invite[]>([]);
   const [label, setLabel] = useState("");
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [jarvis, setJarvis] = useState(false);
   const [uses, setUses] = useState(1);
   const [days, setDays] = useState(7);
@@ -44,7 +47,7 @@ export function InviteManager({ projects }: { projects: Project[] }) {
       const result = await fetchJson<{ invite: CreatedInvite }>("/api/mbox/admin/invites", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label, project_ids: projectIds, jarvis_enabled: jarvis, uses, expires_days: days }),
+        body: JSON.stringify({ label, project_ids: projectIds, company_ids: companyIds, jarvis_enabled: jarvis, uses, expires_days: days }),
       });
       setCreated(result.invite);
       setLabel("");
@@ -85,17 +88,7 @@ export function InviteManager({ projects }: { projects: Project[] }) {
             <label className="invite-number"><span>Использований</span><input type="number" min={1} max={50} value={uses} onChange={(event) => setUses(Number(event.target.value))} /></label>
             <label className="invite-number"><span>Действует, дней</span><input type="number" min={1} max={60} value={days} onChange={(event) => setDays(Number(event.target.value))} /></label>
           </div>
-          <div className="account-projects" aria-label="Доступные проекты">
-            {projects.map((project) => {
-              const checked = projectIds.includes(project.id);
-              return (
-                <label className={checked ? "account-project is-selected" : "account-project"} key={project.id}>
-                  <input type="checkbox" checked={checked} onChange={() => setProjectIds(checked ? projectIds.filter((id) => id !== project.id) : [...projectIds, project.id])} />
-                  <span>{project.name}</span>
-                </label>
-              );
-            })}
-          </div>
+          <AccessPicker projects={projects} companies={companies} selectedProjects={projectIds} selectedCompanies={companyIds} onChange={(next) => { setProjectIds(next.projects); setCompanyIds(next.companies); }} />
           <label className="account-jarvis" title="Вопросы друга будет отвечать ваш Джарвис на ваших ключах моделей. Выключено — друг подключает своего Claude или ChatGPT.">
             <input type="checkbox" checked={jarvis} onChange={(event) => setJarvis(event.target.checked)} />
             Дать доступ к Джарвису
@@ -120,7 +113,7 @@ export function InviteManager({ projects }: { projects: Project[] }) {
                   {invite.active ? "действует" : invite.revoked_at ? "отозвано" : invite.uses_remaining <= 0 ? "использовано" : "истекло"}
                   {` · до ${formatDateTime(invite.expires_at)} · осталось ${invite.uses_remaining}, вошло ${invite.uses_total}`}
                   {` · ${invite.jarvis_enabled ? "с Джарвисом" : "без Джарвиса"}`}
-                  {` · ${invite.projects.length ? invite.projects.map((project) => project.name).join(", ") : "без проектов"}`}
+                  {` · ${[...(invite.companies || []).map((company) => `${company.name} (вся компания)`), ...invite.projects.map((project) => project.name)].join(", ") || "без проектов"}`}
                 </span>
               </div>
               {invite.active && <button className="account-save" type="button" disabled={busy === invite.id} onClick={() => void revoke(invite)}>Отозвать</button>}

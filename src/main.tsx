@@ -53,7 +53,7 @@ import { HistoryDocument } from "./app/workbench/HistoryDocument";
 import { Workbench } from "./app/workbench/Workbench";
 import { RAIL_GROUPS, setRailHidden, useRailHidden, type RailItemId } from "./app/workbench/rail";
 import type {
-  AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, DecisionEntry, FolderRow,
+  AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, Company, DecisionEntry, FolderRow,
   GraphEdge, GroqUsage, Me, Memory, Project,
   SecretSummary, SectionKey, ServerMetrics, Todo,
 } from "./types";
@@ -61,6 +61,8 @@ import "./styles.css";
 import { installLayoutIndependentShortcuts } from "./lib/keyboard";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { removeNow } from "./lib/optimistic";
+import { AccessPicker } from "./features/accounts/AccessPicker";
+import { TelegramBotPanel } from "./features/integrations/TelegramBotPanel";
 
 type AppTheme = "light" | "graphite" | "black";
 
@@ -243,7 +245,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
               onThemeChange={onThemeChange}
               server={user.role === "owner" ? <ServerBoard pulse={realtime.pulse} /> : undefined}
               access={<AccessBoard user={user} onLogout={onLogout} />}
-              team={<TeamBoard user={user} projects={data.projects} onReload={data.reload} />}
+              team={<TeamBoard user={user} projects={data.projects} companies={data.companies} onReload={data.reload} />}
               skills={<SkillAccessBoard />}
               passwords={user.role === "owner" ? <PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} /> : undefined}
               logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
@@ -907,12 +909,13 @@ function AccessBoard({ user, onLogout }: { user: { username: string; role: strin
   );
 }
 
-function TeamBoard({ user, projects, onReload }: { user: { username: string; role: string }; projects: Project[]; onReload: () => void }) {
+function TeamBoard({ user, projects, companies, onReload }: { user: { username: string; role: string }; projects: Project[]; companies: Company[]; onReload: () => void }) {
   return (
     <div className="content-grid settings-single-grid">
       {user.role === "owner"
-        ? <><SpacesPanel onChanged={onReload} /><InviteManager projects={projects} /><AccountManager projects={projects} /></>
+        ? <><SpacesPanel onChanged={onReload} /><InviteManager projects={projects} companies={companies} /><AccountManager projects={projects} companies={companies} /></>
         : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
+      <TelegramBotPanel projects={projects} companies={companies} />
       <AgentsOnThisComputer username={user.username} />
     </div>
   );
@@ -1035,37 +1038,19 @@ type AccountUser = {
   jarvis_enabled?: boolean;
   password_reset_at?: string | null;
   projects: Array<{ project_id: string; project_name: string; role: string }>;
+  companies?: Array<{ company_id: string; company_name: string }>;
 };
 
-function ProjectAccessPicker({ projects, selected, onChange, disabled = false }: { projects: Project[]; selected: string[]; onChange: (ids: string[]) => void; disabled?: boolean }) {
-  return (
-    <div className="account-projects" aria-label="Доступные проекты">
-      {projects.map((project) => {
-        const checked = selected.includes(project.id);
-        return (
-          <label className={checked ? "account-project is-selected" : "account-project"} key={project.id}>
-            <input
-              type="checkbox"
-              checked={checked}
-              disabled={disabled}
-              onChange={() => onChange(checked ? selected.filter((id) => id !== project.id) : [...selected, project.id])}
-            />
-            <span>{project.name}</span>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-function AccountManager({ projects }: { projects: Project[] }) {
+function AccountManager({ projects, companies }: { projects: Project[]; companies: Company[] }) {
   const [accounts, setAccounts] = useState<AccountUser[]>([]);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newJarvis, setNewJarvis] = useState(false);
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [draftProjects, setDraftProjects] = useState<Record<string, string[]>>({});
+  const [draftCompanies, setDraftCompanies] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   // Временный пароль после сброса: показывается один раз, в строке этого аккаунта, до «Скрыть».
@@ -1075,6 +1060,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
     const result = await fetchJson<{ users: AccountUser[] }>("/api/mbox/admin/users");
     setAccounts(result.users);
     setDraftProjects(Object.fromEntries(result.users.map((account) => [account.id, account.projects.map((project) => project.project_id)])));
+    setDraftCompanies(Object.fromEntries(result.users.map((account) => [account.id, (account.companies || []).map((company) => company.company_id)])));
   }, []);
 
   useEffect(() => { load().catch((cause) => setError(cause instanceof Error ? cause.message : "Не удалось загрузить аккаунты")); }, [load]);
@@ -1087,9 +1073,9 @@ function AccountManager({ projects }: { projects: Project[] }) {
       await fetchJson("/api/mbox/admin/users", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, email, password, project_ids: projectIds, jarvis_enabled: newJarvis }),
+        body: JSON.stringify({ username, email, password, project_ids: projectIds, company_ids: companyIds, jarvis_enabled: newJarvis }),
       });
-      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]); setNewJarvis(false);
+      setUsername(""); setEmail(""); setPassword(""); setProjectIds([]); setCompanyIds([]); setNewJarvis(false);
       await load();
     } catch (cause) {
       setError(accountErrorText(cause, "Не удалось создать аккаунт"));
@@ -1105,7 +1091,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
       await fetchJson(`/api/mbox/admin/users/${account.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ project_ids: draftProjects[account.id] || [] }),
+        body: JSON.stringify({ project_ids: draftProjects[account.id] || [], company_ids: draftCompanies[account.id] || [] }),
       });
       await load();
     } catch (cause) {
@@ -1163,7 +1149,7 @@ function AccountManager({ projects }: { projects: Project[] }) {
             <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email (необязательно)" type="email" />
             <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Пароль, минимум 8 знаков" type="password" minLength={8} autoComplete="new-password" required />
           </div>
-          <ProjectAccessPicker projects={projects} selected={projectIds} onChange={setProjectIds} />
+          <AccessPicker projects={projects} companies={companies} selectedProjects={projectIds} selectedCompanies={companyIds} onChange={(next) => { setProjectIds(next.projects); setCompanyIds(next.companies); }} />
           <label className="account-jarvis"><input type="checkbox" checked={newJarvis} onChange={(event) => setNewJarvis(event.target.checked)} />Дать доступ к Джарвису</label>
           <button className="primary-action" disabled={busy === "new"} type="submit"><Plus size={16} />{busy === "new" ? "Создаю…" : "Создать аккаунт"}</button>
         </form>
@@ -1172,7 +1158,10 @@ function AccountManager({ projects }: { projects: Project[] }) {
           {accounts.map((account) => {
             const selected = draftProjects[account.id] || [];
             const persisted = account.projects.map((project) => project.project_id);
-            const changed = [...selected].sort().join(",") !== [...persisted].sort().join(",");
+            const selectedCompanies = draftCompanies[account.id] || [];
+            const persistedCompanies = (account.companies || []).map((company) => company.company_id);
+            const same = (a: string[], b: string[]) => [...a].sort().join(",") === [...b].sort().join(",");
+            const changed = !same(selected, persisted) || !same(selectedCompanies, persistedCompanies);
             return (
               <div className="account-row" key={account.id}>
                 <div className="account-identity">
@@ -1183,7 +1172,13 @@ function AccountManager({ projects }: { projects: Project[] }) {
                   <span className="account-owner-note">Свой MBOX и личный Jarvis</span>
                 ) : (
                   <>
-                    <ProjectAccessPicker projects={projects} selected={selected} onChange={(ids) => setDraftProjects((current) => ({ ...current, [account.id]: ids }))} />
+                    <AccessPicker
+                      projects={projects}
+                      companies={companies}
+                      selectedProjects={selected}
+                      selectedCompanies={selectedCompanies}
+                      onChange={(next) => { setDraftProjects((current) => ({ ...current, [account.id]: next.projects })); setDraftCompanies((current) => ({ ...current, [account.id]: next.companies })); }}
+                    />
                     <label className="account-jarvis" title="Свой Джарвис: отдельная история и чаты, видит только проекты этого аккаунта.">
                       <input type="checkbox" checked={account.jarvis_enabled !== false} disabled={busy === `jarvis:${account.id}`} onChange={(event) => void toggleJarvis(account, event.target.checked)} />
                       Свой Джарвис

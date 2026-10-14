@@ -227,3 +227,16 @@ button.pj-avatar:hover:not(:disabled) .pj-avatar-edit, button.pj-avatar:focus-vi
 .pj-empty-chip > svg { color: var(--accent-color); }
 .pj-empty-chip:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 .pj-card-head + .pj-empty-fields { padding-top: 0; border-top: 0; }
+
+/* Выбор доступа в «Команде»: компании блоками (вся компания — переключатель), под ними их проекты. */
+.access-picker { display: grid; gap: 8px; }
+.access-company { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); }
+.access-company.is-whole { border-color: color-mix(in srgb, var(--accent-color) 45%, var(--wb-line)); background: color-mix(in srgb, var(--accent-color) 6%, transparent); }
+.access-company.is-loose { border-style: dashed; }
+.access-company-head { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); cursor: pointer; }
+.access-company-head.is-static { cursor: default; color: var(--text-muted); font-size: var(--text-xs); }
+.access-company-head > svg { color: var(--text-muted); }
+.access-company-head > b { font-weight: var(--weight-semibold); }
+.access-company-head > span { color: var(--text-muted); font-size: var(--text-xs); }
+.access-company .account-projects { margin: 0; }
+.account-project.is-via-company { opacity: .7; }

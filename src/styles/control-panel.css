@@ -906,6 +906,29 @@
 
 .account-projects { display: flex; flex-wrap: wrap; gap: 6px; }
 
+.telegram-panel { grid-column: 1 / -1; }
+.telegram-hint, .telegram-connect > span { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+.telegram-error { color: var(--danger-color, #b42318); font-size: var(--text-sm); }
+.telegram-connect { display: grid; grid-template-columns: minmax(220px, 1fr) auto; align-items: end; gap: 10px; margin-top: 14px; }
+.telegram-token-field { display: grid; gap: 6px; font-size: var(--text-sm); }
+.telegram-token-field .password-field { width: 100%; }
+.telegram-connect > span { grid-column: 1 / -1; }
+.telegram-bot-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--wb-line); }
+.telegram-bot-row > div { display: grid; gap: 2px; margin-right: auto; }
+.telegram-bot-row > div > span, .telegram-chat-head > div > span { color: var(--text-muted); font-size: var(--text-xs); }
+.telegram-chats { display: grid; gap: 12px; padding-top: 12px; }
+.telegram-chat { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); }
+.telegram-chat-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.telegram-chat-head > div { display: grid; gap: 3px; }
+.telegram-chat-head h3 { margin: 0; font-size: var(--text-md); }
+.telegram-switch, .telegram-options > label { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-sm); }
+.telegram-options { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+.telegram-summary { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 10px; border-radius: var(--radius-sm); background: var(--wb-hover); color: var(--text-muted); font-size: var(--text-sm); white-space: pre-wrap; }
+.telegram-summary svg { flex: 0 0 auto; margin-top: 2px; }
+.telegram-spin { animation: telegram-rotate 1s linear infinite; }
+@keyframes telegram-rotate { to { transform: rotate(360deg); } }
+@media (max-width: 600px) { .telegram-connect { grid-template-columns: 1fr; } .telegram-connect > span { grid-column: auto; } }
+
 .account-project {
   display: inline-flex;
   align-items: center;
