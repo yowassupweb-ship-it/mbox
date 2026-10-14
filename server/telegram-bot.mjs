@@ -69,10 +69,27 @@ CREATE TABLE IF NOT EXISTS telegram_messages (
   UNIQUE (chat_row_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_chat ON telegram_messages(chat_row_id, id);
-ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS tg_user_id BIGINT;
-ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS tg_username TEXT NOT NULL DEFAULT '';
-ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS link_code TEXT;
-ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS link_code_expires TIMESTAMPTZ;
+-- Ботов у человека может быть несколько (для разных проектов и чатов): уникален сам бот, а не владелец.
+ALTER TABLE telegram_bots DROP CONSTRAINT IF EXISTS telegram_bots_owner_user_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_bots_bot_user ON telegram_bots(bot_user_id);
+-- Личный аккаунт Telegram человека: один на все его боты. Только он добавляет ботов в чаты и зовёт агентов.
+CREATE TABLE IF NOT EXISTS telegram_accounts (
+  user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  tg_user_id BIGINT,
+  tg_username TEXT NOT NULL DEFAULT '',
+  link_code TEXT,
+  link_code_expires TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Ссылка «добавить бота в чат» с заранее выбранными проектами: после добавления чат сразу начинает работать.
+CREATE TABLE IF NOT EXISTS telegram_invites (
+  code TEXT PRIMARY KEY,
+  bot_id BIGINT NOT NULL REFERENCES telegram_bots(id) ON DELETE CASCADE,
+  project_ids BIGINT[] NOT NULL DEFAULT '{}',
+  company_ids BIGINT[] NOT NULL DEFAULT '{}',
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ
+);
 CREATE TABLE IF NOT EXISTS telegram_agent_requests (
   id BIGSERIAL PRIMARY KEY,
   bot_id BIGINT NOT NULL REFERENCES telegram_bots(id) ON DELETE CASCADE,
@@ -97,6 +114,7 @@ const KEEP_DAYS = 45;
 const AGENT_WAIT_MS = 20 * 60 * 1000; // дольше агента не ждём: скорее всего, наблюдатель не запущен
 const AGENT_REPLY_MAX = 16000;
 const LINK_CODE_MINUTES = 15;
+const INVITE_MINUTES = 30;
 // Флаг → агент MBOX. Локальный (на компьютере человека, с его файлами) и серверный (облачный) — разные агенты, выбор явный.
 const AGENTS = {
   claude: { agent: "Claude", label: "Claude (локальный)", suffix: "c", other: "claudecloud" },
@@ -220,11 +238,11 @@ async function chatProjects(query, chat, ownerUserId) {
   return rows;
 }
 
-async function recentLines(query, chatRowId, limit, afterId = 0) {
+async function recentLines(query, chatRowId, limit, afterId = 0, exceptMessageId = 0) {
   const rows = (await query(
-    `SELECT id, from_name, text, is_bot, sent_at FROM telegram_messages
-     WHERE chat_row_id = $1 AND id > $2 ORDER BY id DESC LIMIT $3`,
-    [chatRowId, afterId, limit],
+    `SELECT id, message_id, from_name, text, is_bot, sent_at FROM telegram_messages
+     WHERE chat_row_id = $1 AND id > $2 AND message_id <> $4 ORDER BY id DESC LIMIT $3`,
+    [chatRowId, afterId, limit, exceptMessageId],
   )).rows.reverse();
   return rows;
 }
@@ -389,7 +407,7 @@ async function answerInChat(query, bot, chat, message) {
       return;
     }
     const question = messageText(message).replace(new RegExp(`@${bot.username}\\b`, "gi"), "").replace(/^\s*\/ask(@\w+)?\b/i, "").trim() || "(пустое сообщение)";
-    const context = await recentLines(query, chat.id, CONTEXT_MESSAGES);
+    const context = await recentLines(query, chat.id, CONTEXT_MESSAGES, 0, message.message_id);
     const body = [
       `[Telegram · групповой чат «${chat.title}»] Тебя спросили в рабочем чате. Отвечай для чата: коротко, по делу, без таблиц и длинных списков; обращайся к человеку по имени.`,
       `Работай только с проектами: ${projects.map((project) => `${project.name} (#${project.id})`).join(", ")}. Других проектов для тебя здесь нет — не упоминай и не трогай их.`,
@@ -472,6 +490,30 @@ async function upsertChat(query, bot, chat, status) {
   )).rows[0];
 }
 
+/** «/start <код>» в группе: привязывает чат к проектам из приглашения. true — это было приглашение (сообщение дальше не нужно). */
+async function applyInvite(query, bot, token, chat, message, code) {
+  const invite = (await query("SELECT * FROM telegram_invites WHERE code = $1 AND bot_id = $2", [code, bot.id])).rows[0];
+  if (!invite) return false;
+  const say = (body) => send(token, chat.chat_id, body, message.message_id).catch(() => []);
+  if (!isLinkedSender(bot, message)) { await say("Эту ссылку может использовать только владелец бота."); return true; }
+  const claimed = (await query("UPDATE telegram_invites SET used_at = now() WHERE code = $1 AND used_at IS NULL AND expires_at > now() RETURNING code", [code])).rows[0];
+  if (!claimed) { await say("Ссылка уже использована или устарела. Создайте новую в MBOX: Настройки → Команда → Telegram-бот."); return true; }
+  await query(
+    `UPDATE telegram_chats SET project_ids = $2, company_ids = $3, status = 'active',
+       last_digest_message_id = COALESCE((SELECT max(id) FROM telegram_messages WHERE chat_row_id = telegram_chats.id), 0), updated_at = now()
+     WHERE id = $1`,
+    [chat.id, invite.project_ids, invite.company_ids],
+  );
+  deps?.broadcast?.("telegram_chats");
+  const fresh = { ...chat, project_ids: invite.project_ids, company_ids: invite.company_ids };
+  const names = (await chatProjects(query, fresh, bot.owner_user_id)).map((project) => project.name);
+  await say([
+    names.length ? `Готово: чат работает с проектами ${names.join(", ")}.` : "Готово: чат подключён.",
+    `Спросите меня: @${bot.username} вопрос. Важное из переписки я буду сам записывать в память проектов.`,
+  ].join("\n"));
+  return true;
+}
+
 const isLinkedSender = (bot, message) => bot.tg_user_id != null && Number(bot.tg_user_id) === message.from?.id;
 
 const HELP = [
@@ -490,14 +532,14 @@ async function handlePrivate(query, bot, token, message) {
 
   const start = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/i);
   if (start?.[1]) {
-    const valid = bot.link_code && bot.link_code === start[1] && bot.link_code_expires && new Date(bot.link_code_expires) > new Date();
-    if (!valid) { await reply("Код привязки не подошёл или устарел. Нажмите «Привязать Telegram» в MBOX ещё раз и откройте новую ссылку."); return; }
-    await query(
-      "UPDATE telegram_bots SET tg_user_id = $2, tg_username = $3, link_code = NULL, link_code_expires = NULL, last_error = '', updated_at = now() WHERE id = $1",
-      [bot.id, message.from.id, message.from.username || ""],
-    );
+    const linked = (await query(
+      `UPDATE telegram_accounts SET tg_user_id = $2, tg_username = $3, link_code = NULL, link_code_expires = NULL, updated_at = now()
+       WHERE user_id = $1 AND link_code = $4 AND link_code_expires > now() RETURNING user_id`,
+      [bot.owner_user_id, message.from.id, message.from.username || "", start[1]],
+    )).rows[0];
+    if (!linked) { await reply("Код привязки не подошёл или устарел. Нажмите «Привязать Telegram» в MBOX ещё раз и откройте новую ссылку."); return; }
     deps?.broadcast?.("telegram_chats");
-    await reply(`Готово, ${displayName(message.from)}: этот Telegram привязан к вашему аккаунту MBOX. Теперь агентов можете звать только вы.\n\n${HELP}`);
+    await reply(`Готово, ${displayName(message.from)}: этот Telegram привязан к вашему аккаунту MBOX. Теперь только вы можете добавлять моих ботов в чаты и звать агентов.\n\n${HELP}`);
     return;
   }
 
@@ -538,9 +580,20 @@ async function handlePrivate(query, bot, token, message) {
 async function handleUpdate(query, bot, update) {
   const token = await botToken(query, bot.id);
   if (update.my_chat_member) {
-    const { chat, new_chat_member: member } = update.my_chat_member;
+    const { chat, new_chat_member: member, old_chat_member: before, from: adder } = update.my_chat_member;
     if (chat.type === "private") return;
     const gone = ["left", "kicked"].includes(member?.status);
+    // Бота в чат добавляет только его владелец (привязанный аккаунт): чужое добавление — выходим и ничего не сохраняем.
+    const justJoined = ["left", "kicked"].includes(before?.status) && ["member", "administrator"].includes(member?.status);
+    if (justJoined && !isLinkedSender(bot, { from: adder })) {
+      if (token) {
+        await send(token, chat.id, bot.tg_user_id == null
+          ? "Меня может добавлять в чаты только владелец бота, а он ещё не привязал свой Telegram в MBOX. Выхожу."
+          : "Меня может добавлять в чаты только владелец бота. Выхожу.").catch(() => undefined);
+        await tg(token, "leaveChat", { chat_id: chat.id }).catch(() => undefined);
+      }
+      return;
+    }
     const row = await upsertChat(query, bot, chat, gone ? "left" : "pending");
     deps?.broadcast?.("telegram_chats");
     if (!gone && row.status === "pending" && token) {
@@ -556,6 +609,11 @@ async function handleUpdate(query, bot, update) {
   }
   const chat = await upsertChat(query, bot, message.chat, "pending");
   const text = messageText(message);
+  // Ссылка «Добавить в чат» из MBOX: после добавления Telegram сам шлёт в группу «/start <код>» — настраиваем чат по выбору владельца.
+  const invite = text.match(/^\/start(?:@\w+)?\s+(\S+)/i);
+  if (invite && token && !update.edited_message) {
+    if (await applyInvite(query, bot, token, chat, message, invite[1])) return;
+  }
   if (text) {
     await query(
       `INSERT INTO telegram_messages(chat_row_id, message_id, from_id, from_name, text, reply_to, is_bot, sent_at)
@@ -585,7 +643,7 @@ async function handleUpdate(query, bot, update) {
       return;
     }
     const projects = await chatProjects(query, chat, bot.owner_user_id);
-    const context = await recentLines(query, chat.id, 15);
+    const context = await recentLines(query, chat.id, 15, 0, message.message_id);
     const intro = [
       `[Telegram · групповой чат «${chat.title}»] Владелец обращается к тебе из рабочего чата через Telegram-бота MBOX. Ответь для Telegram: коротко, по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.`,
       projects.length ? `Проекты этого чата: ${projects.map((project) => `${project.name} (#${project.id})`).join(", ")}.` : "",
@@ -609,7 +667,7 @@ async function handleUpdate(query, bot, update) {
 export async function handleTelegramWebhook({ req, res, url, query, readBody }) {
   const match = url.pathname.match(/^\/api\/mbox\/telegram\/hook\/(\d+)$/);
   if (!match || req.method !== "POST") return false;
-  const bot = (await query("SELECT * FROM telegram_bots WHERE id = $1", [match[1]])).rows[0];
+  const bot = (await query("SELECT b.*, a.tg_user_id, a.tg_username FROM telegram_bots b LEFT JOIN telegram_accounts a ON a.user_id = b.owner_user_id WHERE b.id = $1", [match[1]])).rows[0];
   const header = String(req.headers["x-telegram-bot-api-secret-token"] || "");
   const valid = bot && header.length === bot.webhook_secret.length && timingSafeEqual(Buffer.from(header), Buffer.from(bot.webhook_secret));
   if (!valid) { res.writeHead(403); res.end(); return true; }
@@ -664,35 +722,56 @@ function publicChat(row) {
   };
 }
 
+/** Всё, что видит интерфейс: привязанный Telegram человека и его боты, у каждого — свои чаты. */
 async function state(query, userId) {
-  const bot = (await query(
-    `SELECT id::text, username, name, can_read_all, last_error, created_at,
-            tg_user_id IS NOT NULL AS linked, tg_username
-     FROM telegram_bots WHERE owner_user_id = $1`,
-    [userId],
-  )).rows[0] || null;
-  const chats = bot ? (await query(
-    `SELECT c.*, (SELECT count(*) FROM telegram_messages m WHERE m.chat_row_id = c.id) AS messages
-     FROM telegram_chats c WHERE c.bot_id = $1 ORDER BY (c.status = 'left'), c.updated_at DESC`,
-    [bot.id],
-  )).rows.map(publicChat) : [];
-  return { bot, chats };
+  const account = (await query("SELECT tg_user_id IS NOT NULL AS linked, tg_username FROM telegram_accounts WHERE user_id = $1", [userId])).rows[0] || { linked: false, tg_username: "" };
+  const bots = (await query("SELECT id::text, username, name, can_read_all, last_error, created_at FROM telegram_bots WHERE owner_user_id = $1 ORDER BY id", [userId])).rows;
+  for (const bot of bots) {
+    bot.chats = (await query(
+      `SELECT c.*, (SELECT count(*) FROM telegram_messages m WHERE m.chat_row_id = c.id) AS messages
+       FROM telegram_chats c WHERE c.bot_id = $1 ORDER BY (c.status = 'left'), c.updated_at DESC`,
+      [bot.id],
+    )).rows.map(publicChat);
+  }
+  return { account, bots };
 }
 
+/** Выборка проектов и компаний — только из того, что видит сам человек. */
+async function pickScope(query, user, body) {
+  const scope = await projectScopeFor(query, user);
+  const ids = (value) => [...new Set((Array.isArray(value) ? value : []).map(String).filter((id) => /^\d+$/.test(id)))];
+  const projectIds = ids(body.project_ids).filter((id) => scope.all || scope.projectIds.includes(id));
+  const companyIds = user.role === "owner" ? ids(body.company_ids) : ids(body.company_ids).filter((id) => (scope.companyIds || []).includes(id));
+  // Только то, что существует: несуществующий номер в чат не попадёт.
+  const [projects, companies] = await Promise.all([
+    projectIds.length ? query("SELECT id::text FROM projects WHERE id = ANY($1::bigint[])", [projectIds]) : { rows: [] },
+    companyIds.length ? query("SELECT id::text FROM companies WHERE id = ANY($1::bigint[])", [companyIds]) : { rows: [] },
+  ]);
+  const known = (rows) => new Set(rows.map((row) => row.id));
+  const knownProjects = known(projects.rows);
+  const knownCompanies = known(companies.rows);
+  return { projectIds: projectIds.filter((id) => knownProjects.has(id)), companyIds: companyIds.filter((id) => knownCompanies.has(id)) };
+}
+
+const webhookParams = (origin, botId, secret) => ({ url: `${origin}/api/mbox/telegram/hook/${botId}`, secret_token: secret, allowed_updates: ["message", "edited_message", "my_chat_member"], drop_pending_updates: true });
+
 /**
- * Настройка в MBOX (любой аккаунт со своим Джарвисом): бот, его чаты и выборка проектов чата.
- *   GET    /api/mbox/telegram                 — бот и чаты
- *   PUT    /api/mbox/telegram/bot             — {token}: подключить бота (getMe + вебхук)
- *   DELETE /api/mbox/telegram/bot             — отключить бота
- *   POST   /api/mbox/telegram/link            — код и ссылка для привязки своего Telegram
- *   DELETE /api/mbox/telegram/link            — отвязать Telegram
- *   PATCH  /api/mbox/telegram/chats/:id       — {project_ids, company_ids, notes_enabled, answers_enabled, status}
- *   DELETE /api/mbox/telegram/chats/:id       — выйти из чата и забыть его
- *   POST   /api/mbox/telegram/chats/:id/digest — разобрать новое прямо сейчас
+ * Настройка в MBOX (любой аккаунт со своим Джарвисом): боты, привязка своего Telegram, чаты и выборка проектов чата.
+ *   GET    /api/mbox/telegram                      — привязка Telegram, боты и их чаты
+ *   PUT    /api/mbox/telegram/bot                  — {token}: подключить ещё одного бота (getMe + вебхук)
+ *   DELETE /api/mbox/telegram/bots/:id             — отключить бота
+ *   POST   /api/mbox/telegram/bots/:id/refresh     — перепроверить бота: getMe (режим приватности) и вебхук
+ *   POST   /api/mbox/telegram/bots/:id/invite      — {project_ids, company_ids}: ссылка «добавить бота в чат» с готовой настройкой
+ *   POST   /api/mbox/telegram/link                 — {bot_id?}: ссылка для привязки своего Telegram
+ *   DELETE /api/mbox/telegram/link                 — отвязать Telegram
+ *   PATCH  /api/mbox/telegram/chats/:id            — {project_ids, company_ids, notes_enabled, answers_enabled, status}
+ *   DELETE /api/mbox/telegram/chats/:id            — выйти из чата и забыть его
+ *   POST   /api/mbox/telegram/chats/:id/digest     — разобрать новое прямо сейчас
  */
 export async function handleTelegramApi({ req, res, url, query, readBody, sendJson, user, origin }) {
   if (!url.pathname.startsWith("/api/mbox/telegram")) return false;
   const userId = String(user.id);
+  const ownBot = async (id) => (await query("SELECT id::text, username FROM telegram_bots WHERE id = $1 AND owner_user_id = $2", [id, userId])).rows[0];
 
   if (url.pathname === "/api/mbox/telegram" && req.method === "GET") {
     sendJson(res, 200, await state(query, userId));
@@ -711,14 +790,14 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
     const row = (await query(
       `INSERT INTO telegram_bots(owner_user_id, token_ciphertext, bot_user_id, username, name, webhook_secret, can_read_all)
        VALUES ($1, pgp_sym_encrypt($2, $3), $4, $5, $6, $7, $8)
-       ON CONFLICT (owner_user_id) DO UPDATE SET token_ciphertext = EXCLUDED.token_ciphertext, bot_user_id = EXCLUDED.bot_user_id,
+       ON CONFLICT (bot_user_id) DO UPDATE SET token_ciphertext = EXCLUDED.token_ciphertext,
          username = EXCLUDED.username, name = EXCLUDED.name, webhook_secret = EXCLUDED.webhook_secret, can_read_all = EXCLUDED.can_read_all,
          last_error = '', updated_at = now()
        RETURNING id::text`,
       [userId, token, secretKey(), me.id, me.username || "", me.first_name || "", secret, Boolean(me.can_read_all_group_messages)],
     )).rows[0];
     try {
-      await tg(token, "setWebhook", { url: `${origin}/api/mbox/telegram/hook/${row.id}`, secret_token: secret, allowed_updates: ["message", "edited_message", "my_chat_member"], drop_pending_updates: true });
+      await tg(token, "setWebhook", webhookParams(origin, row.id, secret));
     } catch (error) {
       await query("UPDATE telegram_bots SET last_error = $2 WHERE id = $1", [row.id, `Вебхук не зарегистрирован: ${error.message}`]);
     }
@@ -726,32 +805,64 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
     return true;
   }
 
-  if (url.pathname === "/api/mbox/telegram/bot" && req.method === "DELETE") {
-    const bot = (await query("SELECT id FROM telegram_bots WHERE owner_user_id = $1", [userId])).rows[0];
-    if (bot) {
-      const token = await botToken(query, bot.id);
+  const botMatch = url.pathname.match(/^\/api\/mbox\/telegram\/bots\/(\d+)(?:\/(refresh|invite))?$/);
+  if (botMatch) {
+    const bot = await ownBot(botMatch[1]);
+    if (!bot) { sendJson(res, 404, { error: "not_found" }); return true; }
+    const token = await botToken(query, bot.id);
+
+    if (!botMatch[2] && req.method === "DELETE") {
       if (token) await tg(token, "deleteWebhook", { drop_pending_updates: true }).catch(() => undefined);
       await query("DELETE FROM telegram_bots WHERE id = $1", [bot.id]);
+      sendJson(res, 200, await state(query, userId));
+      return true;
     }
-    sendJson(res, 200, await state(query, userId));
-    return true;
+
+    if (botMatch[2] === "refresh" && req.method === "POST") {
+      try {
+        const me = await tg(token, "getMe");
+        const secret = (await query("SELECT webhook_secret FROM telegram_bots WHERE id = $1", [bot.id])).rows[0].webhook_secret;
+        await tg(token, "setWebhook", { ...webhookParams(origin, bot.id, secret), drop_pending_updates: false });
+        await query("UPDATE telegram_bots SET username = $2, name = $3, can_read_all = $4, last_error = '', updated_at = now() WHERE id = $1", [bot.id, me.username || bot.username, me.first_name || "", Boolean(me.can_read_all_group_messages)]);
+      } catch (error) {
+        await query("UPDATE telegram_bots SET last_error = $2 WHERE id = $1", [bot.id, `Проверка не прошла: ${error.message}`.slice(0, 300)]);
+      }
+      sendJson(res, 200, await state(query, userId));
+      return true;
+    }
+
+    if (botMatch[2] === "invite" && req.method === "POST") {
+      const { projectIds, companyIds } = await pickScope(query, user, await readBody(req));
+      const code = randomBytes(12).toString("base64url");
+      const expires = (await query(
+        "INSERT INTO telegram_invites(code, bot_id, project_ids, company_ids, expires_at) VALUES ($1, $2, $3, $4, now() + make_interval(mins => $5)) RETURNING expires_at",
+        [code, bot.id, projectIds, companyIds, INVITE_MINUTES],
+      )).rows[0].expires_at;
+      await query("DELETE FROM telegram_invites WHERE expires_at < now() - interval '1 day'");
+      sendJson(res, 200, { ...(await state(query, userId)), invite: { bot_id: bot.id, url: `https://t.me/${bot.username}?startgroup=${code}`, expires_at: expires } });
+      return true;
+    }
+    return false;
   }
 
-  // Привязка своего аккаунта Telegram: одноразовая ссылка t.me/<бот>?start=<код>, действует 15 минут.
+  // Привязка своего аккаунта Telegram: одноразовая ссылка t.me/<бот>?start=<код>, действует 15 минут. Один аккаунт на все боты.
   if (url.pathname === "/api/mbox/telegram/link" && req.method === "POST") {
-    const bot = (await query("SELECT id, username FROM telegram_bots WHERE owner_user_id = $1", [userId])).rows[0];
+    const body = await readBody(req);
+    const bot = (body.bot_id && await ownBot(String(body.bot_id))) || (await query("SELECT id::text, username FROM telegram_bots WHERE owner_user_id = $1 ORDER BY id LIMIT 1", [userId])).rows[0];
     if (!bot) { sendJson(res, 404, { error: "Сначала подключите бота" }); return true; }
     const code = randomBytes(12).toString("base64url");
     const expires = (await query(
-      "UPDATE telegram_bots SET link_code = $2, link_code_expires = now() + make_interval(mins => $3), updated_at = now() WHERE id = $1 RETURNING link_code_expires",
-      [bot.id, code, LINK_CODE_MINUTES],
+      `INSERT INTO telegram_accounts(user_id, link_code, link_code_expires) VALUES ($1, $2, now() + make_interval(mins => $3))
+       ON CONFLICT (user_id) DO UPDATE SET link_code = EXCLUDED.link_code, link_code_expires = EXCLUDED.link_code_expires, updated_at = now()
+       RETURNING link_code_expires`,
+      [userId, code, LINK_CODE_MINUTES],
     )).rows[0].link_code_expires;
     sendJson(res, 200, { ...(await state(query, userId)), link: { url: `https://t.me/${bot.username}?start=${code}`, expires_at: expires } });
     return true;
   }
 
   if (url.pathname === "/api/mbox/telegram/link" && req.method === "DELETE") {
-    await query("UPDATE telegram_bots SET tg_user_id = NULL, tg_username = '', link_code = NULL, link_code_expires = NULL, updated_at = now() WHERE owner_user_id = $1", [userId]);
+    await query("DELETE FROM telegram_accounts WHERE user_id = $1", [userId]);
     sendJson(res, 200, await state(query, userId));
     return true;
   }
@@ -772,11 +883,7 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
 
   if (req.method === "PATCH") {
     const body = await readBody(req);
-    // Выборка — только из того, что видит сам человек: свои проекты и компании, к которым у него есть доступ.
-    const scope = await projectScopeFor(query, user);
-    const ids = (value) => [...new Set((Array.isArray(value) ? value : []).map(String).filter((id) => /^\d+$/.test(id)))];
-    const projectIds = ids(body.project_ids).filter((id) => scope.all || scope.projectIds.includes(id));
-    const companyIds = user.role === "owner" ? ids(body.company_ids) : ids(body.company_ids).filter((id) => (scope.companyIds || []).includes(id));
+    const { projectIds, companyIds } = await pickScope(query, user, body);
     const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
     const nextStatus = has("status") && ["active", "paused"].includes(body.status) ? body.status
       : (projectIds.length || companyIds.length) && chat.status === "pending" ? "active" : chat.status;

@@ -1198,7 +1198,7 @@ function memberRouteAllowed(pathname) {
     // Компании своих проектов — только чтение: правка компаний у владельца (server/companies.mjs).
     || pathname === "/api/mbox/companies"
     // Свой Telegram-бот: чаты и выборка проектов только из своих (проверка внутри handleTelegramApi).
-    || /^\/api\/mbox\/telegram(?:\/(?:bot|link|chats\/\d+(?:\/digest)?))?$/.test(pathname)
+    || /^\/api\/mbox\/telegram(?:\/(?:bot|link|bots\/\d+(?:\/(?:refresh|invite))?|chats\/\d+(?:\/digest)?))?$/.test(pathname)
     || pathname === "/api/mbox/memories"
     || pathname === "/api/mbox/memories/search"
     || pathname === "/api/mbox/folders"
