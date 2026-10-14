@@ -3881,6 +3881,7 @@ export async function replyAsJarvis(item) {
         : "")
       + (allowedProjectIds == null ? "" : " У этого пользователя доступ только к перечисленным проектам и их общей памяти. Не называй и не ищи другие проекты, записи, компании или статистику.")
       + JARVIS_DATA_RULES
+      + (item.props?.system_note ? ` ${String(item.props.system_note).slice(0, 1500)}` : "")
       + (item.props?.current_project_name
         ? ` Пользователь сейчас открыл в интерфейсе проект «${item.props.current_project_name}» — если он не называет проект явно в вопросе или команде, подразумевай именно этот, не переспрашивай.`
         : "")

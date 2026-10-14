@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS telegram_allowed (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (chat_row_id, tg_user_id)
 );
+-- Какими агентами написаны сообщения бота: ответ человека на такое сообщение без флага продолжает разговор с тем же агентом.
+CREATE TABLE IF NOT EXISTS telegram_agent_messages (
+  bot_id BIGINT NOT NULL REFERENCES telegram_bots(id) ON DELETE CASCADE,
+  tg_chat_id BIGINT NOT NULL,
+  message_id BIGINT NOT NULL,
+  flag TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (bot_id, tg_chat_id, message_id)
+);
 CREATE TABLE IF NOT EXISTS telegram_agent_requests (
   id BIGSERIAL PRIMARY KEY,
   bot_id BIGINT NOT NULL REFERENCES telegram_bots(id) ON DELETE CASCADE,
@@ -112,6 +121,7 @@ CREATE TABLE IF NOT EXISTS telegram_agent_requests (
   last_typing_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE telegram_agent_requests ADD COLUMN IF NOT EXISTS flag TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_telegram_agent_requests_open ON telegram_agent_requests(done, id);
 `;
 
@@ -151,6 +161,19 @@ const BOT_COMMANDS = [
   { command: "help", description: "Как пользоваться ботом" },
 ];
 
+/** Ответ на сообщение агента без флага продолжает разговор с ним: раньше отвечал Джарвис, и разговор с Claude обрывался. */
+async function stickyAgent(query, bot, message) {
+  const replyTo = message.reply_to_message?.message_id;
+  if (!replyTo) return "";
+  const row = (await query("SELECT flag FROM telegram_agent_messages WHERE bot_id = $1 AND tg_chat_id = $2 AND message_id = $3", [bot.id, message.chat.id, replyTo])).rows[0];
+  return row?.flag || "";
+}
+
+// Справка для Джарвиса: он не знает, как работает маршрутизация, и на вопрос «почему ответил ты» выдумывал про гонки.
+const BOT_NOTE = "СПРАВКА ПО TELEGRAM-БОТУ. Сообщение с флагом -claude, -claudelocal, -gpt или -gptlocal уходит агентам Claude или GPT, всё остальное достаётся тебе, Джарвису. Ответ человека на сообщение агента без флага продолжает разговор с этим агентом, а /ask вызывает тебя. Агентов зовут только владелец бота и те, кого он разрешил командой /allow. Ты не Claude и не GPT: ты Джарвис, основная модель Gemini, запасная Groq. Если спрашивают, почему ответил именно ты, объясни по этой справке и не выдумывай других причин.";
+
+const quotedText = (message) => String(message.reply_to_message?.text || message.reply_to_message?.caption || "").trim().slice(0, 1500);
+
 /**
  * Разбор обращения к боту: «@бот -claude вопрос» или «/claude вопрос». agent пустой — отвечает Джарвис;
  * viaCommand — это /команда (она дойдёт до бота и при включённом режиме приватности); skip — команда чужого бота.
@@ -159,17 +182,19 @@ function parseCall(text, botUsername) {
   let body = String(text || "");
   let commandAgent = "";
   let viaCommand = false;
+  let explicitJarvis = false;
   const command = body.match(COMMAND);
   if (command) {
     if (command[2] && command[2].toLowerCase() !== String(botUsername).toLowerCase()) return { skip: true, agent: "", text: "", viaCommand: false };
     viaCommand = true;
     const name = command[1].toLowerCase();
-    if (name !== "ask") commandAgent = FLAG_ALIASES[name] || name;
+    if (name === "ask") explicitJarvis = true;
+    else commandAgent = FLAG_ALIASES[name] || name;
     body = body.slice(command[0].length);
   }
   body = body.replace(new RegExp(`@${botUsername}\\b`, "gi"), " ");
   const flagged = splitAgentFlag(body);
-  return { skip: false, agent: commandAgent || flagged.agent, text: flagged.text, viaCommand };
+  return { skip: false, agent: commandAgent || flagged.agent, text: flagged.text, viaCommand, explicitJarvis };
 }
 
 /** «-claude вопрос» → { agent: "claude", text: "вопрос" }. Без флага agent пустой — отвечает Джарвис. */
@@ -323,6 +348,7 @@ async function askJarvis(query, { bot, projects, allProjects = false, title, bod
     ...(chat ? { telegram_chat: String(chat.id) } : {}),
     telegram_kind: kind,
     ...(question ? { question } : {}),
+    system_note: BOT_NOTE,
     mbox_user_id: owner.id,
     mbox_owner: owner.role === "owner",
     thread: thread || `tg${chat?.id || `dm${bot.id}`}`,
@@ -361,7 +387,7 @@ async function agentProjectId(query, owner) {
   return visible.find((row) => row.name === watched)?.id || visible.find((row) => row.name === "Общее")?.id || visible[0]?.id || null;
 }
 
-async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "" }) {
+async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "", quote = "" }) {
   const target = AGENTS[flag];
   const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
   if (!target || !owner) return;
@@ -379,6 +405,7 @@ async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo
   const body = [
     intro || "[Telegram · личная переписка] Владелец пишет тебе через Telegram-бота MBOX. Ответь для Telegram: коротко и по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.",
     "",
+    quote ? `Сообщение, на которое отвечает человек: «${quote}»\n` : "",
     text,
   ].join("\n");
   const props = {
@@ -396,8 +423,8 @@ async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo
     [projectId, `Telegram → ${target.label}: ${text.slice(0, 120)}`, body, JSON.stringify(props)],
   )).rows[0];
   await query(
-    `INSERT INTO telegram_agent_requests(bot_id, tg_chat_id, chat_row_id, reply_to, inbox_id, label, last_typing_at) VALUES ($1, $2, $3, $4, $5, $6, now())`,
-    [bot.id, tgChatId, chatRowId, replyTo, row.id, target.label],
+    `INSERT INTO telegram_agent_requests(bot_id, tg_chat_id, chat_row_id, reply_to, inbox_id, label, flag, last_typing_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+    [bot.id, tgChatId, chatRowId, replyTo, row.id, target.label, flag],
   );
   deps?.broadcast?.("agent_inbox");
   void tg(token, "sendChatAction", { chat_id: tgChatId, action: "typing" }).catch(() => undefined);
@@ -427,6 +454,14 @@ async function pollAgentRequests(query) {
           : String(reply.body || "Готово.");
         if (text.length > AGENT_REPLY_MAX) text = `${text.slice(0, AGENT_REPLY_MAX)}\n\n…ответ обрезан, полный текст — в чате MBOX.`;
         const sent = await send(token, request.tg_chat_id, request.chat_row_id && !failed ? `**${request.label}:**\n${text}` : text, request.reply_to).catch(() => []);
+        if (!failed && request.flag) {
+          for (const item of sent) {
+            await query(
+              "INSERT INTO telegram_agent_messages(bot_id, tg_chat_id, message_id, flag) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+              [request.bot_id, request.tg_chat_id, item.message_id, request.flag],
+            ).catch(() => undefined);
+          }
+        }
         if (request.chat_row_id) {
           const bot = (await query("SELECT bot_user_id FROM telegram_bots WHERE id = $1", [request.bot_id])).rows[0];
           for (const item of sent) {
@@ -637,6 +672,7 @@ const HELP = [
   "• -claude вопрос — Claude на сервере, -claudelocal — Claude на вашем компьютере;",
   "• -gpt вопрос — GPT (Codex) на сервере, -gptlocal — на компьютере.",
   "Владелец может разрешить участнику чата звать Claude и GPT: /allow @username (или ответом на сообщение), отозвать: /disallow.",
+  "Ответ на сообщение агента без флага продолжает разговор с ним; чтобы спросить Джарвиса, начните ответ с /ask.",
   "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот -claude вопрос; то же командами: /claude, /claudelocal, /gpt, /gptlocal (в группе — /claude@бот вопрос). Агенты отвечают, когда закончат работу — это может занять несколько минут.",
 ].join("\n");
 
@@ -667,10 +703,12 @@ async function handlePrivate(query, bot, token, message) {
 
   const call = parseCall(text, bot.username);
   if (call.skip) return;
-  const { agent, text: question } = call;
+  let agent = call.agent;
+  const question = call.text;
+  if (!agent && !call.explicitJarvis && message.reply_to_message) agent = await stickyAgent(query, bot, message);
   if (!question) { await reply(agent ? `Напишите вопрос вместе с флагом, например: -${agent} что нового по проекту?` : HELP); return; }
   if (agent) {
-    await askAgent(query, { bot, token, tgChatId: message.chat.id, replyTo: message.message_id, flag: agent, text: question });
+    await askAgent(query, { bot, token, tgChatId: message.chat.id, replyTo: message.message_id, flag: agent, text: question, quote: quotedText(message) });
     return;
   }
 
@@ -759,9 +797,13 @@ async function handleUpdate(query, bot, update) {
     || call.viaCommand;
   if (!mentioned || !token) return;
   // «@бот -claude вопрос» или «/claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
-  const { agent, text: agentQuestion } = call;
+  const isOwner = isLinkedSender(bot, message);
+  let agent = call.agent;
+  const agentQuestion = call.text;
+  if (!agent && !call.explicitJarvis && message.reply_to_message && (isOwner || await isAllowedInChat(query, chat.id, message.from?.id))) {
+    agent = await stickyAgent(query, bot, message);
+  }
   if (agent) {
-    const isOwner = isLinkedSender(bot, message);
     if (!isOwner && !(await isAllowedInChat(query, chat.id, message.from?.id))) {
       await send(token, message.chat.id, bot.tg_user_id == null
         ? "Агентов можно звать, когда привязан ваш Telegram: Настройки → Команда → Telegram-боты → «Привязать Telegram»."
@@ -782,6 +824,7 @@ async function handleUpdate(query, bot, update) {
       "Последние сообщения чата:",
       ...context.map((line) => `[${stamp(line.sent_at)}] ${line.is_bot ? "Бот" : line.from_name}: ${line.text}`),
       "",
+      quotedText(message) ? `Сообщение, на которое отвечает человек: «${quotedText(message)}»` : "",
       `Вопрос от ${displayName(message.from)}:`,
     ].join("\n");
     await askAgent(query, { bot, token, tgChatId: message.chat.id, chatRowId: chat.id, replyTo: message.message_id, flag: agent, text: agentQuestion, intro });
@@ -832,6 +875,7 @@ export function startTelegramScheduler(query) {
       )).rows;
       for (const row of due) await digestChat(query, row.id).catch((error) => console.error(`[telegram] digest ${row.id}: ${error.message}`));
       await query(`DELETE FROM telegram_messages WHERE sent_at < now() - make_interval(days => $1)`, [KEEP_DAYS]);
+      await query(`DELETE FROM telegram_agent_messages WHERE created_at < now() - make_interval(days => $1)`, [KEEP_DAYS]);
     } catch (error) {
       console.error(`[telegram] scheduler: ${error.message}`);
     }
