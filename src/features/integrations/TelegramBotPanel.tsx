@@ -153,6 +153,7 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
               <li><span>Claude на сервере</span> <code>@{state.bots[0].username} --claudecloud вопрос</code></li>
               <li><span>GPT на компьютере</span> <code>@{state.bots[0].username} --gpt вопрос</code></li>
               <li><span>GPT на сервере</span> <code>@{state.bots[0].username} --gptcloud вопрос</code></li>
+              <li><span>То же командами</span> <code>/claude</code> <code>/claudecloud</code> <code>/gpt</code> <code>/gptcloud</code> <code>/ask</code> <i>работают и при включённом Privacy Mode</i></li>
             </ul>
           )}
 
@@ -189,11 +190,11 @@ function BotCard({ bot, linked, projects, companies, busy, mutate, invite, waiti
         </div>
       </header>
       {bot.last_error && <p className="telegram-error">{bot.last_error}</p>}
-      {!bot.can_read_all && <p className="telegram-warning">У бота включён Privacy Mode: он видит только упоминания и ответы ему, поэтому записи по переписке не работают. В @BotFather: <code>/setprivacy</code> → бот → <b>Disable</b>, затем верните бота в чат и нажмите «Проверить».</p>}
+      {!bot.can_read_all && <p className="telegram-warning">У бота включён Privacy Mode: в группе, где он не администратор, Telegram показывает ему только /команды и ответы на его сообщения, а «@бот текст» не доставляет. Чаты, добавленные кнопкой «Добавить в чат», получают бота администратором без полномочий, и ему видно всё. Для остальных: сделайте бота администратором группы или отключите режим в @BotFather (<code>/setprivacy</code> → бот → <b>Disable</b>, потом верните бота в чат). Команды <code>/ask</code>, <code>/claude</code> работают при любом режиме.</p>}
 
       <div className="telegram-add">
         <strong>Добавить в чат</strong>
-        <span>Выберите, к чему относится чат, и нажмите кнопку: Telegram предложит выбрать группу, и чат сразу заработает с этими проектами. Добавить бота в чат может только вы.</span>
+        <span>Выберите, к чему относится чат, и нажмите кнопку: Telegram предложит выбрать группу и добавит бота администратором без полномочий (так он видит все сообщения), а чат сразу заработает с этими проектами. Добавить бота в чат может только вы.</span>
         <AccessPicker projects={projects} companies={companies} selectedProjects={preset.projects} selectedCompanies={preset.companies} disabled={inviting} onChange={(next) => setPreset(next)} />
         <div className="telegram-options">
           {linked

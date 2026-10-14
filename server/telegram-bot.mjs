@@ -126,6 +126,39 @@ const FLAG_ALIASES = { codex: "gpt", codexcloud: "gptcloud", chatgpt: "gpt" };
 // Телефонные клавиатуры превращают «--» в тире, поэтому принимаем и его.
 const AGENT_FLAG = /(^|\s)(?:--|—|–)(claude|claudecloud|gpt|gptcloud|codex|codexcloud|chatgpt)(?=\s|$)/i;
 
+// В режиме приватности Telegram доставляет боту в группе только /команды и ответы на его сообщения, а «@бот текст» — нет.
+// Поэтому у каждого флага есть команда: /claude, /claudecloud, /gpt, /gptcloud, а /ask — вопрос Джарвису.
+const COMMAND = /^\s*\/(ask|claude|claudecloud|gpt|gptcloud|codex|codexcloud)(?:@(\w+))?(?=\s|$)/i;
+const BOT_COMMANDS = [
+  { command: "ask", description: "Спросить Джарвиса" },
+  { command: "claude", description: "Спросить Claude на компьютере" },
+  { command: "claudecloud", description: "Спросить Claude на сервере" },
+  { command: "gpt", description: "Спросить GPT на компьютере" },
+  { command: "gptcloud", description: "Спросить GPT на сервере" },
+  { command: "help", description: "Как пользоваться ботом" },
+];
+
+/**
+ * Разбор обращения к боту: «@бот --claude вопрос» или «/claude вопрос». agent пустой — отвечает Джарвис;
+ * viaCommand — это /команда (она дойдёт до бота и при включённом режиме приватности); skip — команда чужого бота.
+ */
+function parseCall(text, botUsername) {
+  let body = String(text || "");
+  let commandAgent = "";
+  let viaCommand = false;
+  const command = body.match(COMMAND);
+  if (command) {
+    if (command[2] && command[2].toLowerCase() !== String(botUsername).toLowerCase()) return { skip: true, agent: "", text: "", viaCommand: false };
+    viaCommand = true;
+    const name = command[1].toLowerCase();
+    if (name !== "ask") commandAgent = FLAG_ALIASES[name] || name;
+    body = body.slice(command[0].length);
+  }
+  body = body.replace(new RegExp(`@${botUsername}\\b`, "gi"), " ");
+  const flagged = splitAgentFlag(body);
+  return { skip: false, agent: commandAgent || flagged.agent, text: flagged.text, viaCommand };
+}
+
 /** «--claude вопрос» → { agent: "claude", text: "вопрос" }. Без флага agent пустой — отвечает Джарвис. */
 function splitAgentFlag(text) {
   const match = String(text || "").match(AGENT_FLAG);
@@ -301,7 +334,20 @@ async function askJarvis(query, { bot, projects, allProjects = false, title, bod
  * Вопрос агенту MBOX (Claude / Codex, локальному или серверному): кладём его в инбокс так же, как чат MBOX, — наблюдатель
  * агента подхватит и ответит. Ответ в Telegram отправит pollAgentRequests, когда агент закончит.
  */
-async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "" }) {
+/**
+ * В каком проекте лежит вопрос агенту. При личных пространствах (spaces_v1) сервер показывает наблюдателю только записи
+ * проектов аккаунта: вопрос без проекта он не увидит никогда — так серверный Claude «молчал» на первый вызов из Telegram.
+ * Берём проект чата, иначе «Общее», иначе первый доступный.
+ */
+async function agentProjectId(query, owner, preferred = []) {
+  const scope = await projectScopeFor(query, owner);
+  if (scope.all) return preferred[0] || null;
+  const visible = (await query("SELECT id::text, name FROM projects WHERE id = ANY($1::bigint[]) ORDER BY id", [scope.projectIds])).rows;
+  const ids = new Set(visible.map((row) => row.id));
+  return preferred.map(String).find((id) => ids.has(id)) || visible.find((row) => row.name === "Общее")?.id || visible[0]?.id || null;
+}
+
+async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "", projectIds = [] }) {
   const target = AGENTS[flag];
   const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
   if (!target || !owner) return;
@@ -315,8 +361,7 @@ async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo
     await send(token, tgChatId, `${target.label} сейчас не в сети. ${advice}`, replyTo).catch(() => undefined);
     return;
   }
-  const scope = owner.role === "owner" ? null : await projectScopeFor(query, owner);
-  const projectId = scope && !scope.all ? scope.projectIds[0] || null : null;
+  const projectId = await agentProjectId(query, owner, projectIds);
   const body = [
     intro || "[Telegram · личная переписка] Владелец пишет тебе через Telegram-бота MBOX. Ответь для Telegram: коротко и по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.",
     "",
@@ -390,7 +435,7 @@ async function pollAgentRequests(query) {
   }
 }
 
-async function answerInChat(query, bot, chat, message) {
+async function answerInChat(query, bot, chat, message, asked = "") {
   const token = await botToken(query, bot.id);
   if (!token) return;
   if (working.has(`answer:${chat.id}`)) {
@@ -406,7 +451,7 @@ async function answerInChat(query, bot, chat, message) {
       await send(token, chat.chat_id, "У этого чата нет доступных проектов. Владелец бота выбирает их в Настройки → Команда → Telegram-бот.", message.message_id);
       return;
     }
-    const question = messageText(message).replace(new RegExp(`@${bot.username}\\b`, "gi"), "").replace(/^\s*\/ask(@\w+)?\b/i, "").trim() || "(пустое сообщение)";
+    const question = asked.trim() || "(пустое сообщение)";
     const context = await recentLines(query, chat.id, CONTEXT_MESSAGES, 0, message.message_id);
     const body = [
       `[Telegram · групповой чат «${chat.title}»] Тебя спросили в рабочем чате. Отвечай для чата: коротко, по делу, без таблиц и длинных списков; обращайся к человеку по имени.`,
@@ -521,7 +566,7 @@ const HELP = [
   "• просто текст — отвечает Джарвис;",
   "• --claude вопрос — Claude на вашем компьютере, --claudecloud — Claude на сервере;",
   "• --gpt вопрос — GPT (Codex) на компьютере, --gptcloud — на сервере.",
-  "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот --claude вопрос. Агенты отвечают, когда закончат работу — это может занять несколько минут.",
+  "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот --claude вопрос; то же командами: /claude, /claudecloud, /gpt, /gptcloud (в группе — /claude@бот вопрос). Агенты отвечают, когда закончат работу — это может занять несколько минут.",
 ].join("\n");
 
 /** Личная переписка с ботом: привязка аккаунта по коду (/start <код>) и общение привязанного владельца. */
@@ -549,7 +594,9 @@ async function handlePrivate(query, bot, token, message) {
   }
   if (/^\/(start|help)(@\w+)?$/i.test(text)) { await reply(HELP); return; }
 
-  const { agent, text: question } = splitAgentFlag(text);
+  const call = parseCall(text, bot.username);
+  if (call.skip) return;
+  const { agent, text: question } = call;
   if (!question) { await reply(agent ? `Напишите вопрос вместе с флагом, например: --${agent} что нового по проекту?` : HELP); return; }
   if (agent) {
     await askAgent(query, { bot, token, tgChatId: message.chat.id, replyTo: message.message_id, flag: agent, text: question });
@@ -624,13 +671,19 @@ async function handleUpdate(query, bot, update) {
     await query("UPDATE telegram_chats SET last_message_at = now() WHERE id = $1", [chat.id]);
   }
   if (update.edited_message || message.from?.is_bot) return;
+  const helpCommand = text.match(/^\s*\/help(?:@(\w+))?\s*$/i);
+  if (helpCommand && token && (!helpCommand[1] || helpCommand[1].toLowerCase() === bot.username.toLowerCase())) {
+    await send(token, message.chat.id, HELP, message.message_id).catch(() => undefined);
+    return;
+  }
+  const call = parseCall(text, bot.username);
+  if (call.skip) return;
   const mentioned = (message.entities || message.caption_entities || []).some((entity) => entity.type === "mention" && text.slice(entity.offset, entity.offset + entity.length).toLowerCase() === `@${bot.username}`.toLowerCase())
     || message.reply_to_message?.from?.id === Number(bot.bot_user_id)
-    || new RegExp(`^/ask(@${bot.username})?\\b`, "i").test(text);
+    || call.viaCommand;
   if (!mentioned || !token) return;
-  // «@бот --claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
-  const stripped = text.replace(new RegExp(`@${bot.username}\\b`, "gi"), " ").replace(/^\s*\/ask(@\w+)?\b/i, " ");
-  const { agent, text: agentQuestion } = splitAgentFlag(stripped);
+  // «@бот --claude вопрос» или «/claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
+  const { agent, text: agentQuestion } = call;
   if (agent) {
     if (!isLinkedSender(bot, message)) {
       await send(token, message.chat.id, bot.tg_user_id == null
@@ -652,7 +705,7 @@ async function handleUpdate(query, bot, update) {
       "",
       `Вопрос от ${displayName(message.from)}:`,
     ].join("\n");
-    await askAgent(query, { bot, token, tgChatId: message.chat.id, chatRowId: chat.id, replyTo: message.message_id, flag: agent, text: agentQuestion, intro });
+    await askAgent(query, { bot, token, tgChatId: message.chat.id, chatRowId: chat.id, replyTo: message.message_id, flag: agent, text: agentQuestion, intro, projectIds: projects.map((project) => project.id) });
     return;
   }
   if (chat.status !== "active") {
@@ -660,7 +713,7 @@ async function handleUpdate(query, bot, update) {
     return;
   }
   if (!chat.answers_enabled) return;
-  await answerInChat(query, bot, chat, message);
+  await answerInChat(query, bot, chat, message, call.text);
 }
 
 /** Публичный вебхук Telegram (без сессии MBOX). Подлинность — секрет, который сервер сам выдал при регистрации. */
@@ -798,6 +851,7 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
     )).rows[0];
     try {
       await tg(token, "setWebhook", webhookParams(origin, row.id, secret));
+      await tg(token, "setMyCommands", { commands: BOT_COMMANDS }).catch(() => undefined);
     } catch (error) {
       await query("UPDATE telegram_bots SET last_error = $2 WHERE id = $1", [row.id, `Вебхук не зарегистрирован: ${error.message}`]);
     }
@@ -823,6 +877,7 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
         const me = await tg(token, "getMe");
         const secret = (await query("SELECT webhook_secret FROM telegram_bots WHERE id = $1", [bot.id])).rows[0].webhook_secret;
         await tg(token, "setWebhook", { ...webhookParams(origin, bot.id, secret), drop_pending_updates: false });
+        await tg(token, "setMyCommands", { commands: BOT_COMMANDS }).catch(() => undefined);
         await query("UPDATE telegram_bots SET username = $2, name = $3, can_read_all = $4, last_error = '', updated_at = now() WHERE id = $1", [bot.id, me.username || bot.username, me.first_name || "", Boolean(me.can_read_all_group_messages)]);
       } catch (error) {
         await query("UPDATE telegram_bots SET last_error = $2 WHERE id = $1", [bot.id, `Проверка не прошла: ${error.message}`.slice(0, 300)]);
@@ -839,7 +894,7 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
         [code, bot.id, projectIds, companyIds, INVITE_MINUTES],
       )).rows[0].expires_at;
       await query("DELETE FROM telegram_invites WHERE expires_at < now() - interval '1 day'");
-      sendJson(res, 200, { ...(await state(query, userId)), invite: { bot_id: bot.id, url: `https://t.me/${bot.username}?startgroup=${code}`, expires_at: expires } });
+      sendJson(res, 200, { ...(await state(query, userId)), invite: { bot_id: bot.id, url: `https://t.me/${bot.username}?startgroup=${code}&admin=manage_chat`, expires_at: expires } });
       return true;
     }
     return false;
