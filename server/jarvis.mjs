@@ -590,7 +590,8 @@ async function cloudflareSummarize(transcript) {
 async function tryFastPath(client, text) {
   const q = String(text || "").toLowerCase();
 
-  if (/токен/.test(q) && /(сколько|расход|потрач|статистик|баланс)/.test(q)) {
+  // (?<![а-яё]) — иначе «сколько» находится внутри «несколько» и «Создай несколько задач» отвечает счётчиком.
+  if (/токен/.test(q) && /((?<![а-яё])сколько|расход|потрач|статистик|баланс)/.test(q)) {
     const rows = (await client.query(
       `SELECT model,
               sum(total_tokens)::bigint AS total,
@@ -605,7 +606,7 @@ async function tryFastPath(client, text) {
     return `Расход токенов по моделям:\n${lines.join("\n")}\n\nИтого по всем моделям: ${grandTotal}.`;
   }
 
-  if (/(сколько|число|количество).*(задач|todo)/.test(q) && !/(в проекте|по проекту|про |о\s)/.test(q)) {
+  if (/(?<![а-яё])(сколько|число|количество).*(задач|todo)/.test(q) && !/(в проекте|по проекту|про |о\s)/.test(q)) {
     const row = (await client.query(
       `SELECT count(*)::int AS total, count(*) FILTER (WHERE status NOT IN ('done', 'archived'))::int AS open
        FROM todos`,
@@ -613,7 +614,7 @@ async function tryFastPath(client, text) {
     return `Задач всего: ${row.total}, из них не закрыто (open/next/doing/blocked/review): ${row.open}.`;
   }
 
-  if (/(сколько|число|количество).*(запис|памят)/.test(q)) {
+  if (/(?<![а-яё])(сколько|число|количество).*(запис|памят)/.test(q)) {
     const row = (await client.query("SELECT count(*)::int AS total FROM memories")).rows[0];
     return `Записей в памяти: ${row.total}.`;
   }
@@ -3802,7 +3803,9 @@ export async function replyAsJarvis(item) {
     // Чат (props.thread, кнопка «Новый чат»): ответ ложится в тот же чат, история — только из него.
     const thread = /^[A-Za-z0-9_-]{1,80}$/.test(String(item.props?.thread || "")) ? String(item.props.thread) : "";
     const replyIdentity = { ...(mboxUserId ? { mbox_user_id: mboxUserId, mbox_owner: includeLegacyInbox } : {}), ...(thread ? { thread } : {}) };
-    const fastPathReply = await tryFastPath(client, item.body || item.title);
+    // Самому вопросу человека (без служебной обёртки, как у Telegram-бота): по обёртке быстрый путь и выбор групп срабатывали зря.
+    const asked = String(item.props?.question || "").trim() || item.body || item.title;
+    const fastPathReply = await tryFastPath(client, asked);
     if (fastPathReply) {
       jlog(item.id, `fast-path: "${String(item.body || "").slice(0, 80)}" -> без обращения к LLM`);
       await client.query(
@@ -3967,9 +3970,9 @@ export async function replyAsJarvis(item) {
         [item.props.re, mboxUserId, includeLegacyInbox],
       )).rows[0]?.body || ""
       : "";
-    const activeGroups = selectToolGroups([item.body || item.title, repliedTo, ...recentHuman], recentTools);
+    const activeGroups = selectToolGroups([asked, repliedTo, ...recentHuman], recentTools);
     // Для Groq с его 8000 TPM — только группы самого сообщения, без подтянутых из истории.
-    const focusGroups = selectToolGroups([item.body || item.title, repliedTo]);
+    const focusGroups = selectToolGroups([asked, repliedTo]);
     jlog(item.id, `группы инструментов: ${[...activeGroups].join(", ")}`);
     detailedTrace.push(`Группы инструментов на старте: ${[...activeGroups].join(", ")}`);
     const messages = [

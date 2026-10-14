@@ -300,7 +300,7 @@ async function ownerScope(query, ownerUserId) {
  * проекта в неё не попадал — модель видела пустой разговор и отвечала «уточните, что требуется».
  * thread: для группы — свой на каждый вопрос (контекст чата и так в тексте), для личной переписки — общий.
  */
-async function askJarvis(query, { bot, projects, allProjects = false, title, body, kind, thread, chat = null }) {
+async function askJarvis(query, { bot, projects, allProjects = false, title, body, kind, thread, chat = null, question = "" }) {
   const owner = (await query("SELECT id::text, role, COALESCE((to_jsonb(users)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
   if (!owner || (owner.role !== "owner" && owner.jarvis_enabled === false)) return { error: "Джарвис у владельца бота выключен" };
   const projectId = projects[0]?.id || null;
@@ -309,6 +309,7 @@ async function askJarvis(query, { bot, projects, allProjects = false, title, bod
     source: "telegram",
     ...(chat ? { telegram_chat: String(chat.id) } : {}),
     telegram_kind: kind,
+    ...(question ? { question } : {}),
     mbox_user_id: owner.id,
     mbox_owner: owner.role === "owner",
     thread: thread || `tg${chat?.id || `dm${bot.id}`}`,
@@ -463,7 +464,7 @@ async function answerInChat(query, bot, chat, message, asked = "") {
       "",
       `Вопрос от ${displayName(message.from)}: ${question}`,
     ].join("\n");
-    const result = await askJarvis(query, { bot, chat, projects, title: `Telegram · ${chat.title}: ${question.slice(0, 120)}`, body, kind: "question", thread: `tg${chat.id}-${Date.now().toString(36)}` });
+    const result = await askJarvis(query, { bot, chat, projects, title: `Telegram · ${chat.title}: ${question.slice(0, 120)}`, body, kind: "question", question, thread: `tg${chat.id}-${Date.now().toString(36)}` });
     const reply = result.text || `Не получилось ответить: ${String(result.error || "").slice(0, 300)}`;
     const sent = await send(token, chat.chat_id, reply, message.message_id);
     for (const item of sent) {
@@ -613,7 +614,7 @@ async function handlePrivate(query, bot, token, message) {
     if (!scope) { await reply("Не нашёл ваш аккаунт MBOX."); return; }
     const result = await askJarvis(query, {
       bot, projects: scope.projects, allProjects: scope.all, title: `Telegram: ${question.slice(0, 120)}`,
-      body: `[Telegram] ${question}`, kind: "dm", thread: `tgdm${bot.id}`,
+      body: `[Telegram] ${question}`, kind: "dm", question, thread: `tgdm${bot.id}`,
     });
     await reply(result.text || `Не получилось ответить: ${String(result.error || "").slice(0, 300)}`);
   } catch (error) {
