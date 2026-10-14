@@ -7,7 +7,8 @@ import { Panel, PasswordInput } from "../../ui";
 import { askConfirm } from "../../ui/askText";
 import { AccessPicker } from "../accounts/AccessPicker";
 
-type TelegramBot = { username: string; name: string; last_error: string; created_at: string };
+type TelegramBot = { username: string; name: string; last_error: string; created_at: string; linked: boolean; tg_username: string };
+type TelegramLink = { url: string; expires_at: string };
 type TelegramChat = {
   id: string; title: string; chat_type: string; status: "pending" | "active" | "paused" | "left";
   project_ids: string[]; company_ids: string[]; notes_enabled: boolean; answers_enabled: boolean;
@@ -24,6 +25,7 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [link, setLink] = useState<TelegramLink | null>(null);
 
   const load = useCallback(async () => {
     const next = await fetchJson<TelegramState>("/api/mbox/telegram");
@@ -50,6 +52,29 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
     finally { setBusy(""); }
   }
 
+  // Пока ждём, что человек нажмёт Start в Telegram, подтягиваем состояние — привязка появится сама.
+  useEffect(() => {
+    if (!link || state.bot?.linked) return;
+    const timer = setInterval(() => { void load().catch(() => undefined); }, 3000);
+    return () => clearInterval(timer);
+  }, [link, state.bot?.linked, load]);
+  useEffect(() => { if (state.bot?.linked) setLink(null); }, [state.bot?.linked]);
+
+  async function startLink() {
+    setBusy("link"); setError("");
+    try {
+      const next = await fetchJson<TelegramState & { link: TelegramLink }>("/api/mbox/telegram/link", { method: "POST" });
+      setState({ bot: next.bot, chats: next.chats });
+      setLink(next.link);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось создать ссылку"); }
+    finally { setBusy(""); }
+  }
+  async function unlink() {
+    if (await askConfirm({ title: "Отвязать Telegram?", message: "Агенты Claude и GPT перестанут отвечать в Telegram, а личная переписка с ботом закроется, пока вы не привяжете аккаунт снова.", confirmLabel: "Отвязать", danger: true })) {
+      await mutate("link", "/api/mbox/telegram/link", "DELETE");
+    }
+  }
+
   const saveChat = (chat: TelegramChat, patch: Partial<TelegramChat>) => mutate(chat.id, `/api/mbox/telegram/chats/${chat.id}`, "PATCH", patch);
   async function disconnectBot() {
     if (await askConfirm({ title: "Отключить Telegram-бота?", message: "Настройка бота, список чатов и сохранённые сообщения будут удалены из MBOX.", confirmLabel: "Отключить", danger: true })) {
@@ -65,7 +90,7 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
 
   return (
     <Panel title="Telegram-бот" icon={Bot} className="telegram-panel">
-      <p className="telegram-hint">Создайте бота через @BotFather, отключите ему Privacy Mode командой /setprivacy и добавьте в рабочие группы. После подключения назначьте каждому чату проекты. Джарвис сможет отвечать на вопросы и записывать важное в память выбранных проектов.</p>
+      <p className="telegram-hint">Создайте бота через @BotFather, отключите ему Privacy Mode командой /setprivacy и добавьте в рабочие группы. После подключения назначьте каждому чату проекты. Джарвис сможет отвечать на вопросы и записывать важное в память выбранных проектов. Привяжите свой Telegram, чтобы писать боту в личку и звать Claude и GPT.</p>
       {error && <p className="telegram-error" role="alert">{error}</p>}
       {!state.bot ? (
         <form className="telegram-connect" onSubmit={(event) => void connect(event)}>
@@ -80,6 +105,27 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
             {state.bot.last_error && <span className="telegram-error">{state.bot.last_error}</span>}
             <button className="account-save" type="button" disabled={busy === "bot"} onClick={() => void disconnectBot()}>Отключить бота</button>
           </div>
+          <div className="telegram-bot-row">
+            <div>
+              <strong>Ваш Telegram</strong>
+              <span>{state.bot.linked ? `Привязан${state.bot.tg_username ? `: @${state.bot.tg_username}` : ""}. Агентов звать можете только вы.` : "Не привязан: бот не знает, что вы владелец, и агентам не ответит."}</span>
+            </div>
+            {state.bot.linked
+              ? <button className="account-save" type="button" disabled={busy === "link"} onClick={() => void unlink()}>Отвязать</button>
+              : link
+                ? <a className="primary-action" href={link.url} target="_blank" rel="noreferrer"><MessageCircle size={16} /> Открыть в Telegram</a>
+                : <button className="primary-action" type="button" disabled={busy === "link"} onClick={() => void startLink()}>{busy === "link" ? <LoaderCircle size={16} className="telegram-spin" /> : <MessageCircle size={16} />} Привязать Telegram</button>}
+          </div>
+          {link && !state.bot.linked && <p className="telegram-hint">Откройте ссылку и нажмите Start в Telegram: привязка появится здесь сама. Ссылка действует 15 минут и подходит одному аккаунту.</p>}
+          {state.bot.linked && (
+            <ul className="telegram-usage">
+              <li><span>Джарвис</span> <code>@{state.bot.username} вопрос</code> — в группе, в личке без упоминания</li>
+              <li><span>Claude на компьютере</span> <code>@{state.bot.username} --claude вопрос</code></li>
+              <li><span>Claude на сервере</span> <code>@{state.bot.username} --claudecloud вопрос</code></li>
+              <li><span>GPT на компьютере</span> <code>@{state.bot.username} --gpt вопрос</code></li>
+              <li><span>GPT на сервере</span> <code>@{state.bot.username} --gptcloud вопрос</code></li>
+            </ul>
+          )}
           <div className="telegram-chats">
             {!state.chats.length && <p className="telegram-hint">Пока чатов нет. Добавьте бота в группу — она появится здесь после первого обновления Telegram.</p>}
             {state.chats.map((chat) => (

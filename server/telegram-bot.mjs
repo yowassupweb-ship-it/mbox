@@ -12,6 +12,11 @@
 //     важное (решения, договорённости, сроки, цифры, контакты, риски) в память нужного проекта, поручения — задачами.
 //     В чат при этом ничего не отправляется.
 // Всё, что Джарвис делает, он делает только в проектах чата: доступ сужен так же, как у участника команды.
+//
+// Свой аккаунт Telegram человек привязывает в MBOX (кнопка «Привязать Telegram» → ссылка t.me/<бот>?start=<код>).
+// Привязанный аккаунт — единственный, кто может звать агентов: «@бот --claude вопрос» или «@бот --gpt вопрос» уходит
+// Claude / Codex из инбокса MBOX (те же наблюдатели, что отвечают в чате MBOX), ответ приходит в Telegram, когда агент
+// закончит. Без флага отвечает Джарвис. В личной переписке с ботом (только привязанный аккаунт) упоминание не нужно.
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { JARVIS_NAME, replyAsJarvis } from "./jarvis.mjs";
@@ -64,6 +69,23 @@ CREATE TABLE IF NOT EXISTS telegram_messages (
   UNIQUE (chat_row_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_chat ON telegram_messages(chat_row_id, id);
+ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS tg_user_id BIGINT;
+ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS tg_username TEXT NOT NULL DEFAULT '';
+ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS link_code TEXT;
+ALTER TABLE telegram_bots ADD COLUMN IF NOT EXISTS link_code_expires TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS telegram_agent_requests (
+  id BIGSERIAL PRIMARY KEY,
+  bot_id BIGINT NOT NULL REFERENCES telegram_bots(id) ON DELETE CASCADE,
+  tg_chat_id BIGINT NOT NULL,
+  chat_row_id BIGINT,
+  reply_to BIGINT,
+  inbox_id BIGINT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  done BOOLEAN NOT NULL DEFAULT false,
+  last_typing_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_agent_requests_open ON telegram_agent_requests(done, id);
 `;
 
 const API = "https://api.telegram.org";
@@ -72,6 +94,28 @@ const DIGEST_BATCH = 30; // столько новых сообщений — р�
 const DIGEST_GAP_MS = 10 * 60 * 1000; // не чаще раза в 10 минут на чат
 const CONTEXT_MESSAGES = 30; // сколько последних сообщений видит Джарвис, отвечая на вопрос
 const KEEP_DAYS = 45;
+const AGENT_WAIT_MS = 20 * 60 * 1000; // дольше агента не ждём: скорее всего, наблюдатель не запущен
+const AGENT_REPLY_MAX = 16000;
+const LINK_CODE_MINUTES = 15;
+// Флаг → агент MBOX. Локальный (на компьютере человека, с его файлами) и серверный (облачный) — разные агенты, выбор явный.
+const AGENTS = {
+  claude: { agent: "Claude", label: "Claude (локальный)", suffix: "c", other: "claudecloud" },
+  claudecloud: { agent: "ClaudeCloud", label: "Claude (сервер)", suffix: "cc", other: "claude" },
+  gpt: { agent: "Codex", label: "GPT (локальный)", suffix: "g", other: "gptcloud" },
+  gptcloud: { agent: "CodexCloud", label: "GPT (сервер)", suffix: "gc", other: "gpt" },
+};
+const FLAG_ALIASES = { codex: "gpt", codexcloud: "gptcloud", chatgpt: "gpt" };
+// Телефонные клавиатуры превращают «--» в тире, поэтому принимаем и его.
+const AGENT_FLAG = /(^|\s)(?:--|—|–)(claude|claudecloud|gpt|gptcloud|codex|codexcloud|chatgpt)(?=\s|$)/i;
+
+/** «--claude вопрос» → { agent: "claude", text: "вопрос" }. Без флага agent пустой — отвечает Джарвис. */
+function splitAgentFlag(text) {
+  const match = String(text || "").match(AGENT_FLAG);
+  if (!match) return { agent: "", text: String(text || "").trim() };
+  const raw = match[2].toLowerCase();
+  const rest = (text.slice(0, match.index) + " " + text.slice(match.index + match[0].length)).replace(/[ \t]{2,}/g, " ").trim();
+  return { agent: FLAG_ALIASES[raw] || raw, text: rest };
+}
 
 let deps = null;
 const working = new Set(); // чаты, где сейчас идёт ответ или разбор — второй параллельно не запускаем
@@ -187,27 +231,45 @@ async function recentLines(query, chatRowId, limit, afterId = 0) {
 
 const stamp = (date) => new Date(date).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-/** Отдаёт вопрос Джарвису владельца бота и ждёт его ответа (тот же путь, что у чата в MBOX). */
-async function askJarvis(query, { bot, chat, projects, title, body, kind }) {
+/** Проекты, которые видит владелец бота целиком: all — без ограничения (владелец без личных пространств). */
+async function ownerScope(query, ownerUserId) {
+  const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [ownerUserId])).rows[0];
+  if (!owner) return null;
+  const scope = await projectScopeFor(query, owner);
+  const projects = (await query(
+    "SELECT id::text, name FROM projects WHERE $1::boolean OR id = ANY($2::bigint[]) ORDER BY name",
+    [scope.all, scope.projectIds],
+  )).rows;
+  return { owner, all: Boolean(scope.all), projects };
+}
+
+/**
+ * Отдаёт вопрос Джарвису владельца бота и ждёт его ответа (тот же путь, что у чата в MBOX).
+ * project_id у записи обязателен, если доступ ограничен: история диалога Джарвиса фильтруется по проектам, и вопрос без
+ * проекта в неё не попадал — модель видела пустой разговор и отвечала «уточните, что требуется».
+ * thread: для группы — свой на каждый вопрос (контекст чата и так в тексте), для личной переписки — общий.
+ */
+async function askJarvis(query, { bot, projects, allProjects = false, title, body, kind, thread, chat = null }) {
   const owner = (await query("SELECT id::text, role, COALESCE((to_jsonb(users)->>'jarvis_enabled')::boolean, true) AS jarvis_enabled FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
   if (!owner || (owner.role !== "owner" && owner.jarvis_enabled === false)) return { error: "Джарвис у владельца бота выключен" };
+  const projectId = projects[0]?.id || null;
   const props = {
     to: JARVIS_NAME,
     source: "telegram",
-    telegram_chat: String(chat.id),
+    ...(chat ? { telegram_chat: String(chat.id) } : {}),
     telegram_kind: kind,
     mbox_user_id: owner.id,
     mbox_owner: owner.role === "owner",
-    thread: `tg${chat.id}`,
-    allowed_project_ids: projects.map((project) => project.id),
+    thread: thread || `tg${chat?.id || `dm${bot.id}`}`,
+    allowed_project_ids: allProjects ? null : projects.map((project) => project.id),
   };
   const row = (await query(
     `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
      VALUES ($1, 'Человек', 'question', $2, $3, 'open', 'normal', false, $4)
      RETURNING id::text`,
-    [projects.length === 1 ? projects[0].id : null, title.slice(0, 200), body, JSON.stringify(props)],
+    [projectId, title.slice(0, 200), body, JSON.stringify(props)],
   )).rows[0];
-  await replyAsJarvis({ id: row.id, project_id: projects.length === 1 ? projects[0].id : null, title, body, props });
+  await replyAsJarvis({ id: row.id, project_id: projectId, title, body, props });
   const answer = (await query(
     `SELECT body, item_type, COALESCE((props->>'failed')::boolean, false) AS failed FROM agent_inbox
      WHERE props->>'re' = $1 AND item_type IN ('answer', 'agent_error') ORDER BY id DESC LIMIT 1`,
@@ -215,6 +277,99 @@ async function askJarvis(query, { bot, chat, projects, title, body, kind }) {
   )).rows[0];
   if (!answer) return { error: "Джарвис не ответил" };
   return answer.item_type === "agent_error" || answer.failed ? { error: answer.body } : { text: answer.body };
+}
+
+/**
+ * Вопрос агенту MBOX (Claude / Codex, локальному или серверному): кладём его в инбокс так же, как чат MBOX, — наблюдатель
+ * агента подхватит и ответит. Ответ в Telegram отправит pollAgentRequests, когда агент закончит.
+ */
+async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "" }) {
+  const target = AGENTS[flag];
+  const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
+  if (!target || !owner) return;
+  const online = (await query(
+    "SELECT 1 FROM agent_presence WHERE owner_user_id = $1 AND agent_name = $2 AND last_seen > now() - interval '2 minutes'",
+    [owner.id, target.agent],
+  )).rows.length > 0;
+  if (!online) {
+    const cloud = target.agent.endsWith("Cloud");
+    const advice = cloud ? `Серверный агент сейчас не отвечает. Локальный: --${target.other}.` : `Запустите MBOX Desktop на компьютере — или спросите серверного: --${target.other}.`;
+    await send(token, tgChatId, `${target.label} сейчас не в сети. ${advice}`, replyTo).catch(() => undefined);
+    return;
+  }
+  const scope = owner.role === "owner" ? null : await projectScopeFor(query, owner);
+  const projectId = scope && !scope.all ? scope.projectIds[0] || null : null;
+  const body = [
+    intro || "[Telegram · личная переписка] Владелец пишет тебе через Telegram-бота MBOX. Ответь для Telegram: коротко и по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.",
+    "",
+    text,
+  ].join("\n");
+  const props = {
+    to: target.agent,
+    source: "telegram",
+    telegram_bot: String(bot.id),
+    mbox_user_id: owner.id,
+    mbox_owner: owner.role === "owner",
+    thread: `tg${chatRowId ? `c${chatRowId}` : `dm${bot.id}`}${target.suffix}`,
+  };
+  const row = (await query(
+    `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
+     VALUES ($1, 'Человек', 'question', $2, $3, 'open', 'normal', false, $4)
+     RETURNING id::text`,
+    [projectId, `Telegram → ${target.label}: ${text.slice(0, 120)}`, body, JSON.stringify(props)],
+  )).rows[0];
+  await query(
+    `INSERT INTO telegram_agent_requests(bot_id, tg_chat_id, chat_row_id, reply_to, inbox_id, label, last_typing_at) VALUES ($1, $2, $3, $4, $5, $6, now())`,
+    [bot.id, tgChatId, chatRowId, replyTo, row.id, target.label],
+  );
+  deps?.broadcast?.("agent_inbox");
+  void tg(token, "sendChatAction", { chat_id: tgChatId, action: "typing" }).catch(() => undefined);
+}
+
+let polling = false;
+/** Забирает готовые ответы агентов и отправляет их в Telegram; пока агент работает — держит «печатает…». */
+async function pollAgentRequests(query) {
+  if (polling) return;
+  polling = true;
+  try {
+    const open = (await query("SELECT * FROM telegram_agent_requests WHERE NOT done ORDER BY id LIMIT 20")).rows;
+    for (const request of open) {
+      const reply = (await query(
+        `SELECT body, item_type FROM agent_inbox
+         WHERE (props->>'re' = $1 OR props->>'in_reply_to' = $1) AND item_type IN ('agent_response', 'agent_error', 'answer') ORDER BY id DESC LIMIT 1`,
+        [String(request.inbox_id)],
+      )).rows[0];
+      const expired = Date.now() - new Date(request.created_at).getTime() > AGENT_WAIT_MS;
+      const token = await botToken(query, request.bot_id);
+      if (reply || expired) {
+        const claimed = (await query("UPDATE telegram_agent_requests SET done = true WHERE id = $1 AND NOT done RETURNING id", [request.id])).rows[0];
+        if (!claimed || !token) continue;
+        const failed = !reply || reply.item_type === "agent_error";
+        let text = !reply ? `${request.label} не ответил за ${Math.round(AGENT_WAIT_MS / 60000)} минут: вероятно, наблюдатель не запущен. Вопрос остался в MBOX.`
+          : failed ? `${request.label} не смог ответить: ${String(reply.body || "").slice(0, 600)}`
+          : String(reply.body || "Готово.");
+        if (text.length > AGENT_REPLY_MAX) text = `${text.slice(0, AGENT_REPLY_MAX)}\n\n…ответ обрезан, полный текст — в чате MBOX.`;
+        const sent = await send(token, request.tg_chat_id, request.chat_row_id && !failed ? `**${request.label}:**\n${text}` : text, request.reply_to).catch(() => []);
+        if (request.chat_row_id) {
+          const bot = (await query("SELECT bot_user_id FROM telegram_bots WHERE id = $1", [request.bot_id])).rows[0];
+          for (const item of sent) {
+            await query(
+              `INSERT INTO telegram_messages(chat_row_id, message_id, from_id, from_name, text, is_bot, sent_at) VALUES ($1, $2, $3, $4, $5, true, now()) ON CONFLICT DO NOTHING`,
+              [request.chat_row_id, item.message_id, bot?.bot_user_id, request.label, text.slice(0, 4000)],
+            ).catch(() => undefined);
+          }
+        }
+      } else if (token && (!request.last_typing_at || Date.now() - new Date(request.last_typing_at).getTime() > 4000)) {
+        await query("UPDATE telegram_agent_requests SET last_typing_at = now() WHERE id = $1", [request.id]);
+        void tg(token, "sendChatAction", { chat_id: request.tg_chat_id, action: "typing" }).catch(() => undefined);
+      }
+    }
+    await query("DELETE FROM telegram_agent_requests WHERE done AND created_at < now() - interval '2 days'");
+  } catch (error) {
+    console.error(`[telegram] agent poll: ${error.message}`);
+  } finally {
+    polling = false;
+  }
 }
 
 async function answerInChat(query, bot, chat, message) {
@@ -233,7 +388,7 @@ async function answerInChat(query, bot, chat, message) {
       await send(token, chat.chat_id, "У этого чата нет доступных проектов. Владелец бота выбирает их в Настройки → Команда → Telegram-бот.", message.message_id);
       return;
     }
-    const question = messageText(message).replace(new RegExp(`@${bot.username}\\b`, "gi"), "").trim() || "(пустое сообщение)";
+    const question = messageText(message).replace(new RegExp(`@${bot.username}\\b`, "gi"), "").replace(/^\s*\/ask(@\w+)?\b/i, "").trim() || "(пустое сообщение)";
     const context = await recentLines(query, chat.id, CONTEXT_MESSAGES);
     const body = [
       `[Telegram · групповой чат «${chat.title}»] Тебя спросили в рабочем чате. Отвечай для чата: коротко, по делу, без таблиц и длинных списков; обращайся к человеку по имени.`,
@@ -245,7 +400,7 @@ async function answerInChat(query, bot, chat, message) {
       "",
       `Вопрос от ${displayName(message.from)}: ${question}`,
     ].join("\n");
-    const result = await askJarvis(query, { bot, chat, projects, title: `Telegram · ${chat.title}: ${question.slice(0, 120)}`, body, kind: "question" });
+    const result = await askJarvis(query, { bot, chat, projects, title: `Telegram · ${chat.title}: ${question.slice(0, 120)}`, body, kind: "question", thread: `tg${chat.id}-${Date.now().toString(36)}` });
     const reply = result.text || `Не получилось ответить: ${String(result.error || "").slice(0, 300)}`;
     const sent = await send(token, chat.chat_id, reply, message.message_id);
     for (const item of sent) {
@@ -290,7 +445,7 @@ export async function digestChat(query, chatRowId, { force = false } = {}) {
       "Сообщения:",
       ...fresh.map((line) => `[${stamp(line.sent_at)}] ${line.from_name}: ${line.text}`),
     ].join("\n");
-    const result = await askJarvis(query, { bot, chat, projects, title: `Telegram · ${chat.title}: записи по чату`, body, kind: "digest" });
+    const result = await askJarvis(query, { bot, chat, projects, title: `Telegram · ${chat.title}: записи по чату`, body, kind: "digest", thread: `tg${chat.id}-d${Date.now().toString(36)}` });
     const summary = String(result.text || result.error || "").slice(0, 2000);
     const recorded = result.text && !/^\s*ничего важного/i.test(result.text) ? 1 : 0;
     await query(
@@ -317,6 +472,69 @@ async function upsertChat(query, bot, chat, status) {
   )).rows[0];
 }
 
+const isLinkedSender = (bot, message) => bot.tg_user_id != null && Number(bot.tg_user_id) === message.from?.id;
+
+const HELP = [
+  "Как со мной говорить:",
+  "• просто текст — отвечает Джарвис;",
+  "• --claude вопрос — Claude на вашем компьютере, --claudecloud — Claude на сервере;",
+  "• --gpt вопрос — GPT (Codex) на компьютере, --gptcloud — на сервере.",
+  "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот --claude вопрос. Агенты отвечают, когда закончат работу — это может занять несколько минут.",
+].join("\n");
+
+/** Личная переписка с ботом: привязка аккаунта по коду (/start <код>) и общение привязанного владельца. */
+async function handlePrivate(query, bot, token, message) {
+  const text = messageText(message).trim();
+  if (!token || !text || !message.from || message.from.is_bot) return;
+  const reply = (body) => send(token, message.chat.id, body, message.message_id).catch(() => []);
+
+  const start = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/i);
+  if (start?.[1]) {
+    const valid = bot.link_code && bot.link_code === start[1] && bot.link_code_expires && new Date(bot.link_code_expires) > new Date();
+    if (!valid) { await reply("Код привязки не подошёл или устарел. Нажмите «Привязать Telegram» в MBOX ещё раз и откройте новую ссылку."); return; }
+    await query(
+      "UPDATE telegram_bots SET tg_user_id = $2, tg_username = $3, link_code = NULL, link_code_expires = NULL, last_error = '', updated_at = now() WHERE id = $1",
+      [bot.id, message.from.id, message.from.username || ""],
+    );
+    deps?.broadcast?.("telegram_chats");
+    await reply(`Готово, ${displayName(message.from)}: этот Telegram привязан к вашему аккаунту MBOX. Теперь агентов можете звать только вы.\n\n${HELP}`);
+    return;
+  }
+
+  if (!isLinkedSender(bot, message)) {
+    await reply("Это личный бот владельца MBOX. Привязать свой Telegram можно в MBOX: Настройки → Команда → Telegram-бот. В рабочих группах я отвечаю после настройки чата.");
+    return;
+  }
+  if (/^\/(start|help)(@\w+)?$/i.test(text)) { await reply(HELP); return; }
+
+  const { agent, text: question } = splitAgentFlag(text);
+  if (!question) { await reply(agent ? `Напишите вопрос вместе с флагом, например: --${agent} что нового по проекту?` : HELP); return; }
+  if (agent) {
+    await askAgent(query, { bot, token, tgChatId: message.chat.id, replyTo: message.message_id, flag: agent, text: question });
+    return;
+  }
+
+  const key = `dm:${bot.id}`;
+  if (working.has(key)) { await reply("Сейчас отвечаю на предыдущий вопрос — задайте этот через минуту."); return; }
+  working.add(key);
+  const typing = setInterval(() => { void tg(token, "sendChatAction", { chat_id: message.chat.id, action: "typing" }).catch(() => undefined); }, 4500);
+  void tg(token, "sendChatAction", { chat_id: message.chat.id, action: "typing" }).catch(() => undefined);
+  try {
+    const scope = await ownerScope(query, bot.owner_user_id);
+    if (!scope) { await reply("Не нашёл ваш аккаунт MBOX."); return; }
+    const result = await askJarvis(query, {
+      bot, projects: scope.projects, allProjects: scope.all, title: `Telegram: ${question.slice(0, 120)}`,
+      body: `[Telegram] ${question}`, kind: "dm", thread: `tgdm${bot.id}`,
+    });
+    await reply(result.text || `Не получилось ответить: ${String(result.error || "").slice(0, 300)}`);
+  } catch (error) {
+    await reply(`Не получилось ответить: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearInterval(typing);
+    working.delete(key);
+  }
+}
+
 async function handleUpdate(query, bot, update) {
   const token = await botToken(query, bot.id);
   if (update.my_chat_member) {
@@ -333,7 +551,7 @@ async function handleUpdate(query, bot, update) {
   const message = update.message || update.edited_message;
   if (!message || !message.chat) return;
   if (message.chat.type === "private") {
-    if (token && message.text) await send(token, message.chat.id, "Я работаю в групповых чатах: добавьте меня в рабочий чат, и владелец бота выберет в MBOX, к каким проектам он относится.").catch(() => undefined);
+    await handlePrivate(query, bot, token, message);
     return;
   }
   const chat = await upsertChat(query, bot, message.chat, "pending");
@@ -352,6 +570,33 @@ async function handleUpdate(query, bot, update) {
     || message.reply_to_message?.from?.id === Number(bot.bot_user_id)
     || new RegExp(`^/ask(@${bot.username})?\\b`, "i").test(text);
   if (!mentioned || !token) return;
+  // «@бот --claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
+  const stripped = text.replace(new RegExp(`@${bot.username}\\b`, "gi"), " ").replace(/^\s*\/ask(@\w+)?\b/i, " ");
+  const { agent, text: agentQuestion } = splitAgentFlag(stripped);
+  if (agent) {
+    if (!isLinkedSender(bot, message)) {
+      await send(token, message.chat.id, bot.tg_user_id == null
+        ? "Агентов можно звать, когда привязан ваш Telegram: Настройки → Команда → Telegram-бот → «Привязать Telegram»."
+        : "Claude и GPT отвечают только владельцу бота.", message.message_id).catch(() => undefined);
+      return;
+    }
+    if (!agentQuestion) {
+      await send(token, message.chat.id, `Напишите вопрос после флага, например: @${bot.username} --${agent} что нового по проекту?`, message.message_id).catch(() => undefined);
+      return;
+    }
+    const projects = await chatProjects(query, chat, bot.owner_user_id);
+    const context = await recentLines(query, chat.id, 15);
+    const intro = [
+      `[Telegram · групповой чат «${chat.title}»] Владелец обращается к тебе из рабочего чата через Telegram-бота MBOX. Ответь для Telegram: коротко, по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.`,
+      projects.length ? `Проекты этого чата: ${projects.map((project) => `${project.name} (#${project.id})`).join(", ")}.` : "",
+      "Последние сообщения чата:",
+      ...context.map((line) => `[${stamp(line.sent_at)}] ${line.is_bot ? "Бот" : line.from_name}: ${line.text}`),
+      "",
+      `Вопрос от ${displayName(message.from)}:`,
+    ].join("\n");
+    await askAgent(query, { bot, token, tgChatId: message.chat.id, chatRowId: chat.id, replyTo: message.message_id, flag: agent, text: agentQuestion, intro });
+    return;
+  }
   if (chat.status !== "active") {
     await send(token, message.chat.id, "Меня ещё не настроили для этого чата: владелец бота выбирает проекты в Настройки → Команда → Telegram-бот.", message.message_id).catch(() => undefined);
     return;
@@ -403,6 +648,9 @@ export function startTelegramScheduler(query) {
   };
   const timer = setInterval(() => void tick(), 60 * 1000);
   timer.unref?.();
+  // Ответы агентов (Claude / GPT) приходят в инбокс MBOX в любой момент — забираем их каждые 3 секунды.
+  const agentTimer = setInterval(() => void pollAgentRequests(query), 3000);
+  agentTimer.unref?.();
   return timer;
 }
 
@@ -417,7 +665,12 @@ function publicChat(row) {
 }
 
 async function state(query, userId) {
-  const bot = (await query("SELECT id::text, username, name, can_read_all, last_error, created_at FROM telegram_bots WHERE owner_user_id = $1", [userId])).rows[0] || null;
+  const bot = (await query(
+    `SELECT id::text, username, name, can_read_all, last_error, created_at,
+            tg_user_id IS NOT NULL AS linked, tg_username
+     FROM telegram_bots WHERE owner_user_id = $1`,
+    [userId],
+  )).rows[0] || null;
   const chats = bot ? (await query(
     `SELECT c.*, (SELECT count(*) FROM telegram_messages m WHERE m.chat_row_id = c.id) AS messages
      FROM telegram_chats c WHERE c.bot_id = $1 ORDER BY (c.status = 'left'), c.updated_at DESC`,
@@ -431,6 +684,8 @@ async function state(query, userId) {
  *   GET    /api/mbox/telegram                 — бот и чаты
  *   PUT    /api/mbox/telegram/bot             — {token}: подключить бота (getMe + вебхук)
  *   DELETE /api/mbox/telegram/bot             — отключить бота
+ *   POST   /api/mbox/telegram/link            — код и ссылка для привязки своего Telegram
+ *   DELETE /api/mbox/telegram/link            — отвязать Telegram
  *   PATCH  /api/mbox/telegram/chats/:id       — {project_ids, company_ids, notes_enabled, answers_enabled, status}
  *   DELETE /api/mbox/telegram/chats/:id       — выйти из чата и забыть его
  *   POST   /api/mbox/telegram/chats/:id/digest — разобрать новое прямо сейчас
@@ -478,6 +733,25 @@ export async function handleTelegramApi({ req, res, url, query, readBody, sendJs
       if (token) await tg(token, "deleteWebhook", { drop_pending_updates: true }).catch(() => undefined);
       await query("DELETE FROM telegram_bots WHERE id = $1", [bot.id]);
     }
+    sendJson(res, 200, await state(query, userId));
+    return true;
+  }
+
+  // Привязка своего аккаунта Telegram: одноразовая ссылка t.me/<бот>?start=<код>, действует 15 минут.
+  if (url.pathname === "/api/mbox/telegram/link" && req.method === "POST") {
+    const bot = (await query("SELECT id, username FROM telegram_bots WHERE owner_user_id = $1", [userId])).rows[0];
+    if (!bot) { sendJson(res, 404, { error: "Сначала подключите бота" }); return true; }
+    const code = randomBytes(12).toString("base64url");
+    const expires = (await query(
+      "UPDATE telegram_bots SET link_code = $2, link_code_expires = now() + make_interval(mins => $3), updated_at = now() WHERE id = $1 RETURNING link_code_expires",
+      [bot.id, code, LINK_CODE_MINUTES],
+    )).rows[0].link_code_expires;
+    sendJson(res, 200, { ...(await state(query, userId)), link: { url: `https://t.me/${bot.username}?start=${code}`, expires_at: expires } });
+    return true;
+  }
+
+  if (url.pathname === "/api/mbox/telegram/link" && req.method === "DELETE") {
+    await query("UPDATE telegram_bots SET tg_user_id = NULL, tg_username = '', link_code = NULL, link_code_expires = NULL, updated_at = now() WHERE owner_user_id = $1", [userId]);
     sendJson(res, 200, await state(query, userId));
     return true;
   }
