@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Code2, Copy, Download, Eye, FilePlus2, FileText, Monitor, Pencil, RefreshCw, Save, Smartphone, Trash2, Upload, X } from "lucide-react";
+import { Code2, Copy, Download, ExternalLink, Eye, FilePlus2, FileText, FolderInput, FolderPlus, Monitor, Pencil, RefreshCw, Save, Smartphone, Trash2, Upload, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
@@ -12,9 +12,12 @@ import { CodeEditor } from "./CodeEditor";
 import { highlightCode, languageOf, type CodeLanguage } from "./codeHighlight";
 import { MarkdownToolbar, markdownShortcut } from "./MarkdownToolbar";
 import { FileTypeIcon, FolderIcon } from "./FileTypeIcon";
-import { askConfirm, showNotice } from "../../ui/askText";
+import { askConfirm, askText, showNotice } from "../../ui/askText";
+import { WbMenu } from "./WbMenu";
 import { Crumbs, reveal } from "./Crumbs";
 import { pressable } from "../../ui/pressable";
+import { patchNow, removeNow } from "../../lib/optimistic";
+import { companyLogo, initials, isCompanyHome } from "./projects/projectFields";
 
 const PROJECT_ICONS = "/assets/icons/project";
 const FILE_ICONS = "/assets/icons/files";
@@ -92,6 +95,13 @@ function categoryForUpload(name: string) {
 
 type Group = { key: string; label: string; color?: string; categories: Array<{ name: string; files: Artifact[] }> };
 
+/** Меню по правой кнопке в дереве артефактов: у файла, у категории (папки) и у проекта — свои действия. */
+type FilesMenu =
+  | { kind: "file"; file: Artifact; x: number; y: number }
+  | { kind: "category"; group: Group; name: string; files: Artifact[]; x: number; y: number };
+
+const json = (method: string, body: unknown) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
 export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
   const [filter, setFilter] = usePersistentState("mbox.files.filter", "");
   const [collapsed, setCollapsed] = usePersistentState<string[]>("mbox.files.collapsed", []);
@@ -100,6 +110,9 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const needle = filter.trim().toLowerCase();
+  const [menu, setMenu] = useState<FilesMenu | null>(null);
+  const [dragged, setDragged] = useState<Artifact | null>(null);
+  const [dropKey, setDropKey] = useState("");
 
   const groups = useMemo<Group[]>(() => {
     const visible = data.artifacts.filter((file) => !needle
@@ -154,6 +167,156 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
     if (lastId && list.length === 1) tabs.open(`file:${lastId}`, true);
   }
 
+  /** Перенос файла: в проект (null — без проекта) и/или в категорию. Проект шлём всегда явно. */
+  async function moveFile(file: Artifact, target: { projectId: string | null; category?: string }) {
+    const sameProject = (file.project_id ?? null) === target.projectId;
+    if (sameProject && (!target.category || target.category === file.category)) return;
+    await patchNow(data, "artifacts", file.id, { project_id: target.projectId, ...(target.category ? { category: target.category } : {}) });
+  }
+
+  async function renameFile(file: Artifact) {
+    const name = (await askText({ title: "Имя файла", value: file.name, confirmLabel: "Переименовать" }))?.trim();
+    if (!name || name === file.name) return;
+    await patchNow(data, "artifacts", file.id, { name });
+  }
+
+  async function duplicateFile(file: Artifact) {
+    const dot = file.name.lastIndexOf(".");
+    const name = dot > 0 ? `${file.name.slice(0, dot)} (копия)${file.name.slice(dot)}` : `${file.name} (копия)`;
+    const { artifact } = await fetchJson<{ artifact: { id: string } }>("/api/mbox/artifacts", json("POST", { name, category: file.category, version: file.version, status: file.status, content: file.content, access_level: "agents", project_id: file.project_id ?? null }));
+    data.reload();
+    tabs.open(`file:${artifact.id}`, true);
+  }
+
+  function downloadFile(file: Artifact) {
+    const url = URL.createObjectURL(new Blob([file.content], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = file.name || `file-${file.id}.txt`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  async function removeFiles(files: Artifact[], title: string) {
+    if (!(await askConfirm({ title, message: files.length > 1 ? `Файлов: ${files.length}. Вернуть их будет нельзя.` : "Вернуть файл будет нельзя.", confirmLabel: "Удалить", danger: true }))) return;
+    files.forEach((file) => tabs.close(`file:${file.id}`));
+    await removeNow(data, "artifacts", files.map((file) => file.id));
+  }
+
+  async function renameCategory(group: Group, name: string, files: Artifact[]) {
+    const next = (await askText({ title: "Название папки", value: name, confirmLabel: "Переименовать" }))?.trim();
+    if (!next || next === name) return;
+    if (!group) return;
+    await Promise.all(files.map((file) => patchNow(data, "artifacts", file.id, { category: next })));
+  }
+
+  async function newCategoryFor(file: Artifact) {
+    const name = (await askText({ title: "Новая папка", placeholder: "Название папки", confirmLabel: "Переместить" }))?.trim();
+    if (name) await moveFile(file, { projectId: file.project_id ?? null, category: name });
+  }
+
+  async function moveMany(files: Artifact[], projectId: string | null) {
+    await Promise.all(files.map((file) => patchNow(data, "artifacts", file.id, { project_id: projectId })));
+  }
+
+  /** Перетаскивание файла в дереве: на папку — в эту папку этого проекта, на проект — в проект с той же папкой. */
+  function dropProps(key: string, target: { projectId: string | null; category?: string }) {
+    return {
+      onDragOver: (event: DragEvent) => { if (dragged) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropKey(key); } },
+      onDragLeave: () => setDropKey((current) => (current === key ? "" : current)),
+      onDrop: (event: DragEvent) => {
+        if (!dragged) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDropKey("");
+        const file = dragged;
+        setDragged(null);
+        void moveFile(file, target);
+      },
+    };
+  }
+
+  const countOf = (group: Group) => group.categories.reduce((sum, category) => sum + category.files.length, 0);
+
+  // Компании и их проекты: проект-хранилище компании («записи компании») — сразу папками под компанией.
+  const byKey = new Map(groups.map((group) => [group.key, group]));
+  const companySections = [...data.companies]
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"))
+    .map((company) => {
+      const owned = data.projects.filter((project) => project.company_id === company.id);
+      const homeProject = owned.find((project) => isCompanyHome(project));
+      return {
+        company,
+        home: homeProject ? byKey.get(homeProject.id) ?? null : null,
+        projects: owned.filter((project) => project !== homeProject).map((project) => byKey.get(project.id)).filter((group): group is Group => Boolean(group)),
+      };
+    })
+    .filter((section) => section.home || section.projects.length);
+  const placed = new Set(companySections.flatMap((section) => [section.home?.key, ...section.projects.map((group) => group.key)]).filter(Boolean));
+  const looseGroups = groups.filter((group) => !placed.has(group.key));
+
+  function renderFile(file: Artifact, depth: number) {
+    const tabKey = `file:${file.id}`;
+    return (
+      <li key={file.id}>
+        <div
+          className={`wb-tree-row${tabs.active === tabKey ? " is-active" : ""}${dragged?.id === file.id ? " is-dragging" : ""}`}
+          style={{ ["--depth" as string]: depth }}
+          onClick={() => tabs.open(tabKey)}
+          onDoubleClick={() => tabs.open(tabKey, true)}
+          onContextMenu={(event) => { event.preventDefault(); setMenu({ kind: "file", file, x: event.clientX, y: event.clientY }); }}
+          draggable
+          onDragStart={(event) => { setDragged(file); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", file.name); }}
+          onDragEnd={() => { setDragged(null); setDropKey(""); }}
+          title={`${file.name || "Без имени"} · ${file.version} · ${file.status} · ПКМ — действия, перетащите в другую папку или проект`}
+        >
+          <FileTypeIcon name={file.name} />
+          <span className="wb-tree-label">{file.name || `Без имени #${file.id}`}</span>
+          <span className="wb-tree-hint">{formatBytes(file.memory_bytes)}</span>
+        </div>
+      </li>
+    );
+  }
+
+  function renderCategories(group: Group, depth: number) {
+    return group.categories.map((category) => {
+      const key = `${group.key}/${category.name}`;
+      const open = Boolean(needle) || !collapsed.includes(key);
+      return (
+        <li key={key}>
+          <div
+            className={`wb-tree-row${dropKey === key ? " is-drop-target" : ""}`}
+            style={{ ["--depth" as string]: depth }}
+            {...pressable(() => toggle(key), open)}
+            {...dropProps(key, { projectId: group.key === "none" ? null : group.key, category: category.name })}
+            onContextMenu={(event) => { event.preventDefault(); setMenu({ kind: "category", group, name: category.name, files: category.files, x: event.clientX, y: event.clientY }); }}
+          >
+            <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
+            <FolderIcon open={open} />
+            <span className="wb-tree-label">{category.name}</span>
+            <span className="wb-tree-count">{category.files.length}</span>
+          </div>
+          {open && <ul className="wb-tree-children">{category.files.map((file) => renderFile(file, depth + 1))}</ul>}
+        </li>
+      );
+    });
+  }
+
+  function renderGroup(group: Group, depth: number) {
+    const open = Boolean(needle) || !collapsed.includes(group.key);
+    return (
+      <li key={group.key}>
+        <div className={`wb-tree-row wb-tree-project${dropKey === group.key ? " is-drop-target" : ""}`} style={{ ["--project-color" as string]: group.color || "var(--state-off)", ["--depth" as string]: depth }} {...pressable(() => toggle(group.key), open)} {...dropProps(group.key, { projectId: group.key === "none" ? null : group.key })}>
+          <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
+          <span className="wb-project-dot" />
+          <span className="wb-tree-label">{group.label}</span>
+          <span className="wb-tree-count">{countOf(group)}</span>
+        </div>
+        {open && <ul className="wb-tree-children">{renderCategories(group, depth + 1)}</ul>}
+      </li>
+    );
+  }
+
   function onDrop(event: DragEvent) {
     event.preventDefault();
     setDragOver(false);
@@ -182,64 +345,88 @@ export function FilesView({ data, tabs }: { data: MboxData; tabs: TabsApi }) {
       </div>
       {(notice || uploading) && <div className="wb-files-notice">{uploading ? "Загружаю…" : notice}<button type="button" onClick={() => setNotice("")} aria-label="Скрыть"><X size={12} /></button></div>}
       <div className="wb-view-body">
-        {groups.map((group) => {
-          const groupOpen = Boolean(needle) || !collapsed.includes(group.key);
+        {/* Та же структура, что в «Проектах»: компании → записи компании и её проекты → папки → файлы. */}
+        {companySections.length > 0 && <h3 className="wb-tree-group-label">Компании</h3>}
+        {companySections.map(({ company, home, projects: projectGroups }) => {
+          const key = `company:${company.id}`;
+          const open = Boolean(needle) || !collapsed.includes(key);
+          const count = [home, ...projectGroups].reduce((sum, group) => sum + (group ? countOf(group) : 0), 0);
+          const logo = companyLogo(company);
           return (
-            <ul className="wb-tree" key={group.key}>
+            <ul className="wb-tree" key={key}>
               <li>
-                <div className="wb-tree-row wb-tree-project" style={{ ["--project-color" as string]: group.color || "var(--state-off)", ["--depth" as string]: 0 }} {...pressable(() => toggle(group.key), groupOpen)}>
-                  <span className={groupOpen ? "wb-caret is-open" : "wb-caret"}>›</span>
-                  <span className="wb-project-dot" />
-                  <span className="wb-tree-label">{group.label}</span>
-                  <span className="wb-tree-count">{group.categories.reduce((sum, category) => sum + category.files.length, 0)}</span>
+                <div
+                  className={`wb-tree-row wb-tree-company${dropKey === key ? " is-drop-target" : ""}`}
+                  style={{ ["--company-color" as string]: company.color && company.color !== "#2c2c2e" ? company.color : "var(--text-muted)", ["--depth" as string]: 0 }}
+                  {...pressable(() => toggle(key), open)}
+                  {...(home ? dropProps(key, { projectId: home.key }) : {})}
+                >
+                  <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
+                  <span className={`wb-company-mark${logo ? " has-logo" : ""}`} aria-hidden="true">{logo ? <img src={logo} alt="" /> : initials(company.name)}</span>
+                  <span className="wb-tree-label">{company.name}</span>
+                  <span className="wb-tree-count">{count}</span>
                 </div>
-                {groupOpen && (
+                {open && (
                   <ul className="wb-tree-children">
-                    {group.categories.map((category) => {
-                      const key = `${group.key}/${category.name}`;
-                      const open = Boolean(needle) || !collapsed.includes(key);
-                      return (
-                        <li key={category.name}>
-                          <div className="wb-tree-row" style={{ ["--depth" as string]: 1 }} {...pressable(() => toggle(key), open)}>
-                            <span className={open ? "wb-caret is-open" : "wb-caret"}>›</span>
-                            <FolderIcon open={open} />
-                            <span className="wb-tree-label">{category.name}</span>
-                            <span className="wb-tree-count">{category.files.length}</span>
-                          </div>
-                          {open && (
-                            <ul className="wb-tree-children">
-                              {category.files.map((file) => {
-                                const tabKey = `file:${file.id}`;
-                                return (
-                                  <li key={file.id}>
-                                    <div
-                                      className={tabs.active === tabKey ? "wb-tree-row is-active" : "wb-tree-row"}
-                                      style={{ ["--depth" as string]: 2 }}
-                                      onClick={() => tabs.open(tabKey)}
-                                      onDoubleClick={() => tabs.open(tabKey, true)}
-                                      title={`${file.name || "Без имени"} · ${file.version} · ${file.status}`}
-                                    >
-                                      <FileTypeIcon name={file.name} />
-                                      <span className="wb-tree-label">{file.name || `Без имени #${file.id}`}</span>
-                                      <span className="wb-tree-hint">{formatBytes(file.memory_bytes)}</span>
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-                        </li>
-                      );
-                    })}
+                    {home && renderCategories(home, 1)}
+                    {projectGroups.map((group) => renderGroup(group, 1))}
                   </ul>
                 )}
               </li>
             </ul>
           );
         })}
+        {looseGroups.length > 0 && companySections.length > 0 && <h3 className="wb-tree-group-label">Без компании</h3>}
+        {looseGroups.map((group) => <ul className="wb-tree" key={group.key}>{renderGroup(group, 0)}</ul>)}
         {!groups.length && <p className="wb-empty">{needle ? "Ничего не найдено" : "Файлов пока нет — создай или перетащи сюда с диска"}</p>}
       </div>
       {dragOver && <div className="wb-drop-hint"><Upload size={22} />Отпусти, чтобы загрузить</div>}
+      {menu && (
+        <WbMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <div className="wb-note-menu wb-tree-ctx" onClick={() => setMenu(null)}>
+            {menu.kind === "file" ? (() => {
+              const file = menu.file;
+              const projectId = file.project_id ?? null;
+              const siblings = [...new Set(data.artifacts.filter((item) => (item.project_id ?? null) === projectId).map((item) => item.category || "Other"))].filter((name) => name !== file.category).sort();
+              return (
+                <>
+                  <div className="wb-note-menu-label">{file.name || `Файл #${file.id}`}</div>
+                  <button type="button" role="menuitem" onClick={() => tabs.open(`file:${file.id}`, true)}><ExternalLink size={15} aria-hidden="true" />Открыть</button>
+                  <button type="button" role="menuitem" onClick={() => void renameFile(file)}><Pencil size={15} aria-hidden="true" />Переименовать</button>
+                  <button type="button" role="menuitem" onClick={() => void duplicateFile(file)}><Copy size={15} aria-hidden="true" />Дублировать</button>
+                  <button type="button" role="menuitem" onClick={() => downloadFile(file)}><Download size={15} aria-hidden="true" />Скачать</button>
+                  <div className="wb-menu-sep" role="separator" />
+                  <div className="wb-note-menu-label">Переместить в папку</div>
+                  {siblings.slice(0, 8).map((name) => (
+                    <button key={name} type="button" role="menuitem" onClick={() => void moveFile(file, { projectId, category: name })}><FolderInput size={15} aria-hidden="true" />{name}</button>
+                  ))}
+                  <button type="button" role="menuitem" onClick={() => void newCategoryFor(file)}><FolderPlus size={15} aria-hidden="true" />Новая папка…</button>
+                  <div className="wb-menu-sep" role="separator" />
+                  <div className="wb-note-menu-label">Переместить в проект</div>
+                  {data.projects.filter((project) => project.id !== projectId && project.status !== "archived").map((project) => (
+                    <button key={project.id} type="button" role="menuitem" onClick={() => void moveFile(file, { projectId: project.id })}><span className="wb-project-dot" style={{ ["--project-color" as string]: project.color || "var(--state-off)" }} aria-hidden="true" />{project.name}</button>
+                  ))}
+                  {projectId && <button type="button" role="menuitem" onClick={() => void moveFile(file, { projectId: null })}><FolderInput size={15} aria-hidden="true" />Без проекта</button>}
+                  <div className="wb-menu-sep" role="separator" />
+                  <button type="button" role="menuitem" className="is-danger" onClick={() => void removeFiles([file], `Удалить «${file.name || `файл #${file.id}`}»?`)}><Trash2 size={15} aria-hidden="true" />Удалить</button>
+                </>
+              );
+            })() : (
+              <>
+                <div className="wb-note-menu-label">{menu.name} · {menu.files.length}</div>
+                <button type="button" role="menuitem" onClick={() => void renameCategory(menu.group, menu.name, menu.files)}><Pencil size={15} aria-hidden="true" />Переименовать папку</button>
+                <div className="wb-menu-sep" role="separator" />
+                <div className="wb-note-menu-label">Переместить папку в проект</div>
+                {data.projects.filter((project) => project.id !== menu.group.key && project.status !== "archived").map((project) => (
+                  <button key={project.id} type="button" role="menuitem" onClick={() => void moveMany(menu.files, project.id)}><span className="wb-project-dot" style={{ ["--project-color" as string]: project.color || "var(--state-off)" }} aria-hidden="true" />{project.name}</button>
+                ))}
+                <div className="wb-menu-sep" role="separator" />
+                <button type="button" role="menuitem" className="is-danger" onClick={() => void removeFiles(menu.files, `Удалить папку «${menu.name}» вместе с файлами?`)}><Trash2 size={15} aria-hidden="true" />Удалить папку</button>
+              </>
+            )}
+          </div>
+        </WbMenu>
+      )}
     </div>
   );
 }
@@ -329,9 +516,8 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
 
   async function remove() {
     if (!file || !(await askConfirm({ title: `Удалить файл «${file.name || `#${file.id}`}»?`, confirmLabel: "Удалить", danger: true }))) return;
-    await fetchJson(`/api/mbox/artifacts/${file.id}`, { method: "DELETE" });
-    data.reload();
     tabs.close(tabKey);
+    await removeNow(data, "artifacts", file.id);
   }
 
   function download() {

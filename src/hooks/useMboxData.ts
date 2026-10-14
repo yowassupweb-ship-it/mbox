@@ -20,6 +20,9 @@ export type MboxData = ReturnType<typeof useMboxData>;
 
 type Key = "memories" | "artifacts" | "projects" | "companies" | "folders" | "secrets" | "history" | "agents" | "edges" | "inbox" | "runs" | "decisions";
 
+/** Списки, которые можно поправить на экране сразу, до ответа сервера (drop / patchLocal). */
+export type LocalKind = "artifacts" | "projects" | "companies" | "folders" | "memories" | "decisions" | "todos";
+
 const ALL_KEYS: Key[] = ["memories", "artifacts", "projects", "companies", "folders", "secrets", "history", "agents", "edges", "inbox", "runs", "decisions"];
 
 /**
@@ -65,7 +68,8 @@ function urlFor(key: Key, qs: string) {
 }
 
 // У участника этих разделов нет (организации и секреты — только владельцу): не стучимся и не получаем 403 на каждом обновлении.
-const hiddenKeys = (role: string) => new Set<Key>(role === "owner" ? [] : ["companies", "secrets"]);
+// Компании участник видит только те, где есть его проекты (фильтр на сервере) — без них дерево проектов теряло группировку.
+const hiddenKeys = (role: string) => new Set<Key>(role === "owner" ? [] : ["secrets"]);
 
 export function useMboxData(query: string, onAuthExpired?: () => void, role = "owner") {
   const hiddenRef = useRef(hiddenKeys(role));
@@ -217,5 +221,38 @@ export function useMboxData(query: string, onAuthExpired?: () => void, role = "o
     };
   }, [run]);
 
-  return { memories, memoriesTotal, memoriesTotalBytes, artifacts, projects, companies, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload };
+  /**
+   * Мгновенное удаление и правка на экране, до ответа сервера. Раньше удалённое висело, пока заново не скачаются все
+   * списки (до 10 МБ, через туннель — десятки секунд). Кэш сырого ответа для списка сбрасываем: если сервер откажет,
+   * следующее перечитывание вернёт строку на место.
+   */
+  const drop = useCallback((kind: LocalKind, id: string) => {
+    const state = pump.current;
+    const without = <T extends { id: string }>(list: T[]) => list.filter((item) => item.id !== id);
+    switch (kind) {
+      case "artifacts": state.raw.delete("artifacts"); setArtifacts(without); break;
+      case "projects": state.raw.delete("projects"); setProjects(without); break;
+      case "companies": state.raw.delete("companies"); setCompanies(without); break;
+      case "folders": state.raw.delete("folders"); setFolders(without); break;
+      case "memories": state.raw.delete("memories"); setMemories(without); break;
+      case "decisions": state.raw.delete("decisions"); setDecisions(without); break;
+      case "todos": state.raw.delete("projects"); setProjects((list) => list.map((project) => project.todos.some((todo) => todo.id === id) ? { ...project, todos: project.todos.filter((todo) => todo.id !== id) } : project)); break;
+    }
+  }, []);
+
+  const patchLocal = useCallback((kind: LocalKind, id: string, patch: Record<string, unknown>) => {
+    const state = pump.current;
+    const merge = <T extends { id: string }>(list: T[]) => list.map((item) => (item.id === id ? { ...item, ...patch } : item));
+    switch (kind) {
+      case "artifacts": state.raw.delete("artifacts"); setArtifacts(merge); break;
+      case "projects": state.raw.delete("projects"); setProjects(merge); break;
+      case "companies": state.raw.delete("companies"); setCompanies(merge); break;
+      case "folders": state.raw.delete("folders"); setFolders(merge); break;
+      case "memories": state.raw.delete("memories"); setMemories(merge); break;
+      case "decisions": state.raw.delete("decisions"); setDecisions(merge); break;
+      case "todos": state.raw.delete("projects"); setProjects((list) => list.map((project) => project.todos.some((todo) => todo.id === id) ? { ...project, todos: project.todos.map((todo) => (todo.id === id ? { ...todo, ...patch } : todo)) } : project)); break;
+    }
+  }, []);
+
+  return { memories, memoriesTotal, memoriesTotalBytes, artifacts, projects, companies, folders, secrets, auditEvents, agents, graphEdges, inbox, runs, decisions, loading, offline, reload, drop, patchLocal };
 }

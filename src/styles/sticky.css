@@ -1,0 +1,137 @@
+/* ─── Заметки на рабочем столе (src/pages/StickyApp.tsx) ─── */
+
+html.is-sticky, html.is-sticky body, html.is-sticky #root { height: 100%; margin: 0; overflow: hidden; background: var(--st-body, #2b2b2e); }
+html.is-sticky { --st-body: #2b2b2e; --st-text: #f2f2f4; --st-muted: rgba(242, 242, 244, .55); --st-line: rgba(255, 255, 255, .08); --st-hover: rgba(255, 255, 255, .08); --st-card: #333336; }
+html.is-sticky[data-theme="light"] { --st-body: #fbfbf8; --st-text: #1d1d1f; --st-muted: rgba(29, 29, 31, .5); --st-line: rgba(0, 0, 0, .08); --st-hover: rgba(0, 0, 0, .06); --st-card: #ffffff; }
+html.is-sticky[data-theme="black"] { --st-body: #1c1c1e; --st-card: #262628; }
+
+.st-shell { --st-tone: #e8b60c; height: 100vh; display: flex; flex-direction: column; background: var(--st-body); color: var(--st-text); font-family: var(--font-sans); font-size: 15px; line-height: 1.45; border-top: 0; user-select: none; }
+
+/* Шапка цвета заметки — за неё окно и таскают. */
+.st-head { flex: none; display: flex; align-items: center; height: 34px; padding: 0 2px; background: var(--st-tone); color: color-mix(in srgb, #000 78%, var(--st-tone)); -webkit-app-region: drag; }
+.st-shell.is-list .st-head { background: transparent; color: var(--st-muted); }
+.st-head-fill { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; height: 100%; }
+.st-btn { -webkit-app-region: no-drag; display: grid; place-items: center; width: 34px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; cursor: pointer; }
+.st-btn:hover { background: color-mix(in srgb, #000 14%, transparent); }
+.st-shell.is-list .st-btn:hover { background: var(--st-hover); color: var(--st-text); }
+.st-btn:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+.st-pin { display: grid; place-items: center; width: 22px; opacity: .7; }
+.st-sync { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .55; animation: st-pulse 1s ease-in-out infinite; }
+.st-sync.is-error { background: #b3261e; opacity: 1; animation: none; }
+@keyframes st-pulse { 50% { opacity: .15; } }
+
+/* Меню «⋯»: цвета и действия. */
+.st-menu-scrim { position: fixed; inset: 0; z-index: 9; }
+.st-menu { position: absolute; top: 36px; right: 6px; left: 6px; z-index: 10; display: grid; gap: 2px; padding: 8px; border: 1px solid var(--st-line); border-radius: 10px; background: var(--st-card); box-shadow: 0 14px 36px rgba(0, 0, 0, .35); animation: st-in .12s ease-out; }
+@keyframes st-in { from { opacity: 0; transform: translateY(-4px); } }
+.st-colors { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-bottom: 6px; }
+.st-colors button { display: grid; place-items: center; height: 26px; padding: 0; border: 0; border-radius: 6px; background: var(--st-tone); color: color-mix(in srgb, #000 75%, var(--st-tone)); cursor: pointer; }
+.st-colors button:hover { filter: brightness(1.08); }
+.st-colors button.is-on { box-shadow: 0 0 0 2px var(--st-card), 0 0 0 4px var(--st-tone); }
+.st-menu > button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: none; color: var(--st-text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.st-menu > button:hover { background: var(--st-hover); }
+.st-menu > button.is-danger:hover { color: #ff6b6b; }
+
+/* Текст заметки. */
+.st-editor { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px 16px; outline: none; user-select: text; cursor: text; overflow-wrap: anywhere; scrollbar-width: thin; }
+.st-editor:empty::before { content: attr(data-placeholder); color: var(--st-muted); pointer-events: none; }
+.st-editor > div { min-height: 1.45em; }
+.st-editor ul { margin: 2px 0; padding-left: 22px; }
+.st-editor li { margin: 1px 0; }
+.st-editor a { color: color-mix(in srgb, var(--st-tone) 70%, var(--st-text)); text-decoration: underline; text-underline-offset: 2px; }
+.st-editor code { padding: 1px 4px; border-radius: 4px; background: var(--st-hover); font-family: var(--font-mono); font-size: .9em; }
+.st-editor img { display: block; max-width: 100%; max-height: 260px; margin: 6px 0; border-radius: 6px; object-fit: contain; }
+.st-editor .st-task { position: relative; padding-left: 26px; }
+.st-editor .st-task::before { content: ""; position: absolute; left: 1px; top: .2em; width: 15px; height: 15px; border: 1.5px solid var(--st-muted); border-radius: 4px; cursor: pointer; }
+.st-editor .st-task[data-done="1"] { color: var(--st-muted); text-decoration: line-through; }
+.st-editor .st-task[data-done="1"]::before { border-color: var(--st-tone); background: var(--st-tone) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.5 3 3 6-7'/%3E%3C/svg%3E") center / 11px no-repeat; }
+
+/* Панель оформления внизу, как у системных записок. */
+.st-tools { flex: none; display: flex; align-items: center; gap: 2px; height: 42px; padding: 0 8px; border-top: 1px solid var(--st-line); }
+.st-tools button { display: grid; place-items: center; width: 36px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--st-muted); cursor: pointer; }
+.st-tools button:hover { background: var(--st-hover); color: var(--st-text); }
+.st-tools button:focus-visible { outline: 2px solid var(--st-tone); outline-offset: -2px; }
+
+/* Пустые состояния. */
+.st-empty { flex: 1 1 auto; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 24px; text-align: center; color: var(--st-muted); font-size: 13px; }
+.st-empty svg { color: var(--st-tone); }
+.st-empty b { color: var(--st-text); font-size: 15px; }
+.st-empty.is-inline { padding: 40px 16px; }
+.st-link { padding: 0; border: 0; background: none; color: var(--st-tone); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* Окно «Заметки»: поиск и карточки. */
+.st-list-top { flex: none; padding: 2px 16px 12px; }
+.st-list-top h1 { margin: 0 0 12px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.st-search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: 6px; background: var(--st-card); color: var(--st-muted); }
+.st-search:focus-within { box-shadow: inset 0 -2px 0 var(--st-tone); }
+.st-search input { flex: 1 1 auto; min-width: 0; border: 0; background: none; color: var(--st-text); font: inherit; font-size: 14px; outline: none; user-select: text; }
+.st-list { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; grid-auto-rows: max-content; align-content: start; gap: 10px; padding: 0 16px 16px; scrollbar-width: thin; }
+.st-card { position: relative; display: grid; gap: 6px; max-height: 190px; padding: 14px 16px 16px; border: 0; border-top: 4px solid var(--st-tone); border-radius: 4px; background: var(--st-card); color: var(--st-text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; overflow: hidden; transition: background .12s ease-out; }
+.st-card:hover { background: color-mix(in srgb, var(--st-card) 88%, var(--st-text)); }
+.st-card:focus-visible { outline: 2px solid var(--st-tone); outline-offset: 2px; }
+.st-card.is-open::after { content: ""; position: absolute; right: 0; bottom: 0; border-style: solid; border-width: 0 0 14px 14px; border-color: transparent transparent color-mix(in srgb, var(--st-text) 30%, transparent) transparent; }
+.st-card-date { justify-self: end; color: var(--st-tone); font-size: 11px; }
+.st-card-text { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; line-height: 1.45; }
+.st-card-text i { color: var(--st-muted); }
+
+@media (prefers-reduced-motion: reduce) { .st-menu, .st-sync { animation: none; } }
+
+/* ─── Вид в духе Apple: тонкая шапка, мягкий оттенок цвета заметки вместо заливки, системный шрифт ─── */
+.st-shell {
+  --st-tint: color-mix(in srgb, var(--st-tone) 9%, var(--st-body));
+  --st-head-bg: color-mix(in srgb, var(--st-tone) 26%, var(--st-body));
+  background: var(--st-tint);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+}
+html.is-sticky[data-theme="light"] .st-shell { --st-tint: color-mix(in srgb, var(--st-tone) 16%, #fff); --st-head-bg: color-mix(in srgb, var(--st-tone) 38%, #fff); }
+.st-head { height: 26px; padding: 0 3px; gap: 2px; background: var(--st-head-bg); color: var(--st-text); border-bottom: 1px solid color-mix(in srgb, var(--st-tone) 30%, transparent); }
+.st-shell.is-list .st-head { border-bottom: 0; }
+.st-btn { width: 26px; height: 22px; border-radius: 6px; color: color-mix(in srgb, var(--st-text) 70%, transparent); }
+.st-btn:hover { background: color-mix(in srgb, var(--st-text) 10%, transparent); color: var(--st-text); }
+
+/* Переключатель «Правка / Просмотр» */
+.st-seg { -webkit-app-region: no-drag; display: inline-flex; gap: 1px; margin-left: 2px; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--st-text) 9%, transparent); }
+.st-seg button { display: grid; place-items: center; width: 24px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: none; color: color-mix(in srgb, var(--st-text) 62%, transparent); cursor: pointer; }
+.st-seg button:hover { color: var(--st-text); }
+.st-seg button.is-on { background: color-mix(in srgb, var(--st-body) 82%, var(--st-text)); color: var(--st-text); box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
+html.is-sticky[data-theme="light"] .st-seg button.is-on { background: #fff; }
+.st-seg button:focus-visible { outline: 2px solid var(--st-tone); outline-offset: 0; }
+
+.st-menu { top: 30px; border-radius: 12px; background: color-mix(in srgb, var(--st-card) 94%, transparent); backdrop-filter: blur(20px) saturate(1.4); }
+.st-colors button { height: 22px; border-radius: 50%; width: 22px; justify-self: center; }
+.st-colors { grid-template-columns: repeat(8, 1fr); align-items: center; }
+
+.st-editor { padding: 12px 16px 14px; }
+.st-tools { height: 34px; padding: 0 6px; border-top: 1px solid color-mix(in srgb, var(--st-tone) 18%, var(--st-line)); }
+.st-tools button { width: 30px; height: 26px; }
+
+/* Просмотр Markdown */
+.st-preview { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px 16px; color: var(--st-text); font-size: 14px; line-height: 1.5; user-select: text; scrollbar-width: thin; }
+.st-preview h1, .st-preview h2, .st-preview h3 { margin: .9em 0 .35em; color: var(--st-text); font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
+.st-preview > :first-child, .st-preview h1:first-child, .st-preview h2:first-child { margin-top: 0; }
+.st-preview h1 { font-size: 18px; }
+.st-preview h2 { font-size: 16px; }
+.st-preview h3 { font-size: 14.5px; }
+.st-preview p { margin: 0 0 .6em; }
+.st-preview ul, .st-preview ol { margin: 0 0 .6em; padding-left: 20px; }
+.st-preview a { color: color-mix(in srgb, var(--st-tone) 60%, var(--st-text)); }
+.st-preview img { max-width: 100%; border-radius: 6px; }
+.st-preview table { font-size: 13px; }
+.st-preview-empty { margin: 0; color: var(--st-muted); }
+html.is-sticky .st-shell .st-preview h4 { margin: .8em 0 .3em; padding: 0; border: 0; color: var(--st-text); font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
+html.is-sticky .st-shell .st-preview h4:first-child { margin-top: 0; }
+html.is-sticky .st-shell .st-preview h4.level-1 { font-size: 17px; }
+html.is-sticky .st-shell .st-preview h4.level-2 { font-size: 15.5px; }
+html.is-sticky .st-shell .st-preview h4.level-3, html.is-sticky .st-shell .st-preview h4.level-4 { font-size: 14.5px; }
+
+/* Заголовки и цитаты в режиме правки — выглядят как в просмотре, в Markdown остаются «# » и «> ». */
+.st-editor .st-h { margin: .5em 0 .2em; font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
+.st-editor .st-h:first-child { margin-top: 0; }
+.st-editor .st-h1 { font-size: 17px; }
+.st-editor .st-h2 { font-size: 15.5px; }
+.st-editor .st-h3 { font-size: 14.5px; }
+.st-editor .st-quote { padding-left: 10px; color: color-mix(in srgb, var(--st-text) 75%, transparent); font-style: italic; }
+.st-editor ol { margin: 2px 0; padding-left: 22px; }

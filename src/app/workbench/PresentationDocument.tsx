@@ -79,6 +79,7 @@ export function PresentationDocument({ presentationId, tabs, tabKey, visible, on
   const [tool, setTool] = useState<"select" | "hand">("select");
   const [spaceHand, setSpaceHand] = useState(false);
   const hand = tool === "hand" || spaceHand;
+  const moveableRef = useRef<Moveable | null>(null);
   const zoomAnchor = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const [, setTick] = useState(0);
   const savedRef = useRef("");
@@ -238,7 +239,12 @@ export function PresentationDocument({ presentationId, tabs, tabKey, visible, on
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
-    const fit = () => setFitK(Math.max(0.1, Math.min((stage.clientWidth - 48) / SLIDE_W, (stage.clientHeight - 48) / SLIDE_H)));
+    // offsetWidth/offsetHeight, а не client*: при приближении появляются полосы прокрутки, client* уменьшается, слайд
+    // вписывался мельче, полосы пропадали — и масштаб дрожал по кругу. Внешний размер от полос прокрутки не зависит.
+    const fit = () => {
+      const next = Math.max(0.1, Math.min((stage.offsetWidth - 48) / SLIDE_W, (stage.offsetHeight - 48) / SLIDE_H));
+      setFitK((current) => (Math.abs(current - next) < 0.0005 ? current : next));
+    };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(stage);
@@ -265,6 +271,9 @@ export function PresentationDocument({ presentationId, tabs, tabKey, visible, on
     return () => stage.removeEventListener("wheel", onWheel);
     // Холст появляется только после загрузки презентации: подписываемся заново, когда он есть.
   }, [editing, record?.id, Boolean(deck)]);
+
+  // Рамка выделения сама не знает, что элемент изменил размер вместе с масштабом: без пересчёта она оставалась на старом месте.
+  useLayoutEffect(() => { moveableRef.current?.updateRect(); }, [k]);
 
   useLayoutEffect(() => {
     const anchor = zoomAnchor.current;
@@ -704,6 +713,7 @@ export function PresentationDocument({ presentationId, tabs, tabKey, visible, on
               })}
               {target && (
                 <Moveable
+                  ref={moveableRef}
                   target={target}
                   draggable
                   resizable

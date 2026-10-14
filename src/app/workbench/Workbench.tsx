@@ -76,6 +76,8 @@ import { RAIL_GROUPS, useRailHidden, type RailItemId } from "./rail";
 import { askConfirm } from "../../ui/askText";
 import { TreeGlyph } from "./TreeGlyph";
 import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
+import { ProjectPage } from "./projects/ProjectPage";
+import { CompanyPage } from "./projects/CompanyPage";
 
 type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
@@ -934,6 +936,14 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return renderers.history();
       case "settings":
         return renderers.settings();
+      case "project":
+        if (!project) return lost(data.loading ? "Загрузка…" : "Проект не найден — возможно, его удалили.");
+        return <ProjectPage project={project} data={data} tabs={tabs} isOwner={user.role === "owner"} />;
+      case "company": {
+        const company = data.companies.find((item) => item.id === first);
+        if (!company) return lost(data.loading ? "Загрузка…" : "Компания не найдена — возможно, её удалили.");
+        return <CompanyPage company={company} data={data} tabs={tabs} isOwner={user.role === "owner"} />;
+      }
       case "todos":
         if (!project) return lost("Проект не найден — возможно, его удалили.");
         return <TodoBoard project={project} tabs={tabs} onSaved={data.reload} />;
@@ -1221,7 +1231,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       </nav>
 
       <aside className="wb-sidebar" aria-label="Боковая панель" data-scroll-scope={`sidebar:${activity}`}>
-        {activity === "explorer" && <ExplorerView data={data} tabs={tabs} onProjectContext={onProjectContext} />}
+        {activity === "explorer" && <ExplorerView data={data} tabs={tabs} isOwner={user.role === "owner"} onProjectContext={onProjectContext} />}
         {activity === "planner" && <PlannerSidebar />}
         {activity === "search" && <SearchView data={data} tabs={tabs} focusSignal={searchFocus} />}
         {activity === "agents" && <AgentsView data={data} tabs={tabs} />}

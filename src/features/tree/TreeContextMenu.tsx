@@ -23,7 +23,7 @@ export function EntityPreview({ node }: { node: FolderTreeNode }) {
   );
 }
 
-export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: TreeMenuState; projects: Project[]; onClose: () => void; onSaved: () => void }) {
+export function TreeContextMenu({ state, projects, onClose, onSaved, onDeleted }: { state: TreeMenuState; projects: Project[]; onClose: () => void; onSaved: () => void; onDeleted?: (kind: "projects" | "folders" | "todos" | "artifacts" | "memories", id: string) => Promise<unknown> }) {
   const { node, position } = state;
   const canColor = Boolean(node.id && (node.type === "folder" || node.type === "project"));
   const canDelete = Boolean(node.id && node.type && node.type !== "meta");
@@ -109,9 +109,11 @@ export function TreeContextMenu({ state, projects, onClose, onSaved }: { state: 
     };
     const path = paths[node.type];
     if (!path) return;
+    onClose();
+    // Удаление сразу на экране, без ожидания полной перезагрузки данных (lib/optimistic).
+    if (onDeleted) { await onDeleted(path as "projects" | "folders" | "todos" | "artifacts" | "memories", node.id); return; }
     await fetchJson(`/api/mbox/${path}/${node.id}`, { method: "DELETE" });
     onSaved();
-    onClose();
   }
 
   return (

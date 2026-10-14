@@ -8,6 +8,7 @@ import { delimitedContent, parseDelimited } from "./officeFormat";
 import type { TabsApi } from "./tabs";
 import { askConfirm } from "../../ui/askText";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { ImportOffer, projectOfStorageKey } from "./ImportOffer";
 
 const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
 
@@ -108,6 +109,12 @@ export function StorageSheetDocument({ storageKey, tabs, tabKey, visible, onDirt
       )}
     >
       {error && <div className="wb-banner is-error" role="alert">{error}</div>}
+      <ImportOffer id={tabKey} name={storageKey} tabs={tabs} projectId={projectOfStorageKey(storageKey)} load={async () => {
+        const { url } = await fetchJson<{ url: string }>(`/api/mbox/storage/link?key=${encodeURIComponent(storageKey)}&expires=600`);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Хранилище ответило ${response.status}`);
+        return response.blob();
+      }} />
       {loading ? <div className="wb-doc-missing" role="status" aria-live="polite">Открываю {storageKey.split("/").pop()}…</div>
         : book && sheetName ? <Suspense fallback={<OctopusSpinner />}><SheetEditor book={book} sheetName={sheetName} onSheetName={setSheetName} onChange={() => setDirty(true)} visible={visible} /></Suspense>
           : !error && <div className="wb-doc-missing">Не удалось прочитать таблицу.</div>}

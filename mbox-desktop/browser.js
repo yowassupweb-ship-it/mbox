@@ -18,6 +18,8 @@ const serverState = require("./server-state");
 const downloads = require("./browser-downloads");
 const contextMenu = require("./browser-menu");
 const permissions = require("./browser-permissions");
+const passwordStore = require("./password-store");
+const { createPasswordManager } = require("./browser-passwords");
 
 const PARTITION = "persist:mbox-browser";
 // Инкогнито: раздел без префикса persist: живёт только в памяти — куки, кэш и вход пропадают вместе с последней такой вкладкой.
@@ -37,6 +39,7 @@ const pendingAuth = new Map();
 let authSeq = 0;
 let window = null;
 let emit = () => {};
+const passwords = createPasswordManager({ tabs, publish: (key) => publish(key), emit: (payload) => emit(payload) });
 
 /** Только настоящие веб-адреса. Всё остальное (mailto:, tel:, file:) — во внешнее приложение. */
 function normalizeUrl(input) {
@@ -88,6 +91,7 @@ function stateOf(key) {
     find: tab.find || null,
     incognito: Boolean(tab.incognito),
     permission: tab.prompts?.[0] ? { id: tab.prompts[0].id, origin: tab.prompts[0].origin, kind: tab.prompts[0].kind, label: tab.prompts[0].label, queued: tab.prompts.length - 1 } : null,
+    passwordPrompt: passwords.stateFor(tab),
     auth: tab.auth ? { id: tab.auth.id, host: tab.auth.host, realm: tab.auth.realm, isProxy: tab.auth.isProxy, failed: tab.auth.failed } : null,
   };
 }
@@ -129,6 +133,7 @@ function create(key) {
     contents.on(event, () => publish(key));
   }
   contents.on("did-start-loading", () => { tab.error = ""; });
+  passwords.watch(key, tab);
   // Переход на другую страницу уничтожает курсор агента (он живёт в DOM): возвращаем его на прежнее место, пока агент работает.
   contents.on("dom-ready", () => { restoreCursor(contents); });
 
@@ -814,8 +819,8 @@ async function fillPassword(key, username) {
   if (tab.incognito) return { ok: false, error: "В режиме инкогнито пароли не подставляются" };
   const contents = tab.view.webContents;
   const pageUrl = contents.getURL();
-  const entries = chromeImport.credentialsFor(pageUrl);
-  const entry = entries.find((item) => item.username === username);
+  const match = passwordStore.forPage(pageUrl).find((item) => item.username === username);
+  const entry = match ? passwordStore.secretForPage(match.id, pageUrl) : null;
   if (!entry) return { ok: false, error: "Для этого сайта пароль не найден" };
   const script = `(() => {
     if (location.origin !== ${JSON.stringify(new URL(pageUrl).origin)}) return false;
@@ -1228,6 +1233,7 @@ function attach(mainWindow, sendToUi) {
   };
 
   permissionStore = permissions.createPermissionStore(app.getPath("userData"));
+  passwords.install();
   // Обычный раздел и раздел инкогнито настраиваются одинаково: Chrome-подобный User-Agent, вопросы про разрешения, загрузки.
   // Сайты не получают разрешений (камера, геолокация, уведомления) без вопроса человеку и доступа к мосту MBOX; запись
   // текста в буфер обмена разрешена всегда — без неё не работают кнопки «Копировать». Чтение буфера — только с вопросом.
@@ -1245,4 +1251,4 @@ function attach(mainWindow, sendToUi) {
   mainWindow.on("closed", () => { for (const tab of tabs.values()) dropPrompts(tab); tabs.clear(); window = null; void clearIncognito(); });
 }
 
-module.exports = { attach, downloads, setAgentControl, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerAuth, answerPermission, siteInfo, sitePermission, suggest, agentAction, setSearchEngine, clearCache, state: stateOf, isIncognitoKey, PARTITION, INCOGNITO_PARTITION };
+module.exports = { attach, downloads, setAgentControl, open, setBounds, show, hide, hideAll, close, act, capture, favicon, fillPassword, answerPassword: passwords.answer, passwordPromptSecret: passwords.promptSecret, answerAuth, answerPermission, siteInfo, sitePermission, suggest, agentAction, setSearchEngine, clearCache, state: stateOf, isIncognitoKey, PARTITION, INCOGNITO_PARTITION };

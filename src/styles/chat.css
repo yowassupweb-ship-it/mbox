@@ -1169,7 +1169,6 @@
 }
 .console-suggest button.is-active {
   background: color-mix(in srgb, var(--accent-color) 14%, transparent);
-  border-left-color: var(--accent-color);
   color: var(--text-main);
 }
 
@@ -1487,9 +1486,9 @@
 
 /* Ответ агента, который не состоялся (item_type agent_error): видно сразу, без похода в логи. */
 .console-bubble.is-failed {
-  border-left: 2px solid var(--state-danger);
   padding-left: 8px;
-  background: color-mix(in srgb, var(--state-danger) 8%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
 }
 
 /* ─── Цепочка работы агента (ChainTimeline): шаг, его аргументы и результат ───

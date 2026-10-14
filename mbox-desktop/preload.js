@@ -71,6 +71,38 @@ const desktopApi = {
   },
   // Встроенный браузер: страница управляет вкладкой по её ключу и получает обратно только адрес,
   // заголовок и состояние кнопок. Содержимое чужого сайта интерфейсу MBOX недоступно.
+  // Слой всплывающих окон браузера (browser-overlay.js): окно MBOX показывает/прячет, слой рисует и отвечает.
+  overlay: {
+    show: (rect, payload) => ipcRenderer.invoke("mbox-desktop:overlay-show", rect, payload),
+    hide: () => ipcRenderer.invoke("mbox-desktop:overlay-hide"),
+    onEvent: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("mbox-desktop:overlay", listener);
+      return () => ipcRenderer.removeListener("mbox-desktop:overlay", listener);
+    },
+  },
+  overlayHost: {
+    onRender: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("mbox-overlay:render", listener);
+      return () => ipcRenderer.removeListener("mbox-overlay:render", listener);
+    },
+    action: (payload) => ipcRenderer.send("mbox-overlay:action", payload),
+    size: (id, height) => ipcRenderer.send("mbox-overlay:size", id, height),
+    close: () => ipcRenderer.send("mbox-overlay:close"),
+    ready: () => ipcRenderer.send("mbox-overlay:ready"),
+  },
+  // Заметки на рабочем столе (sticky-notes.js): открыть заметку окном, список, управление своим окном.
+  sticky: {
+    open: (noteId, point) => ipcRenderer.invoke("mbox-desktop:sticky-open", String(noteId), point || null),
+    list: () => ipcRenderer.invoke("mbox-desktop:sticky-open", "list"),
+    close: (noteId) => ipcRenderer.invoke("mbox-desktop:sticky-close", noteId ? String(noteId) : ""),
+    forget: (noteId) => ipcRenderer.invoke("mbox-desktop:sticky-forget", String(noteId)),
+    setOnTop: (value) => ipcRenderer.invoke("mbox-desktop:sticky-on-top", value),
+    minimize: () => ipcRenderer.invoke("mbox-desktop:sticky-minimize"),
+    state: () => ipcRenderer.invoke("mbox-desktop:sticky-state"),
+    focusMain: () => ipcRenderer.invoke("mbox-desktop:sticky-focus-main"),
+  },
   browser: {
     open: (key, url) => ipcRenderer.invoke("mbox-desktop:browser-open", key, url),
     setBounds: (key, bounds) => ipcRenderer.invoke("mbox-desktop:browser-bounds", key, bounds),
@@ -102,6 +134,7 @@ const desktopApi = {
     importPasswords: () => ipcRenderer.invoke("mbox-desktop:browser-import-passwords"),
     credentials: (url) => ipcRenderer.invoke("mbox-desktop:browser-credentials", url),
     fillPassword: (key, username) => ipcRenderer.invoke("mbox-desktop:browser-fill-password", key, username),
+    passwords: (action, ...args) => ipcRenderer.invoke("mbox-desktop:browser-passwords", action, ...args),
     auth: (id, username, password) => ipcRenderer.invoke("mbox-desktop:browser-auth", id, username, password),
     permission: (id, decision, remember) => ipcRenderer.invoke("mbox-desktop:browser-permission", id, decision, remember),
     siteInfo: (key) => ipcRenderer.invoke("mbox-desktop:browser-site-info", key),

@@ -9,6 +9,7 @@ import { formatBytes } from "../../lib/format";
 import { readBrowserSettings, SEARCH_ENGINES, useBrowserSettings } from "./browserSettings";
 import { DOWNLOAD_START_EVENT, downloadPercent, useBrowserDownloads, wireBrowserDownloads, type BrowserDownload } from "./browserDownloads";
 import { OmniboxList, hostOf as omniHost, useOmniboxRows, type OmniboxRow } from "./BrowserOmnibox";
+import { PasswordBar, PasswordsDialog, type PasswordPrompt } from "./BrowserPasswords";
 import { PermissionBar, SiteInfoButton, type SiteInfo, type SitePermissionPrompt } from "./BrowserSiteInfo";
 import { incognitoTabKey, incognitoTabUrl, isIncognitoKey } from "./incognito";
 
@@ -20,6 +21,9 @@ import { incognitoTabKey, incognitoTabUrl, isIncognitoKey } from "./incognito";
  * отправляет в приложение — туда и кладётся настоящая страница Chromium. Поэтому здесь нет ни iframe,
  * ни доступа к содержимому сайта.
  */
+
+/** Снимок страницы: картинка и её место в области страницы (в CSS-пикселях, 1:1 к физическим). */
+type Pic = { url: string; box: { left: number; top: number; width: number; height: number } };
 
 export type BrowserState = {
   key: string;
@@ -40,6 +44,7 @@ export type BrowserState = {
   incognito?: boolean;
   /** Сайт просит разрешение (камера, микрофон, геолокация, уведомления): ответить надо панелью над страницей. */
   permission?: SitePermissionPrompt | null;
+  passwordPrompt?: PasswordPrompt | null;
 };
 
 type BrowserBridge = {
@@ -71,8 +76,9 @@ type BrowserBridge = {
   removeBookmark: (url: string) => Promise<BrowserBookmark[]>;
   chromeProfiles: () => Promise<string[]>;
   importBookmarks: (profile: string) => Promise<{ bookmarks?: { count?: number; error?: string } }>;
-  importPasswords: () => Promise<{ ok?: boolean; count?: number; error?: string; canceled?: boolean }>;
-  credentials: (url: string) => Promise<{ username: string }[]>;
+  importPasswords: () => Promise<{ ok?: boolean; count?: number; added?: number; updated?: number; error?: string; canceled?: boolean }>;
+  credentials: (url: string) => Promise<{ id?: string; username: string }[]>;
+  passwords?: (action: string, ...args: unknown[]) => Promise<unknown>;
   fillPassword: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   /** Ответ на HTTP-вход сайта: null вместо имени — отменить. Нет у старых версий приложения. */
   auth?: (id: string, username: string | null, password?: string) => Promise<{ ok: boolean; error?: string }>;
@@ -205,6 +211,19 @@ function pointerPoint(x: number, y: number, menu: { width: number; height: numbe
   };
 }
 
+type OverlayEvent = { type: "closed" | "action" | "navigate" | "context" | "remove"; kind?: string; url?: string; x?: number; y?: number; background?: boolean };
+type OverlayBridge = {
+  show: (rect: { x: number; y: number; width: number; height: number }, payload: Record<string, unknown>) => Promise<unknown>;
+  hide: () => Promise<unknown>;
+  onEvent: (handler: (event: OverlayEvent) => void) => () => void;
+};
+/** Слой всплывающих окон поверх страницы (только MBOX Desktop с browser-overlay.js). */
+function overlayBridge(): OverlayBridge | null {
+  return (window as unknown as { mboxDesktop?: { overlay?: OverlayBridge } }).mboxDesktop?.overlay ?? null;
+}
+/** Какая вкладка браузера сейчас владеет слоем: события слоя общие для всего окна. */
+let overlayOwner = "";
+
 function bookmarkLabel(item: BrowserBookmark) {
   const title = String(item.title || "").trim();
   if (!title || /^https?:\/\//i.test(title)) return "";
@@ -296,9 +315,13 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
   const [address, setAddress] = useState(url);
   const [editing, setEditing] = useState(false);
   const [bookmarks, setBookmarks] = useState<BrowserBookmark[]>([]);
+  const bookmarksRef = useRef(bookmarks);
+  bookmarksRef.current = bookmarks;
   const [toolsOpen, setToolsOpen] = useState(false);
   // Меню папки — плавающее: рисуется по координатам кнопки, а не раздвигает панель.
-  const [folderOpen, setFolderOpen] = useState<{ name: string; x: number; y: number } | null>(null);
+  // overlay — папка нарисована слоем поверх страницы (browser-overlay.js): страницу не прячем, анимации на сайте идут.
+  const [folderOpen, setFolderOpen] = useState<{ name: string; x: number; y: number; overlay?: boolean } | null>(null);
+  const folderClosedAt = useRef<{ name: string; at: number } | null>(null);
   const [dragUrl, setDragUrl] = useState("");
   const [dropUrl, setDropUrl] = useState("");
   // Что тащат (папка и источник нужны, чтобы переложить закладку) и таймер «раскрыть папку, над которой держат закладку».
@@ -319,7 +342,9 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
   const activeDownloads = downloads.filter((item) => item.state === "progressing").length;
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState("Default");
-  const [credentials, setCredentials] = useState<{ username: string }[]>([]);
+  const [credentials, setCredentials] = useState<{ id?: string; username: string }[]>([]);
+  // Окно «Пароли»: null — закрыто, строка — с каким фильтром открыто (сайт вкладки или пусто).
+  const [passwordsOpen, setPasswordsOpen] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   // Агент сейчас действует в этой вкладке (browser.js подсвечивает поля на самой странице, здесь — кто и что).
   const [agentNote, setAgentNote] = useState<{ actor: string; text: string } | null>(null);
@@ -378,8 +403,15 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
   useEffect(() => {
     if (!bridge || !toolsOpen) return;
     void bridge.chromeProfiles().then((items) => { setProfiles(items); if (items.length && !items.includes(profile)) setProfile(items[0]); });
-    void bridge.credentials(state?.url || url).then(setCredentials);
-  }, [bridge, toolsOpen, state?.url, url]);
+  }, [bridge, toolsOpen]);
+
+  // Сохранённые пароли сайта — для ключа в строке адреса; обновляются и после ответа на «Сохранить пароль?».
+  useEffect(() => {
+    if (!bridge || incognito) { setCredentials([]); return; }
+    let alive = true;
+    void bridge.credentials(state?.url || url).then((items) => { if (alive) setCredentials(items); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [bridge, incognito, state?.url, url, state?.passwordPrompt?.id, passwordsOpen]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -413,6 +445,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
       }
       // Закладки общие: добавили звёздочкой в одной вкладке — панель обновляется во всех сразу.
       if (payload.type === "bookmarks") { setBookmarks(payload.bookmarks || []); return; }
+      // «Управление паролями» из подсказки в поле входа на странице.
+      if (payload.type === "passwords") { if (payload.from === tabKey) setPasswordsOpen(omniHost(String((payload as { origin?: string }).origin || ""))); return; }
       if (payload.type === "shortcut" && payload.key === tabKey) {
         if (payload.action === "address") { addressRef.current?.focus(); addressRef.current?.select(); }
         else if (payload.action === "find") openFind();
@@ -483,11 +517,30 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
 
   // Пока страница спрятана под меню, на её месте держим последний снимок — иначе под попапом
   // зияет пустое место и кажется, что вкладка перезагрузилась.
-  const [frozen, setFrozen] = useState("");
-  // Нативная страница кладётся по округлённым координатам области, а сама область дробная: снимок рисуем по тем же
-  // округлённым границам, иначе при подмене страницы на снимок картинка сдвигается на пару пикселей.
-  const [frozenBox, setFrozenBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  const lastFrozen = useRef("");
+  // Снимок рисуется 1:1 в физических пикселях ровно там, где главный процесс положил страницу. Раньше картинка
+  // растягивалась под CSS-размер области: при дробном масштабе экрана (1,35) это давало сдвиг на 1–2 пикселя, лишние
+  // 0,3% размера и «толстый» текст — замерено по кадрам экрана.
+  const [frozen, setFrozen] = useState<Pic | null>(null);
+  // Свежий снимок постоянно нарисован ПОД живой страницей (её окно лежит сверху и его закрывает). Когда открывается
+  // меню, страница просто прячется — а под ней уже готовая картинка. Пустого (тёмного) кадра больше нет: его и было видно
+  // как мигание, потому что картинка рисовалась после того, как страница уже ушла.
+  const [underlay, setUnderlay] = useState<Pic | null>(null);
+  const underlayRef = useRef<Pic | null>(null);
+  const underlayAt = useRef(0);
+  const lastFrozen = useRef<Pic | null>(null);
+  const prefetching = useRef(false);
+  const picOf = useCallback(async (url: string): Promise<Pic | null> => {
+    const probe = new Image();
+    probe.src = url;
+    try { await probe.decode(); } catch { return null; }
+    const rect = stageRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const dpr = window.devicePixelRatio || 1;
+    // Начало страницы главного процесса: округлённые координаты области (как в report), переведённые в физические пиксели.
+    const left = Math.round(Math.round(rect.left) * dpr) / dpr - rect.left;
+    const top = Math.round(Math.round(rect.top) * dpr) / dpr - rect.top;
+    return { url, box: { left, top, width: probe.naturalWidth / dpr, height: probe.naturalHeight / dpr } };
+  }, []);
   // Пустая вкладка — стартовая страница MBOX вместо белого about:blank; плавающие окна (папка, история,
   // настройки) тоже прячут страницу: её рисует главный процесс поверх окна, и она закрыла бы их собой.
   const isBlank = state ? !state.url || state.url === "about:blank" : !url;
@@ -498,7 +551,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     lastUrl.current = state?.url;
   }, [state?.url]);
   const overlayOpen = useOverlayOpen();
-  const hidden = Boolean(folderOpen) || bookmarksOpen || historyOpen || toolsOpen || downloadsOpen || isBlank || overlayOpen || (omniOpen && omniRows.length > 0);
+  const hidden = Boolean(folderOpen && !folderOpen.overlay) || bookmarksOpen || historyOpen || toolsOpen || downloadsOpen || isBlank || overlayOpen || (omniOpen && omniRows.length > 0);
   // Снимок нужно сделать, пока страница ещё видна: capture() у спрятанной вкладки пустой. Раньше
   // уборка прошлого эффекта прятала страницу раньше снимка — и под «…» зияла пустота вместо сайта.
   const hiddenRef = useRef(hidden);
@@ -514,27 +567,32 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
         void bridge.hide(tabKey);
         return () => { cancelled = true; };
       }
+      const ready = underlayRef.current;
+      if (ready && Date.now() - underlayAt.current < 4000) {
+        // Снимок уже нарисован под страницей — прячем её сразу, в этот же момент.
+        lastFrozen.current = ready;
+        setFrozen(ready);
+        void bridge.hide(tabKey);
+        return () => { cancelled = true; };
+      }
       const capture = bridge.capture?.(tabKey) ?? Promise.resolve("");
       const limit = new Promise<string>((resolve) => window.setTimeout(() => resolve(""), 900));
       void Promise.race([capture, limit]).then(async (shot) => {
         if (cancelled) return;
-        const picture = shot || lastFrozen.current;
+        const picture = (shot ? await picOf(shot) : null) || lastFrozen.current;
+        if (cancelled) return;
         if (picture) {
-          // Картинка должна быть декодирована и нарисована, пока живая страница ещё на месте: иначе на кадр виден пустой фон.
-          try { const probe = new Image(); probe.src = picture; await probe.decode(); } catch { /* покажем как есть */ }
-          if (cancelled) return;
-          if (shot) lastFrozen.current = shot;
-          const rect = stageRef.current?.getBoundingClientRect();
-          setFrozenBox(rect ? { left: Math.round(rect.left) - rect.left, top: Math.round(rect.top) - rect.top, width: Math.round(rect.width), height: Math.round(rect.height) } : null);
+          // Картинка должна быть нарисована, пока живая страница ещё на месте: иначе на кадр виден пустой фон.
+          lastFrozen.current = picture;
           setFrozen(picture);
-          await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))));
         }
         if (!cancelled && hiddenRef.current) void bridge.hide(tabKey);
       }).catch(() => { if (!cancelled) void bridge.hide(tabKey); });
       return () => { cancelled = true; };
     }
     // Страницу показываем первой, снимок убираем чуть позже: иначе между ними на кадр виден пустой фон.
-    const unfreeze = window.setTimeout(() => setFrozen(""), 160);
+    const unfreeze = window.setTimeout(() => setFrozen(null), 160);
     report();
     const releaseVisible = claimVisibleBrowser(bridge, tabKey);
     const frame = window.requestAnimationFrame(report);
@@ -545,7 +603,29 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     if (stageRef.current) observer.observe(stageRef.current);
     const timer = window.setInterval(report, 1500);
     window.addEventListener("resize", report);
+    underlayAt.current = 0;
+    // Указатель над интерфейсом, а не над страницей — значит, скоро может открыться меню: держим свежий снимок наготове
+    // под страницей. Над самой страницей события сюда не приходят (её рисует главный процесс), поэтому лишней работы нет.
+    // Пауза в событиях значит, что указатель был над страницей (там могли прокрутить) — тогда снимаем сразу, без паузы.
+    let lastMove = 0;
+    const prefetch = () => {
+      const now = Date.now();
+      const returned = now - lastMove > 250;
+      lastMove = now;
+      if (prefetching.current || !bridge.capture || hiddenRef.current) return;
+      if (!returned && now - underlayAt.current < 1000) return;
+      prefetching.current = true;
+      void bridge.capture(tabKey).then(async (shot) => {
+        const pic = shot ? await picOf(shot) : null;
+        if (!pic || hiddenRef.current) return;
+        underlayRef.current = pic;
+        underlayAt.current = Date.now();
+        setUnderlay(pic);
+      }).catch(() => undefined).finally(() => { prefetching.current = false; });
+    };
+    window.addEventListener("pointermove", prefetch, { passive: true });
     return () => {
+      window.removeEventListener("pointermove", prefetch);
       window.clearTimeout(unfreeze);
       window.cancelAnimationFrame(frame);
       observer.disconnect();
@@ -625,6 +705,55 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     folderRows.push({ kind: "bookmark", item, depth: nested.length });
   }
 
+  // Папка в слое: при каждом изменении содержимого слой перерисовывается на том же месте.
+  const folderOverlayRows = folderOpen?.overlay
+    ? folderRows.map((row) => row.kind === "group"
+      ? row
+      : { kind: "bookmark" as const, url: row.item.url, label: bookmarkLabel(row.item) || bookmarkHost(row.item.url), depth: row.depth })
+    : null;
+  const folderOverlayKey = folderOpen?.overlay ? JSON.stringify([folderOpen.name, folderOpen.x, folderOpen.y, folderOverlayRows]) : "";
+  useEffect(() => {
+    const overlay = overlayBridge();
+    if (!overlay || !folderOpen?.overlay || !folderOverlayRows) return;
+    overlayOwner = tabKey;
+    void overlay.show(
+      { x: folderOpen.x, y: folderOpen.y, width: 320, height: Math.min(window.innerHeight * 0.6, 460) },
+      { kind: "bookmark-folder", theme: document.documentElement.dataset.theme || "graphite", name: folderOpen.name, count: folderItems.length, rows: folderOverlayRows, width: 320, maxHeight: Math.min(window.innerHeight * 0.6, 460) },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderOverlayKey]);
+  useEffect(() => {
+    if (!folderOpen?.overlay) return;
+    return () => { if (overlayOwner === tabKey) void overlayBridge()?.hide(); };
+  }, [folderOpen?.overlay, tabKey]);
+  // Обработчики событий слоя — всегда свежие (подписка одна на вкладку, а функции замыкают текущее состояние).
+  const overlayActions = useRef({ navigate: (_url: string) => {}, menu: (_item: BrowserBookmark, _x: number, _y: number) => {}, remove: (_item: BrowserBookmark) => {} });
+  overlayActions.current = { navigate, menu: (item, x, y) => openBookmarkMenu(item, x, y, true), remove: (item) => void removeFromFolder(item) };
+  useEffect(() => {
+    const overlay = overlayBridge();
+    if (!overlay) return;
+    return overlay.onEvent((event) => {
+      if (overlayOwner !== tabKey || event.kind !== "bookmark-folder") return;
+      if (event.type === "closed") {
+        setFolderOpen((current) => {
+          if (current?.overlay) folderClosedAt.current = { name: current.name, at: Date.now() };
+          return current?.overlay ? null : current;
+        });
+        return;
+      }
+      const item = event.url ? bookmarksRef.current.find((entry) => entry.url === event.url) : undefined;
+      if (event.type === "navigate" && event.url) {
+        if (event.background) tabs.open(incognito ? incognitoTabKey(event.url) : browserTabKey(event.url), false);
+        else overlayActions.current.navigate(event.url);
+      } else if (event.type === "context" && item && Number.isFinite(event.x) && Number.isFinite(event.y)) {
+        overlayActions.current.menu(item, event.x as number, event.y as number);
+      } else if (event.type === "remove" && item) {
+        overlayActions.current.remove(item);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabKey]);
+
   function beginDrag(item: BrowserBookmark, event: ReactDragEvent) {
     dragRef.current = item;
     setDragUrl(item.url);
@@ -676,7 +805,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     // Меню рисуется порталом в корень рабочего места (как WbMenu): внутри области браузера его обрезала бы
     // соседняя панель чата, а у панелей contain: layout, из-за чего fixed считался бы от области, а не от окна.
     const point = pointerPoint(x, y, { width: 320, height: Math.min(window.innerHeight * 0.6, 440) });
-    setFolderOpen({ name, x: point.x, y: point.y });
+    // Пока тащат закладку, папка остаётся окном интерфейса: перетаскивание между разными слоями ненадёжно.
+    setFolderOpen({ name, x: point.x, y: point.y, overlay: Boolean(overlayBridge()) && !dragRef.current });
+  }
+
+  /** Щелчок по кнопке открытой папки: слой уже закрылся от потери фокуса — не открываем его тут же снова. */
+  function justClosed(name: string) {
+    const closed = folderClosedAt.current;
+    return Boolean(closed && closed.name === name && Date.now() - closed.at < 350);
   }
 
   async function toggleBookmark() {
@@ -700,7 +836,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
     setBusy(true);
     try {
       const result = await bridge!.importPasswords();
-      if (!result.canceled) setMessage(result.error || `Импортировано паролей: ${result.count ?? 0}. Удалите CSV после импорта.`);
+      if (!result.canceled) setMessage(result.error || `Паролей добавлено: ${result.added ?? result.count ?? 0}${result.updated ? `, обновлено: ${result.updated}` : ""}. Удалите CSV после импорта.`);
       setCredentials(await bridge!.credentials(pageUrl));
     } catch (error) { setMessage(String(error)); }
     finally { setBusy(false); }
@@ -842,6 +978,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
               {state.zoom}%
             </button>
           )}
+          {credentials.length > 0 && !incognito && (
+            <button type="button" className="wb-browser-star" onClick={() => setPasswordsOpen(omniHost(pageUrl))} title={`Сохранённые пароли для сайта: ${credentials.length}`} aria-label="Сохранённые пароли для сайта">
+              <KeyRound size={14} />
+            </button>
+          )}
           <button type="button" className="wb-browser-star" disabled={!/^https?:\/\//i.test(pageUrl)} onClick={() => void toggleBookmark()} title={saved ? "Убрать из закладок" : "Добавить в закладки"} aria-label={saved ? "Убрать из закладок" : "Добавить в закладки"} aria-pressed={saved}>
             <Star size={15} fill={saved ? "currentColor" : "none"} />
           </button>
@@ -917,7 +1058,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
                 onClick={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
                   if (folderOpen?.name === name) setFolderOpen(null);
-                  else openBookmarkFolder(name, rect.left, rect.bottom + 4);
+                  else if (!justClosed(name)) openBookmarkFolder(name, rect.left, rect.bottom + 4);
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -979,7 +1120,7 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
             onClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               if (folderOpen?.name === "Другие") setFolderOpen(null);
-              else openBookmarkFolder("Другие", rect.left, rect.bottom + 4);
+              else if (!justClosed("Другие")) openBookmarkFolder("Другие", rect.left, rect.bottom + 4);
             }}
           >
             <FolderIcon size={16} open={folderOpen?.name === "Другие"} />
@@ -989,11 +1130,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
       </div>
 
       {/* Плавающие окна: подложка ловит клик мимо и закрывает их. */}
-      {(folderOpen || bookmarksOpen || historyOpen || toolsOpen || downloadsOpen) && (
+      {((folderOpen && !folderOpen.overlay) || bookmarksOpen || historyOpen || toolsOpen || downloadsOpen) && (
         <div className="wb-bookmark-scrim" onClick={closePanels} onContextMenu={(event) => { event.preventDefault(); closePanels(); }} />
       )}
 
-      {folderOpen && createPortal(
+      {folderOpen && !folderOpen.overlay && createPortal(
         <div className="wb-browser-pop wb-browser-folder-menu" style={{ left: folderOpen.x, top: folderOpen.y }} role="menu" aria-label={`Закладки: ${folderOpen.name}`}>
           <div className="wb-browser-pop-head"><FolderIcon size={16} open /><span>{folderOpen.name}</span><small>{folderItems.length}</small></div>
           <div
@@ -1218,14 +1359,11 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
               <button type="button" disabled={busy || !profiles.length} onClick={() => void importBookmarks()}><Import size={14} /> Закладки</button>
               <button type="button" disabled={busy} onClick={() => void importPasswords()}><KeyRound size={14} /> Пароли из CSV</button>
             </div>
-            <small>Пароли сначала экспортируйте в Chrome. Они сохранятся только на этом компьютере.</small>
+            <small>Пароли сначала экспортируйте в Chrome. Они добавятся к сохранённым и останутся только на этом компьютере.</small>
           </section>
-          {credentials.length > 0 && (
+          {bridge.passwords && (
             <section>
-              <h4>Вход на этот сайт</h4>
-              <div className="wb-browser-pop-buttons">
-                {credentials.map((item) => <button type="button" key={item.username} onClick={() => { void bridge.fillPassword(tabKey, item.username).then((result) => { setMessage(result.error || "Поля входа заполнены"); setToolsOpen(false); }); }}><KeyRound size={14} /> {item.username}</button>)}
-              </div>
+              <button type="button" className="wb-browser-pop-link" onClick={() => { setToolsOpen(false); setPasswordsOpen(""); }}><KeyRound size={13} /> Пароли{credentials.length ? ` · для этого сайта: ${credentials.length}` : ""}</button>
             </section>
           )}
           {!isBlank && (
@@ -1261,6 +1399,8 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
       )}
       {state?.error && <div className="wb-banner is-error" role="alert">{state.error}</div>}
       {state?.permission && bridge.permission && <PermissionBar prompt={state.permission} bridge={bridge} />}
+      {state?.passwordPrompt && bridge.passwords && !incognito && <PasswordBar prompt={state.passwordPrompt} bridge={bridge} />}
+      {passwordsOpen !== null && bridge.passwords && <PasswordsDialog bridge={bridge} initialQuery={passwordsOpen} onClose={() => setPasswordsOpen(null)} />}
       {help && (
         <div className="wb-browser-help" role="alert">
           <LifeBuoy size={18} aria-hidden="true" />
@@ -1277,7 +1417,14 @@ export function BrowserDocument({ tabKey, visible, tabs, onTitle, onState, onOpe
       {/* Пустое место под страницу: её рисует поверх главный процесс по этим координатам. */}
       <div ref={stageRef} className="wb-browser-stage" data-scroll-memory="off">
         {isBlank && !state?.auth && <BrowserStartPage engine={engineLabel} bookmarks={bookmarks} history={bridge.history} onNavigate={navigate} incognito={incognito} />}
-        {frozen && !isBlank && !state?.auth && <img className="wb-browser-frozen" src={frozen} alt="" draggable={false} style={frozenBox ? { left: frozenBox.left, top: frozenBox.top, right: "auto", bottom: "auto", width: frozenBox.width, height: frozenBox.height, objectFit: "fill" } : undefined} />}
+        {(() => {
+          // Пока страница видна, снимок лежит под ней (готов к мгновенной подмене); пока спрятана — он и есть страница.
+          // Подложку не снимаем и в первый кадр «спрятано»: тот же <img> должен остаться в DOM. Раньше в этот кадр
+          // картинка исчезала, а следующим кадром монтировалась заново — PNG декодировался, и окно мигало тёмным.
+          const pic = frozen ?? (visible ? underlay : null);
+          if (!pic || isBlank || state?.auth) return null;
+          return <img className="wb-browser-frozen" src={pic.url} alt="" draggable={false} style={{ left: pic.box.left, top: pic.box.top, right: "auto", bottom: "auto", width: pic.box.width, height: pic.box.height, objectFit: "fill" }} />;
+        })()}
         {state?.auth && bridge?.auth && <BrowserAuthForm key={state.auth.id} auth={state.auth} answer={bridge.auth} />}
       </div>
     </div>

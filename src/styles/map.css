@@ -194,8 +194,7 @@
   display: grid;
   gap: 2px;
   padding: var(--space-3) var(--space-4);
-  border: var(--border-width) solid var(--border-color);
-  border-left: 3px solid var(--node-color, var(--status-next));
+  border: var(--border-width) solid color-mix(in srgb, var(--node-color, var(--status-next)) 30%, var(--border-color));
   border-radius: var(--radius-lg);
   background: var(--element-bg);
   box-shadow: var(--chin-shadow);
@@ -343,7 +342,6 @@
 /* Проекты-хабы светятся своим цветом — сразу видно их среди задач-спутников. */
 .map-node.kind-project {
   border-color: color-mix(in srgb, var(--node-color, var(--status-next)) 42%, var(--border-color));
-  border-left-width: 3px;
   box-shadow:
     var(--chin-shadow),
     0 0 0 1px color-mix(in srgb, var(--node-color, var(--status-next)) 32%, transparent),

@@ -5,6 +5,7 @@ const localUi = require("./localUi");
 const serverState = require("./server-state");
 const browser = require("./browser");
 const chromeImport = require("./import-chrome");
+const passwordStore = require("./password-store");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -26,6 +27,8 @@ const responderEnv = loadResponderEnv();
 // Обновления приложения всегда с основного сервера: у чужого MBOX папки downloads нет.
 const updateFeedUrl = `${DEFAULT_MBOX_URL}/downloads/`;
 const iconPath = path.join(__dirname, "resources", "mbox.png");
+const { createStickyNotes } = require("./sticky-notes");
+const { createOverlay } = require("./browser-overlay");
 const processPatterns = {
   Codex: "codex-chat-watcher.mjs",
   Claude: "claude-inbox-watcher.mjs"
@@ -79,6 +82,23 @@ app.whenReady().then(async () => {
   }
   session.defaultSession.protocol.handle(localUi.MEDIA_SCHEME, serveWorkspaceMedia);
   createWindow();
+  stickyNotes = createStickyNotes({
+    baseUrl: () => withDesktopFlag(useLocalUi ? `${localUi.APP_ORIGIN}/` : mboxUrl),
+    preload: path.join(__dirname, "preload.js"),
+    additionalArguments: [`--mbox-server=${mboxUrl}`, `--mbox-local-ui=${useLocalUi ? "1" : "0"}`],
+    icon: iconPath,
+    onFocusMain: () => { if (!mainWindow) return; if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); },
+  });
+  stickyNotes.install();
+  // Всплывающие окна браузера (папки закладок) — отдельным прозрачным слоем поверх страницы, без снимка.
+  createOverlay({
+    getWindow: () => mainWindow,
+    url: () => { const url = new URL(withDesktopFlag(useLocalUi ? `${localUi.APP_ORIGIN}/` : mboxUrl)); url.searchParams.set("overlay", "1"); return url.toString(); },
+    preload: path.join(__dirname, "preload.js"),
+    additionalArguments: [`--mbox-server=${mboxUrl}`, `--mbox-local-ui=${useLocalUi ? "1" : "0"}`],
+  }).install();
+  // Заметки, оставленные на рабочем столе, возвращаются на свои места вместе с приложением.
+  stickyNotes.restore();
   createTray();
   setMenu();
   setupAutoUpdates();
@@ -92,6 +112,8 @@ app.whenReady().then(async () => {
     await startResponders({ reveal: false, takeover: true }).catch((error) => log(`autostart responders failed: ${error.message}`));
   }
 });
+
+let stickyNotes = null;
 
 app.on("window-all-closed", () => {});
 
@@ -1333,6 +1355,22 @@ ipcMain.handle("mbox-desktop:browser-credentials", async (event, url) => {
 ipcMain.handle("mbox-desktop:browser-fill-password", async (event, key, username) => {
   assertBrowserHost(event);
   return browser.fillPassword(String(key), String(username));
+});
+// Менеджер паролей встроенного браузера (окно «Пароли» и панель «Сохранить пароль?»). Только для интерфейса MBOX:
+// страницы сайтов ходят в browser-passwords.js и получают пароль лишь своего сайта.
+ipcMain.handle("mbox-desktop:browser-passwords", async (event, action, ...args) => {
+  assertBrowserHost(event);
+  const id = String(args[0] || "");
+  switch (action) {
+    case "list": return { available: passwordStore.available(), entries: passwordStore.list(), never: passwordStore.neverList() };
+    case "reveal": return passwordStore.secret(id)?.password ?? null;
+    case "update": return passwordStore.update(id, args[1] || {});
+    case "remove": return passwordStore.remove(id);
+    case "allow": return passwordStore.allow(id);
+    case "answer": return browser.answerPassword(id, String(args[1] || ""), args[2] || {});
+    case "prompt-secret": return browser.passwordPromptSecret(id);
+    default: return { ok: false, error: "unknown_action" };
+  }
 });
 ipcMain.handle("mbox-desktop:install-update", async () => {
   autoUpdater.quitAndInstall(false, true);

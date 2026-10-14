@@ -179,7 +179,7 @@
     .pane > * + * { margin-top: 10px; }
 
     /* Библиотека */
-    .lib-tools { position: sticky; top: -10px; z-index: 2; display: grid; gap: 8px; margin: -10px -10px 0; padding: 10px; background: var(--surface); }
+    .lib-tools { position: sticky; top: -10px; z-index: 10; display: grid; gap: 8px; margin: -10px -10px 0; padding: 10px; background: var(--surface); }
     .search { position: relative; }
     .search .i { position: absolute; top: 9px; left: 11px; color: var(--text-muted); }
     .search input { padding-left: 34px; }
@@ -188,7 +188,7 @@
     .cats button:hover { color: var(--text); }
     .cats button.on { background: var(--selected); color: var(--accent); }
     .lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; }
-    .comp { position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--element); cursor: grab; transition: border-color .12s, box-shadow .12s; }
+    .comp { position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--element); cursor: grab; transition: border-color .12s, box-shadow .12s; isolation: isolate; }
     .comp:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--shadow-sm); }
     .comp:active { cursor: grabbing; }
     .comp-thumb { position: relative; height: 104px; overflow: hidden; background: #fff6ed; pointer-events: none; }

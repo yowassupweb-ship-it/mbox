@@ -9,6 +9,7 @@ import { onWorkspaceChange, rootName, workspaceBridge, type DataRead } from "./l
 import type { TabsApi } from "./tabs";
 import { base64ToArrayBuffer, bytesToBase64, parseDelimited, delimitedContent } from "./officeFormat";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { ImportOffer } from "./ImportOffer";
 
 const PdfViewer = lazy(() => import("./PdfViewer"));
 const SheetEditor = lazy(() => import("./UniverSheetEditor").then((module) => ({ default: module.SheetEditor })));
@@ -167,6 +168,7 @@ export function LocalOfficeDocument({ rootKey, path, tabs, tabKey, visible, onDi
       )}
     >
       {find.bar}
+      <ImportOffer id={tabKey} name={path} tabs={tabs} load={async () => { if (!bridge?.readData) throw new Error("Нет доступа к диску"); const read = await bridge.readData(rootKey, path); if (read.tooLarge) throw new Error("Файл слишком большой для переноса в MBOX"); return new Blob([base64ToArrayBuffer(read.base64)]); }} />
       {error && <div className="wb-banner is-error" role="alert">{error}</div>}
       {loading ? <div className="wb-doc-missing" role="status" aria-live="polite">Открываю {path}…</div>
         : file?.tooLarge ? <div className="wb-doc-missing">Файл {formatBytes(file.size)} — слишком большой для встроенного просмотра.</div>

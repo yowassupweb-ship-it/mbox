@@ -665,6 +665,81 @@
 .bug-attach:hover { background: var(--wb-hover); color: var(--text-main); }
 
 /* Страховка от двоения текста: пока в поле фокус, показываем только само поле, а домен-наложение прячем. */
-.wb-browser-address:focus-within .wb-browser-urltext { display: none; }
+.wb-browser-address:has(input:focus) .wb-browser-urltext { display: none; }
 .wb-browser-address input.is-idle:focus { color: var(--text-main); caret-color: auto; text-align: left; }
 .wb-browser-address input.is-idle:focus::placeholder { color: var(--text-muted); }
+
+/* Иконки сайтов не обрезаем: скругление и круглые рамки срезали углы у квадратных значков. */
+.wb-browser-favicon, img.wb-browser-favicon { border-radius: 0 !important; clip-path: none !important; }
+
+/* ─── Пароли (BrowserPasswords.tsx) ─── */
+.wb-pw-bar { flex-wrap: wrap; row-gap: 8px; }
+.wb-pw-bar .wb-permission-text { flex: 1 1 200px; }
+.wb-pw-error { color: var(--state-danger) !important; }
+.wb-pw-field { position: relative; display: flex; align-items: center; flex: 0 1 190px; min-width: 120px; }
+.wb-pw-field input { width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.wb-pw-field input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
+.wb-pw-field input:disabled { opacity: .75; }
+.wb-pw-field.is-secret input { padding-right: 32px; font-family: var(--font-mono); letter-spacing: .04em; }
+.wb-pw-field button { position: absolute; right: 3px; width: 26px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-muted); cursor: pointer; }
+.wb-pw-field button:hover { background: var(--wb-hover); color: var(--text-main); }
+
+.wb-pw-scrim { position: fixed; inset: 0; z-index: calc(var(--z-panel) + 20); display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, #000 38%, transparent); animation: wb-pw-fade var(--duration-fast) var(--ease-out); }
+@keyframes wb-pw-fade { from { opacity: 0; } }
+.wb-pw-dialog { display: flex; flex-direction: column; width: min(720px, 100%); max-height: min(720px, calc(100vh - 32px)); border: 1px solid var(--wb-line); border-radius: var(--radius-xl); background: var(--wb-surface); color: var(--text-main); box-shadow: var(--float); overflow: hidden; }
+.wb-pw-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px 18px; }
+.wb-pw-head-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent-color) 16%, transparent); color: var(--accent-color); }
+.wb-pw-head-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.wb-pw-head-text h2 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.wb-pw-head-text small { color: var(--text-muted); font-size: var(--text-xs); }
+.wb-pw-ghost { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: var(--radius-pill); background: none; color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.wb-pw-ghost:hover { background: var(--wb-hover); }
+.wb-pw-icon { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-2); cursor: pointer; }
+.wb-pw-icon:hover { background: var(--wb-hover); color: var(--text-main); }
+.wb-pw-icon.is-danger:hover { color: var(--state-danger); }
+.wb-pw-icon.is-primary { background: var(--accent-fill); color: var(--on-accent); }
+.wb-pw-icon.is-primary:hover { background: var(--accent-fill-hover); color: var(--on-accent); }
+.wb-pw-icon:focus-visible, .wb-pw-ghost:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
+.wb-pw-at { font-weight: var(--weight-semibold); font-size: var(--text-sm); }
+.wb-pw-search { display: flex; align-items: center; gap: 8px; margin: 0 16px 10px; padding: 0 10px; height: 34px; border-radius: var(--radius-md); background: var(--surface-hover); color: var(--text-muted); }
+.wb-pw-search input { flex: 1 1 auto; min-width: 0; border: 0; background: none; color: var(--text-main); font: inherit; font-size: var(--text-sm); outline: none; }
+.wb-pw-search button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--text-muted); cursor: pointer; }
+.wb-pw-body { flex: 1 1 auto; min-height: 120px; overflow: auto; padding: 0 10px 8px; }
+.wb-pw-site, .wb-pw-never { padding: 4px 0; border-top: 1px solid var(--wb-line); }
+.wb-pw-site:first-child { border-top: 0; }
+.wb-pw-site h3, .wb-pw-never h3 { display: flex; align-items: center; gap: 8px; margin: 8px 8px 4px; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.wb-pw-site h3 small { margin-left: auto; color: var(--text-muted); font-weight: var(--weight-normal); }
+.wb-pw-never h3 { color: var(--text-muted); font-weight: var(--weight-medium); }
+.wb-pw-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto; align-items: center; gap: 10px; padding: 6px 8px 6px 32px; border-radius: var(--radius-md); }
+.wb-pw-never .wb-pw-row { grid-template-columns: minmax(0, 1fr) auto; padding-left: 8px; }
+.wb-pw-row:hover { background: var(--wb-hover); }
+.wb-pw-user { min-width: 0; display: grid; gap: 1px; }
+.wb-pw-user b { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.wb-pw-user b i { color: var(--text-muted); font-weight: var(--weight-normal); }
+.wb-pw-user small { color: var(--text-muted); font-size: var(--text-2xs); }
+.wb-pw-secret { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: .08em; user-select: none; }
+.wb-pw-secret.is-shown { color: var(--text-main); letter-spacing: 0; user-select: text; }
+.wb-pw-actions { display: flex; gap: 2px; opacity: .55; transition: opacity var(--duration-fast) var(--ease-out); }
+.wb-pw-row:hover .wb-pw-actions, .wb-pw-actions:focus-within { opacity: 1; }
+.wb-pw-row.is-editing { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto; background: var(--wb-hover); }
+.wb-pw-row.is-editing input { height: 30px; min-width: 0; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.wb-pw-row.is-editing input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
+.wb-pw-empty { display: grid; justify-items: center; gap: 8px; padding: 36px 24px 40px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.wb-pw-empty svg { color: var(--accent-color); opacity: .8; }
+.wb-pw-empty b { color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.wb-pw-empty span { max-width: 420px; }
+.wb-pw-note { margin: 10px 8px; color: var(--text-muted); font-size: var(--text-sm); }
+.wb-pw-note.is-warn { color: var(--state-danger); }
+.wb-pw-foot { min-height: 30px; padding: 6px 18px 10px; color: var(--text-muted); font-size: var(--text-xs); }
+@media (max-width: 560px) {
+  .wb-pw-row { grid-template-columns: minmax(0, 1fr) auto; padding-left: 8px; }
+  .wb-pw-secret { grid-column: 1 / -1; grid-row: 2; }
+  .wb-pw-actions { opacity: 1; }
+  .wb-pw-head-text small { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .wb-pw-scrim { animation: none; } }
+
+/* Слой всплывающих окон поверх страницы (OverlayApp): прозрачный фон, окно — в потоке, а не fixed. */
+html.is-overlay, html.is-overlay body, html.is-overlay #root { margin: 0; background: transparent !important; overflow: hidden; }
+.ov-root { box-sizing: border-box; display: inline-block; }
+.ov-pop.wb-browser-pop { position: relative; left: auto; top: auto; z-index: auto; box-shadow: 0 10px 28px rgba(0, 0, 0, .32), 0 0 0 1px var(--border-color); animation: none; }

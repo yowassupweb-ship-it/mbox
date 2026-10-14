@@ -43,6 +43,12 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: "История", hint: "Журнал аудита", icon: `${SYSTEM}/history.png` };
     case "settings":
       return { title: "Настройки", hint: "Сервер и доступ", icon: `${SYSTEM}/settings.png` };
+    case "project":
+      return { title: project?.name ?? `Проект #${first}`, hint: "Страница проекта", icon: `${SYSTEM}/properties.png`, glyph: "project" };
+    case "company": {
+      const company = data.companies.find((item) => item.id === first);
+      return { title: company?.name ?? `Компания #${first}`, hint: "Карточка компании", icon: `${SYSTEM}/properties.png`, glyph: "company" };
+    }
     case "todos":
       return { title: `Todo · ${project?.name ?? `#${first}`}`, hint: "Задачи проекта", icon: `${SYSTEM}/todo.png`, glyph: "todos" };
     case "entity": {

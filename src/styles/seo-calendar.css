@@ -68,7 +68,7 @@
 .seo-cal-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-md); background: var(--element-bg); }
 .seo-cal-panel h4 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); text-transform: capitalize; }
 .seo-cal-panel ul { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
-.seo-cal-event { display: flex; flex-direction: column; gap: 6px; padding-left: var(--space-3); border-left: 3px solid var(--tone, var(--border-color)); }
+.seo-cal-event { display: flex; flex-direction: column; gap: 6px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--tone, var(--border-color)) 10%, transparent); }
 .seo-cal-event p { margin: 0; font-size: var(--text-sm); line-height: 1.5; }
 .seo-cal-event-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .seo-cal-event-head strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); }

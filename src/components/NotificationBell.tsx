@@ -1,5 +1,6 @@
 import { Bell, BellOff, CheckCheck } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { markOverlay } from "../app/workbench/BrowserDocument";
 import { ENTITY_CHANGED_EVENT } from "../hooks/useRealtime";
 import { fetchJson } from "../lib/api";
 import { formatSince } from "../lib/format";
@@ -86,6 +87,8 @@ export function NotificationBell({ onOpenTodo }: { onOpenTodo?: (todoId: string)
   useEffect(() => {
     openRef.current = open;
     if (!open) return;
+    // Страница встроенного браузера рисуется поверх всего окна — пока список открыт, её подменяет снимок.
+    markOverlay(true);
     const close = () => { setOpen(false); void markRead(); };
     const onDown = (event: MouseEvent) => {
       if (rootRef.current?.contains(event.target as Node)) return;
@@ -95,6 +98,7 @@ export function NotificationBell({ onOpenTodo }: { onOpenTodo?: (todoId: string)
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey);
     return () => {
+      markOverlay(false);
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("keydown", onKey);
     };

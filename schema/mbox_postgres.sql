@@ -157,6 +157,9 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#2c2
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'private';
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+-- Проект принадлежит одной компании (server/companies.mjs; там же перенос старых связей owns из graph_edges).
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS company_id BIGINT REFERENCES companies(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id);
 
 CREATE TABLE IF NOT EXISTS todos (
   id BIGSERIAL PRIMARY KEY,

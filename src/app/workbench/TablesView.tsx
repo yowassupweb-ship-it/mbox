@@ -120,7 +120,7 @@ export function TablesView({ tabs, defaultProjectId = null, onOpen }: { tabs: Ta
     window.addEventListener(SHEETS_MODE_EVENT, onMode);
     return () => window.removeEventListener(SHEETS_MODE_EVENT, onMode);
   }, [setMode]);
-  if (mode === "notes") return <NotesView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} switcher={<SheetsDocsSwitch mode={mode} onMode={setMode} />} />;
+  if (mode === "notes") return <NotesView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} switcher={(count: number) => <SheetsDocsSwitch mode={mode} onMode={setMode} count={count} />} />;
   if (mode === "slides") return <PresentationsView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />;
   return mode === "docs"
     ? <DocumentsView tabs={tabs} defaultProjectId={defaultProjectId} onOpen={onOpen} mode={mode} onMode={setMode} />

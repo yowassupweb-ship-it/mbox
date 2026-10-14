@@ -4,7 +4,8 @@ import { ShareButton } from "./ShareLinks";
 import { usePresence } from "./presence";
 import { PresenceAvatars } from "./PresenceAvatars";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Copy, Eye, FileText, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Trash2, Upload, Users, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Copy, Eye, FileText, FolderClosed, GitCompare, Globe2, History, Link2, Lock, MoreHorizontal, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, StickyNote, Trash2, Upload, Users, X } from "lucide-react";
+import { dragNoteOut, openSticky, stickyBridge } from "./stickyBridge";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
@@ -135,7 +136,7 @@ if (typeof window !== "undefined") {
   });
 }
 
-export function NotesView({ tabs, defaultProjectId = null, onOpen, switcher }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void; switcher?: ReactNode }) {
+export function NotesView({ tabs, defaultProjectId = null, onOpen, switcher }: { tabs: TabsApi; defaultProjectId?: string | null; onOpen?: () => void; switcher?: ReactNode | ((count: number) => ReactNode) }) {
   const [, setTick] = useState(0);
   const [query, setQuery] = useState(notesStore.query);
   const [importing, setImporting] = useState(false);
@@ -226,7 +227,7 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen, switcher }: {
   function renderItem(note: Note) {
     const key = `note:${note.id}`;
     return (
-      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} onClick={() => { tabs.open(key); onOpen?.(); }} onDoubleClick={() => { tabs.open(key, true); onOpen?.(); }} onContextMenu={(event) => { event.preventDefault(); setContext({ note, x: event.clientX, y: event.clientY }); }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") { tabs.open(key, true); onOpen?.(); } if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setContext({ note, x: rect.left + 24, y: rect.bottom }); } }}>
+      <div key={note.id} data-note-color={note.color || "default"} className={tabs.active === key ? "wb-note-item is-active" : "wb-note-item"} draggable={Boolean(stickyBridge())} onDragStart={(event) => { event.dataTransfer.setData("text/plain", note.title || ""); event.dataTransfer.effectAllowed = "copyMove"; }} onDragEnd={(event) => dragNoteOut(event, note.id)} title={stickyBridge() ? "Перетащите за окно MBOX — заметка встанет на рабочий стол" : undefined} onClick={() => { tabs.open(key); onOpen?.(); }} onDoubleClick={() => { tabs.open(key, true); onOpen?.(); }} onContextMenu={(event) => { event.preventDefault(); setContext({ note, x: event.clientX, y: event.clientY }); }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") { tabs.open(key, true); onOpen?.(); } if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setContext({ note, x: rect.left + 24, y: rect.bottom }); } }}>
         <div className="wb-note-item-title">{note.title || "Пустая заметка"}</div>
         {snippetOf(note) && <div className="wb-note-item-snippet">{snippetOf(note)}</div>}
         <div className="wb-note-item-meta">{formatSince(note.updated_at)}</div>
@@ -242,12 +243,13 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen, switcher }: {
       <header className="wb-view-head">
         <span className={switcher ? "wb-tables-heading" : undefined}>{switcher ? "Рабочее пространство" : "Заметки"}</span>
         <div className="wb-view-actions">
+          {stickyBridge() && <button type="button" onClick={() => void stickyBridge()?.list()} title="Заметки на рабочем столе" aria-label="Заметки на рабочем столе"><StickyNote size={14} /></button>}
           <button type="button" disabled={!canCreate || importing} onClick={() => importInputRef.current?.click()} title={canCreate ? "Импорт Word в новую заметку" : "Нет доступных проектов для заметок"}><Upload size={14} /></button>
           <button type="button" disabled={!canCreate} onClick={() => { void createNoteAndOpen(tabs, defaultProjectId ?? null); onOpen?.(); }} title={canCreate ? "Новая заметка (Ctrl+Alt+N)" : "Нет доступных проектов для заметок"}><Plus size={14} /></button>
           <input ref={importInputRef} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWordAsNote(file); event.target.value = ""; }} />
         </div>
       </header>
-      {switcher}
+      {typeof switcher === "function" ? switcher(notesStore.list.length) : switcher}
       <div className="wb-filter">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти в заметках" onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
         {query && <button type="button" onClick={() => setQuery("")} aria-label="Очистить"><X size={13} /></button>}
@@ -269,6 +271,7 @@ export function NotesView({ tabs, defaultProjectId = null, onOpen, switcher }: {
             <div className="wb-note-menu">
               <button type="button" role="menuitem" onClick={() => { tabs.open(`note:${context.note.id}`, true); onOpen?.(); setContext(null); }}><span><FileText size={14} />Открыть</span></button>
               <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void patchNote(note, { pinned: !note.pinned }); }}><span>{context.note.pinned ? <PinOff size={14} /> : <Pin size={14} />}{context.note.pinned ? "Открепить" : "Закрепить сверху"}</span></button>
+              {stickyBridge() && <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void openSticky(note.id); }}><span><StickyNote size={14} />На рабочий стол</span></button>}
               <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void renameNote(note); }}><span><Pencil size={14} />Переименовать</span></button>
               <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void duplicateNote(note); }}><span><Copy size={14} />Дублировать</span></button>
               <button type="button" role="menuitem" onClick={() => { const note = context.note; setContext(null); void downloadNoteWord(note); }}><span><FileText size={14} />Скачать в Word</span></button>
@@ -758,6 +761,11 @@ export function NoteDocument({ noteId, data, tabs, tabKey, visible, onDirty }: {
                 <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); void update({ pinned: !note.pinned }); }}>
                   <span>{note.pinned ? <PinOff size={14} /> : <Pin size={14} />}{note.pinned ? "Открепить" : "Закрепить сверху"}</span>
                 </button>
+                {stickyBridge() && (
+                  <button type="button" role="menuitem" onClick={() => { setMoreMenu(null); void openSticky(note.id); }}>
+                    <span><StickyNote size={14} />На рабочий стол</span>
+                  </button>
+                )}
                 <div className="wb-menu-sep" role="separator" />
                 <div className="wb-note-menu-label">Фон документа</div>
                 {NOTE_THEME_ORDER.map((theme) => (

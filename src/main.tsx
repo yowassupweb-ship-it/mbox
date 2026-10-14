@@ -60,6 +60,7 @@ import type {
 import "./styles.css";
 import { installLayoutIndependentShortcuts } from "./lib/keyboard";
 import { GlobalTooltip } from "./components/GlobalTooltip";
+import { removeNow } from "./lib/optimistic";
 
 type AppTheme = "light" | "graphite" | "black";
 
@@ -251,7 +252,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
           todo: (project, todo) => <TodoNote project={project} todo={todo} onSaved={data.reload} />,
         }}
       />
-      {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} />}
+      {projectMenu && <TreeContextMenu state={projectMenu} projects={data.projects} onClose={() => setProjectMenu(null)} onSaved={data.reload} onDeleted={(kind, id) => removeNow(data, kind, id)} />}
     </div>
   );
 }
@@ -1298,11 +1299,25 @@ const sharedSeoToken = window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{24,6
 const sharedSeoLogin = /^\/seo-access\/?$/.test(window.location.pathname);
 const SharedDocumentPage = lazy(() => import("./pages/SharedDocumentPage").then((module) => ({ default: module.SharedDocumentPage })));
 const sharedDocumentToken = window.location.pathname.match(/^\/d\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+// Окно заметки на рабочем столе (MBOX Desktop, ?sticky=<id> или ?sticky=list): только заметка, без всего приложения.
+const StickyApp = lazy(() => import("./pages/StickyApp").then((module) => ({ default: module.StickyApp })));
+const stickyTarget = new URLSearchParams(window.location.search).get("sticky");
+// Слой всплывающих окон над страницей встроенного браузера (MBOX Desktop, ?overlay=1): только само окно, прозрачный фон.
+const OverlayApp = lazy(() => import("./pages/OverlayApp").then((module) => ({ default: module.OverlayApp })));
+const overlayMode = new URLSearchParams(window.location.search).get("overlay") === "1";
 
 installLayoutIndependentShortcuts();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {sharedNoteToken ? (
+    {overlayMode ? (
+      <Suspense fallback={null}>
+        <OverlayApp />
+      </Suspense>
+    ) : stickyTarget && /^(list|\d+)$/.test(stickyTarget) ? (
+      <Suspense fallback={null}>
+        <StickyApp target={stickyTarget} />
+      </Suspense>
+    ) : sharedNoteToken ? (
       <Suspense fallback={null}>
         <SharedNotePage token={sharedNoteToken} />
       </Suspense>

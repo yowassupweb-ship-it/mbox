@@ -11,7 +11,8 @@
 const fs = require("fs");
 const os = require("node:os");
 const path = require("node:path");
-const { app, safeStorage } = require("electron");
+const { app } = require("electron");
+const passwordStore = require("./password-store");
 
 function chromeUserDataDir() {
   const local = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
@@ -117,7 +118,7 @@ function parseCsv(text) {
  */
 function importPasswordsCsv(csvPath) {
   if (!csvPath || !fs.existsSync(csvPath)) return { ok: false, error: "CSV-файл не найден" };
-  if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: "Шифрованное хранилище ОС недоступно — пароли не сохранены" };
+  if (!passwordStore.available()) return { ok: false, error: "Шифрованное хранилище ОС недоступно — пароли не сохранены" };
   const text = fs.readFileSync(csvPath, "utf8").replace(/^﻿/, "");
   const rows = parseCsv(text);
   if (!rows.length) return { ok: false, error: "CSV пустой" };
@@ -132,35 +133,17 @@ function importPasswordsCsv(csvPath) {
     if (!cells[iUrl] && !cells[iUser]) continue;
     entries.push({ url: cells[iUrl] || "", username: cells[iUser] || "", password: cells[iPass] || "" });
   }
-  const vault = path.join(app.getPath("userData"), "mbox-browser-vault.bin");
-  const encrypted = safeStorage.encryptString(JSON.stringify({ version: 1, savedAt: Date.now(), entries }));
-  fs.writeFileSync(vault, encrypted);
-  return { ok: true, count: entries.length };
+  // Дополняем хранилище: раньше импорт перезаписывал файл, и пароли, сохранённые в самом MBOX, пропадали.
+  return passwordStore.importEntries(entries);
 }
 
-/** Сколько паролей уже лежит в локальном vault (для интерфейса; сами пароли не отдаём). */
+/** Сколько паролей уже лежит в хранилище (для интерфейса; сами пароли не отдаём). */
 function vaultInfo() {
-  const vault = path.join(app.getPath("userData"), "mbox-browser-vault.bin");
-  if (!fs.existsSync(vault) || !safeStorage.isEncryptionAvailable()) return { count: 0 };
-  try {
-    const data = JSON.parse(safeStorage.decryptString(fs.readFileSync(vault)));
-    return { count: Array.isArray(data.entries) ? data.entries.length : 0, savedAt: data.savedAt || 0 };
-  } catch {
-    return { count: 0 };
-  }
+  return { count: passwordStore.count() };
 }
 
 function credentialsFor(pageUrl) {
-  let origin;
-  try { const url = new URL(pageUrl); if (url.protocol !== "https:") return []; origin = url.origin; } catch { return []; }
-  const vault = path.join(app.getPath("userData"), "mbox-browser-vault.bin");
-  if (!fs.existsSync(vault) || !safeStorage.isEncryptionAvailable()) return [];
-  try {
-    const data = JSON.parse(safeStorage.decryptString(fs.readFileSync(vault)));
-    return (Array.isArray(data.entries) ? data.entries : []).filter((entry) => {
-      try { return new URL(entry.url).origin === origin; } catch { return false; }
-    });
-  } catch { return []; }
+  return passwordStore.forPage(pageUrl);
 }
 
 // ── Сохранение импортированного во встроенный браузер ────────────────────────────────────────

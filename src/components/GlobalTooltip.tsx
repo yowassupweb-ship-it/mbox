@@ -45,9 +45,15 @@ export function GlobalTooltip() {
     const place = (el: HTMLElement) => {
       const rect = el.getBoundingClientRect();
       const box = tip.getBoundingClientRect();
-      let top = rect.bottom + GAP;
-      if (top + box.height > window.innerHeight - EDGE) top = rect.top - GAP - box.height;
       const left = Math.min(Math.max(rect.left + rect.width / 2 - box.width / 2, EDGE), window.innerWidth - box.width - EDGE);
+      let top = rect.bottom + GAP;
+      // Страница встроенного браузера рисуется поверх окна, и подсказка под панелью закладок уходила под сайт:
+      // если снизу она легла бы на область страницы, ставим её над элементом.
+      const overPage = [...document.querySelectorAll<HTMLElement>(".wb-browser-stage")].some((stage) => {
+        const area = stage.getBoundingClientRect();
+        return area.width > 0 && left < area.right && left + box.width > area.left && top < area.bottom && top + box.height > area.top;
+      });
+      if (overPage || top + box.height > window.innerHeight - EDGE) top = rect.top - GAP - box.height;
       tip.style.transform = `translate(${Math.round(left)}px, ${Math.round(Math.max(top, EDGE))}px)`;
     };
 

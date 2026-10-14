@@ -23,6 +23,7 @@ import { handlePlannerApi } from "./server/planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./server/chat-threads.mjs";
 import { ensureNotificationsSchema, handleNotificationsApi } from "./server/notifications.mjs";
+import { applyProjectCompany, ensureCompaniesSchema, handleCompaniesApi } from "./server/companies.mjs";
 import { bugReportRow, insertBugReport } from "./server/bug-reports.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./server/browser-state.mjs";
 import { ensureAccountsSchema, handleAccountsApi } from "./server/accounts.mjs";
@@ -983,6 +984,7 @@ function mboxDevApi() {
       ensureDocumentsSchema(queryPostgres).catch((error: Error) => console.error(`documents schema: ${error.message}`));
       ensureChatThreadsSchema(queryPostgres).catch((error: Error) => console.error(`chat threads schema: ${error.message}`));
       ensureNotificationsSchema(queryPostgres).catch((error: Error) => console.error(`notifications schema: ${error.message}`));
+      ensureCompaniesSchema(queryPostgres).catch((error: Error) => console.error(`companies schema: ${error.message}`));
       ensureBrowserStateSchema(queryPostgres).catch((error: Error) => console.error(`browser state schema: ${error.message}`));
       ensureSpacesSchema(queryPostgres).catch((error: Error) => console.error(`spaces schema: ${error.message}`));
       ensureAccountsSchema(queryPostgres).catch((error: Error) => console.error(`accounts schema: ${error.message}`));
@@ -1897,11 +1899,13 @@ function mboxDevApi() {
           const artifactMatch = url.pathname.match(/^\/api\/mbox\/artifacts\/(\d+)$/);
           if (artifactMatch && req.method === "PATCH") {
             const body = await readBody<Record<string, unknown>>(req);
-            if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
+            const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+            if (has("project_id") && !devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
+            // Проект и папка меняются, только если их прислали (иначе переименование выкидывало файл из проекта).
             const result = await queryPostgres(
               `UPDATE artifacts SET
-                 folder_id = $1,
-                 project_id = $2,
+                 folder_id = CASE WHEN $11::boolean THEN $1::bigint ELSE folder_id END,
+                 project_id = CASE WHEN $12::boolean THEN $2::bigint ELSE project_id END,
                  name = COALESCE(NULLIF($3, ''), name),
                  category = COALESCE(NULLIF($4, ''), category),
                  version = COALESCE(NULLIF($5, ''), version),
@@ -1910,7 +1914,7 @@ function mboxDevApi() {
                  updated_at = now()
                WHERE id = $8 AND ($9::boolean OR project_id = ANY($10::bigint[]))
                RETURNING id::text`,
-              [body.folder_id || null, body.project_id || null, String(body.name ?? "").trim(), String(body.category ?? ""), String(body.version ?? ""), String(body.status ?? ""), body.content ?? null, artifactMatch[1], devScope.all, devScope.projectIds],
+              [body.folder_id || null, body.project_id || null, String(body.name ?? "").trim(), String(body.category ?? ""), String(body.version ?? ""), String(body.status ?? ""), body.content ?? null, artifactMatch[1], devScope.all, devScope.projectIds, has("folder_id"), has("project_id")],
             );
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "artifacts" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { artifact: result.rows[0] } : { error: "not_found" });
@@ -1921,6 +1925,8 @@ function mboxDevApi() {
             broadcastRealtime(realtimeClients, "entity_changed", { entity: "artifacts" });
             return sendJson(res, 200, { ok: true });
           }
+
+          if (await handleCompaniesApi({ req, res, url, query: queryPostgres, readBody, sendJson, scope: devScope, isOwner: Boolean(devScope.owner), broadcast: (_action: string, entity: string) => broadcastRealtime(realtimeClients, "entity_changed", { entity }) })) return;
 
           if (url.pathname === "/api/mbox/companies") {
             if (req.method === "POST") {
@@ -2090,11 +2096,13 @@ function mboxDevApi() {
                 [String(body.name ?? "").trim(), String(body.status ?? ""), JSON.stringify(Array.isArray(body.stack) ? body.stack : []), String(body.git_url ?? ""), String(body.deploy_provider ?? ""), String(body.deploy_target ?? ""), String(body.color ?? "#2c2c2e"), String(body.access_level ?? ""), JSON.stringify(body.props && typeof body.props === "object" ? body.props : {})],
               );
               await addProjectMember(queryPostgres, (result.rows[0] as { id: string } | undefined)?.id, sessionUser.id);
+              await applyProjectCompany(queryPostgres, (result.rows[0] as { id: string } | undefined)?.id, body);
               broadcastRealtime(realtimeClients, "entity_changed", { entity: "projects" });
               return sendJson(res, 201, { project: result.rows[0] });
             }
             const projects = await queryPostgres(
               `SELECT p.id::text, p.name, p.status, p.stack, p.git_url, p.deploy_target, p.deploy_provider, p.props, p.color, p.access_level,
+                      p.company_id::text, p.created_at::text, p.updated_at::text,
                       pg_column_size(p)::int AS memory_bytes
                FROM projects p
                LEFT JOIN LATERAL (
@@ -2280,6 +2288,10 @@ function mboxDevApi() {
                 body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null,
               ],
             );
+            if (result.rows[0] && body.company_id !== undefined) {
+              if (!devScope.owner) return sendJson(res, 403, { error: "owner_required" });
+              await applyProjectCompany(queryPostgres, projectMatch[1], body);
+            }
             if (result.rows[0]) broadcastRealtime(realtimeClients, "entity_changed", { entity: "projects" });
             return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { project: result.rows[0] } : { error: "not_found" });
           }

@@ -14,6 +14,7 @@ import { MarkdownToolbarBay, markdownShortcut, toggleTask } from "./MarkdownTool
 import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./DocumentTools";
 import { WORKSPACE_VERSION_EVENT } from "../../hooks/useRealtime";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { ImportOffer } from "./ImportOffer";
 
 const MARKDOWN = /\.(md|mdx|markdown)$/i;
 
@@ -434,6 +435,7 @@ export function LocalFileDocument({ rootKey, path, tabs, tabKey, visible, onDirt
         </div>
       )}
       {error && <div className="wb-banner is-error">{error}</div>}
+      <ImportOffer id={tabKey} name={path} tabs={tabs} load={async () => new Blob([draft], { type: "text/plain" })} />
       {liveVersion && !viewing && (
         <div className="wb-banner is-live">
           {sourceLabel[liveVersion.source] ?? liveVersion.source} {liveVersion.author || "агент"} изменил файл {formatSince(liveVersion.created_at)}

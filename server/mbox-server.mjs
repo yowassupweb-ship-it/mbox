@@ -30,6 +30,7 @@ import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
 import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./spaces.mjs";
 import { auditVisibility, ensureAuditScopeSchema } from "./audit-scope.mjs";
 import { ensureNotificationsSchema, handleNotificationsApi } from "./notifications.mjs";
+import { applyProjectCompany, ensureCompaniesSchema, handleCompaniesApi } from "./companies.mjs";
 import { bugReportRow, insertBugReport } from "./bug-reports.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
 import { TOOL_CATALOG } from "./tool-catalog.mjs";
@@ -1193,6 +1194,8 @@ function memberRouteAllowed(pathname) {
     || pathname.startsWith("/api/mbox/seo")
     || pathname === "/api/mbox/ui/open"
     || pathname === "/api/mbox/projects"
+    // Компании своих проектов — только чтение: правка компаний у владельца (server/companies.mjs).
+    || pathname === "/api/mbox/companies"
     || pathname === "/api/mbox/memories"
     || pathname === "/api/mbox/memories/search"
     || pathname === "/api/mbox/folders"
@@ -2168,10 +2171,13 @@ async function handleApiWithContext(req, res, url) {
       const current = await query("SELECT project_id::text, name, category, version, status FROM artifacts WHERE id = $1", [artifactMatch[1]]);
       before = current.rows[0] || null;
     }
+    // Проект и папка меняются, только если их прислали: переименование или перенос в категорию без project_id
+    // раньше молча выкидывали файл из проекта (поле затиралось в NULL).
+    const has = (key) => Object.prototype.hasOwnProperty.call(body || {}, key);
     const result = await query(
       `UPDATE artifacts SET
-         folder_id = $1,
-         project_id = $2,
+         folder_id = CASE WHEN $9::boolean THEN $1::bigint ELSE folder_id END,
+         project_id = CASE WHEN $10::boolean THEN $2::bigint ELSE project_id END,
          name = COALESCE(NULLIF($3, ''), name),
          category = COALESCE(NULLIF($4, ''), category),
          version = COALESCE(NULLIF($5, ''), version),
@@ -2180,7 +2186,7 @@ async function handleApiWithContext(req, res, url) {
          updated_at = now()
        WHERE id = $8
        RETURNING id::text, project_id::text, name, category, version, status`,
-      [body.folder_id || null, body.project_id || null, String(body.name || "").trim(), String(body.category || ""), String(body.version || ""), String(body.status || ""), body.content ?? null, artifactMatch[1]],
+      [body.folder_id || null, body.project_id || null, String(body.name || "").trim(), String(body.category || ""), String(body.version || ""), String(body.status || ""), body.content ?? null, artifactMatch[1], has("folder_id"), has("project_id")],
     );
     if (result.rows[0]) {
       const changedFields = Object.keys(body || {}).filter((key) => !["folder_id", "project_id"].includes(key));
@@ -2227,6 +2233,9 @@ async function handleApiWithContext(req, res, url) {
     broadcastChange(req, "delete", "artifacts", `#${artifactMatch[1]}`);
     return sendJson(res, 200, { ok: true });
   }
+
+  // Компании и принадлежность проектов (projects.company_id) — общий модуль прод/dev. Старые ручки ниже уже не достигаются.
+  if (await handleCompaniesApi({ req, res, url, query, readBody, sendJson, scope, isOwner: isOwner(user), broadcast: (action, entity, detail) => broadcastChange(req, action, entity, detail) })) return;
 
   if (url.pathname === "/api/mbox/companies") {
     if (req.method === "POST") {
@@ -2428,11 +2437,13 @@ async function handleApiWithContext(req, res, url) {
       );
       // Проект принадлежит тому, кто его создал: без членства он не увидел бы собственный проект.
       await addProjectMember(query, result.rows[0]?.id, user.id);
+      await applyProjectCompany(query, result.rows[0]?.id, body);
       broadcastChange(req, "create", "projects", String(body.name || "").trim());
       return sendJson(res, 201, { project: result.rows[0] });
     }
     const projects = await query(
       `SELECT p.id::text, p.name, p.status, p.stack, p.git_url, p.deploy_target, p.deploy_provider, p.props, p.color, p.access_level,
+              p.company_id::text, p.created_at::text, p.updated_at::text,
               pg_column_size(p)::int AS memory_bytes
        FROM projects p
        LEFT JOIN LATERAL (
@@ -2615,6 +2626,11 @@ async function handleApiWithContext(req, res, url) {
         body.props && typeof body.props === "object" ? JSON.stringify(body.props) : null,
       ],
     );
+    if (result.rows[0] && body.company_id !== undefined) {
+      // Перенести проект в другую компанию может только владелец: компании — его разметка команды.
+      if (!isOwner(user)) return sendForbidden(res);
+      await applyProjectCompany(query, projectMatch[1], body);
+    }
     if (result.rows[0]) broadcastChange(req, "update", "projects", String(body.name || "").trim() || `#${projectMatch[1]}`);
     return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { project: result.rows[0] } : { error: "not_found" });
   }
@@ -3509,7 +3525,7 @@ ensureIntegrationsSchema(query).catch((error) => console.error(`integrations sch
 ensureSpacesSchema(query).catch((error) => console.error(`spaces schema: ${error.message}`));
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
-ensureAuditScopeSchema(query).then(() => ensureNotificationsSchema(query)).catch((error) => console.error(`audit scope schema: ${error.message}`));
+ensureAuditScopeSchema(query).then(() => ensureNotificationsSchema(query)).then(() => ensureCompaniesSchema(query)).catch((error) => console.error(`audit scope schema: ${error.message}`));
 ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
 ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
 ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));

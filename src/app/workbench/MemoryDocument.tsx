@@ -12,6 +12,7 @@ import { DocumentContextMenu, openDocumentMenu, useDocumentFind } from "./Docume
 import { askConfirm, showNotice } from "../../ui/askText";
 import { Crumbs, reveal } from "./Crumbs";
 import { OctopusSpinner } from "../../components/OctopusSpinner";
+import { removeNow } from "../../lib/optimistic";
 
 type MemoryRecord = Memory & { project_name?: string | null; todo_id?: string | null };
 type MemoryLink = { id: string; from_memory_id: string; from_title: string; to_memory_id: string; to_title: string; link_type: string };
@@ -232,9 +233,8 @@ export function MemoryDocument({ memoryId, data, tabs, tabKey, visible, onTitle,
 
   async function remove() {
     if (!memory || !(await askConfirm({ title: `Удалить запись «${memory.title}»?`, confirmLabel: "Удалить", danger: true }))) return;
-    await fetchJson(`/api/mbox/memories/${memory.id}`, { method: "DELETE" });
-    data.reload();
     tabs.close(tabKey);
+    await removeNow(data, "memories", memory.id);
   }
 
   useEffect(() => {

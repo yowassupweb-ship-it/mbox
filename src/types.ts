@@ -114,6 +114,7 @@ export type CompanyProjectLink = {
   project_id: string;
   project_name: string;
   edge_type: string;
+  status?: string;
 };
 
 export type Company = {
@@ -157,6 +158,10 @@ export type Project = {
   access_level: string;
   memory_bytes: number;
   todos: Todo[];
+  /** Компания, которой принадлежит проект (projects.company_id). */
+  company_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type ProjectRelation = {

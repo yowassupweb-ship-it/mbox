@@ -61,7 +61,6 @@
   min-width: 148px;
   padding: 14px 18px;
   border: var(--border-width) solid var(--border-color);
-  border-left: 3px solid var(--project-color, var(--border-color));
   border-radius: var(--radius-lg);
   background: var(--container-bg);
   color: var(--text-muted);
@@ -1067,7 +1066,6 @@
   max-width: 100%;
   padding: var(--space-3) var(--space-4);
   border: var(--border-width) solid var(--border-color);
-  border-left: 3px solid var(--agent-accent, var(--accent-color));
   border-radius: var(--radius-lg);
   background: var(--element-bg);
 }

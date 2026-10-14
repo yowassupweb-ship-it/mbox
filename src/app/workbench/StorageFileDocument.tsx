@@ -10,6 +10,7 @@ import { DocShell } from "./docLayout";
 import { renderDocument } from "./MemoryDocument";
 import { STORAGE_FILE_TAB, notifyStorageChanged, storageLink } from "./storageApi";
 import type { TabsApi } from "./tabs";
+import { ImportOffer, projectOfStorageKey } from "./ImportOffer";
 
 const StorageImage = lazy(() => import("./StorageImage"));
 const PdfViewer = lazy(() => import("./PdfViewer"));
@@ -153,6 +154,12 @@ export function StorageFileDocument({ storageKey, tabs, tabKey, visible, onDirty
       )}
     >
       {error && <div className="wb-banner is-error" role="alert">{error}</div>}
+      <ImportOffer id={tabKey} name={name} tabs={tabs} projectId={projectOfStorageKey(storageKey)} load={async () => {
+        if (kind === "text" && text !== null) return new Blob([text], { type: "text/plain" });
+        const response = await fetch(source);
+        if (!response.ok) throw new Error(`Хранилище ответило ${response.status}`);
+        return response.blob();
+      }} />
       {kind === "image" && (
         <Suspense fallback={<OctopusSpinner />}>
           <StorageImage src={source} name={name} version={version} onSave={EDITABLE_IMAGE.test(name) ? upload : undefined} onDownload={() => void download()} />

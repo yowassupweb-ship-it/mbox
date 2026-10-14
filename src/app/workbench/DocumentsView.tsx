@@ -19,15 +19,16 @@ export const SHEETS_MODE_EVENT = "mbox:sheets-mode";
  * число записей в списке; стрелки влево/вправо переключают, как у обычных вкладок.
  */
 export function SheetsDocsSwitch({ mode, onMode, count }: { mode: SheetsDocsMode; onMode: (mode: SheetsDocsMode) => void; count?: number }) {
-  const items: Array<{ id: SheetsDocsMode; label: string; icon: typeof FileText }> = [
-    { id: "notes", label: "Заметки", icon: NotebookPen },
-    { id: "tables", label: "Таблицы", icon: Table2 },
-    { id: "docs", label: "Документы", icon: FileText },
-    { id: "slides", label: "Презентации", icon: Presentation },
+  // Четыре раздела в одну строку: значок над короткой подписью. В сетке 2×2 «Презентации» обрезались до «Презен…».
+  const items: Array<{ id: SheetsDocsMode; label: string; short: string; icon: typeof FileText }> = [
+    { id: "notes", label: "Заметки", short: "Заметки", icon: NotebookPen },
+    { id: "tables", label: "Таблицы", short: "Таблицы", icon: Table2 },
+    { id: "docs", label: "Документы", short: "Документы", icon: FileText },
+    { id: "slides", label: "Презентации", short: "Слайды", icon: Presentation },
   ];
   return (
     <div
-      className="wb-mode-tabs"
+      className="wb-mode-tabs is-quad"
       role="tablist"
       aria-label="Раздел"
       onKeyDown={(event) => {
@@ -37,11 +38,13 @@ export function SheetsDocsSwitch({ mode, onMode, count }: { mode: SheetsDocsMode
         onMode(order[(order.indexOf(mode) + (event.key === "ArrowRight" ? 1 : order.length - 1)) % order.length]);
       }}
     >
-      {items.map(({ id, label, icon: Icon }) => (
-        <button key={id} type="button" role="tab" aria-selected={mode === id} tabIndex={mode === id ? 0 : -1} className={mode === id ? "is-on" : undefined} onClick={() => onMode(id)}>
-          <Icon size={14} aria-hidden="true" />
-          <span>{label}</span>
-          {mode === id && count !== undefined && <b>{count}</b>}
+      {items.map(({ id, label, short, icon: Icon }) => (
+        <button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={label} title={label} tabIndex={mode === id ? 0 : -1} className={mode === id ? "is-on" : undefined} onClick={() => onMode(id)}>
+          <i>
+            <Icon size={16} aria-hidden="true" />
+            {mode === id && count !== undefined && count > 0 && <b>{count > 99 ? "99+" : count}</b>}
+          </i>
+          <span>{short}</span>
         </button>
       ))}
     </div>
