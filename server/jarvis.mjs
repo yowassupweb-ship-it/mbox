@@ -414,6 +414,11 @@ export async function groqComplete(messages, tools, purpose = "reply", signal, a
 function toGeminiSchema(schema) {
   if (!schema || typeof schema !== "object") return schema;
   const out = Array.isArray(schema) ? [...schema] : { ...schema };
+  // Gemini не принимает type-массив вроде ["string", "null"]: берём настоящий тип и помечаем nullable.
+  if (Array.isArray(out.type)) {
+    if (out.type.includes("null")) out.nullable = true;
+    out.type = out.type.find((item) => item !== "null") || "string";
+  }
   if (typeof out.type === "string") out.type = out.type.toUpperCase();
   if (out.properties) out.properties = Object.fromEntries(Object.entries(out.properties).map(([key, value]) => [key, toGeminiSchema(value)]));
   if (out.items) out.items = toGeminiSchema(out.items);

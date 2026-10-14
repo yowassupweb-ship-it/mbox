@@ -335,19 +335,19 @@ async function askJarvis(query, { bot, projects, allProjects = false, title, bod
  * агента подхватит и ответит. Ответ в Telegram отправит pollAgentRequests, когда агент закончит.
  */
 /**
- * В каком проекте лежит вопрос агенту. При личных пространствах (spaces_v1) сервер показывает наблюдателю только записи
- * проектов аккаунта: вопрос без проекта он не увидит никогда — так серверный Claude «молчал» на первый вызов из Telegram.
- * Берём проект чата, иначе «Общее», иначе первый доступный.
+ * В каком проекте лежит вопрос агенту. Наблюдатель агента привязан к одному проекту (MBOX_PROJECT, по умолчанию «MBOX») и
+ * берёт только вопросы этого проекта или без проекта; а при личных пространствах (spaces_v1) сервер не отдаёт ему записи
+ * без проекта вовсе. Поэтому вопрос кладём в проект наблюдателя; проекты чата передаём агенту в тексте.
  */
-async function agentProjectId(query, owner, preferred = []) {
+async function agentProjectId(query, owner) {
   const scope = await projectScopeFor(query, owner);
-  if (scope.all) return preferred[0] || null;
+  if (scope.all) return null;
   const visible = (await query("SELECT id::text, name FROM projects WHERE id = ANY($1::bigint[]) ORDER BY id", [scope.projectIds])).rows;
-  const ids = new Set(visible.map((row) => row.id));
-  return preferred.map(String).find((id) => ids.has(id)) || visible.find((row) => row.name === "Общее")?.id || visible[0]?.id || null;
+  const watched = process.env.MBOX_PROJECT || "MBOX";
+  return visible.find((row) => row.name === watched)?.id || visible.find((row) => row.name === "Общее")?.id || visible[0]?.id || null;
 }
 
-async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "", projectIds = [] }) {
+async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "" }) {
   const target = AGENTS[flag];
   const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
   if (!target || !owner) return;
@@ -361,7 +361,7 @@ async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo
     await send(token, tgChatId, `${target.label} сейчас не в сети. ${advice}`, replyTo).catch(() => undefined);
     return;
   }
-  const projectId = await agentProjectId(query, owner, projectIds);
+  const projectId = await agentProjectId(query, owner);
   const body = [
     intro || "[Telegram · личная переписка] Владелец пишет тебе через Telegram-бота MBOX. Ответь для Telegram: коротко и по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.",
     "",
@@ -705,7 +705,7 @@ async function handleUpdate(query, bot, update) {
       "",
       `Вопрос от ${displayName(message.from)}:`,
     ].join("\n");
-    await askAgent(query, { bot, token, tgChatId: message.chat.id, chatRowId: chat.id, replyTo: message.message_id, flag: agent, text: agentQuestion, intro, projectIds: projects.map((project) => project.id) });
+    await askAgent(query, { bot, token, tgChatId: message.chat.id, chatRowId: chat.id, replyTo: message.message_id, flag: agent, text: agentQuestion, intro });
     return;
   }
   if (chat.status !== "active") {
