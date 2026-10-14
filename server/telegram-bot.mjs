@@ -14,7 +14,7 @@
 // Всё, что Джарвис делает, он делает только в проектах чата: доступ сужен так же, как у участника команды.
 //
 // Свой аккаунт Telegram человек привязывает в MBOX (кнопка «Привязать Telegram» → ссылка t.me/<бот>?start=<код>).
-// Привязанный аккаунт — единственный, кто может звать агентов: «@бот --claude вопрос» или «@бот --gpt вопрос» уходит
+// Привязанный аккаунт — единственный, кто может звать агентов: «@бот -claude вопрос» или «@бот -gpt вопрос» уходит
 // Claude / Codex из инбокса MBOX (те же наблюдатели, что отвечают в чате MBOX), ответ приходит в Telegram, когда агент
 // закончит. Без флага отвечает Джарвис. В личной переписке с ботом (только привязанный аккаунт) упоминание не нужно.
 
@@ -127,31 +127,32 @@ const LINK_CODE_MINUTES = 15;
 const INVITE_MINUTES = 30;
 // Флаг → агент MBOX. Локальный (на компьютере человека, с его файлами) и серверный (облачный) — разные агенты, выбор явный.
 const AGENTS = {
-  claude: { agent: "Claude", label: "Claude (локальный)", suffix: "c", other: "claudecloud" },
-  claudecloud: { agent: "ClaudeCloud", label: "Claude (сервер)", suffix: "cc", other: "claude" },
-  gpt: { agent: "Codex", label: "GPT (локальный)", suffix: "g", other: "gptcloud" },
-  gptcloud: { agent: "CodexCloud", label: "GPT (сервер)", suffix: "gc", other: "gpt" },
+  claude: { agent: "ClaudeCloud", label: "Claude (сервер)", suffix: "cc", other: "claudelocal" },
+  claudelocal: { agent: "Claude", label: "Claude (на компьютере)", suffix: "c", other: "claude" },
+  gpt: { agent: "CodexCloud", label: "GPT (сервер)", suffix: "gc", other: "gptlocal" },
+  gptlocal: { agent: "Codex", label: "GPT (на компьютере)", suffix: "g", other: "gpt" },
 };
-const FLAG_ALIASES = { codex: "gpt", codexcloud: "gptcloud", chatgpt: "gpt" };
-// Телефонные клавиатуры превращают «--» в тире, поэтому принимаем и его.
-const AGENT_FLAG = /(^|\s)(?:--|—|–)(claude|claudecloud|gpt|gptcloud|codex|codexcloud|chatgpt)(?=\s|$)/i;
+// Старые и длинные написания тоже понимаем: -claudecloud = -claude, -codex = -gptlocal.
+const FLAG_ALIASES = { claudecloud: "claude", gptcloud: "gpt", codexcloud: "gpt", codex: "gptlocal" };
+// Принимаем «-флаг», «--флаг» и тире с телефонной клавиатуры («—», «–»).
+const AGENT_FLAG = /(^|\s)(?:--|—|–|-)(claude|claudelocal|claudecloud|gpt|gptlocal|gptcloud|codex|codexcloud)(?=\s|$)/i;
 
 // В режиме приватности Telegram доставляет боту в группе только /команды и ответы на его сообщения, а «@бот текст» — нет.
-// Поэтому у каждого флага есть команда: /claude, /claudecloud, /gpt, /gptcloud, а /ask — вопрос Джарвису.
-const COMMAND = /^\s*\/(ask|claude|claudecloud|gpt|gptcloud|codex|codexcloud)(?:@(\w+))?(?=\s|$)/i;
+// Поэтому у каждого флага есть команда: /claude, /claudelocal, /gpt, /gptlocal, а /ask — вопрос Джарвису.
+const COMMAND = /^\s*\/(ask|claude|claudelocal|claudecloud|gpt|gptlocal|gptcloud|codex|codexcloud)(?:@(\w+))?(?=\s|$)/i;
 const BOT_COMMANDS = [
   { command: "ask", description: "Спросить Джарвиса" },
-  { command: "claude", description: "Спросить Claude на компьютере" },
-  { command: "claudecloud", description: "Спросить Claude на сервере" },
-  { command: "gpt", description: "Спросить GPT на компьютере" },
-  { command: "gptcloud", description: "Спросить GPT на сервере" },
+  { command: "claude", description: "Спросить Claude на сервере" },
+  { command: "claudelocal", description: "Спросить Claude на компьютере" },
+  { command: "gpt", description: "Спросить GPT на сервере" },
+  { command: "gptlocal", description: "Спросить GPT на компьютере" },
   { command: "allow", description: "Разрешить участнику звать Claude и GPT (для владельца)" },
   { command: "disallow", description: "Отозвать разрешение (для владельца)" },
   { command: "help", description: "Как пользоваться ботом" },
 ];
 
 /**
- * Разбор обращения к боту: «@бот --claude вопрос» или «/claude вопрос». agent пустой — отвечает Джарвис;
+ * Разбор обращения к боту: «@бот -claude вопрос» или «/claude вопрос». agent пустой — отвечает Джарвис;
  * viaCommand — это /команда (она дойдёт до бота и при включённом режиме приватности); skip — команда чужого бота.
  */
 function parseCall(text, botUsername) {
@@ -171,7 +172,7 @@ function parseCall(text, botUsername) {
   return { skip: false, agent: commandAgent || flagged.agent, text: flagged.text, viaCommand };
 }
 
-/** «--claude вопрос» → { agent: "claude", text: "вопрос" }. Без флага agent пустой — отвечает Джарвис. */
+/** «-claude вопрос» → { agent: "claude", text: "вопрос" }. Без флага agent пустой — отвечает Джарвис. */
 function splitAgentFlag(text) {
   const match = String(text || "").match(AGENT_FLAG);
   if (!match) return { agent: "", text: String(text || "").trim() };
@@ -370,7 +371,7 @@ async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo
   )).rows.length > 0;
   if (!online) {
     const cloud = target.agent.endsWith("Cloud");
-    const advice = cloud ? `Серверный агент сейчас не отвечает. Локальный: --${target.other}.` : `Запустите MBOX Desktop на компьютере — или спросите серверного: --${target.other}.`;
+    const advice = cloud ? `Серверный агент сейчас не отвечает. На компьютере: -${target.other}.` : `Запустите MBOX Desktop на компьютере — или спросите серверного: -${target.other}.`;
     await send(token, tgChatId, `${target.label} сейчас не в сети. ${advice}`, replyTo).catch(() => undefined);
     return;
   }
@@ -621,7 +622,7 @@ async function handleAllowCommand(query, bot, token, chat, message, command, arg
        ON CONFLICT (chat_row_id, tg_user_id) DO UPDATE SET tg_username = EXCLUDED.tg_username, tg_name = EXCLUDED.tg_name`,
       [chat.id, target.id, target.username, target.name],
     );
-    await reply(`Готово: ${label(target)} теперь может обращаться к Claude и GPT в этом чате (--claude, --claudecloud, --gpt, --gptcloud или командами). Агенты работают в вашем аккаунте MBOX, но я прошу их держаться проектов этого чата. Отозвать: /disallow ${label(target)}.`);
+    await reply(`Готово: ${label(target)} теперь может обращаться к Claude и GPT в этом чате (-claude, -claudelocal, -gpt, -gptlocal или командами). Агенты работают в вашем аккаунте MBOX, но я прошу их держаться проектов этого чата. Отозвать: /disallow ${label(target)}.`);
   } else {
     const removed = (await query("DELETE FROM telegram_allowed WHERE chat_row_id = $1 AND tg_user_id = $2 RETURNING tg_user_id", [chat.id, target.id])).rows.length;
     await reply(removed ? `Готово: у ${label(target)} больше нет доступа к Claude и GPT.` : `${label(target)} и не был в списке.`);
@@ -633,10 +634,10 @@ const isLinkedSender = (bot, message) => bot.tg_user_id != null && Number(bot.tg
 const HELP = [
   "Как со мной говорить:",
   "• просто текст — отвечает Джарвис;",
-  "• --claude вопрос — Claude на вашем компьютере, --claudecloud — Claude на сервере;",
-  "• --gpt вопрос — GPT (Codex) на компьютере, --gptcloud — на сервере.",
+  "• -claude вопрос — Claude на сервере, -claudelocal — Claude на вашем компьютере;",
+  "• -gpt вопрос — GPT (Codex) на сервере, -gptlocal — на компьютере.",
   "Владелец может разрешить участнику чата звать Claude и GPT: /allow @username (или ответом на сообщение), отозвать: /disallow.",
-  "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот --claude вопрос; то же командами: /claude, /claudecloud, /gpt, /gptcloud (в группе — /claude@бот вопрос). Агенты отвечают, когда закончат работу — это может занять несколько минут.",
+  "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот -claude вопрос; то же командами: /claude, /claudelocal, /gpt, /gptlocal (в группе — /claude@бот вопрос). Агенты отвечают, когда закончат работу — это может занять несколько минут.",
 ].join("\n");
 
 /** Личная переписка с ботом: привязка аккаунта по коду (/start <код>) и общение привязанного владельца. */
@@ -667,7 +668,7 @@ async function handlePrivate(query, bot, token, message) {
   const call = parseCall(text, bot.username);
   if (call.skip) return;
   const { agent, text: question } = call;
-  if (!question) { await reply(agent ? `Напишите вопрос вместе с флагом, например: --${agent} что нового по проекту?` : HELP); return; }
+  if (!question) { await reply(agent ? `Напишите вопрос вместе с флагом, например: -${agent} что нового по проекту?` : HELP); return; }
   if (agent) {
     await askAgent(query, { bot, token, tgChatId: message.chat.id, replyTo: message.message_id, flag: agent, text: question });
     return;
@@ -757,7 +758,7 @@ async function handleUpdate(query, bot, update) {
     || message.reply_to_message?.from?.id === Number(bot.bot_user_id)
     || call.viaCommand;
   if (!mentioned || !token) return;
-  // «@бот --claude вопрос» или «/claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
+  // «@бот -claude вопрос» или «/claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
   const { agent, text: agentQuestion } = call;
   if (agent) {
     const isOwner = isLinkedSender(bot, message);
@@ -768,7 +769,7 @@ async function handleUpdate(query, bot, update) {
       return;
     }
     if (!agentQuestion) {
-      await send(token, message.chat.id, `Напишите вопрос после флага, например: @${bot.username} --${agent} что нового по проекту?`, message.message_id).catch(() => undefined);
+      await send(token, message.chat.id, `Напишите вопрос после флага, например: @${bot.username} -${agent} что нового по проекту?`, message.message_id).catch(() => undefined);
       return;
     }
     const projects = await chatProjects(query, chat, bot.owner_user_id);
