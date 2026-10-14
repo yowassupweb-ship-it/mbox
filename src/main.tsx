@@ -63,6 +63,7 @@ import { GlobalTooltip } from "./components/GlobalTooltip";
 import { removeNow } from "./lib/optimistic";
 import { AccessPicker } from "./features/accounts/AccessPicker";
 import { TelegramBotPanel } from "./features/integrations/TelegramBotPanel";
+import { NodesPanel } from "./features/nodes/NodesPanel";
 
 type AppTheme = "light" | "graphite" | "black";
 
@@ -778,6 +779,7 @@ function ServerBoard({ pulse }: { pulse: number }) {
           <EmptyState text="Ожидание метрик сервера" />
         </Panel>
         {usagePanel}
+        <NodesPanel />
       </div>
     );
   }
@@ -809,6 +811,7 @@ function ServerBoard({ pulse }: { pulse: number }) {
         </div>
       </Panel>
       {usagePanel}
+      <NodesPanel />
     </div>
   );
 }

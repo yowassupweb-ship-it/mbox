@@ -25,6 +25,11 @@ function agentKitFile(name) {
   try { return fs.readFileSync(path.join(SCRIPTS_DIR, name), "utf8"); } catch { return null; }
 }
 
+/** Весь набор агента (package.json и скрипты) как [[имя, текст]] — его ставят на чужих компьютерах и на нодах (server/nodes.mjs). */
+export function agentKitFiles() {
+  return ["package.json", ...AGENT_KIT].map((name) => [name, agentKitFile(name)]).filter(([, text]) => text !== null);
+}
+
 export async function ensureAccountsSchema(query) {
   await query(`CREATE TABLE IF NOT EXISTS project_memberships (
     project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

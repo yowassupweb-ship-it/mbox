@@ -1495,9 +1495,32 @@
 .telegram-bot-card { display: grid; gap: 12px; margin-top: 14px; padding: 16px; border: 1px solid var(--wb-line); border-radius: var(--radius-lg); }
 .telegram-bot-card .telegram-chat-head h3 { font-size: var(--text-lg); }
 .telegram-bot-card .telegram-chat-head a { color: inherit; }
-.telegram-bot-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.telegram-chat-head > .telegram-bot-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
 .telegram-warning { margin: 0; padding: 10px; border-radius: var(--radius-sm); background: var(--wb-hover); color: var(--text-main); font-size: var(--text-sm); line-height: 1.5; }
 .telegram-add { display: grid; gap: 10px; padding: 14px; border-radius: var(--radius-md); background: var(--wb-hover); }
 .telegram-add > span { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
 .telegram-add-bot { justify-self: start; margin-top: 14px; }
 .telegram-usage i { color: var(--text-muted); font-style: normal; }
+.nodes-panel { grid-column: 1 / -1; }
+.nodes-form { display: grid; gap: 12px; margin-top: 14px; max-width: 520px; }
+.nodes-form > label, .nodes-password, .nodes-advanced label { display: grid; gap: 6px; font-size: var(--text-sm); }
+.nodes-form > label input, .nodes-advanced label input { width: 100%; }
+.nodes-password .password-field { width: 100%; }
+.nodes-password .password-field input { flex: 1 1 auto; min-width: 0; }
+.nodes-advanced { display: grid; gap: 10px; font-size: var(--text-sm); color: var(--text-muted); }
+.nodes-advanced summary { cursor: pointer; }
+.nodes-advanced label { margin-top: 8px; }
+.nodes-confirm { display: grid; gap: 10px; margin-top: 14px; padding: 14px; border-radius: var(--radius-md); background: var(--wb-hover); }
+.nodes-fingerprint { font-family: var(--font-mono); font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--text-main) 8%, transparent); word-break: break-all; width: fit-content; max-width: 100%; }
+.nodes-card .telegram-chat-head > div > span { display: inline-flex; align-items: center; gap: 6px; }
+.nodes-agent { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--wb-line); border-radius: var(--radius-md); }
+.nodes-agent-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+.nodes-agent-head > div { display: grid; gap: 2px; margin-right: auto; }
+.nodes-agent-head > div > span { color: var(--text-muted); font-size: var(--text-xs); }
+.nodes-chip { padding: 3px 10px; border-radius: var(--radius-pill); background: var(--wb-hover); color: var(--text-muted); font-size: var(--text-xs); }
+.nodes-chip.is-ok { color: var(--text-main); background: color-mix(in srgb, var(--text-main) 14%, transparent); }
+.nodes-login, .nodes-code { display: grid; gap: 8px; justify-items: start; }
+.nodes-code input { width: min(100%, 420px); }
+.nodes-log { font-size: var(--text-sm); color: var(--text-muted); }
+.nodes-log summary { cursor: pointer; }
+.nodes-log pre { margin: 8px 0 0; max-height: 220px; overflow: auto; padding: 10px; border-radius: var(--radius-sm); background: var(--wb-hover); font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre-wrap; word-break: break-word; }

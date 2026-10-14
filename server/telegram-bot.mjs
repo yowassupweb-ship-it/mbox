@@ -145,7 +145,8 @@ const AGENTS = {
 // Старые и длинные написания тоже понимаем: -claudecloud = -claude, -codex = -gptlocal.
 const FLAG_ALIASES = { claudecloud: "claude", gptcloud: "gpt", codexcloud: "gpt", codex: "gptlocal" };
 // Принимаем «-флаг», «--флаг» и тире с телефонной клавиатуры («—», «–»).
-const AGENT_FLAG = /(^|\s)(?:--|—|–|-)(claude|claudelocal|claudecloud|gpt|gptlocal|gptcloud|codex|codexcloud)(?=\s|$)/i;
+// «-claude@имя» / «-gpt@имя» — агент на подключённой ноде (Настройки → Сервер → Ноды).
+const AGENT_FLAG = /(^|\s)(?:--|—|–|-)(claude|claudelocal|claudecloud|gpt|gptlocal|gptcloud|codex|codexcloud)(?:@([a-z0-9][a-z0-9-]{0,22}[a-z0-9]))?(?=\s|$)/i;
 
 // В режиме приватности Telegram доставляет боту в группе только /команды и ответы на его сообщения, а «@бот текст» — нет.
 // Поэтому у каждого флага есть команда: /claude, /claudelocal, /gpt, /gptlocal, а /ask — вопрос Джарвису.
@@ -203,7 +204,9 @@ function splitAgentFlag(text) {
   if (!match) return { agent: "", text: String(text || "").trim() };
   const raw = match[2].toLowerCase();
   const rest = (text.slice(0, match.index) + " " + text.slice(match.index + match[0].length)).replace(/[ \t]{2,}/g, " ").trim();
-  return { agent: FLAG_ALIASES[raw] || raw, text: rest };
+  const agent = FLAG_ALIASES[raw] || raw;
+  // Нода имеет смысл только у «-claude» и «-gpt»; у остальных «@имя» просто отбрасываем.
+  return { agent: match[3] && (agent === "claude" || agent === "gpt") ? `${agent}@${match[3].toLowerCase()}` : agent, text: rest };
 }
 
 let deps = null;
@@ -387,17 +390,36 @@ async function agentProjectId(query, owner) {
   return visible.find((row) => row.name === watched)?.id || visible.find((row) => row.name === "Общее")?.id || visible[0]?.id || null;
 }
 
+/** Флаг → агент: из таблицы AGENTS или агент на подключённой ноде («claude@имя»). */
+async function resolveAgentTarget(query, owner, flag) {
+  if (!String(flag).includes("@")) return { target: AGENTS[flag] || null };
+  const [base, nodeName] = String(flag).split("@");
+  const rows = (await query("SELECT name FROM agent_nodes WHERE owner_user_id = $1 AND status = 'ready' ORDER BY name", [owner.id]).catch(() => ({ rows: [] }))).rows;
+  const node = rows.find((row) => row.name === nodeName);
+  if (!node) return { missing: nodeName, names: rows.map((row) => row.name) };
+  const claude = base === "claude";
+  return { target: { agent: `${claude ? "Claude" : "Codex"}-${node.name}`, label: `${claude ? "Claude" : "GPT"} (нода ${node.name})`, suffix: `n${claude ? "c" : "g"}-${node.name}`, other: "", node: node.name } };
+}
+
 async function askAgent(query, { bot, token, tgChatId, chatRowId = null, replyTo = null, flag, text, intro = "", quote = "" }) {
-  const target = AGENTS[flag];
   const owner = (await query("SELECT id::text, role FROM users WHERE id = $1", [bot.owner_user_id])).rows[0];
-  if (!target || !owner) return;
+  if (!owner) return;
+  const resolved = await resolveAgentTarget(query, owner, flag);
+  if (resolved.missing) {
+    await send(token, tgChatId, resolved.names.length
+      ? `Ноды «${resolved.missing}» нет среди готовых. Ваши ноды: ${resolved.names.join(", ")}.`
+      : "Готовых нод пока нет: подключите сервер в Настройки → Сервер → Ноды.", replyTo).catch(() => undefined);
+    return;
+  }
+  const target = resolved.target;
+  if (!target) return;
   const online = (await query(
     "SELECT 1 FROM agent_presence WHERE owner_user_id = $1 AND agent_name = $2 AND last_seen > now() - interval '2 minutes'",
     [owner.id, target.agent],
   )).rows.length > 0;
   if (!online) {
     const cloud = target.agent.endsWith("Cloud");
-    const advice = cloud ? `Серверный агент сейчас не отвечает. На компьютере: -${target.other}.` : `Запустите MBOX Desktop на компьютере — или спросите серверного: -${target.other}.`;
+    const advice = target.node ? `Загляните в Настройки → Сервер → Ноды: нужен вход в ${target.agent.startsWith("Claude") ? "Claude" : "Codex"} и запущенная служба.` : cloud ? `Серверный агент сейчас не отвечает. На компьютере: -${target.other}.` : `Запустите MBOX Desktop на компьютере — или спросите серверного: -${target.other}.`;
     await send(token, tgChatId, `${target.label} сейчас не в сети. ${advice}`, replyTo).catch(() => undefined);
     return;
   }
@@ -670,7 +692,8 @@ const HELP = [
   "Как со мной говорить:",
   "• просто текст — отвечает Джарвис;",
   "• -claude вопрос — Claude на сервере, -claudelocal — Claude на вашем компьютере;",
-  "• -gpt вопрос — GPT (Codex) на сервере, -gptlocal — на компьютере.",
+  "• -gpt вопрос — GPT (Codex) на сервере, -gptlocal — на компьютере;",
+  "• -claude@имя и -gpt@имя — агент на вашей ноде (Настройки → Сервер → Ноды).",
   "Владелец может разрешить участнику чата звать Claude и GPT: /allow @username (или ответом на сообщение), отозвать: /disallow.",
   "Ответ на сообщение агента без флага продолжает разговор с ним; чтобы спросить Джарвиса, начните ответ с /ask.",
   "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот -claude вопрос; то же командами: /claude, /claudelocal, /gpt, /gptlocal (в группе — /claude@бот вопрос). Агенты отвечают, когда закончат работу — это может занять несколько минут.",

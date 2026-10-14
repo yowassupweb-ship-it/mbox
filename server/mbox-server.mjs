@@ -31,6 +31,7 @@ import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor 
 import { auditVisibility, ensureAuditScopeSchema } from "./audit-scope.mjs";
 import { ensureNotificationsSchema, handleNotificationsApi } from "./notifications.mjs";
 import { applyProjectCompany, ensureCompaniesSchema, handleCompaniesApi } from "./companies.mjs";
+import { ensureNodesSchema, handleNodesApi } from "./nodes.mjs";
 import { configureTelegram, ensureTelegramSchema, handleTelegramApi, handleTelegramWebhook, startTelegramScheduler } from "./telegram-bot.mjs";
 import { bugReportRow, insertBugReport } from "./bug-reports.mjs";
 import { ensureAccountsSchema, ensureInitialOwner, handleAccountsApi, handlePublicInvite } from "./accounts.mjs";
@@ -1363,6 +1364,8 @@ async function handleApiWithContext(req, res, url) {
   if (await handleBrowserStateApi({ req, res, url, query, readBody, sendJson, allowed: true, userId: user.id, secretKey: process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key" })) return;
   if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
   if (await handleGmailApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, origin: publicOrigin(req) })) return;
+  // Ноды: Ubuntu-серверы с Claude Code и Codex, подключаемые по SSH (server/nodes.mjs); только владелец.
+  if (await handleNodesApi({ req, res, url, query, readBody, sendJson, user, owner: isOwner(user), origin: publicOrigin(req) })) return;
   // Telegram-бот человека: свой бот, его чаты и выборка проектов чата (server/telegram-bot.mjs).
   if (await handleTelegramApi({ req, res, url, query, readBody, sendJson, user, origin: publicOrigin(req) })) return;
   if (await handleGoogleDocsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, broadcast: broadcastRealtime })) return;
@@ -3533,6 +3536,7 @@ ensureSpacesSchema(query).catch((error) => console.error(`spaces schema: ${error
 ensureAccountsSchema(query).then(() => ensureInitialOwner(query)).catch((error) => console.error(`accounts schema: ${error.message}`));
 ensureStorageSchema(query).catch((error) => console.error(`storage schema: ${error.message}`));
 ensureAuditScopeSchema(query).then(() => ensureNotificationsSchema(query)).then(() => ensureCompaniesSchema(query)).catch((error) => console.error(`audit scope schema: ${error.message}`));
+ensureNodesSchema(query).catch((error) => console.error(`nodes schema: ${error.message}`));
 // Telegram-боты: таблицы, затем раз в минуту — разбор новых сообщений чатов в память проектов.
 configureTelegram({ broadcast: (entity) => broadcastRealtime("entity_changed", { entity }) });
 ensureTelegramSchema(query).then(() => startTelegramScheduler(query)).catch((error) => console.error(`telegram schema: ${error.message}`));
