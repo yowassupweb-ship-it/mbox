@@ -154,6 +154,7 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
               <li><span>GPT на компьютере</span> <code>@{state.bots[0].username} --gpt вопрос</code></li>
               <li><span>GPT на сервере</span> <code>@{state.bots[0].username} --gptcloud вопрос</code></li>
               <li><span>То же командами</span> <code>/claude</code> <code>/claudecloud</code> <code>/gpt</code> <code>/gptcloud</code> <code>/ask</code> <i>работают и при включённом Privacy Mode</i></li>
+              <li><span>Дать доступ участнику</span> <code>/allow @username</code> <code>/disallow @username</code> <i>в группе, только вы; можно ответом на его сообщение; права на этот чат</i></li>
             </ul>
           )}
 

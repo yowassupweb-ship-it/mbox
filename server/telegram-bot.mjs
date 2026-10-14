@@ -90,6 +90,16 @@ CREATE TABLE IF NOT EXISTS telegram_invites (
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ
 );
+ALTER TABLE telegram_messages ADD COLUMN IF NOT EXISTS from_username TEXT NOT NULL DEFAULT '';
+-- Кому владелец разрешил (/allow) звать Claude и GPT в конкретном чате. Права на чат, не на весь бот.
+CREATE TABLE IF NOT EXISTS telegram_allowed (
+  chat_row_id BIGINT NOT NULL REFERENCES telegram_chats(id) ON DELETE CASCADE,
+  tg_user_id BIGINT NOT NULL,
+  tg_username TEXT NOT NULL DEFAULT '',
+  tg_name TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (chat_row_id, tg_user_id)
+);
 CREATE TABLE IF NOT EXISTS telegram_agent_requests (
   id BIGSERIAL PRIMARY KEY,
   bot_id BIGINT NOT NULL REFERENCES telegram_bots(id) ON DELETE CASCADE,
@@ -135,6 +145,8 @@ const BOT_COMMANDS = [
   { command: "claudecloud", description: "Спросить Claude на сервере" },
   { command: "gpt", description: "Спросить GPT на компьютере" },
   { command: "gptcloud", description: "Спросить GPT на сервере" },
+  { command: "allow", description: "Разрешить участнику звать Claude и GPT (для владельца)" },
+  { command: "disallow", description: "Отозвать разрешение (для владельца)" },
   { command: "help", description: "Как пользоваться ботом" },
 ];
 
@@ -560,6 +572,62 @@ async function applyInvite(query, bot, token, chat, message, code) {
   return true;
 }
 
+/** Кого имеет в виду владелец: ответ на сообщение человека, упоминание без @username, либо @username из тех, кого бот видел в чате. */
+async function resolveAllowTarget(query, chat, message, args) {
+  const replied = message.reply_to_message?.from;
+  if (replied) return replied.is_bot ? { bot: true } : { id: Number(replied.id), username: replied.username || "", name: displayName(replied) };
+  const entities = message.entities || [];
+  const byId = entities.find((entity) => entity.type === "text_mention" && entity.user);
+  if (byId) return { id: Number(byId.user.id), username: byId.user.username || "", name: displayName(byId.user) };
+  const handle = String(args || "").match(/@(\w{3,32})/);
+  if (!handle) return null;
+  const row = (await query(
+    "SELECT from_id::text AS id, from_name FROM telegram_messages WHERE chat_row_id = $1 AND lower(from_username) = lower($2) AND NOT is_bot ORDER BY id DESC LIMIT 1",
+    [chat.id, handle[1]],
+  )).rows[0];
+  return row ? { id: Number(row.id), username: handle[1], name: row.from_name } : { missing: handle[1] };
+}
+
+const isAllowedInChat = async (query, chatRowId, tgUserId) =>
+  tgUserId != null && (await query("SELECT 1 FROM telegram_allowed WHERE chat_row_id = $1 AND tg_user_id = $2", [chatRowId, tgUserId])).rows.length > 0;
+
+const label = (person) => (person.username ? `@${person.username}` : person.name || String(person.id));
+
+/** «/allow @кто» и «/disallow @кто» в группе — только владелец. Без адресата /allow показывает, кому разрешено. */
+async function handleAllowCommand(query, bot, token, chat, message, command, args) {
+  const reply = (body) => send(token, message.chat.id, body, message.message_id).catch(() => []);
+  if (!isLinkedSender(bot, message)) {
+    await reply(bot.tg_user_id == null ? "Сначала привяжите свой Telegram в MBOX: Настройки → Команда → Telegram-боты." : "Разрешать и отзывать доступ к агентам может только владелец бота.");
+    return;
+  }
+  const target = await resolveAllowTarget(query, chat, message, args);
+  if (!target) {
+    if (command === "allow") {
+      const list = (await query("SELECT tg_username, tg_name FROM telegram_allowed WHERE chat_row_id = $1 ORDER BY created_at", [chat.id])).rows;
+      await reply(list.length
+        ? `Claude и GPT в этом чате могут звать: ${list.map((row) => (row.tg_username ? `@${row.tg_username}` : row.tg_name)).join(", ")}.\nДобавить: /allow @username (или ответом на сообщение), убрать: /disallow @username.`
+        : "Пока агентов в этом чате зовёте только вы. Разрешить участнику: /allow @username или /allow ответом на его сообщение.");
+    } else {
+      await reply("Кого отозвать? /disallow @username или /disallow ответом на сообщение человека.");
+    }
+    return;
+  }
+  if (target.bot) { await reply("Это бот — ему доступ не нужен."); return; }
+  if (target.missing) { await reply(`Не видел @${target.missing} в этом чате. Пусть напишет здесь любое сообщение, или отправьте /${command} ответом на его сообщение.`); return; }
+  if (Number(bot.tg_user_id) === target.id) { await reply("Вы владелец бота — доступ у вас и так есть."); return; }
+  if (command === "allow") {
+    await query(
+      `INSERT INTO telegram_allowed(chat_row_id, tg_user_id, tg_username, tg_name) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (chat_row_id, tg_user_id) DO UPDATE SET tg_username = EXCLUDED.tg_username, tg_name = EXCLUDED.tg_name`,
+      [chat.id, target.id, target.username, target.name],
+    );
+    await reply(`Готово: ${label(target)} теперь может обращаться к Claude и GPT в этом чате (--claude, --claudecloud, --gpt, --gptcloud или командами). Агенты работают в вашем аккаунте MBOX, но я прошу их держаться проектов этого чата. Отозвать: /disallow ${label(target)}.`);
+  } else {
+    const removed = (await query("DELETE FROM telegram_allowed WHERE chat_row_id = $1 AND tg_user_id = $2 RETURNING tg_user_id", [chat.id, target.id])).rows.length;
+    await reply(removed ? `Готово: у ${label(target)} больше нет доступа к Claude и GPT.` : `${label(target)} и не был в списке.`);
+  }
+}
+
 const isLinkedSender = (bot, message) => bot.tg_user_id != null && Number(bot.tg_user_id) === message.from?.id;
 
 const HELP = [
@@ -567,6 +635,7 @@ const HELP = [
   "• просто текст — отвечает Джарвис;",
   "• --claude вопрос — Claude на вашем компьютере, --claudecloud — Claude на сервере;",
   "• --gpt вопрос — GPT (Codex) на компьютере, --gptcloud — на сервере.",
+  "Владелец может разрешить участнику чата звать Claude и GPT: /allow @username (или ответом на сообщение), отозвать: /disallow.",
   "Флаг можно поставить в любое место сообщения. В группах так же, после упоминания: @бот --claude вопрос; то же командами: /claude, /claudecloud, /gpt, /gptcloud (в группе — /claude@бот вопрос). Агенты отвечают, когда закончат работу — это может занять несколько минут.",
 ].join("\n");
 
@@ -664,14 +733,19 @@ async function handleUpdate(query, bot, update) {
   }
   if (text) {
     await query(
-      `INSERT INTO telegram_messages(chat_row_id, message_id, from_id, from_name, text, reply_to, is_bot, sent_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))
+      `INSERT INTO telegram_messages(chat_row_id, message_id, from_id, from_name, from_username, text, reply_to, is_bot, sent_at)
+       VALUES ($1, $2, $3, $4, $9, $5, $6, $7, to_timestamp($8))
        ON CONFLICT (chat_row_id, message_id) DO UPDATE SET text = EXCLUDED.text`,
-      [chat.id, message.message_id, message.from?.id ?? null, displayName(message.from), text.slice(0, 8000), message.reply_to_message?.message_id ?? null, Boolean(message.from?.is_bot), message.date || Math.floor(Date.now() / 1000)],
+      [chat.id, message.message_id, message.from?.id ?? null, displayName(message.from), text.slice(0, 8000), message.reply_to_message?.message_id ?? null, Boolean(message.from?.is_bot), message.date || Math.floor(Date.now() / 1000), message.from?.username || ""],
     );
     await query("UPDATE telegram_chats SET last_message_at = now() WHERE id = $1", [chat.id]);
   }
   if (update.edited_message || message.from?.is_bot) return;
+  const allowCommand = text.match(/^\s*\/(allow|disallow)(?:@(\w+))?(?:\s+([\s\S]*))?$/i);
+  if (allowCommand && token && (!allowCommand[2] || allowCommand[2].toLowerCase() === bot.username.toLowerCase())) {
+    await handleAllowCommand(query, bot, token, chat, message, allowCommand[1].toLowerCase(), allowCommand[3]);
+    return;
+  }
   const helpCommand = text.match(/^\s*\/help(?:@(\w+))?\s*$/i);
   if (helpCommand && token && (!helpCommand[1] || helpCommand[1].toLowerCase() === bot.username.toLowerCase())) {
     await send(token, message.chat.id, HELP, message.message_id).catch(() => undefined);
@@ -686,10 +760,11 @@ async function handleUpdate(query, bot, update) {
   // «@бот --claude вопрос» или «/claude вопрос»: агентов зовёт только привязанный аккаунт владельца. Без флага отвечает Джарвис.
   const { agent, text: agentQuestion } = call;
   if (agent) {
-    if (!isLinkedSender(bot, message)) {
+    const isOwner = isLinkedSender(bot, message);
+    if (!isOwner && !(await isAllowedInChat(query, chat.id, message.from?.id))) {
       await send(token, message.chat.id, bot.tg_user_id == null
-        ? "Агентов можно звать, когда привязан ваш Telegram: Настройки → Команда → Telegram-бот → «Привязать Telegram»."
-        : "Claude и GPT отвечают только владельцу бота.", message.message_id).catch(() => undefined);
+        ? "Агентов можно звать, когда привязан ваш Telegram: Настройки → Команда → Telegram-боты → «Привязать Telegram»."
+        : "Claude и GPT отвечают только владельцу бота и тем, кого он разрешил: /allow @username.", message.message_id).catch(() => undefined);
       return;
     }
     if (!agentQuestion) {
@@ -699,7 +774,9 @@ async function handleUpdate(query, bot, update) {
     const projects = await chatProjects(query, chat, bot.owner_user_id);
     const context = await recentLines(query, chat.id, 15, 0, message.message_id);
     const intro = [
-      `[Telegram · групповой чат «${chat.title}»] Владелец обращается к тебе из рабочего чата через Telegram-бота MBOX. Ответь для Telegram: коротко, по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.`,
+      isOwner
+        ? `[Telegram · групповой чат «${chat.title}»] Владелец обращается к тебе из рабочего чата через Telegram-бота MBOX. Ответь для Telegram: коротко, по делу, простое форматирование (абзацы, списки, **жирный**, без таблиц). Если просят что-то сделать — сделай и коротко скажи, что получилось.`
+        : `[Telegram · групповой чат «${chat.title}»] Тебе пишет участник чата ${displayName(message.from)}: владелец разрешил ему обращаться к тебе через Telegram-бота MBOX. Это не владелец. Ответь для Telegram: коротко, по делу, простое форматирование. Работай только в пределах проектов этого чата: не раскрывай и не меняй данные других проектов, не трогай файлы и компьютер владельца, не отправляй писем и не удаляй ничего — если просят такое, вежливо откажи и скажи, что это может только владелец.`,
       projects.length ? `Проекты этого чата: ${projects.map((project) => `${project.name} (#${project.id})`).join(", ")}.` : "",
       "Последние сообщения чата:",
       ...context.map((line) => `[${stamp(line.sent_at)}] ${line.is_bot ? "Бот" : line.from_name}: ${line.text}`),
