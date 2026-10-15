@@ -35,6 +35,13 @@
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
+/* По центру окна, а не свободного места между названием и кнопками: иначе капсула гуляла вместе с длиной названия вкладки. */
+@media (min-width: 721px) {
+  .wb-titlebar .topbar { position: relative; }
+  .wb-titlebar .command-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: clamp(220px, 30vw, 420px); }
+  .wb-titlebar .topbar-context { max-width: calc(50% - clamp(110px, 15vw, 210px) - 24px); overflow: hidden; }
+  .wb-titlebar .topbar-actions { margin-left: auto; }
+}
 .wb-titlebar .command-center:hover { border-color: transparent; background: color-mix(in srgb, var(--text-main) 10%, transparent); color: var(--text-2); }
 .wb-titlebar .command-center span { text-align: center; }
 .wb-titlebar .command-center kbd { border-radius: var(--radius-xs); background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-muted); font-family: var(--font-sans); font-size: var(--text-2xs); }

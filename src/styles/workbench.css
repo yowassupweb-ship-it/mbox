@@ -4418,3 +4418,18 @@ html[data-mbox-desktop="true"] .wb-titlebar .tb-pop-agents { right: calc(100vw -
 /* Перетаскивание в дереве артефактов: цель — подсвеченная строка, перетаскиваемый файл — приглушён. */
 .wb-tree-row.is-drop-target { background: color-mix(in srgb, var(--accent-color) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 55%, transparent); }
 .wb-tree-row.is-dragging { opacity: .45; }
+
+/* «История» во вкладке — колонка по центру, как документы; дни — в боковой панели (HistorySidebar). */
+.wb-history.is-tab { width: 100%; max-width: 960px; margin-inline: auto; padding-inline: 28px; }
+.wb-history-day { scroll-margin-top: 48px; }
+.wb-history-day h2 { color: var(--text-main); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-transform: none; }
+.wb-history-latest { display: inline-flex; align-items: center; gap: 5px; height: 26px; margin-left: auto; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--accent-color) 55%, transparent); border-radius: var(--radius-pill); background: var(--wb-selected); color: var(--text-main); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.wb-history-end { margin: 18px 0 0; color: var(--text-muted); font-size: var(--text-xs); text-align: center; }
+.wb-history-sentinel { height: 1px; }
+.wb-history-side-mode { display: flex; gap: 2px; margin: 0 10px 8px; padding: 2px; border-radius: var(--radius-sm); background: var(--wb-hover); }
+.wb-history-side-mode button { flex: 1; height: 24px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: none; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.wb-history-side-mode button.is-on { background: var(--wb-surface-2); color: var(--text-main); font-weight: var(--weight-medium); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24); }
+.wb-history-side-day { display: flex; align-items: center; gap: 8px; }
+.wb-history-side-day .wb-menu-item-title { flex: 1; min-width: 0; text-transform: none; }
+.wb-history-side-count { flex: none; color: var(--text-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.wb-history-side-day.is-active .wb-history-side-count { color: var(--text-2); }

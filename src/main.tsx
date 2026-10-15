@@ -226,7 +226,7 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
           />
         )}
         renderers={{
-          history: () => <HistoryDocument events={data.auditEvents} />,
+          history: (where) => <HistoryDocument where={where} />,
           settings: () => (
             <SettingsPage
               user={user}

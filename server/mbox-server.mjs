@@ -25,6 +25,7 @@ import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./design-syst
 import { handleMcpHttp } from "./mcp-http.mjs";
 import { approvedSecrets, ensurePasswordsSchema, handlePasswordsApi } from "./passwords.mjs";
 import { decodeBody } from "./body-text.mjs";
+import { handleHistoryApi } from "./history.mjs";
 import { ensureGooglePlannerSchema, handleGooglePlannerApi, handleGooglePlannerCallback, handleGooglePlannerPush, scheduleGoogleSync, startGooglePlannerSync, syncGooglePlanner } from "./google-planner.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
 import { handlePlannerApi, startPlannerAutomations } from "./planner.mjs";
@@ -1217,6 +1218,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/folders"
     || pathname === "/api/mbox/artifacts"
     || pathname === "/api/mbox/history"
+    || pathname === "/api/mbox/history/days"
     || pathname === "/api/mbox/graph/edges"
     || pathname === "/api/mbox/agent/runs"
     || pathname === "/api/mbox/decisions"
@@ -2785,22 +2787,12 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { metrics: snapshot ? { ...snapshot, source: "host" } : null });
   }
 
-  if (url.pathname === "/api/mbox/history") {
+  if (url.pathname === "/api/mbox/history" || url.pathname === "/api/mbox/history/days") {
     // История — только своя: события этого аккаунта и его агентов (server/audit-scope.mjs), без чужих сообщений и действий.
-    const others = (await query("SELECT username FROM users WHERE id <> $1 AND username <> ''", [user.id])).rows.map((row) => row.username);
-    const result = await query(
-      `SELECT id::text, actor, action, entity_type, entity_id::text, project_id::text, summary, metadata,
-              pg_column_size(audit_events)::int AS memory_bytes,
-              created_at::text
-       FROM audit_events
-       WHERE ${auditVisibility("audit_events", 2)}
-         AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
-          OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%')
-       ORDER BY created_at DESC
-       LIMIT 200`,
-      [q, String(user.id), isOwner(user), String(user.username || ""), others],
-    );
-    return sendJson(res, 200, { events: result.rows });
+    // Страницами и по дням — server/history.mjs.
+    const others = (await query("SELECT username FROM users WHERE id <> $1 AND username <> ", [user.id])).rows.map((row) => row.username);
+    await handleHistoryApi({ url, query, sendJson, res, scope: (first) => ({ sql: auditVisibility("e", first), params: [String(user.id), isOwner(user), String(user.username || ""), others] }) });
+    return;
   }
 
   if (url.pathname === "/api/mbox/agent/context") {

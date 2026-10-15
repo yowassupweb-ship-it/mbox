@@ -22,6 +22,7 @@ import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./server/desi
 import { ensureGooglePlannerSchema, handleGooglePlannerApi } from "./server/google-planner.mjs";
 import { approvedSecrets, handlePasswordsApi } from "./server/passwords.mjs";
 import { decodeBody } from "./server/body-text.mjs";
+import { handleHistoryApi } from "./server/history.mjs";
 import { handleSpotlightApi } from "./server/spotlight.mjs";
 import { handlePlannerApi } from "./server/planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
@@ -2405,20 +2406,9 @@ function mboxDevApi() {
             return sendJson(res, 200, { metrics: result.rows[0] ?? null });
           }
 
-          if (url.pathname === "/api/mbox/history") {
-            const result = await queryPostgres(
-              `SELECT id::text, actor, action, entity_type, entity_id::text, project_id::text, summary, metadata,
-                      pg_column_size(audit_events)::int AS memory_bytes,
-                      created_at::text
-               FROM audit_events
-               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
-                 AND ($1 = '' OR actor ILIKE '%' || $1 || '%' OR action ILIKE '%' || $1 || '%'
-                  OR entity_type ILIKE '%' || $1 || '%' OR summary ILIKE '%' || $1 || '%' OR metadata::text ILIKE '%' || $1 || '%')
-               ORDER BY created_at DESC
-               LIMIT 200`,
-              [q, devScope.all, devScope.projectIds],
-            );
-            return sendJson(res, 200, { events: result.rows });
+          if (url.pathname === "/api/mbox/history" || url.pathname === "/api/mbox/history/days") {
+            await handleHistoryApi({ url, query: queryPostgres, sendJson, res, scope: (first: number) => ({ sql: `($${first}::boolean OR e.project_id = ANY($${first + 1}::bigint[]))`, params: [devScope.all, devScope.projectIds] }) });
+            return;
           }
 
           // Расстановка узлов карты. Держать в паре с server/mbox-server.mjs.

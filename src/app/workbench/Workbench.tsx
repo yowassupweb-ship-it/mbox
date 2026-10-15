@@ -80,8 +80,9 @@ import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 import { ProjectPage } from "./projects/ProjectPage";
 import { CompanyPage } from "./projects/CompanyPage";
 import { SettingsSidebar } from "../../features/settings/SettingsSidebar";
+import { HistorySidebar } from "./HistorySidebar";
 
-type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh" | "settings";
+type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh" | "settings" | "history";
 type ConsoleDock = "bottom" | "right";
 
 /** Исполнитель задачи: id пользователя лежит в props.assignees как user:<id>. */
@@ -118,7 +119,7 @@ function systemIcon(file: string) {
 }
 
 export type WorkbenchRenderers = {
-  history: () => ReactNode;
+  history: (where?: "tab" | "panel") => ReactNode;
   settings: () => ReactNode;
   todo: (project: Project, todo: Todo) => ReactNode;
 };
@@ -346,7 +347,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, [tabsState, splitTabs, setSplitTabs, setSplitActive]);
   const tabs = useMemo(() => ({ ...tabsState, open: routedOpen }), [tabsState, routedOpen]);
   // Вкладка «Настройки» показывает свои разделы в боковой панели — как проводник показывает проекты.
-  useEffect(() => { if (tabsState.active === "settings") setActivity("settings"); }, [tabsState.active]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tabsState.active === "settings") setActivity("settings"); else if (tabsState.active === "history") setActivity("history"); }, [tabsState.active]); // eslint-disable-line react-hooks/exhaustive-deps
   const [splitRatio, setSplitRatio] = usePersistentState("mbox.wb.splitRatio", 0.5);
   const [rightOpen, setRightOpen] = usePersistentState("mbox.wb.rightOpen", true);
   const [rightWidth, setRightWidth] = usePersistentState("mbox.wb.rightWidth", 460);
@@ -552,7 +553,9 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   function openRail(id: RailItemId) {
     const tabKey = RAIL_TABS[id];
     if (tabKey) tabs.open(tabKey, true);
-    else showActivity(id as Activity);
+    // «История» — вкладка с лентой и дни в боковой панели.
+    if (id === "history") { setActivity("history"); setSidebarOpen(true); }
+    else if (!tabKey) showActivity(id as Activity);
   }
 
   // ── Панель разделов в духе Dock: значок под курсором и соседние растут, у наведённого — меню действий ──────────
@@ -948,7 +951,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       case "abilities":
         return <AbilitiesBoard />;
       case "history":
-        return renderers.history();
+        return renderers.history("tab");
       case "settings":
         return renderers.settings();
       case "project":
@@ -1259,6 +1262,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
+        {activity === "history" && <HistorySidebar onOpen={() => { if (tabs.active !== "history") tabs.open("history", true); }} />}
         {activity === "settings" && <SettingsSidebar owner={user.role === "owner"} onOpen={() => { tabs.open("settings", true); if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         <div className="wb-sash is-vertical" onPointerDown={resizeSidebar} role="separator" aria-orientation="vertical" aria-label="Ширина боковой панели" />
       </aside>
@@ -1477,7 +1481,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
                 ) : !needsHuman.length && <p className="wb-empty">Ничего не требует внимания</p>}
               </div>
             )}
-            {effectivePanelTab === "journal" && <div className="wb-panel-pane is-journal" data-scroll-scope="panel:journal">{renderers.history()}</div>}
+            {effectivePanelTab === "journal" && <div className="wb-panel-pane is-journal" data-scroll-scope="panel:journal">{renderers.history("panel")}</div>}
           </div>
         </section>
       </div>
