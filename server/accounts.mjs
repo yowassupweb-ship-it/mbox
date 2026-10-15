@@ -360,7 +360,7 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     res.end(text);
     return true;
   }
-  // Адрес и состав инструментов MCP по HTTP для окна «MCP для ChatGPT»: сам ключ — обычный личный токен (/account/tokens).
+  // Адрес и состав инструментов MCP по HTTP для окна «MCP»: сам ключ — обычный личный токен (/account/tokens).
   if (url.pathname === "/api/mbox/account/mcp" && req.method === "GET") {
     sendJson(res, 200, { url: `${publicOrigin(req)}/mcp`, tools: process.env.MBOX_MCP_HTTP_TOOLS ? null : [...DEFAULT_HTTP_TOOLS] });
     return true;

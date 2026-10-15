@@ -15,7 +15,7 @@
 
 import { randomBytes } from "node:crypto";
 
-const secretKey = () => process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
+export const secretKey = () => process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -113,7 +113,7 @@ export async function beginGmailConnect(query, userId, origin) {
   return url.toString();
 }
 
-async function tokenRequest(params) {
+export async function tokenRequest(params) {
   const response = await fetch(GOOGLE_TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

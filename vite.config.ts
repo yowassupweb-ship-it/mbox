@@ -19,6 +19,9 @@ import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./ser
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./server/documents.mjs";
 import { ensurePresentationsSchema, handlePresentationsApi } from "./server/presentations.mjs";
 import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./server/design-systems.mjs";
+import { ensureGooglePlannerSchema, handleGooglePlannerApi } from "./server/google-planner.mjs";
+import { approvedSecrets, handlePasswordsApi } from "./server/passwords.mjs";
+import { decodeBody } from "./server/body-text.mjs";
 import { handleSpotlightApi } from "./server/spotlight.mjs";
 import { handlePlannerApi } from "./server/planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
@@ -438,7 +441,7 @@ const agentStructure = {
 async function readBody<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as T;
+  return JSON.parse(decodeBody(Buffer.concat(chunks), req.headers["content-type"]) || "{}") as T;
 }
 
 function getCookie(req: IncomingMessage, name: string) {
@@ -994,6 +997,7 @@ function mboxDevApi() {
       ensureIntegrationsSchema(queryPostgres).catch((error: Error) => console.error(`integrations schema: ${error.message}`));
       ensurePresentationsSchema(queryPostgres).catch((error: Error) => console.error(`presentations schema: ${error.message}`));
       ensureDesignSystemsSchema(queryPostgres).catch((error: Error) => console.error(`design systems schema: ${error.message}`));
+      ensureGooglePlannerSchema(queryPostgres).catch((error: Error) => console.error(`google planner schema: ${error.message}`));
       ensureItemIconsSchema(queryPostgres).catch((error: Error) => console.error(`icons schema: ${error.message}`));
       ensureSkillAccessSchema(queryPostgres).then(() => ensureSkillStoreSchema(queryPostgres)).catch((error: Error) => console.error(`skill access schema: ${error.message}`));
       ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
@@ -1153,6 +1157,8 @@ function mboxDevApi() {
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handlePresentationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleDesignSystemsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handlePasswordsApi({ req, res, url, query: queryPostgres, readBody, sendJson, userId: String(sessionUser.id), broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handleGooglePlannerApi({ req, res, url, query: queryPostgres, readBody, sendJson, userId: String(sessionUser.id), origin: `http://${req.headers.host || "localhost:5173"}` })) return;
           if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
           if (await handleNotificationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, scope: devScope, hasProjectAccess: devHasProjectAccess })) return;
           if (url.pathname.startsWith("/api/mbox/storage")) {
@@ -2747,79 +2753,7 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/agent/approved-secrets") {
-            const projectName = url.searchParams.get("project") || "MBOX";
-            const result = await queryPostgres(
-              `SELECT s.id::text, s.title, s.login, s.url,
-                      pgp_sym_decrypt(s.secret_ciphertext::bytea, $2) AS password,
-                      s.approved_until::text, p.name AS project_name
-               FROM protected_secrets s
-               JOIN projects p ON p.id = s.project_id
-               WHERE p.name = $1
-                 AND s.agent_share_state = 'approved'
-                 AND (s.approved_until IS NULL OR s.approved_until > now())
-               ORDER BY s.updated_at DESC`,
-              [projectName, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key"],
-            );
-            return sendJson(res, 200, { secrets: result.rows });
-          }
-
-          if (url.pathname === "/api/mbox/secrets") {
-            if (req.method === "POST") {
-              const body = await readBody<{ project_id?: string | null; title?: string; login?: string; password?: string; url?: string }>(req);
-              if (!devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
-              const title = body.title?.trim() ?? "";
-              const password = body.password ?? "";
-              if (!title || !password) return sendJson(res, 400, { error: "title_and_password_required" });
-              const result = await queryPostgres(
-                `INSERT INTO protected_secrets(project_id, title, login, secret_ciphertext, url, access_level, agent_share_state)
-                 VALUES ($6, $1, $2, pgp_sym_encrypt($3, $5), $4, 'private', 'locked')
-                 RETURNING id::text, project_id::text, title, login, url, access_level, agent_share_state,
-                           pg_column_size(protected_secrets)::int AS memory_bytes,
-                           approved_until::text, updated_at::text`,
-                [title, body.login?.trim() ?? "", password, body.url?.trim() ?? "", process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key", body.project_id || null],
-              );
-              broadcastRealtime(realtimeClients, "entity_changed", { entity: "secrets" });
-              return sendJson(res, 201, { secret: result.rows[0] });
-            }
-            const result = await queryPostgres(
-              `SELECT id::text, project_id::text, title, login, url, access_level, agent_share_state,
-                      pg_column_size(protected_secrets)::int AS memory_bytes, approved_until::text, updated_at::text
-               FROM protected_secrets
-               WHERE ($2::boolean OR project_id = ANY($3::bigint[]))
-                 AND ($1 = '' OR title ILIKE '%' || $1 || '%' OR login ILIKE '%' || $1 || '%' OR url ILIKE '%' || $1 || '%')
-               ORDER BY updated_at DESC LIMIT 100`,
-              [q, devScope.all, devScope.projectIds],
-            );
-            return sendJson(res, 200, { secrets: result.rows });
-          }
-
-          const secretMatch = url.pathname.match(/^\/api\/mbox\/secrets\/(\d+)$/);
-          if (secretMatch && req.method === "PATCH") {
-            const body = await readBody<{ project_id?: string | null; agent_share_state?: string; approved_until?: string | null; title?: string; login?: string; password?: string; url?: string }>(req);
-            if (body.project_id && !devHasProjectAccess(devScope, body.project_id)) return sendJson(res, 403, { error: "forbidden" });
-            const title = body.title?.trim() ?? "";
-            const login = typeof body.login === "string" ? body.login.trim() : null;
-            const password = body.password ?? "";
-            const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
-            const hasApprovedUntil = Object.prototype.hasOwnProperty.call(body, "approved_until");
-            const result = await queryPostgres(
-              `UPDATE protected_secrets
-               SET project_id = COALESCE($1, project_id),
-                   agent_share_state = COALESCE(NULLIF($2, ''), agent_share_state),
-                   approved_until = CASE WHEN $10 THEN $3 ELSE approved_until END,
-                   title = COALESCE(NULLIF($5, ''), title),
-                   login = COALESCE($6, login),
-                   url = COALESCE($7, url),
-                   secret_ciphertext = CASE WHEN NULLIF($8, '') IS NULL THEN secret_ciphertext ELSE pgp_sym_encrypt($8, $9) END,
-                   updated_at = now()
-               WHERE id = $4 AND ($11::boolean OR project_id = ANY($12::bigint[]))
-               RETURNING id::text, project_id::text, title, login, url, access_level, agent_share_state,
-                         pg_column_size(protected_secrets)::int AS memory_bytes,
-                         approved_until::text, updated_at::text`,
-              [body.project_id || null, body.agent_share_state ?? "", body.approved_until || null, secretMatch[1], title, login, typeof body.url === "string" ? body.url.trim() : null, password, secretKey, hasApprovedUntil, devScope.all, devScope.projectIds],
-            );
-            broadcastRealtime(realtimeClients, "entity_changed", { entity: "secrets" });
-            return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { secret: result.rows[0] } : { error: "not_found" });
+            return sendJson(res, 200, { secrets: await approvedSecrets(queryPostgres, sessionUser.id, url.searchParams.get("project") || "") });
           }
 
           return sendJson(res, 404, { error: "not_found" });

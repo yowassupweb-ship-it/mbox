@@ -23,6 +23,9 @@ import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } fr
 import { ensurePresentationsSchema, handlePresentationsApi } from "./presentations.mjs";
 import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./design-systems.mjs";
 import { handleMcpHttp } from "./mcp-http.mjs";
+import { approvedSecrets, ensurePasswordsSchema, handlePasswordsApi } from "./passwords.mjs";
+import { decodeBody } from "./body-text.mjs";
+import { ensureGooglePlannerSchema, handleGooglePlannerApi, handleGooglePlannerCallback, handleGooglePlannerPush, scheduleGoogleSync, startGooglePlannerSync, syncGooglePlanner } from "./google-planner.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
 import { handlePlannerApi, startPlannerAutomations } from "./planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
@@ -905,7 +908,8 @@ async function readBody(req) {
     chunks.push(buffer);
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    // Кодировку угадываем: агент с Windows шлёт кириллицу в 1251/866, и чтение «как UTF-8» портило её навсегда (server/body-text.mjs).
+    return JSON.parse(decodeBody(Buffer.concat(chunks), req.headers["content-type"]) || "{}");
   } catch {
     throw new HttpError(400, "invalid_json");
   }
@@ -1186,6 +1190,12 @@ function memberRouteAllowed(pathname) {
     // Магазин навыков и инструментов: витрина для всей команды.
     || /^\/api\/mbox\/icons\/(?:skill|tool)\/[a-z0-9_-]+$/.test(pathname)
     || /^\/api\/mbox\/store(?:\/\d+(?:\/install)?)?$/.test(pathname)
+    // Каталог инструментов — статичные описания (server/tool-catalog.mjs); без него у участника пустой раздел «Инструменты».
+    || pathname === "/api/mbox/tools"
+    // Свои пароли (записи режутся по хозяину в server/passwords.mjs) и одобренные агенту из них.
+    || /^\/api\/mbox\/secrets(?:\/\d+(?:\/reveal)?)?$/.test(pathname)
+    || /^\/api\/mbox\/passwords\/(?:vault|save|used|never|import)$/.test(pathname)
+    || pathname === "/api/mbox/agent/approved-secrets"
     || pathname === "/api/mbox/agent/models"
     || pathname === "/api/mbox/agent/threads"
     || /^\/api\/mbox\/agent\/threads\/[A-Za-z0-9_-]{1,80}$/.test(pathname)
@@ -1219,6 +1229,7 @@ function memberRouteAllowed(pathname) {
     || /^\/api\/mbox\/planner\/(?:tasks|events)(?:\/\d+)?$/.test(pathname)
     || pathname === "/api/mbox/presentations"
     || /^\/api\/mbox\/presentations\/\d+(?:\/slides|\/assets(?:\/\d+)?)?$/.test(pathname)
+    || /^\/api\/mbox\/google-planner\/(?:status|sources|connect|disconnect|settings|sync)$/.test(pathname)
     || pathname === "/api/mbox/design-systems"
     || /^\/api\/mbox\/design-systems\/\d+$/.test(pathname)
     || pathname === "/api/mbox/spotlight"
@@ -1327,7 +1338,14 @@ async function handleApiWithContext(req, res, url) {
     return sendJson(res, 200, { user: withChatDefaults(await currentUser(req)) });
   }
 
-  if (url.pathname === "/api/mbox/oauth/google/callback" && req.method === "GET") { await handleGoogleCallback({ res, url, query }); return; }
+  if (url.pathname === "/api/mbox/oauth/google/callback" && req.method === "GET") {
+    // Подключение календаря и задач (server/google-planner.mjs) возвращается сюда же; чьё — решает state.
+    const planner = await handleGooglePlannerCallback({ res, url, query, onConnected: (userId) => { syncGooglePlanner(query, userId, { broadcast: broadcastRealtime }).catch(() => {}); } });
+    if (!planner) await handleGoogleCallback({ res, url, query });
+    return;
+  }
+  // Уведомление Google Календаря об изменениях: без сессии, подлинность — id и токен канала (server/google-planner.mjs).
+  if (await handleGooglePlannerPush({ req, res, url, query, broadcast: broadcastRealtime })) return;
   // Вебхук Telegram-бота: без сессии, подлинность — секрет бота в заголовке (server/telegram-bot.mjs).
   if (await handleTelegramWebhook({ req, res, url, query, readBody })) return;
   if (await handlePublicInvite({ req, res, url, query, readBody, sendJson, startSession: createSessionForUser })) return;
@@ -1340,12 +1358,13 @@ async function handleApiWithContext(req, res, url) {
   if (await handleSpacesApi({ req, res, url, query, readBody, sendJson, user })) return;
 
   if (!isOwner(user) && !memberRouteAllowed(url.pathname)) return sendJson(res, 403, { error: "project_access_denied", message: "Этот раздел доступен только владельцу MBOX" });
-  // Пароли и ключи сервера — только владельцу инстанса.
-  if (!isOwner(user) && /^\/api\/mbox\/(secrets|agent\/approved-secrets)(?:\/|$)/.test(url.pathname)) return sendJson(res, 403, { error: "owner_required" });
+  // Пароли: у каждого свои записи (сайты, серверы, прочее), браузер Desktop подставляет и сохраняет их (server/passwords.mjs).
+  if (await handlePasswordsApi({ req, res, url, query, readBody, sendJson, userId: String(user.id), broadcast: broadcastRealtime })) return;
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: isOwner(user), broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
-  if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime, actor: actorFromReq(req), userName: user.username })) return;
+  if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: (type, payload) => { broadcastRealtime(type, payload); if (payload?.entity === "calendar_events" || payload?.entity === "todos") scheduleGoogleSync(query, user.id, broadcastRealtime); }, actor: actorFromReq(req), userName: user.username })) return;
+  if (await handleGooglePlannerApi({ req, res, url, query, readBody, sendJson, userId: String(user.id), origin: publicOrigin(req), broadcast: broadcastRealtime })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handlePresentationsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
@@ -2831,16 +2850,17 @@ async function handleApiWithContext(req, res, url) {
     const runs = await query("SELECT id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 20", [project.id]);
     const history = await query("SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text FROM audit_events WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50", [project.id]);
     const memories = await relevantMemories(`${project.name} ${project.stack.join(" ")} ${JSON.stringify(project.props || {})}`, { projectId: project.id, limit: 5 });
-    const secrets = !isOwner(user) ? { rows: [] } : await query(
+    // Одобренные агенту пароли этого проекта — только свои записи того, от чьего имени агент (server/passwords.mjs).
+    const secrets = await query(
       `SELECT s.id::text, s.title, s.login, s.url,
               pgp_sym_decrypt(s.secret_ciphertext::bytea, $2) AS password,
               s.approved_until::text
        FROM protected_secrets s
-       WHERE s.project_id = $1
+       WHERE s.project_id = $1 AND s.owner_user_id = $3
          AND s.agent_share_state = 'approved'
          AND (s.approved_until IS NULL OR s.approved_until > now())
       ORDER BY s.updated_at DESC`,
-      [project.id, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key"],
+      [project.id, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key", String(user.id)],
     );
     if (detail === "full") {
       return sendJson(res, 200, { project, detail, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, memories, approved_secrets: secrets.rows });
@@ -3258,84 +3278,8 @@ async function handleApiWithContext(req, res, url) {
   }
 
   if (url.pathname === "/api/mbox/agent/approved-secrets") {
-    const projectName = url.searchParams.get("project") || "MBOX";
-    const result = await query(
-      `SELECT s.id::text, s.title, s.login, s.url,
-              pgp_sym_decrypt(s.secret_ciphertext::bytea, $2) AS password,
-              s.approved_until::text, p.name AS project_name
-       FROM protected_secrets s
-       JOIN projects p ON p.id = s.project_id
-       WHERE p.name = $1
-         AND s.agent_share_state = 'approved'
-         AND (s.approved_until IS NULL OR s.approved_until > now())
-       ORDER BY s.updated_at DESC`,
-      [projectName, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key"],
-    );
-    return sendJson(res, 200, { secrets: result.rows });
-  }
-
-  if (url.pathname === "/api/mbox/secrets") {
-    if (req.method === "POST") {
-      const body = await readBody(req);
-      const title = typeof body.title === "string" ? body.title.trim() : "";
-      const password = typeof body.password === "string" ? body.password : "";
-      if (!title || !password) return sendJson(res, 400, { error: "title_and_password_required" });
-      const result = await query(
-        `INSERT INTO protected_secrets(project_id, title, login, secret_ciphertext, url, access_level, agent_share_state)
-         VALUES ($6, $1, $2, pgp_sym_encrypt($3, $5), $4, 'private', 'locked')
-         RETURNING id::text, project_id::text, title, login, url, access_level, agent_share_state,
-                   pg_column_size(protected_secrets)::int AS memory_bytes,
-                   approved_until::text, updated_at::text`,
-        [
-          title,
-          typeof body.login === "string" ? body.login.trim() : "",
-          password,
-          typeof body.url === "string" ? body.url.trim() : "",
-          process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key",
-          body.project_id || null,
-        ],
-      );
-      broadcastChange(req, "create", "secrets", title);
-      return sendJson(res, 201, { secret: result.rows[0] });
-    }
-    const result = await query(
-      `SELECT id::text, project_id::text, title, login, url, access_level, agent_share_state,
-              pg_column_size(protected_secrets)::int AS memory_bytes, approved_until::text, updated_at::text
-       FROM protected_secrets
-       WHERE $1 = '' OR title ILIKE '%' || $1 || '%' OR login ILIKE '%' || $1 || '%' OR url ILIKE '%' || $1 || '%'
-       ORDER BY updated_at DESC LIMIT 100`,
-      [q],
-    );
-    return sendJson(res, 200, { secrets: result.rows });
-  }
-
-  const secretMatch = url.pathname.match(/^\/api\/mbox\/secrets\/(\d+)$/);
-  if (secretMatch && req.method === "PATCH") {
-    const body = await readBody(req);
-    const title = typeof body.title === "string" ? body.title.trim() : "";
-    const login = typeof body.login === "string" ? body.login.trim() : null;
-    const rawPassword = typeof body.password === "string" ? body.password : "";
-    const password = looksLikePasswordHash(rawPassword) ? "" : rawPassword;
-    const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
-    const hasApprovedUntil = Object.prototype.hasOwnProperty.call(body, "approved_until");
-    const result = await query(
-      `UPDATE protected_secrets
-       SET project_id = COALESCE($1, project_id),
-           agent_share_state = COALESCE(NULLIF($2, ''), agent_share_state),
-           approved_until = CASE WHEN $10 THEN $3 ELSE approved_until END,
-           title = COALESCE(NULLIF($5, ''), title),
-           login = COALESCE($6, login),
-           url = COALESCE($7, url),
-           secret_ciphertext = CASE WHEN NULLIF($8, '') IS NULL THEN secret_ciphertext ELSE pgp_sym_encrypt($8, $9) END,
-           updated_at = now()
-       WHERE id = $4
-       RETURNING id::text, project_id::text, title, login, url, access_level, agent_share_state,
-                 pg_column_size(protected_secrets)::int AS memory_bytes,
-                 approved_until::text, updated_at::text`,
-      [body.project_id || null, String(body.agent_share_state || ""), body.approved_until || null, secretMatch[1], title, login, typeof body.url === "string" ? body.url.trim() : null, password, secretKey, hasApprovedUntil],
-    );
-    broadcastChange(req, "update", "secrets", title || `#${secretMatch[1]}`);
-    return sendJson(res, result.rows[0] ? 200 : 404, result.rows[0] ? { secret: result.rows[0] } : { error: "not_found" });
+    // Одобренные агенту записи раздела «Пароли» того, от чьего имени пришёл агент (server/passwords.mjs).
+    return sendJson(res, 200, { secrets: await approvedSecrets(query, user.id, url.searchParams.get("project") || "") });
   }
 
   return sendJson(res, 404, { error: "not_found" });
@@ -3552,6 +3496,8 @@ configureTelegram({ broadcast: (entity) => broadcastRealtime("entity_changed", {
 ensureTelegramSchema(query).then(() => startTelegramScheduler(query)).catch((error) => console.error(`telegram schema: ${error.message}`));
 ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
 ensureDesignSystemsSchema(query).catch((error) => console.error(`design systems schema: ${error.message}`));
+ensurePasswordsSchema(query).catch((error) => console.error(`passwords schema: ${error.message}`));
+ensureGooglePlannerSchema(query).then(() => startGooglePlannerSync({ query, broadcast: broadcastRealtime })).catch((error) => console.error(`google planner schema: ${error.message}`));
 ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
 ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));

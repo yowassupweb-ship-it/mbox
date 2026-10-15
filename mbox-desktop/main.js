@@ -284,6 +284,8 @@ function createWindow() {
   // Сквозная сессия: забираем с сервера куки сайтов (до того, как человек откроет первую вкладку),
   // и дальше досылаем изменения. Проверка доступности — она же проверка, что вход в MBOX есть.
   serverState.configure(mboxUrl);
+  // Пароли браузера живут в разделе «Пароли» сервера: забираем копию и досылаем то, что сохранили без сети (password-store.js).
+  passwordStore.start();
   // Чистка кук Google — до первой вкладки и независимо от связи с сервером (см. repairGoogleCookies).
   const googleRepair = serverState.repairGoogleCookies(browser.PARTITION).catch(() => 0);
   void serverState.probe().then(async (on) => {

@@ -5,7 +5,7 @@
 // а на каждую сессию запускает этот сервер дочерним процессом (stdio) с ключом звонящего и гонит через него JSON-RPC.
 // Все права проверяет обычный API MBOX по этому ключу: участник видит только свои проекты, как и везде.
 //
-// Ключ — личный токен аккаунта (Настройки → Аккаунт → MCP для ChatGPT; тот же механизм, что у /account/tokens), отзывается там же.
+// Ключ — личный токен аккаунта (Настройки → MCP; тот же механизм, что у /account/tokens), отзывается там же.
 // Передаётся заголовком `Authorization: Bearer <ключ>` или частью адреса /mcp/<ключ> — для клиентов без своих заголовков.
 //
 //   POST   /mcp          — JSON-RPC (initialize открывает сессию, дальше заголовок Mcp-Session-Id)
@@ -35,7 +35,7 @@ export const DEFAULT_HTTP_TOOLS = new Set([
   "note_search", "note_read", "note_write", "note_edit", "doc_search", "doc_read", "doc_write", "doc_edit",
   "table_search", "table_read", "table_write_cells", "table_append_rows", "table_create",
   "design_system_list", "design_system_read", "design_system_write", "presentation_list", "presentation_read",
-  "planner_read", "list_skills", "get_skill", "storage_list", "storage_read",
+  "planner_read", "planner_task", "planner_event", "list_skills", "get_skill", "storage_list", "storage_read",
 ]);
 
 export function httpToolFilter(setting = process.env.MBOX_MCP_HTTP_TOOLS) {
@@ -187,7 +187,7 @@ export async function handleMcpHttp({ req, res, url, authenticate, scriptPath, b
   const user = key ? await authenticate(key) : null;
   if (!user) {
     noteFailure(ip);
-    send(res, 401, { error: "invalid_key", hint: "Создайте ключ: Настройки → Аккаунт → MCP для ChatGPT" }, { ...cors, "www-authenticate": 'Bearer realm="MBOX MCP"' });
+    send(res, 401, { error: "invalid_key", hint: "Создайте ключ: Настройки → MCP" }, { ...cors, "www-authenticate": 'Bearer realm="MBOX MCP"' });
     return true;
   }
 

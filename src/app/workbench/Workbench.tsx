@@ -79,8 +79,9 @@ import { TreeGlyph } from "./TreeGlyph";
 import { REVEAL_EVENT, type RevealDetail } from "./Crumbs";
 import { ProjectPage } from "./projects/ProjectPage";
 import { CompanyPage } from "./projects/CompanyPage";
+import { SettingsSidebar } from "../../features/settings/SettingsSidebar";
 
-type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
+type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh" | "settings";
 type ConsoleDock = "bottom" | "right";
 
 /** Исполнитель задачи: id пользователя лежит в props.assignees как user:<id>. */
@@ -344,6 +345,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
     tabsState.open(nextKey, pin);
   }, [tabsState, splitTabs, setSplitTabs, setSplitActive]);
   const tabs = useMemo(() => ({ ...tabsState, open: routedOpen }), [tabsState, routedOpen]);
+  // Вкладка «Настройки» показывает свои разделы в боковой панели — как проводник показывает проекты.
+  useEffect(() => { if (tabsState.active === "settings") setActivity("settings"); }, [tabsState.active]); // eslint-disable-line react-hooks/exhaustive-deps
   const [splitRatio, setSplitRatio] = usePersistentState("mbox.wb.splitRatio", 0.5);
   const [rightOpen, setRightOpen] = usePersistentState("mbox.wb.rightOpen", true);
   const [rightWidth, setRightWidth] = usePersistentState("mbox.wb.rightWidth", 460);
@@ -1241,7 +1244,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
           <span className="wb-activity-label" aria-hidden="true">Чат</span>
           <span className="wb-activity-tip" role="tooltip">Чат с агентами</span>
         </button>
-        <ActivityButton label="Настройки" short="Настройки" icon={systemIcon("settings.png")} active={tabs.active === "settings"} onClick={() => { closePhoneChat(); tabs.open("settings", true); }} />
+        <ActivityButton label="Настройки" short="Настройки" icon={systemIcon("settings.png")} active={tabs.active === "settings" || (sidebarOpen && activity === "settings")} onClick={() => { closePhoneChat(); tabs.open("settings", true); setActivity("settings"); setSidebarOpen(true); }} />
       </nav>
 
       <aside className="wb-sidebar" aria-label="Боковая панель" data-scroll-scope={`sidebar:${activity}`}>
@@ -1256,6 +1259,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         {activity === "skills" && <SkillsView tabs={tabs} />}
         {activity === "tools" && <ToolsView tabs={tabs} />}
         {activity === "ssh" && <SshView />}
+        {activity === "settings" && <SettingsSidebar owner={user.role === "owner"} onOpen={() => { tabs.open("settings", true); if (window.matchMedia("(max-width: 720px)").matches) setSidebarOpen(false); }} />}
         <div className="wb-sash is-vertical" onPointerDown={resizeSidebar} role="separator" aria-orientation="vertical" aria-label="Ширина боковой панели" />
       </aside>
 

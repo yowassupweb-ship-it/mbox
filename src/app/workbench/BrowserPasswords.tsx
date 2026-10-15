@@ -6,7 +6,8 @@ import { Favicon, markOverlay } from "./BrowserDocument";
 
 /**
  * Пароли встроенного браузера: панель «Сохранить пароль?» над страницей и окно «Пароли» (поиск, показать, копировать,
- * изменить, удалить, сайты-исключения, импорт из Chrome). Сами пароли живут только на этом компьютере, в хранилище,
+ * изменить, удалить, сайты-исключения, импорт из Chrome). Пароли живут в разделе «Пароли» на сервере MBOX (server/passwords.mjs),
+ * на компьютере — копия для работы без сети, в хранилище,
  * зашифрованном ключом ОС (mbox-desktop/password-store.js); подсказки в полях входа рисует сама страница сайта
  * (browser-tab-preload.js).
  */
@@ -48,7 +49,7 @@ export function PasswordBar({ prompt, bridge }: { prompt: PasswordPrompt; bridge
       <span className="wb-permission-icon"><KeyRound size={16} aria-hidden="true" /></span>
       <span className="wb-permission-text">
         {update ? "Обновить пароль для " : "Сохранить пароль для "}<b>{prompt.host}</b>?
-        {error ? <small className="wb-pw-error"> · {error}</small> : <small> Только на этом компьютере</small>}
+        {error ? <small className="wb-pw-error"> · {error}</small> : <small> В разделе «Пароли» MBOX</small>}
       </span>
       <label className="wb-pw-field">
         <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Без логина" spellCheck={false} autoComplete="off" disabled={busy || update} aria-label="Логин" />
@@ -172,7 +173,7 @@ export function PasswordsDialog({ bridge, initialQuery = "", onClose }: { bridge
           <span className="wb-pw-head-icon"><KeyRound size={18} aria-hidden="true" /></span>
           <div className="wb-pw-head-text">
             <h2>Пароли</h2>
-            <small>{total ? `Сохранено: ${total} · только на этом компьютере, зашифровано ключом Windows` : "Хранятся только на этом компьютере, зашифрованы ключом Windows"}</small>
+            <small>{total ? `Сохранено: ${total} · в разделе «Пароли» MBOX, на всех ваших компьютерах` : "Хранятся в разделе «Пароли» MBOX и доступны на всех ваших компьютерах"}</small>
           </div>
           <button type="button" className="wb-pw-ghost" onClick={() => void importCsv()} title="Импорт CSV, экспортированного из Chrome"><Import size={14} /> Из Chrome</button>
           <button type="button" className="wb-pw-icon" onClick={onClose} aria-label="Закрыть"><X size={16} /></button>
