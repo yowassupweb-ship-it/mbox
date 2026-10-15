@@ -300,7 +300,10 @@
   overscroll-behavior: contain;
 }
 
-/* Спиннер ожидания — маскот MBOX (components/OctopusSpinner.tsx). */
-.octopus-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 12px; color: var(--text-muted); font-size: var(--text-sm); text-align: center; }
-.octopus-spinner img { display: block; image-rendering: pixelated; }
+/* Спиннер ожидания (components/OctopusSpinner.tsx): двенадцать палочек к центру, яркость бежит по кругу, как в macOS и iOS. */
+.octopus-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px 12px; color: var(--text-muted); font-size: var(--text-sm); text-align: center; }
 .octopus-spinner.is-compact { flex-direction: row; justify-content: flex-start; gap: 8px; padding: 8px 12px; }
+.activity-spinner { position: relative; display: inline-block; flex: none; color: var(--text-muted); }
+.activity-spinner > i { position: absolute; left: 50%; top: 0; width: 8.5%; height: 28%; margin-left: -4.25%; border-radius: 999px; background: currentColor; transform-origin: 50% 178.5%; opacity: .2; animation: activity-spinner-fade 1s linear infinite; }
+@keyframes activity-spinner-fade { from { opacity: 1; } to { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .activity-spinner > i { animation-duration: 2.4s; } }
