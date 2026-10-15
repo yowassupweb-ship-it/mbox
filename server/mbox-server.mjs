@@ -123,7 +123,7 @@ const agentStructure = {
     open: { label_ru: "Новая", ai_rule: "available but not the first priority" },
     next: { label_ru: "Следующая", ai_rule: "preferred next task" },
     doing: { label_ru: "В работе", ai_rule: "currently active" },
-    blocked: { label_ru: "Заблокирована", ai_rule: "requires user input or external access" },
+    blocked: { label_ru: "Заблокирована", ai_rule: "set only by the owner. Agents never set it: if you need an answer or data from the owner, keep the todo in next/open and ask through create_inbox_item with requires_human=true" },
     review: { label_ru: "На проверке", ai_rule: "implementation needs human review" },
     done: { label_ru: "Готово", ai_rule: "completed; do not pick for work" },
     archived: { label_ru: "Архив", ai_rule: "historical; ignore unless asked" },

@@ -621,7 +621,7 @@ server.registerTool(
   "set_task_status",
   {
     title: "Set MBOX task status",
-    description: "MANDATORY when pausing, blocking, sending to review or finishing. Update a todo status and note in MBOX.",
+    description: "MANDATORY when pausing, sending to review or finishing. Update a todo status and note in MBOX. Never set blocked: it is the owner's status. If you need an answer or data from the owner, leave the todo in next/open and use create_inbox_item with requires_human=true.",
     inputSchema: {
       id: z.string(),
       status: z.enum(["open", "next", "doing", "blocked", "review", "done", "archived"]),
@@ -645,7 +645,7 @@ server.registerTool(
     inputSchema: {
       project: z.string().default("MBOX"),
       todo_id: z.string(),
-      status: z.enum(["review", "done", "blocked"]).default("review"),
+      status: z.enum(["review", "done"]).default("review"),
       note: z.string(),
       memory_title: z.string(),
       memory_content: z.string(),
