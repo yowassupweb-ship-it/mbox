@@ -81,3 +81,11 @@ export async function plannerFetch<T>(path: string, init?: RequestInit): Promise
   if (!response.ok) throw new Error(`planner_${response.status}`);
   return response.json() as Promise<T>;
 }
+
+/** Подпись к тосту при сбое записи: отказ сервера в доступе и конец сессии — не «нет связи». */
+export function failText(error: unknown, base: string) {
+  const status = /^planner_(\d{3})$/.exec(error instanceof Error ? error.message : "")?.[1];
+  if (status === "403") return `${base} — у вашей учётной записи нет доступа к планировщику.`;
+  if (status === "401") return `${base} — сессия истекла, войдите заново.`;
+  return `${base} — нет связи с сервером.`;
+}

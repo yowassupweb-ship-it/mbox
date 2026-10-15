@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, Bot, CalendarDays, Check, ChevronDown, MapPin, Repeat, Trash2, Zap } from 'lucide-react';
-import { create, overlayRoot } from '../lib';
+import { create, failText, overlayRoot } from '../lib';
 import { showToast } from '../ui/Toast';
 import { DatePicker } from '../ui/DatePicker';
 import { Menu, MenuItem, Sheet, type MenuAnchor } from '../ui/overlay';
@@ -160,8 +160,8 @@ export default function EventEditor({ state, onClose }: { state: EditorState; on
         await updateEvent(original, draft, scope);
       }
       onClose();
-    } catch {
-      showToast('Не сохранилось — нет связи с сервером.', 'error');
+    } catch (e) {
+      showToast(failText(e, 'Не сохранилось'), 'error');
       setBusy(false);
     }
   };
@@ -175,7 +175,7 @@ export default function EventEditor({ state, onClose }: { state: EditorState; on
       scope = picked;
     }
     setBusy(true);
-    try { await deleteEvent(original, scope); onClose(); } catch { showToast('Не удалилось — нет связи с сервером.', 'error'); setBusy(false); }
+    try { await deleteEvent(original, scope); onClose(); } catch (e) { showToast(failText(e, 'Не удалилось'), 'error'); setBusy(false); }
   };
 
   const pop = (kind: NonNullable<typeof menu>['kind']) => (e: React.MouseEvent<HTMLElement>) =>

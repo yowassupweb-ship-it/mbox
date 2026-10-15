@@ -1,3 +1,4 @@
+import { failText } from '../lib';
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { AlertCircle, Bot, CalendarDays, CalendarX, Check, ChevronDown, ChevronRight, CircleCheck, Columns2, Copy, ExternalLink, Flag, FolderClosed, PanelTop, Plus, RotateCcw, RotateCw, Search, Trash2 } from 'lucide-react';
 import { showToast } from '../ui/Toast';
@@ -41,7 +42,7 @@ const Row = memo(function Row({ t, list, active, onOpen, onMenu }: { t: Task; li
   const fresh = useCalendarUi((s) => s.fresh.includes(`task:${t.id}`));
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    void updateTask(t.id, { status: done ? 'open' : 'done' }).catch(() => showToast('Не сохранилось — нет связи с сервером.', 'error'));
+    void updateTask(t.id, { status: done ? 'open' : 'done' }).catch((e) => showToast(failText(e, 'Не сохранилось'), 'error'));
   };
   return (
     <div role="button" tabIndex={0} className="ntl-row" data-task-id={t.id} aria-current={active ? 'true' : undefined} data-done={done ? 'true' : undefined} data-fresh={fresh ? 'true' : undefined} onClick={() => onOpen(t.id)} onKeyDown={(e) => {
@@ -105,8 +106,8 @@ export function TaskList() {
       const t = await createTask({ listId: filter === 'all' ? PERSONAL : filter });
       setFresh(t.id);
       openTask(t.id, 'tab');
-    } catch {
-      showToast('Задача не создалась — нет связи с сервером.', 'error');
+    } catch (e) {
+      showToast(failText(e, 'Задача не создалась'), 'error');
     } finally {
       setCreating(false);
     }
@@ -237,7 +238,7 @@ function TaskMenu({ task, anchor, onClose, onDeleted }: {
   const status = statusOf(task);
   const apply = (patch: Partial<Task>) => {
     onClose();
-    void updateTask(task.id, patch).catch(() => showToast('Не сохранилось — нет связи с сервером.', 'error'));
+    void updateTask(task.id, patch).catch((e) => showToast(failText(e, 'Не сохранилось'), 'error'));
   };
   const remove = async () => {
     onClose();

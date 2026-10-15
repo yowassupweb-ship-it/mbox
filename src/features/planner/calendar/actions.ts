@@ -1,3 +1,4 @@
+import { failText } from '../lib';
 import { showToast } from '../ui/Toast';
 import { askConfirm } from '../ui/overlay';
 import { updateTask } from '../tasks/api';
@@ -33,7 +34,7 @@ export async function moveEvent(e: CalEvent, start: Date, end: Date) {
   // Системную автоматизацию двигает её расписание, а не человек.
   if (e.system) return;
   if (e.taskId) {
-    updateTask(e.taskId, { dueDate: dayIso(start) }).catch(() => showToast('Срок не перенёсся — нет связи с сервером.', 'error'));
+    updateTask(e.taskId, { dueDate: dayIso(start) }).catch((e) => showToast(failText(e, 'Срок не перенёсся'), 'error'));
     return;
   }
   let scope: Scope = 'all';
@@ -44,8 +45,8 @@ export async function moveEvent(e: CalEvent, start: Date, end: Date) {
   }
   try {
     await updateEvent(e, { start: localIso(start), end: localIso(end) }, scope);
-  } catch {
-    showToast('Не перенеслось — нет связи с сервером.', 'error');
+  } catch (e) {
+    showToast(failText(e, 'Не перенеслось'), 'error');
   }
 }
 
@@ -67,7 +68,7 @@ export async function removeEvent(e: CalEvent) {
   } else if (!await askConfirm({ title: `Удалить «${e.title || 'Без названия'}»?`, confirm: 'Удалить', tone: 'danger' })) {
     return;
   }
-  try { await deleteEvent(e, scope); } catch { showToast('Не удалилось — нет связи с сервером.', 'error'); }
+  try { await deleteEvent(e, scope); } catch (e) { showToast(failText(e, 'Не удалилось'), 'error'); }
 }
 
 /** Копия — редактор с теми же полями: дату и время можно поправить до сохранения. */
@@ -79,10 +80,10 @@ export function duplicateEvent(e: CalEvent) {
 }
 
 export function recolorEvent(e: CalEvent, color: string) {
-  updateEvent(e, { color }, 'all').catch(() => showToast('Не сохранилось — нет связи с сервером.', 'error'));
+  updateEvent(e, { color }, 'all').catch((e) => showToast(failText(e, 'Не сохранилось'), 'error'));
 }
 
 export function toggleTaskDone(e: CalEvent) {
   if (!e.taskId) return;
-  updateTask(e.taskId, { status: e.done ? 'open' : 'done' }).catch(() => showToast('Не сохранилось — нет связи с сервером.', 'error'));
+  updateTask(e.taskId, { status: e.done ? 'open' : 'done' }).catch((e) => showToast(failText(e, 'Не сохранилось'), 'error'));
 }

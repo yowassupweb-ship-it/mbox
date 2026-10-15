@@ -1,3 +1,4 @@
+import { failText } from '../lib';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import {
   AlertCircle, ArrowLeft, Bot, CalendarDays, Check, ChevronDown, Eye, Flag, FolderClosed, Loader2, MoreHorizontal, Pencil,
@@ -136,7 +137,7 @@ export default function TaskDocument({ task, onBack, onGone }: {
 
   // Успех видно по самой задаче — всплывашки только об ошибках, иначе их сыпалось по штуке на клик.
   const patch = async (p: Partial<Task>) => {
-    try { await updateTask(task.id, p); } catch { showToast('Не сохранилось — нет связи с сервером.', 'error'); }
+    try { await updateTask(task.id, p); } catch (e) { showToast(failText(e, 'Не сохранилось'), 'error'); }
   };
 
   const remove = async () => {
