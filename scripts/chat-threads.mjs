@@ -336,6 +336,7 @@ export function chatRules({ agentName, skills = [], windows = process.platform =
     "Work economically:",
     "- Routine requests (edit a file, fix formatting, rename, small change): fewest possible steps — one call to change, one to read the result back. No renderers, converters or viewers (LibreOffice, Word COM, render scripts), no visual checks unless asked, no filesystem exploration beyond the task, even if a skill demands heavier verification.",
     "- Read only the parts you need, prefer targeted search over broad scans, never repeat large file contents in the answer.",
+    "- If you hit a defect of MBOX itself (an mbox-prod tool or API errors or returns wrong data, a screen or flow contradicts its description, something silently does nothing): file it with report_bug yourself, right away, without asking the owner, then continue the task; add one line «Записал баг-репорт: …» to the answer. Not for your own mistakes, wrong input or intended access limits.",
     "- Access denied / permission denied / EACCES / EPERM: do not work around it (no copies elsewhere, no elevation, no other paths); stop and end the answer with a short question naming the access needed and why.",
     "",
     "MBOX tools (mbox-prod MCP):",

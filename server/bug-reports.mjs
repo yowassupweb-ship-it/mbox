@@ -54,7 +54,28 @@ export function bugReportRow(input = {}, { reporter = "", source = "api" } = {})
   };
 }
 
+/**
+ * Агенты заводят баг-репорты сами (без участия человека), поэтому один и тот же сбой не должен плодить записи: открытый
+ * отчёт с тем же заголовком в том же проекте за 14 дней получает строку «Повторилось» и поднимается наверх, новый не создаётся.
+ */
 export async function insertBugReport(query, row, projectId) {
+  const existing = (await query(
+    `SELECT id::text FROM memories
+      WHERE entity_type = 'bug' AND 'bug:open' = ANY(tags) AND lower(title) = lower($1)
+        AND project_id IS NOT DISTINCT FROM $2::bigint AND created_at > now() - interval '14 days'
+      ORDER BY created_at DESC LIMIT 1`,
+    [row.title, projectId || null],
+  )).rows[0];
+  if (existing) {
+    const who = row.metadata?.reporter ? ` (${row.metadata.reporter})` : "";
+    await query(
+      `UPDATE memories SET content = content || $2, updated_at = now(),
+              metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{repeats}', to_jsonb(COALESCE((metadata->>'repeats')::int, 1) + 1))
+        WHERE id = $1`,
+      [existing.id, `\n\n**Повторилось** ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC${who}`],
+    );
+    return existing.id;
+  }
   const result = await query(
     `INSERT INTO memories(project_id, title, content, entity_type, access_level, tags, metadata)
      VALUES ($1, $2, $3, 'bug', 'agents', $4, $5) RETURNING id::text`,

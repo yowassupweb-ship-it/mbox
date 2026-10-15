@@ -182,7 +182,13 @@ async function withPush(result) {
   return { ...result, content: [...content, ...extra] };
 }
 
-const server = new McpServer({ name: "mbox-prod", version: "1.0.0" });
+// instructions видит любой клиент MCP (Claude Code, Codex, ChatGPT, облачные агенты) — общие правила работы с MBOX.
+const server = new McpServer({ name: "mbox-prod", version: "1.0.0" }, {
+  instructions: [
+    "MBOX is the owner's workspace and task source. Start meaningful work with get_agent_context and track work in MBOX todos.",
+    "Bugs in MBOX itself: if any MBOX tool, API or screen misbehaves while you work (error, wrong data, crash, silent no-op), file it yourself with report_bug right away. Do not ask the owner first and do not stop your task for it. Skip your own mistakes, bad input and intended permission denials; duplicates are merged on the server.",
+  ].join("\n"),
+});
 
 server.registerTool(
   "describe_structure",
@@ -794,7 +800,7 @@ server.registerTool(
   "report_bug",
   {
     title: "Report a bug to MBOX memory",
-    description: "Write a bug report into MBOX memory (entity_type bug, tags bug-report + severity:*), the same way as the bug button in the status bar. Use it when something in MBOX or a tool misbehaves and a person or developer must see it. Describe what happened, what you expected, and how to reproduce. This only records the report; it does not create a todo.",
+    description: "Write a bug report into MBOX memory (entity_type bug, tags bug-report + severity:*), the same way as the bug button in the status bar. CALL IT ON YOUR OWN, WITHOUT ASKING THE OWNER, whenever during any task you hit a defect of MBOX itself: an MBOX tool or API returns an error or wrong data, a screen or flow contradicts its description, something crashes or silently does nothing. Not for: your own mistakes, wrong user input, permissions denied by design, outages of external sites. Give the exact error text, the tool or endpoint, steps, expected vs actual. A duplicate (same title, still open) is merged on the server, so use a precise stable title. Mention the report in one line of your answer and continue the task. This only records the report; it does not create a todo.",
     inputSchema: {
       title: z.string().describe("Short summary, e.g. 'integration_list returns 400 for members'"),
       description: z.string().describe("What went wrong, with exact error text"),
