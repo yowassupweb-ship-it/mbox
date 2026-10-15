@@ -82,6 +82,13 @@ import { CompanyPage } from "./projects/CompanyPage";
 type Activity = "explorer" | "planner" | "notes" | "tables" | "local" | "files" | "browser" | "search" | "storage" | "agents" | "skills" | "tools" | "ssh";
 type ConsoleDock = "bottom" | "right";
 
+/** Исполнитель задачи: id пользователя лежит в props.assignees как user:<id>. */
+function assignedTo(props: Record<string, unknown> | undefined, userId: string | undefined) {
+  const raw = props?.assignees;
+  const list = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? raw.split(/[,\s]+/) : [];
+  return Boolean(userId) && list.includes(`user:${userId}`);
+}
+
 /** Телефон: из какого списка открыт документ — туда ведёт «Назад» в шапке модального окна. */
 function phoneListOf(key: string): Activity | null {
   const kind = key.split(":")[0];
@@ -126,7 +133,7 @@ type Props = {
   renderers: WorkbenchRenderers;
   realtime: { state: string; label: string };
   status: { state: string; label: string };
-  user: { username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean };
+  user: { id?: string; username: string; role: string; jarvis_enabled?: boolean; jarvis_autoreply?: boolean };
   onProjectContext: (project: Project, position: { x: number; y: number }) => void;
 };
 
@@ -838,9 +845,13 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   }, [setPanelHeight]));
 
   const needsHuman = data.inbox.filter((item) => item.requires_human && item.status !== "done");
+  // Владельцу — все задачи на проверке и заблокированные. Участнику в общем проекте чужие задачи — шум (репорт #2905):
+  // ему показываем только те, где он исполнитель.
   const attentionTodos = useMemo(
-    () => data.projects.flatMap((project) => project.todos.filter((todo) => todo.status === "blocked" || todo.status === "review").map((todo) => ({ todo, project }))),
-    [data.projects],
+    () => data.projects.flatMap((project) => project.todos
+      .filter((todo) => (todo.status === "blocked" || todo.status === "review") && (user.role === "owner" || assignedTo(todo.props, user.id)))
+      .map((todo) => ({ todo, project }))),
+    [data.projects, user.role, user.id],
   );
   const knownAgents = data.agents.filter((agent) => agentFamily(agent.name));
   const working = knownAgents.filter((agent) => isAgentWorking(agent, data.runs));

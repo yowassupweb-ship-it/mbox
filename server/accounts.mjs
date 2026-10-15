@@ -408,6 +408,20 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     sendJson(res, 200, { ok: true });
     return true;
   }
+  // Свой логин меняет сам человек (репорт Миши #2899). Токены, сессии и агенты привязаны к id, поэтому всё остаётся на месте;
+  // то, что запомнило имя текстом (подписи в истории), остаётся со старым.
+  if (url.pathname === "/api/mbox/account/username" && req.method === "POST") {
+    const body = await readBody(req);
+    const next = String(body.username || "").trim();
+    if (!USERNAME_PATTERN.test(next)) { sendJson(res, 400, { error: "invalid_username" }); return true; }
+    const ok = await query("SELECT 1 FROM users WHERE id = $1 AND password_hash = crypt($2, password_hash)", [user.id, String(body.current_password || "")]);
+    if (!ok.rows[0]) { sendJson(res, 403, { error: "wrong_current_password" }); return true; }
+    const taken = await query("SELECT 1 FROM users WHERE lower(username) = lower($1) AND id <> $2 LIMIT 1", [next, user.id]);
+    if (taken.rows[0]) { sendJson(res, 409, { error: "account_already_exists" }); return true; }
+    await query("UPDATE users SET username = $2 WHERE id = $1", [user.id, next]);
+    sendJson(res, 200, { ok: true, username: next });
+    return true;
+  }
   const currentSessionHash = () => {
     const raw = String(req.headers.cookie || "").match(/(?:^|;\s*)mbox_session=([^;]+)/)?.[1];
     return raw ? createHash("sha256").update(decodeURIComponent(raw)).digest("hex") : "";
