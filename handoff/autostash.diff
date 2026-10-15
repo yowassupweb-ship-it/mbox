@@ -1,0 +1,35 @@
+diff --git a/server/mbox-server.mjs b/server/mbox-server.mjs
+index 5518f84..9a89ce4 100644
+--- a/server/mbox-server.mjs
++++ b/server/mbox-server.mjs
+@@ -1772,11 +1772,28 @@ async function replyAsJarvis(item) {
+     const actionLog = [];
+     const toolsUsed = [];
+     let reply = "";
++    // Прораб (GROQ_MODEL) — основная модель диалога, но у неё своя дневная квота Groq, и живое
++    // наблюдение 20 августа показало: как только она выбита, весь ответ Джарвиса просто падал.
++    // Раз квота — на модель, а не на аккаунт, у Младшего (GROQ_MODEL_JUNIOR) она отдельная и почти
++    // всегда свободна. Переключаемся на него для ОСТАТКА этого ответа, если Прораб отказал по 429.
++    let activeModel = GROQ_MODEL;
+     jlog(item.id, `старт: "${String(item.body || "").slice(0, 160)}"`);
+     for (let step = 0; step < 5; step += 1) {
+-      jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте)`);
++      jlog(item.id, `шаг ${step}: запрос к Groq (${messages.length} сообщений в контексте, модель ${activeModel})`);
+       setPhase(item.id, "Подбирает инструмент/навык");
+-      const message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal);
++      let message;
++      try {
++        message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal, 0, activeModel);
++      } catch (error) {
++        if (activeModel === GROQ_MODEL && /groq 429/.test(error.message || "")) {
++          jlog(item.id, `шаг ${step}: ${GROQ_MODEL} недоступен (${String(error.message).slice(0, 150)}) — переключаюсь на ${GROQ_MODEL_JUNIOR}`);
++          setPhase(item.id, "Делегирует младшему агенту (лимит Прораба исчерпан)");
++          activeModel = GROQ_MODEL_JUNIOR;
++          message = await groqComplete(messages, JARVIS_TOOLS, "reply", controller.signal, 0, activeModel);
++        } else {
++          throw error;
++        }
++      }
+       if (!message.tool_calls?.length) {
+         reply = message.content || "";
+         jlog(item.id, `шаг ${step}: без tool_calls, финальный текст (${reply.length} символов)`);

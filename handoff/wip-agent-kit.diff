@@ -1,0 +1,26 @@
+diff --git a/mbox-desktop/agent-kit.js b/mbox-desktop/agent-kit.js
+index cf5554f..ced6634 100644
+--- a/mbox-desktop/agent-kit.js
++++ b/mbox-desktop/agent-kit.js
+@@ -103,7 +103,20 @@ module.exports = String.raw`(() => {
+     if (cursorEl && cursorEl.isConnected) return cursorEl;
+     cursorEl = document.createElement("div");
+     cursorEl.id = "__mbox-cursor";
+-    cursorEl.innerHTML = '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 2 L3 17 L7.2 13.2 L10 19.5 L12.6 18.4 L9.9 12.2 L15.5 12 Z" fill="#0a84ff" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg><span></span>';
++    const NS = "http://www.w3.org/2000/svg";
++    const svg = document.createElementNS(NS, "svg");
++    svg.setAttribute("width", "22");
++    svg.setAttribute("height", "22");
++    svg.setAttribute("viewBox", "0 0 22 22");
++    const path = document.createElementNS(NS, "path");
++    path.setAttribute("d", "M3 2 L3 17 L7.2 13.2 L10 19.5 L12.6 18.4 L9.9 12.2 L15.5 12 Z");
++    path.setAttribute("fill", "#0a84ff");
++    path.setAttribute("stroke", "#fff");
++    path.setAttribute("stroke-width", "1.5");
++    path.setAttribute("stroke-linejoin", "round");
++    svg.appendChild(path);
++    cursorEl.appendChild(svg);
++    cursorEl.appendChild(document.createElement("span"));
+     cursorEl.style.transform = "translate(" + cursorAt.x + "px," + cursorAt.y + "px)";
+     (document.body || document.documentElement).appendChild(cursorEl);
+     return cursorEl;
