@@ -45,7 +45,7 @@ export function AgentsOnThisComputer({ username }: { username: string }) {
   const [busy, setBusy] = useState(false);
   const [platform, setPlatform] = useState<Platform>(() => (/win/i.test(navigator.platform) ? "windows" : "unix"));
   const [copied, setCopied] = useState(false);
-  const load = useCallback(() => fetchJson<{ tokens: AccountToken[] }>("/api/mbox/account/tokens").then((result) => setTokens(result.tokens)).catch(() => showToast("Не удалось загрузить ключи агентов", "error")), []);
+  const load = useCallback(() => fetchJson<{ tokens: AccountToken[] }>("/api/mbox/account/tokens").then((result) => setTokens(result.tokens.filter((item) => !item.label.startsWith("MCP: ")))).catch(() => showToast("Не удалось загрузить ключи агентов", "error")), []);
   useEffect(() => { void load(); }, [load]);
 
   const command = token ? installCommand(platform, serverOrigin(), username, token) : "";

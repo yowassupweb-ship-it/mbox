@@ -14,12 +14,8 @@ import {
   KeyRound,
   LockKeyhole,
   Plus,
-  Sparkles,
   Server,
   ShieldCheck,
-  Sun,
-  Moon,
-  Contrast,
   Zap,
 } from "lucide-react";
 import { FolderTree, type FolderTreeNode } from "./components/FolderTree";
@@ -34,24 +30,20 @@ import { OfflineBanner, ShellLoading } from "./app/ShellStates";
 import { LoginScreen } from "./pages/LoginScreen";
 import { notifyDesktopSignedIn, notifyDesktopSignedOut } from "./lib/desktopAccount";
 import { InviteScreen } from "./pages/InviteScreen";
-import { SessionsPanel } from "./features/accounts/SessionsPanel";
 import { SkillAccessBoard } from "./features/skills/SkillAccessBoard";
 import { SpacesPanel } from "./features/accounts/SpacesPanel";
 import { InviteManager } from "./features/accounts/InviteManager";
-import { PasswordPanel } from "./features/accounts/PasswordPanel";
 import { accountErrorText } from "./features/accounts/accountErrors";
 import { EntityPreview, TreeContextMenu, type TreeMenuState } from "./features/tree/TreeContextMenu";
 import { TodoCardGrid } from "./features/projects/TodoCards";
 import { ProjectEntityView } from "./features/projects/EntityPanels";
 import { EmptyState, ManualForm, Panel } from "./ui";
 import { askConfirm } from "./ui/askText";
-import { AgentsOnThisComputer } from "./features/agents/AgentsOnThisComputer";
 import { bootstrapSeen, loadSeen } from "./lib/seen";
 import { useMboxData } from "./hooks/useMboxData";
 import { useRealtime } from "./hooks/useRealtime";
 import { HistoryDocument } from "./app/workbench/HistoryDocument";
 import { Workbench } from "./app/workbench/Workbench";
-import { RAIL_GROUPS, setRailHidden, useRailHidden, type RailItemId } from "./app/workbench/rail";
 import type {
   AgentActivity, AgentInboxItem, AgentRun, Artifact, AuditEvent, Company, DecisionEntry, FolderRow,
   GraphEdge, GroqUsage, Me, Memory, Project,
@@ -62,8 +54,8 @@ import { installLayoutIndependentShortcuts } from "./lib/keyboard";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { removeNow } from "./lib/optimistic";
 import { AccessPicker } from "./features/accounts/AccessPicker";
-import { TelegramBotPanel } from "./features/integrations/TelegramBotPanel";
 import { NodesPanel } from "./features/nodes/NodesPanel";
+import { SettingsPage } from "./features/settings/SettingsPage";
 
 type AppTheme = "light" | "graphite" | "black";
 
@@ -241,14 +233,17 @@ function Workspace({ user, onLogout, theme, onThemeChange }: { user: { username:
         renderers={{
           history: () => <HistoryDocument events={data.auditEvents} />,
           settings: () => (
-            <SettingsBoard
+            <SettingsPage
+              user={user}
               theme={theme}
               onThemeChange={onThemeChange}
-              server={user.role === "owner" ? <ServerBoard pulse={realtime.pulse} /> : undefined}
-              access={<AccessBoard user={user} onLogout={onLogout} />}
+              onLogout={onLogout}
+              projects={data.projects}
+              companies={data.companies}
               team={<TeamBoard user={user} projects={data.projects} companies={data.companies} onReload={data.reload} />}
               skills={<SkillAccessBoard />}
-              passwords={user.role === "owner" ? <PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} /> : undefined}
+              secrets={user.role === "owner" ? <PasswordsBoard secrets={data.secrets} projects={data.projects} onSaved={data.reload} /> : undefined}
+              server={user.role === "owner" ? <ServerBoard pulse={realtime.pulse} /> : undefined}
               logs={<LogsBoard runs={data.runs} decisions={data.decisions} />}
             />
           ),
@@ -588,145 +583,6 @@ function consoleTime(iso: string): string {
   return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-type SettingsTab = "appearance" | "server" | "access" | "team" | "skills" | "passwords" | "logs";
-
-function SettingsBoard({ server, access, team, skills, passwords, logs, theme, onThemeChange }: { server?: ReactNode; access: ReactNode; team: ReactNode; skills?: ReactNode; passwords?: ReactNode; logs: ReactNode; theme: AppTheme; onThemeChange: (theme: AppTheme) => void }) {
-  const [tab, setTab] = useState<SettingsTab>("appearance");
-  const content: Record<SettingsTab, ReactNode> = {
-    appearance: <AppearanceSettings theme={theme} onChange={onThemeChange} />,
-    server,
-    access,
-    team,
-    skills,
-    passwords,
-    logs,
-  };
-  return (
-    <div className="settings-board">
-      <div className="settings-tabs" role="tablist" aria-label="Настройки">
-        <button role="tab" aria-selected={tab === "appearance"} className={tab === "appearance" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("appearance")}>
-          <Contrast size={16} /> Интерфейс
-        </button>
-        {server && (
-          <button role="tab" aria-selected={tab === "server"} className={tab === "server" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("server")}>
-            <Server size={16} /> Сервер
-          </button>
-        )}
-        <button role="tab" aria-selected={tab === "access"} className={tab === "access" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("access")}>
-          <ShieldCheck size={16} /> Аккаунт
-        </button>
-        <button role="tab" aria-selected={tab === "team"} className={tab === "team" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("team")}>
-          <GitBranch size={16} /> Команда
-        </button>
-        {skills && (
-          <button role="tab" aria-selected={tab === "skills"} className={tab === "skills" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("skills")}>
-            <Sparkles size={16} /> Мои навыки
-          </button>
-        )}
-        {passwords && (
-          <button role="tab" aria-selected={tab === "passwords"} className={tab === "passwords" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("passwords")}>
-            <LockKeyhole size={16} /> Секреты
-          </button>
-        )}
-        <button role="tab" aria-selected={tab === "logs"} className={tab === "logs" ? "settings-tab is-active" : "settings-tab"} type="button" onClick={() => setTab("logs")}>
-          <History size={16} /> Логи
-        </button>
-      </div>
-      {content[tab]}
-    </div>
-  );
-}
-
-const THEME_OPTIONS: Array<{ id: AppTheme; title: string; description: string; icon: typeof Sun }> = [
-  { id: "light", title: "Светлая", description: "Чистая спокойная поверхность для дневной работы", icon: Sun },
-  { id: "graphite", title: "Графитовая", description: "Мягкий тёмно-серый фон с умеренным контрастом", icon: Contrast },
-  { id: "black", title: "Тёмная", description: "Глубокий чёрный фон для работы вечером", icon: Moon },
-];
-
-function AppearanceSettings({ theme, onChange }: { theme: AppTheme; onChange: (theme: AppTheme) => void }) {
-  return (
-    <section className="appearance-settings" aria-labelledby="appearance-title">
-      <header className="appearance-heading">
-        <div>
-          <p>Внешний вид</p>
-          <h2 id="appearance-title">Тема MBOX</h2>
-        </div>
-        <span>Сохраняется на этом устройстве</span>
-      </header>
-      <div className="theme-options" role="radiogroup" aria-label="Тема интерфейса">
-        {THEME_OPTIONS.map((option) => {
-          const Icon = option.icon;
-          const selected = theme === option.id;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              className={selected ? "theme-option is-selected" : "theme-option"}
-              role="radio"
-              aria-checked={selected}
-              onClick={() => onChange(option.id)}
-            >
-              <span className={`theme-preview is-${option.id}`} aria-hidden="true">
-                <span className="theme-preview-rail" />
-                <span className="theme-preview-body"><i /><i /><i /></span>
-              </span>
-              <span className="theme-option-copy">
-                <strong><Icon size={16} />{option.title}</strong>
-                <span>{option.description}</span>
-              </span>
-              <span className="theme-choice" aria-hidden="true" />
-            </button>
-          );
-        })}
-      </div>
-      <p className="appearance-note">Inter используется для интерфейса и документов. Моноширинный шрифт остаётся только в коде, терминале и технических данных.</p>
-      <RailSettings />
-    </section>
-  );
-}
-
-/** Какие разделы показывать в левой полосе. Состав и порядок — в app/workbench/rail.ts. */
-function RailSettings() {
-  const hidden = useRailHidden();
-  const toggle = (id: RailItemId, show: boolean) =>
-    setRailHidden(show ? hidden.filter((item) => item !== id) : [...hidden.filter((item) => item !== id), id]);
-  return (
-    <section className="rail-settings" aria-labelledby="rail-title">
-      <header className="appearance-heading">
-        <div>
-          <p>Боковые вкладки</p>
-          <h2 id="rail-title">Разделы в левой полосе</h2>
-        </div>
-        <span>Сохраняется на этом устройстве</span>
-      </header>
-      <div className="rail-groups">
-        {RAIL_GROUPS.map((group) => (
-          <div className="rail-group" key={group.id}>
-            <h3>{group.title}</h3>
-            {group.items.map((item) => {
-              const shown = !hidden.includes(item.id);
-              return (
-                <label className="rail-option" key={item.id}>
-                  <input
-                    type="checkbox"
-                    checked={shown}
-                    disabled={item.required}
-                    onChange={(event) => toggle(item.id, event.target.checked)}
-                  />
-                  <img src={item.icon} alt="" width={20} height={20} />
-                  <span>{item.label.replace(/\s*\([^)]*\)$/, "")}</span>
-                  {item.required && <small>всегда виден</small>}
-                  {item.desktopOnly && <small>только в приложении</small>}
-                </label>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function ServerBoard({ pulse }: { pulse: number }) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [usage, setUsage] = useState<GroqUsage | null>(null);
@@ -892,36 +748,10 @@ function TodoForm({ projects, onSaved }: { projects: Project[]; onSaved: () => v
     </ManualForm>
   );
 }
-function AccessBoard({ user, onLogout }: { user: { username: string; role: string }; onLogout: () => void }) {
-  return (
-    <div className="content-grid settings-single-grid">
-      <Panel title="Профиль" icon={ShieldCheck}>
-        <div className="entity-list">
-          <EntityLine title="Логин" value={user.username} />
-          <EntityLine title="Роль" value={user.role === "owner" ? "владелец: ваш MBOX, команда и настройки сервера" : "участник: свой MBOX — свои проекты, навыки и интеграции; общие проекты — по приглашению"} />
-          <button className="ghost-action" onClick={async () => {
-            await notifyDesktopSignedOut();
-            await fetch("/api/mbox/auth/logout", { method: "POST" });
-            onLogout();
-          }}>Выйти</button>
-        </div>
-      </Panel>
-      <PasswordPanel />
-      <SessionsPanel onSignedOut={onLogout} />
-    </div>
-  );
-}
-
 function TeamBoard({ user, projects, companies, onReload }: { user: { username: string; role: string }; projects: Project[]; companies: Company[]; onReload: () => void }) {
-  return (
-    <div className="content-grid settings-single-grid">
-      {user.role === "owner"
-        ? <><SpacesPanel onChanged={onReload} /><InviteManager projects={projects} companies={companies} /><AccountManager projects={projects} companies={companies} /></>
-        : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>}
-      <TelegramBotPanel projects={projects} companies={companies} />
-      <AgentsOnThisComputer username={user.username} />
-    </div>
-  );
+  return user.role === "owner"
+    ? <div className="st-stack"><SpacesPanel onChanged={onReload} /><InviteManager projects={projects} companies={companies} /><AccountManager projects={projects} companies={companies} /></div>
+    : <Panel title="Команда" icon={GitBranch}><EmptyState text="Состав команды и общие проекты настраивает владелец" /></Panel>;
 }
 
 function LogsBoard({ runs, decisions }: { runs: AgentRun[]; decisions: DecisionEntry[] }) {

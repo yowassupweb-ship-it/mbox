@@ -388,3 +388,10 @@
 /* Режим инкогнито во встроенном браузере: фиолетовый акцент и тонированная панель, чтобы вкладку не спутать с обычной. */
 :root { --incognito-accent: hsl(262 85% 76%); --incognito-bar: hsl(262 20% 17%); }
 :root[data-theme="light"] { --incognito-accent: hsl(262 55% 46%); --incognito-bar: hsl(262 32% 92%); }
+
+/* Образцы тем в «Настройки → Интерфейс»: цвета фиксированные и от выбранной темы не зависят — человек видит, что получит. */
+:root {
+  --theme-sample-light-bg: #f5f5f7;   --theme-sample-light-rail: #e6e6ea;   --theme-sample-light-line: #c9c9d0;
+  --theme-sample-graphite-bg: #2b2c30; --theme-sample-graphite-rail: #202124; --theme-sample-graphite-line: #4a4b51;
+  --theme-sample-black-bg: #0a0a0b;   --theme-sample-black-rail: #151516;   --theme-sample-black-line: #2c2c2e;
+}
