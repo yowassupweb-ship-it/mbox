@@ -1212,6 +1212,9 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/notes"
     || pathname === "/api/mbox/tables"
     || pathname === "/api/mbox/documents"
+    // Планировщик: задачи и события режутся по проектам и хозяину внутри server/planner.mjs. people и automations
+    // участнику не открыты: там список всех аккаунтов и системные сценарии.
+    || /^\/api\/mbox\/planner\/(?:tasks|events)(?:\/\d+)?$/.test(pathname)
     || pathname === "/api/mbox/presentations"
     || /^\/api\/mbox\/presentations\/\d+(?:\/slides|\/assets(?:\/\d+)?)?$/.test(pathname)
     || pathname === "/api/mbox/spotlight"
