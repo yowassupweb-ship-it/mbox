@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { Flag, Play, Search, X } from "lucide-react";
 import { fetchJson } from "../../lib/api";
 import { formatDateTime, formatSince } from "../../lib/format";
@@ -30,7 +31,7 @@ export function ServerSection({ pulse }: { pulse: number }) {
 
   return (
     <div className="st-stack">
-      {metrics === undefined && <Card><p className="st-muted">Загружаю метрики…</p></Card>}
+      {metrics === undefined && <Card><OctopusSpinner compact label="Загружаю метрики…" /></Card>}
       {metrics === null && <Notice tone="warn" title="Метрик пока нет">Сборщик scripts/server_metrics_collector.sh на хосте ещё ничего не прислал.</Notice>}
       {metrics && (
         <>

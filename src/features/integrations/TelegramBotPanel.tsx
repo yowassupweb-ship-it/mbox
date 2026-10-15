@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import type { FormEvent } from "react";
 import { Bot, ExternalLink, LoaderCircle, MessageCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { fetchJson } from "../../lib/api";
@@ -108,7 +109,7 @@ export function TelegramBotPanel({ projects, companies }: { projects: Project[];
     }
   }
 
-  if (loading) return <Panel title="Telegram-боты" icon={Bot}><p className="telegram-hint">Загружаю настройки…</p></Panel>;
+  if (loading) return <Panel title="Telegram-боты" icon={Bot}><OctopusSpinner compact label="Загружаю настройки…" /></Panel>;
 
   const connectForm = (
     <form className="telegram-connect" onSubmit={(event) => void connect(event)}>

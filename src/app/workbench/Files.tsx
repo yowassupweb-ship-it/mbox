@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { Code2, Copy, Download, ExternalLink, Eye, FilePlus2, FileText, FolderInput, FolderPlus, Monitor, Pencil, RefreshCw, Save, Smartphone, Trash2, Upload, X } from "lucide-react";
 import type { MboxData } from "../../hooks/useMboxData";
 import { fetchJson } from "../../lib/api";
@@ -580,7 +581,7 @@ export function FileDocument({ fileId, data, tabs, tabKey, visible, onDirty }: {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  if (!isNew && !file) return <div className="wb-doc-missing">{data.loading ? "Загрузка…" : `Файл #${fileId} не найден — возможно, его удалили.`}</div>;
+  if (!isNew && !file) return <div className="wb-doc-missing">{data.loading ? <OctopusSpinner /> : `Файл #${fileId} не найден — возможно, его удалили.`}</div>;
 
   const project = data.projects.find((item) => item.id === (editing ? draft.projectId : file?.project_id));
   const shownContent = kind === "json" ? prettyJson(file?.content ?? "") : file?.content ?? "";

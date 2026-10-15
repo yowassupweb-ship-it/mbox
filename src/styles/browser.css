@@ -102,7 +102,7 @@
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
 }
-.wb-browser-pop-folder-row svg { flex: none; opacity: .78; }
+.wb-browser-pop-folder-row svg { flex: none; }
 .wb-browser-pop-row:hover { background: var(--wb-hover); }
 .wb-browser-pop-row > button:first-child {
   flex: 1 1 auto;
@@ -725,7 +725,7 @@
 .wb-pw-row.is-editing input { height: 30px; min-width: 0; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
 .wb-pw-row.is-editing input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -1px; }
 .wb-pw-empty { display: grid; justify-items: center; gap: 8px; padding: 36px 24px 40px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-normal); }
-.wb-pw-empty svg { color: var(--accent-color); opacity: .8; }
+.wb-pw-empty svg { color: var(--accent-color); }
 .wb-pw-empty b { color: var(--text-main); font-size: var(--text-md); font-weight: var(--weight-semibold); }
 .wb-pw-empty span { max-width: 420px; }
 .wb-pw-note { margin: 10px 8px; color: var(--text-muted); font-size: var(--text-sm); }

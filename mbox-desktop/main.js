@@ -263,11 +263,12 @@ function createWindow() {
     // окно дёргалось, фокус уходил в меню и курсор пропадал из заметки. Меню скрыто насовсем ниже,
     // его горячие клавиши (Ctrl+R, масштаб, DevTools) продолжают работать.
     autoHideMenuBar: false,
-    // Одна полоса вместо двух: системная рамка Windows убрана, кнопки окна рисуются поверх шапки MBOX
-    // (Window Controls Overlay). Цвет кнопок страница подстраивает под тему (mbox-desktop:titlebar-theme).
+    // Одна полоса вместо двух: системная рамка убрана. На macOS — родной «светофор»; на Windows и Linux кнопки окна
+    // рисует сама шапка MBOX в том же стиле (WindowControls.tsx, mbox-desktop:window-control) вместо квадратных
+    // кнопок Windows поверх шапки (titleBarOverlay).
     ...(process.platform === "darwin"
       ? { titleBarStyle: "hiddenInset" }
-      : { titleBarStyle: "hidden", titleBarOverlay: { color: "#25262a", symbolColor: "#f5f5f7", height: 38 } }),
+      : { titleBarStyle: "hidden" }),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       additionalArguments: [`--mbox-server=${mboxUrl}`, `--mbox-local-ui=${useLocalUi ? "1" : "0"}`],
@@ -298,6 +299,10 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   if (saved.maximized) mainWindow.maximize();
   for (const event of ["resize", "move", "maximize", "unmaximize"]) mainWindow.on(event, saveWindowState);
+  // Кнопки окна в шапке знают, развёрнуто ли окно и активно ли оно (неактивное — серые, как в macOS).
+  for (const event of ["maximize", "unmaximize", "focus", "blur", "enter-full-screen", "leave-full-screen"]) {
+    mainWindow.on(event, () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("mbox-desktop:window-state", windowState()); });
+  }
   mainWindow.webContents.on("did-finish-load", () => mainWindow?.webContents.setZoomFactor(saved.zoom || 1));
   if (isLocalDevWindow) {
     mainWindow.on("page-title-updated", (event) => {
@@ -972,6 +977,19 @@ ipcMain.handle("mbox-desktop:restart-agent", async (_event, name) => {
   await startResponder(name);
   return processStatus();
 });
+// Кнопки окна в шапке MBOX: закрыть, свернуть, развернуть. Только главное окно и только эти три действия.
+ipcMain.handle("mbox-desktop:window-control", async (event, action) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return windowState();
+  if (action === "close") mainWindow.close();
+  else if (action === "minimize") mainWindow.minimize();
+  else if (action === "maximize") { if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize(); }
+  else if (action === "fullscreen") mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  return windowState();
+});
+function windowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return { maximized: false, focused: false, fullscreen: false, platform: process.platform };
+  return { maximized: mainWindow.isMaximized(), focused: mainWindow.isFocused(), fullscreen: mainWindow.isFullScreen(), platform: process.platform };
+}
 ipcMain.handle("mbox-desktop:titlebar-theme", async (_event, color, symbolColor) => {
   if (process.platform === "darwin" || !mainWindow || mainWindow.isDestroyed()) return false;
   const safe = (value, fallback) => (/^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\))$/i.test(String(value || "").trim()) ? String(value).trim() : fallback);

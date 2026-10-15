@@ -1,4 +1,5 @@
 import { AlertTriangle, CalendarCheck, Check, ChevronLeft, ChevronRight, CircleDashed, Minus, Play, RefreshCw, X } from "lucide-react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { fetchJson } from "../../lib/api";
 import { useSeoAccess } from "./seoAccess";
@@ -115,7 +116,7 @@ export function SeoCalendar({ onRun, busy, onOpen, refreshKey }: { onRun: (scena
           <button type="button" className="seo-cal-btn is-text" onClick={() => void load(month)}><RefreshCw size={13} aria-hidden="true" /> Повторить</button>
         </div>
       )}
-      {!data && loading && <p className="seo-cal-loading">Загружаю календарь…</p>}
+      {!data && loading && <OctopusSpinner compact label="Загружаю календарь…" />}
 
       {data && (
         <>

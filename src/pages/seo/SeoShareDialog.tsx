@@ -1,4 +1,5 @@
 import { Check, Copy, KeyRound, Link2, RefreshCw, Trash2, X } from "lucide-react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, fetchJson } from "../../lib/api";
 import { serverOrigin } from "../../lib/serverOrigin";
@@ -95,7 +96,7 @@ export function SeoShareDialog({ onClose }: { onClose: () => void }) {
         </header>
         <p className="seo-form-hint">Человек увидит только SEO Wizard. Настройки, ключи подключённых сервисов и остальной MBOX ему недоступны ни по ссылке, ни по паролю.</p>
         {error && <p className="seo-error" role="alert">{error}</p>}
-        {!state && !error && <p className="seo-form-hint">Загружаю…</p>}
+        {!state && !error && <OctopusSpinner compact label="Загружаю…" />}
 
         {state && (
           <>

@@ -1395,7 +1395,7 @@
   transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
 }
 .console-picker-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.console-picker-btn > svg { flex: none; opacity: .7; transition: transform var(--duration-fast) var(--ease-out); }
+.console-picker-btn > svg { flex: none; transition: transform var(--duration-fast) var(--ease-out); }
 .console-picker-btn:hover { color: var(--text-2); background: var(--element-bg); }
 .console-picker-btn.is-open {
   color: var(--text-main);

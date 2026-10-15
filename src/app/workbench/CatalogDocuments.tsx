@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { ArrowRight, Check, Copy, ExternalLink, FolderOpen, Play, Square } from "lucide-react";
 import { openSkillPage } from "./agentTabs";
 import type { TabsApi } from "./tabs";
@@ -58,7 +59,7 @@ export function SkillDocument({ skillId, tabs }: { skillId: string; tabs: TabsAp
   const { data, loading } = useSkillsCatalog();
   const { copied, copy } = useCopy();
   const skill = data.skills.find((item) => item.id === skillId);
-  if (!skill) return <div className="wb-doc-missing">{loading ? "Загрузка…" : "Навык не найден в каталоге."}</div>;
+  if (!skill) return <div className="wb-doc-missing">{loading ? <OctopusSpinner /> : "Навык не найден в каталоге."}</div>;
   const steps = skill.steps?.length ? skill.steps : ["Передайте исходные данные", "Агент выполнит сценарий", "Получите готовый результат"];
 
   return (
@@ -134,7 +135,7 @@ function desktop(): DesktopBridge | undefined {
 export function ToolDocument({ toolId, tabs }: { toolId: string; tabs: TabsApi }) {
   const { data, loading } = useToolsCatalog();
   const tool = data.tools.find((item) => item.id === toolId);
-  if (!tool) return <div className="wb-doc-missing">{loading ? "Загрузка…" : "Инструмент не найден в каталоге."}</div>;
+  if (!tool) return <div className="wb-doc-missing">{loading ? <OctopusSpinner /> : "Инструмент не найден в каталоге."}</div>;
   return <ToolPage tool={tool} tabs={tabs} />;
 }
 

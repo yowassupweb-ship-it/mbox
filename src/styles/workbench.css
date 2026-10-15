@@ -744,7 +744,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 }
 
 .wb-tab img,
-.wb-tab .wb-file-type-icon { width: 18px; height: 18px; flex: none; image-rendering: auto; opacity: 0.9; }
+.wb-tab .wb-file-type-icon { width: 18px; height: 18px; flex: none; image-rendering: auto; }
 .wb-file-type-icon { color: var(--text-muted); }
 .wb-file-type-icon.is-code { color: var(--ft-code); }
 .wb-file-type-icon.is-data { color: var(--ft-data); }
@@ -1501,7 +1501,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 .wb-browser-favicon { width: 14px; height: 14px; flex: none; border-radius: var(--radius-2xs); object-fit: contain; }
 
 .wb-browser-bookmarks { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 3px 10px; border-bottom: 1px solid var(--wb-line); color: var(--text-muted); overflow-x: auto; scrollbar-width: thin; white-space: nowrap; }
-.wb-browser-bookmarks > svg { flex: none; margin-right: 2px; opacity: .72; }
+.wb-browser-bookmarks > svg { flex: none; margin-right: 2px; }
 .wb-browser-bookmarks > span { font-size: var(--text-xs); }
 .wb-browser-bookmarks button { position: relative; flex: none; max-width: 180px; min-height: 25px; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); padding: 4px 8px; font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .wb-browser-bookmarks button:not(:has(span)) { justify-content: center; padding-inline: 6px; }
@@ -1520,7 +1520,7 @@ li.is-drop-target > .wb-tree-project { box-shadow: inset 0 2px 0 var(--accent-co
 /* Закладка без названия — одна фавиконка, поэтому отступы у такой кнопки поджаты. */
 .wb-browser-bookmarks button:not(:has(span)) { padding: 5px 6px; }
 .wb-bookmark-folder { gap: 4px; }
-.wb-bookmark-folder svg { flex: none; opacity: .75; }
+.wb-bookmark-folder svg { flex: none; }
 
 /* Контекстное меню закладки: переименовать, открыть, удалить. */
 .wb-bookmark-scrim { position: fixed; inset: 0; z-index: var(--z-panel); }
@@ -2869,7 +2869,7 @@ audio.wb-storage-preview-media { width: min(560px, 100%); }
 .wb-status-item.is-static { cursor: default; }
 .wb-status-item.is-static:hover { background: none; color: inherit; }
 .wb-status-item.is-on { color: var(--accent-color); }
-.wb-status-chat-icon { width: 12px; height: 12px; object-fit: contain; opacity: .85; }
+.wb-status-chat-icon { width: 12px; height: 12px; object-fit: contain; }
 .wb-status-item.is-warn { background: color-mix(in srgb, var(--state-warn) 20%, transparent); color: var(--state-warn); }
 .wb-status-item.is-state { max-width: 45vw; overflow: hidden; text-overflow: ellipsis; }
 .wb-status-fill { flex: 1; }

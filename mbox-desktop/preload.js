@@ -58,6 +58,16 @@ const desktopApi = {
   restartAgent: (name) => ipcRenderer.invoke("mbox-desktop:restart-agent", name),
   setAgentEnabled: (name, enabled) => ipcRenderer.invoke("mbox-desktop:agent-enabled", name, enabled),
   setTitleBarTheme: (color, symbolColor) => ipcRenderer.invoke("mbox-desktop:titlebar-theme", color, symbolColor),
+  // Кнопки окна рисует шапка MBOX (не macOS): действие и подписка на состояние окна.
+  windowControls: process.platform === "darwin" ? null : {
+    act: (action) => ipcRenderer.invoke("mbox-desktop:window-control", String(action)),
+    state: () => ipcRenderer.invoke("mbox-desktop:window-control", "state"),
+    onState: (callback) => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on("mbox-desktop:window-state", listener);
+      return () => ipcRenderer.removeListener("mbox-desktop:window-state", listener);
+    },
+  },
   startSsh: (target, cols, rows, options) => ipcRenderer.invoke("mbox-desktop:ssh-start", target, cols, rows, options),
   resizeSession: (id, cols, rows) => ipcRenderer.invoke("mbox-desktop:session-resize", id, cols, rows),
   sessions: () => ipcRenderer.invoke("mbox-desktop:sessions"),

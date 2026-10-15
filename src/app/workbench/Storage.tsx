@@ -267,7 +267,7 @@ export function StorageDocument({ compact = false }: { compact?: boolean }) {
     return <div className="wb-doc-missing">Для этого формата нет быстрого предпросмотра. Файл можно скачать.</div>;
   }
 
-  if (!config) return <div className="wb-doc-missing">{error || "Загрузка…"}</div>;
+  if (!config) return <div className="wb-doc-missing">{error || <OctopusSpinner />}</div>;
   if (config.member && !config.configured) return <div className="wb-doc-missing">Хранилище ещё не подключено — это делает владелец MBOX.</div>;
   if (editing) return <StorageSettings config={config} onSaved={(next) => { setConfig(next); setEditing(!next.configured); }} onCancel={config.configured ? () => setEditing(false) : undefined} />;
 

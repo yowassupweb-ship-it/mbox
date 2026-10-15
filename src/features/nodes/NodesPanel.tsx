@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import type { FormEvent } from "react";
 import { ExternalLink, KeyRound, LoaderCircle, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import { fetchJson } from "../../lib/api";
@@ -93,7 +94,7 @@ export function NodesPanel() {
     if (result) { setNodes(result.nodes); setNote(result.note || ""); }
   }
 
-  if (loading) return <Panel title="Ноды" icon={Server}><p className="telegram-hint">Загружаю…</p></Panel>;
+  if (loading) return <Panel title="Ноды" icon={Server}><OctopusSpinner compact label="Загружаю…" /></Panel>;
 
   return (
     <Panel title="Ноды: Claude и Codex на ваших серверах" icon={Server} className="nodes-panel">

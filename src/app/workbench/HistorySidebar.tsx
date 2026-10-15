@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { fetchJson } from "../../lib/api";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { ENTITY_CHANGED_EVENT } from "../../hooks/useRealtime";
 import { dayTitle, jumpToHistoryDay, setHistoryState, useHistoryState } from "./historyNav";
 
@@ -55,7 +56,7 @@ export function HistorySidebar({ onOpen }: { onOpen: () => void }) {
         <button type="button" role="radio" aria-checked={nav.mode === "all"} className={nav.mode === "all" ? "is-on" : undefined} onClick={() => setHistoryState({ mode: "all" })}>Всё</button>
       </div>
       <div className="wb-view-body" ref={listRef}>
-        {days === null && <p className="wb-view-empty">Загружаю дни…</p>}
+        {days === null && <OctopusSpinner compact label="Загружаю дни…" />}
         {days !== null && !days.length && <p className="wb-view-empty">Событий нет</p>}
         {months.map(([month, items]) => (
           <section className="wb-menu-group" key={month}>

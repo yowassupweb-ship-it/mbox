@@ -2329,7 +2329,7 @@ time {
 .memory-link-chip.out { --chip-accent: var(--status-working); }
 .memory-link-chip.in { --chip-accent: var(--status-decision); }
 .memory-link-chip em { font-style: normal; color: var(--text-muted); font-size: var(--text-2xs); }
-.memory-link-chip svg { flex: none; opacity: .7; }
+.memory-link-chip svg { flex: none; }
 
 .memory-link-more {
   align-self: center;

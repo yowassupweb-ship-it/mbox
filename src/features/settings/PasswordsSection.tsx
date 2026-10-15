@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { OctopusSpinner } from "../../components/OctopusSpinner";
 import { Bot, Check, Copy, Eye, EyeOff, Globe, KeyRound, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
 import { fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
@@ -85,7 +86,7 @@ export function PasswordsSection({ projects }: { projects: Project[] }) {
             { id: "other", label: `Другое ${counts.other}` },
           ]} />
         </div>
-        {entries === null ? <p className="st-muted">Загружаю…</p> : (
+        {entries === null ? <OctopusSpinner compact label="Загружаю пароли…" /> : (
           <Rows empty={search || kind !== "all" ? "Ничего не нашлось." : "Пока пусто. Пароли сайтов появятся сами, когда вы войдёте куда-нибудь во встроенном браузере и нажмёте «Сохранить»."}>
             {visible.map((entry) => (
               <Row

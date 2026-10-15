@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { OctopusSpinner, Spinner } from "../../components/OctopusSpinner";
 import { CalendarDays, ExternalLink, ListChecks, LoaderCircle, RefreshCw, Unplug, Zap } from "lucide-react";
 import { ApiError, fetchJson } from "../../lib/api";
 import { formatSince } from "../../lib/format";
@@ -92,7 +93,7 @@ function GoogleSyncCard({ owner }: { owner: boolean }) {
   }
 
   if (!status) {
-    return <Card title="Календарь и задачи Google"><p className="st-muted">{error || "Загружаю…"}</p></Card>;
+    return <Card title="Календарь и задачи Google">{error ? <p className="st-muted">{error}</p> : <OctopusSpinner compact label="Загружаю…" />}</Card>;
   }
 
   const result = status.last_result;
@@ -222,7 +223,7 @@ function SourceList({ items, selected, disabled, onToggle }: {
   disabled: boolean;
   onToggle: (id: string, on: boolean, title: string) => void;
 }) {
-  if (!items) return <p className="st-note st-sources-loading"><LoaderCircle size={13} className="st-spin" /> Загружаю список из Google…</p>;
+  if (!items) return <p className="st-note st-sources-loading"><Spinner size={13} /> Загружаю список из Google…</p>;
   return (
     <ul className="st-sources">
       {items.map((item) => {

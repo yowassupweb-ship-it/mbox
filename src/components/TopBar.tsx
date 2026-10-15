@@ -1,4 +1,5 @@
 import { AlertTriangle, Bot, Check, Download, FolderOpen, LogOut, MessagesSquare, Monitor, PanelLeft, Play, Power, RefreshCw, Search, Square } from "lucide-react";
+import { WindowControls } from "./WindowControls";
 import { useEffect, useRef, useState } from "react";
 import { AgentAvatar, useWorkingFrame, WORKING_FRAMES, WORKING_FRAME_INTERVAL_MS, AgentName } from "./AgentAvatar";
 import type { ToolOutputLine, ToolRunEvent } from "../types";
@@ -264,6 +265,7 @@ export function TopBar({
 
   return (
     <header className="topbar" ref={barRef}>
+      <WindowControls />
       <div className="topbar-context" title={`${activeTitle} — ${activeHint}${tabCount > 1 ? ` · ${tabCount} вкладок` : ""}`}>
         {activeGlyph ? <TreeGlyph kind={activeGlyph} size={16} /> : <img src={activeIcon} alt="" width={18} height={18} />}
         <strong>{activeTitle}</strong>

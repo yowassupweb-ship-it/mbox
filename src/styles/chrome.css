@@ -70,6 +70,13 @@
 .wb-titlebar .realtime-pill:hover,
 .wb-titlebar .desktop-pill[aria-expanded="true"],
 .wb-titlebar .realtime-pill[aria-expanded="true"] { background: color-mix(in srgb, var(--text-main) 9%, transparent); color: var(--text-main); }
+/* Осьминог-статус: без рамки и пульсирующей тени (состояния attention/working из shell.css рисовали в шапке кривой
+   контур и сдвигали значок на пиксель), чуть крупнее. Состояние агентов видно по самому осьминогу и по цвету. */
+.wb-titlebar .realtime-pill.realtime-pill { border: 0; box-shadow: none; animation: none; transform: none; outline: none; }
+/* Один осьминог — квадратная кнопка, значок ровно по центру (раньше отступы и gap пилюли сдвигали его вбок). */
+.wb-titlebar .realtime-pill.realtime-pill:not(:has(.pill-avatars)) { display: inline-grid; place-items: center; width: 32px; min-width: 32px; height: 30px; padding: 0; gap: 0; }
+.wb-titlebar .realtime-pill.realtime-pill .topbar-logo { display: block; width: 26px; height: 26px; margin: 0; }
+.wb-titlebar .realtime-pill.realtime-pill:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 .wb-titlebar .topbar-icon-action:active,
 .wb-titlebar .topbar-logout:active { background: color-mix(in srgb, var(--text-main) 14%, transparent); }
 
@@ -90,7 +97,7 @@
   border-radius: var(--radius-xs);
   color: var(--text-muted);
 }
-.wb-status-item svg { width: 12px; height: 12px; opacity: 0.85; }
+.wb-status-item svg { width: 12px; height: 12px; }
 .wb-status-item:hover { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--text-2); }
 .wb-status-item.is-on { color: var(--accent-color); }
 .wb-status-item.is-warn { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); }
@@ -153,3 +160,18 @@
 .wb-titlebar .desktop-pill { width: 28px; padding: 0; justify-content: center; }
 .wb-titlebar .desktop-pill .desktop-pill-count:not(.is-zero) { top: 1px; right: 0; background: var(--accent-fill); color: var(--on-accent); }
 .wb-titlebar .desktop-pill .desktop-pill-count.is-zero { top: 1px; right: 0; }
+
+/* Кнопки окна MBOX Desktop на Windows и Linux — «светофор» как в macOS (components/WindowControls.tsx). */
+.window-controls { flex: none; display: flex; align-items: center; gap: 8px; margin-right: 8px; padding: 0 4px; -webkit-app-region: no-drag; }
+.window-control { position: relative; display: grid; place-items: center; width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; cursor: default; -webkit-app-region: no-drag; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.22); }
+.window-control::after { content: ""; position: absolute; inset: -4px; }
+.window-control.is-close { background: #ff5f57; }
+.window-control.is-minimize { background: #febc2e; }
+.window-control.is-zoom { background: #28c840; }
+.window-control svg { width: 8px; height: 8px; opacity: 0; fill: none; stroke: rgba(0, 0, 0, 0.6); stroke-width: 1.3; stroke-linecap: round; }
+.window-control svg .is-fill { fill: rgba(0, 0, 0, 0.6); stroke: none; }
+.window-controls:hover .window-control svg,
+.window-control:focus-visible svg { opacity: 1; }
+.window-control:active { filter: brightness(0.82); }
+.window-control:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.window-controls.is-blurred:not(:hover) .window-control { background: color-mix(in srgb, var(--text-main) 22%, transparent); box-shadow: none; }
