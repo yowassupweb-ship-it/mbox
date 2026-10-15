@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_HTTP_TOOLS } from "./mcp-http.mjs";
 
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 const ROOT_PACKAGE = path.resolve(SCRIPTS_DIR, "..", "package.json");
@@ -357,6 +358,11 @@ export async function handleAccountsApi({ req, res, url, query, readBody, sendJs
     if (text === null) { sendJson(res, 404, { error: "not_found" }); return true; }
     res.writeHead(200, { "content-type": kitMatch[1].endsWith(".json") ? "application/json; charset=utf-8" : "text/javascript; charset=utf-8", "cache-control": "no-store" });
     res.end(text);
+    return true;
+  }
+  // Адрес и состав инструментов MCP по HTTP для окна «MCP для ChatGPT»: сам ключ — обычный личный токен (/account/tokens).
+  if (url.pathname === "/api/mbox/account/mcp" && req.method === "GET") {
+    sendJson(res, 200, { url: `${publicOrigin(req)}/mcp`, tools: process.env.MBOX_MCP_HTTP_TOOLS ? null : [...DEFAULT_HTTP_TOOLS] });
     return true;
   }
   if (url.pathname === "/api/mbox/account/tokens" && req.method === "GET") {

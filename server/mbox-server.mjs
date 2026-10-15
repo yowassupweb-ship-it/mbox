@@ -22,6 +22,7 @@ import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tab
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
 import { ensurePresentationsSchema, handlePresentationsApi } from "./presentations.mjs";
 import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./design-systems.mjs";
+import { handleMcpHttp } from "./mcp-http.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
 import { handlePlannerApi, startPlannerAutomations } from "./planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
@@ -3428,6 +3429,8 @@ const httpServer = http.createServer(async (req, res) => {
   }
   try {
     if (await handleVkTourBot({ req, res, url, query, readBody })) return;
+    // MCP по HTTP: публичный адрес и ключ (личный токен аккаунта) для ChatGPT и других удалённых клиентов, см. server/mcp-http.mjs.
+    if (await handleMcpHttp({ req, res, url, authenticate: (key) => currentUser({ headers: { authorization: `Bearer ${key}` } }), scriptPath: path.join(root, "scripts", "mbox-mcp-server.mjs"), baseUrl: `http://127.0.0.1:${port}`, cwd: root })) return;
     if (url.pathname.startsWith("/api/mbox/")) return await handleApi(req, res, url);
     // Заметка по ссылке (/n/<токен>) — без входа в MBOX, доступ определяет только токен.
     if (url.pathname.startsWith("/api/share/")) {
