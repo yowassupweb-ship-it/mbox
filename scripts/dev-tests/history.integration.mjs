@@ -1,0 +1,15 @@
+import pg from "pg";
+import { handleHistoryApi } from "../../server/history.mjs";
+import { auditVisibility } from "../../server/audit-scope.mjs";
+const pool = new pg.Pool({ connectionString: "postgres://postgres@127.0.0.1:55432/mbox" });
+const query = (s, v) => pool.query(s, v);
+const owner = (await query("select id::text, username from users where role='owner' order by id limit 1")).rows[0];
+const scope = (first) => ({ sql: auditVisibility("e", first), params: [owner.id, true, owner.username, []] });
+const call = async (path) => { let out; await handleHistoryApi({ url: new URL("http://x" + path), query, res: {}, sendJson: (_r, s, j) => { out = j; }, scope }); return out; };
+const days = await call("/api/mbox/history/days?tz=Europe/Moscow&mode=important");
+console.log("days", days.days.length, JSON.stringify(days.days.slice(0, 2)));
+const p1 = await call("/api/mbox/history?limit=5");
+const p2 = await call(`/api/mbox/history?limit=5&before=${encodeURIComponent(p1.events.at(-1).created_at)}`);
+console.log("page1", p1.events.length, p1.more, "page2", p2.events.length, "ordered", p2.events.every((e) => e.created_at < p1.events.at(-1).created_at));
+console.log("search", (await call("/api/mbox/history?q=документ&mode=important")).events.length);
+await pool.end();
