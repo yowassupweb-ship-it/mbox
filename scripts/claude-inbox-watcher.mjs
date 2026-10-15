@@ -9,7 +9,7 @@ import { createInboxWake } from "./inbox-wake.mjs";
 import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
 import { claudeWindowsFromEvent, postUsage } from "./usage-report.mjs";
 import { enrichFocus } from "./focus-excerpt.mjs";
-import { chatRules, clipError, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
+import { chatRules, clipError, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, ROTATE_CONTEXT_TOKENS, COMPACT_CONTEXT_TOKENS, chatToolsArg, sameThread, threadOf } from "./chat-threads.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const LOCK_TOUCH_MS = 30_000;
@@ -84,7 +84,11 @@ const sessions = createSessionStore(agentName);
 // Сколько чатов отвечаем одновременно (см. parallelLimit в chat-threads.mjs).
 const MAX_PARALLEL = parallelLimit(process.env.MBOX_WATCH_PARALLEL);
 const activeLanes = new Map();
-const reportPhase = createPhaseBoard((phase) => { ping("heartbeat", phase).catch(() => {}); });
+// Крестик в чате: сервер помечает сообщение cancelled_at, наблюдатель на ближайшем круге убивает CLI этого сообщения
+// (и только его — соседние чаты работают дальше) и молча убирает фазу, без «не смог ответить».
+const runningChildren = new Map();
+const cancelledItems = new Set();
+const reportPhase = createPhaseBoard((phase, inboxId, itemPhase) => { ping("heartbeat", phase, inboxId ? { inbox_id: inboxId, item_phase: itemPhase } : undefined).catch(() => {}); });
 const timings = createRunTimings();
 
 // ВНИМАНИЕ: главный цикл этого файла (`while (!stopping)`) работает на верхнем уровне модуля и
@@ -251,6 +255,7 @@ while (!stopping) {
     if (Date.now() - lastHeartbeat > HEARTBEAT_MS) { lastHeartbeat = Date.now(); await ping("heartbeat"); }
     // Навыки не переписываем под работающим CLI — только в паузе между ответами.
     if (!activeLanes.size && Date.now() - lastSkillSync > skillSyncMs) { killAllWarm(); await refreshSkills(); }
+    if (runningChildren.size) await stopCancelled();
     const items = await newInboxItems();
     let started = 0;
     for (const item of items) {
@@ -487,6 +492,26 @@ function report(item) {
   if (item.body) console.log(item.body);
 }
 
+function killChild(child) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+  else child.kill("SIGKILL");
+}
+
+/** Отменённые в чате сообщения, над которыми идёт работа: убить их CLI. */
+async function stopCancelled() {
+  for (const [id, child] of [...runningChildren]) {
+    try {
+      const data = await mboxFetch(`/api/mbox/agent/inbox/${id}`);
+      const item = data.item || data.inbox || data;
+      if (!item?.props?.cancelled_at) continue;
+      cancelledItems.add(id);
+      console.log(`${logPrefix} #${id} отменён в чате — останавливаю CLI`);
+      killChild(child);
+    } catch { /* сеть — проверим на следующем круге */ }
+  }
+}
+
 async function handleInboxItem(item) {
   console.log(`${logPrefix} handling #${item.id}`);
   const claimed = await claimInbox(item.id, { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString() });
@@ -513,6 +538,7 @@ async function handleInboxItem(item) {
     outcome.stats = { ...(outcome.stats || {}), ...timing };
     console.log(`${logPrefix} #${item.id}: ${describeTimings(timing)}`);
     const answer = outcome.text;
+    if (cancelledItems.has(String(item.id))) throw Object.assign(new Error("cancelled"), { cancelled: true });
     await createInboxItem({
       title: `Claude ответил на #${item.id}: ${item.title || ""}`,
       body: images.body || "Готово.",
@@ -547,10 +573,15 @@ async function handleInboxItem(item) {
     });
     await finishRun(run?.id, "done", answer, Date.now() - startedAt);
   } catch (error) {
-    const message = error.cliFailure ? error.message : error.stack || error.message;
     timings.finish(item.id);
     reportPhase(item.id, "");
     run = await runPromise;
+    // Человек сам остановил ответ — это не сбой: без сообщения об ошибке и без повторной попытки.
+    if (cancelledItems.delete(String(item.id)) || error?.cancelled) {
+      await finishRun(run?.id, "cancelled", "Остановлено в чате", Date.now() - startedAt);
+      return;
+    }
+    const message = error.cliFailure ? error.message : error.stack || error.message;
     await createInboxItem({
       title: `Claude не смог ответить на #${item.id}`,
       body: message,
@@ -707,6 +738,11 @@ async function runClaude(item) {
   const thread = threadOf(item);
   let sessionId = sessions.get(thread);
   // Раздутая сессия дороже новой: каждый шаг пересылает весь контекст (см. ROTATE_CONTEXT_TOKENS).
+  // Сначала пробуем сжать: дешевле новой сессии и не теряет ход разговора (см. COMPACT_CONTEXT_TOKENS).
+  if (sessionId && sessions.contextOf(thread) > COMPACT_CONTEXT_TOKENS) {
+    const compacted = await compactSession(thread, sessionId);
+    if (compacted) sessionId = compacted;
+  }
   const rotated = Boolean(sessionId && sessions.contextOf(thread) > ROTATE_CONTEXT_TOKENS);
   if (rotated) {
     console.log(`${logPrefix} чат ${thread}: контекст ${sessions.contextOf(thread)} > ${ROTATE_CONTEXT_TOKENS} — начинаю новую сессию`);
@@ -732,6 +768,35 @@ async function runClaude(item) {
   return outcome;
 }
 
+/** `/compact` в сессии чата отдельным коротким запуском. Возвращает id сессии после сжатия или "" — тогда сработает ротация. */
+async function compactSession(thread, sessionId) {
+  killWarm(thread);
+  const before = sessions.contextOf(thread);
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const args = ["-p", "/compact", "--resume", sessionId, "--output-format", "json", "--permission-mode", "bypassPermissions"];
+      const child = process.platform === "win32"
+        ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[claudeCommand, ...args].join(" ")}"`], { cwd: workdir, env: process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
+        : spawn(claudeCommand, args, { cwd: workdir, env: process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      let out = "";
+      const timer = setTimeout(() => { child.kill(); reject(new Error("compact timeout")); }, 5 * 60_000);
+      child.stdout.on("data", (chunk) => { out += chunk; });
+      child.on("close", (code) => { clearTimeout(timer); if (code === 0) resolve(out); else reject(new Error(`compact exit ${code}`)); });
+      child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    });
+    const data = JSON.parse(String(result).trim().split(/\r?\n/).pop() || "{}");
+    if (data.is_error) throw new Error(String(data.result || "compact failed"));
+    const id = String(data.session_id || sessionId);
+    // Точный размер после сжатия станет известен на следующем ходе; пока считаем сессию маленькой.
+    sessions.remember(thread, id, Math.min(before, 20_000));
+    console.log(`${logPrefix} чат ${thread}: контекст ${before} сжат (/compact)`);
+    return id;
+  } catch (error) {
+    console.log(`${logPrefix} чат ${thread}: сжать не удалось (${error instanceof Error ? error.message : error}) — сессия начнётся заново`);
+    return "";
+  }
+}
+
 async function runClaudeTurn(item, resumeId) {
   const message = await enrichFocus(item, mboxFetch);
   // Правила — в системном промпте (rulesPath), в сообщение идёт только сам запрос; в первом ходе сессии — с историей чата.
@@ -754,9 +819,12 @@ async function runClaudeTurn(item, resumeId) {
   // не выбрал — остаётся то, что настроено переменными окружения, а дальше умолчание самого CLI.
   const wantedModel = pickModel(item.props?.model) || pickModel(claudeModel) || CLAUDE_DEFAULT_MODEL;
   // CLAUDE_WATCH_EFFORT — экономный уровень по умолчанию для облачного агента (low), если в чате не выбран другой.
-  const wantedEffort = pickEffort(item.props?.effort) || pickEffort(process.env.CLAUDE_WATCH_EFFORT);
+  // Без выбора в чате — «medium»: умолчание CLI думает дольше, а размышление — те же выходные токены лимита подписки.
+  const wantedEffort = pickEffort(item.props?.effort) || pickEffort(process.env.CLAUDE_WATCH_EFFORT) || "medium";
   if (wantedModel) args.push("--model", wantedModel);
   if (wantedEffort) args.push("--effort", wantedEffort);
+  const tools = chatToolsArg();
+  if (tools) args.push("--tools", tools);
   if (mcpConfigReady) args.push("--mcp-config", cliPath(mcpConfigPath));
   if (rulesReady) args.push("--append-system-prompt-file", cliPath(rulesPath));
 
@@ -809,6 +877,7 @@ function spawnStreaming(command, args, options, input = "", inboxId = "", warm =
     }
     let settled = false;
     const runTimer = armRunTimeout(child);
+    if (inboxId) runningChildren.set(String(inboxId), child);
 
     // steps — цепочка шагов для чата: что вызвано, с чем и что вернулось, в порядке событий.
     // pendingTools связывает вызов с его результатом: они приходят разными событиями потока.
@@ -933,6 +1002,7 @@ function spawnStreaming(command, args, options, input = "", inboxId = "", warm =
       if (settled) return;
       settled = true;
       clearTimeout(runTimer);
+      if (runningChildren.get(String(inboxId)) === child) runningChildren.delete(String(inboxId));
       child.stdout.off("data", onStdout);
       child.stderr.off("data", onStderr);
       child.off("close", onClose);

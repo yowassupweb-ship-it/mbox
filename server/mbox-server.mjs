@@ -1427,6 +1427,12 @@ async function handleApiWithContext(req, res, url) {
       setAgentPhase(`${user.id}:${name}`, body.phase.trim());
       broadcastRealtime("agent_presence", { agent: name, event: "phase" });
     }
+    // Фаза конкретного сообщения: чат показывает её у себя, и параллельные чаты одного агента не перекрывают друг друга.
+    if (/^\d{1,18}$/.test(String(body.inbox_id || "")) && typeof body.item_phase === "string") {
+      const phase = body.item_phase.trim().slice(0, 120);
+      if (phase) jarvisPhase.set(String(body.inbox_id), { phase, at: Date.now() });
+      else jarvisPhase.delete(String(body.inbox_id));
+    }
     // Шаг работы агента — в эфир как есть, без записи в базу: это поток, а не состояние.
     // Итоговая цепочка всё равно приедет в props ответа, а здесь важна только скорость.
     // Отдельный тип события намеренно: agent_presence заставляет интерфейс перечитывать ростер,
@@ -3093,11 +3099,15 @@ async function handleApiWithContext(req, res, url) {
     // на полпути, и помечаем сообщение done, чтобы резервный cron его не подобрал следом.
     const controller = activeJarvisRequests.get(cancelMatch[1]);
     if (controller) controller.abort();
+    // cancelled_at — сигнал наблюдателям Claude и Codex: они убивают CLI именно этого сообщения (соседние чаты не трогают).
     await query(
-      `UPDATE agent_inbox SET status = 'done', updated_at = now()
+      `UPDATE agent_inbox SET status = 'done', updated_at = now(),
+              props = COALESCE(props, '{}'::jsonb) || jsonb_build_object('cancelled_at', now()::text, 'cancelled_by', $4::text)
        WHERE id = $1 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))`,
-      [cancelMatch[1], String(user.id), isOwner(user)],
+      [cancelMatch[1], String(user.id), isOwner(user), String(user.username || "")],
     );
+    jarvisPhase.delete(cancelMatch[1]);
+    broadcastRealtime("entity_changed", { entity: "agent_inbox", action: "cancel", id: cancelMatch[1], silent: true });
     return sendJson(res, 200, { ok: true, aborted: Boolean(controller) });
   }
 

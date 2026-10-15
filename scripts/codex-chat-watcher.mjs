@@ -50,7 +50,10 @@ const sessions = createSessionStore(`codex-${agentName}`);
 // Сколько чатов отвечаем одновременно (см. parallelLimit в chat-threads.mjs).
 const MAX_PARALLEL = parallelLimit(config.MBOX_WATCH_PARALLEL);
 const activeLanes = new Map();
-const reportPhase = createPhaseBoard((phase) => { ping("heartbeat", phase).catch(() => {}); });
+// Крестик в чате (cancelled_at от сервера): убиваем CLI только этого сообщения, без «не смог ответить».
+const runningChildren = new Map();
+const cancelledItems = new Set();
+const reportPhase = createPhaseBoard((phase, inboxId, itemPhase) => { ping("heartbeat", phase, inboxId ? { inbox_id: inboxId, item_phase: itemPhase } : undefined).catch(() => {}); });
 const timings = createRunTimings();
 // Весь набор уровней из каталога Codex (models_cache.json): у новых моделей есть max и ultra.
 const CODEX_EFFORT_CHOICES = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
@@ -133,6 +136,7 @@ console.log(`${logPrefix} ${includeBacklog ? "including backlog" : `ignoring cha
 while (!stopping) {
   try {
     if (Date.now() - lastHeartbeat > HEARTBEAT_MS) { lastHeartbeat = Date.now(); await ping("heartbeat"); }
+    if (runningChildren.size) await stopCancelled();
     for (const item of await pendingMentions()) {
       // Чат уже отвечает или места нет — сообщение остаётся open и берётся, когда освободится.
       const lane = laneOf(item);
@@ -565,6 +569,21 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+async function stopCancelled() {
+  for (const [id, child] of [...runningChildren]) {
+    try {
+      const data = await mboxFetch(`/api/mbox/agent/inbox/${id}`);
+      const item = data.item || data.inbox || data;
+      if (!item?.props?.cancelled_at) continue;
+      cancelledItems.add(id);
+      console.log(`${logPrefix} #${id} отменён в чате — останавливаю CLI`);
+      if (child.exitCode !== null) continue;
+      if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+      else child.kill("SIGKILL");
+    } catch { /* сеть — проверим на следующем круге */ }
+  }
+}
+
 async function handleMention(item) {
   console.log(`${logPrefix} handling chat #${item.id}: ${item.title}`);
   const claimed = await claimInbox(item.id, { ...(item.props || {}), handled_by: agentName, handling_started_at: new Date().toISOString(), source: "codex-chat-watcher" });
@@ -591,6 +610,7 @@ async function handleMention(item) {
     outcome.stats = { ...(outcome.stats || {}), ...timing };
     console.log(`${logPrefix} #${item.id}: ${describeTimings(timing)}`);
     const answer = outcome.text;
+    if (cancelledItems.has(String(item.id))) throw Object.assign(new Error("cancelled"), { cancelled: true });
     await createInboxItem({
       project_id: item.project_id || null,
       title: `ChatGPT: ответ на #${item.id}`,
@@ -617,10 +637,14 @@ async function handleMention(item) {
     });
     await finishRun(run?.id, "done", answer, Date.now() - startedAt);
   } catch (error) {
-    const message = error.cliFailure ? error.message : error.stack || error.message;
     timings.finish(item.id);
     reportPhase(item.id, "");
     run = await runPromise;
+    if (cancelledItems.delete(String(item.id)) || error?.cancelled) {
+      await finishRun(run?.id, "cancelled", "Остановлено в чате", Date.now() - startedAt);
+      return;
+    }
+    const message = error.cliFailure ? error.message : error.stack || error.message;
     await createInboxItem({
       project_id: item.project_id || null,
       title: `ChatGPT не смог ответить на #${item.id}`,
@@ -825,6 +849,7 @@ function spawnCodex(command, args, options, inboxId = "") {
     // windowsHide: без него Windows открывала CLI агента в отдельном видимом окне консоли.
     const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const runTimer = armRunTimeout(child);
+    if (inboxId) { runningChildren.set(String(inboxId), child); child.once("close", () => { if (runningChildren.get(String(inboxId)) === child) runningChildren.delete(String(inboxId)); }); }
     const startedAt = Date.now();
     const state = { text: "", toolsUsed: [], trace: [], steps: [], stats: null, failure: "", sessionId: "" };
     let stderr = "";

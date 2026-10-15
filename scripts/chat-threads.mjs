@@ -77,6 +77,26 @@ export function createSessionStore(agentName) {
 export const ROTATE_CONTEXT_TOKENS = Number(process.env.MBOX_WATCH_ROTATE_TOKENS || 120_000);
 
 /**
+ * Раньше выросшую сессию сразу выбрасывали и начинали новую — с повторной загрузкой всего системного промпта и потерей
+ * хода разговора. Теперь сначала сжимаем её (`/compact` в той же сессии, проверено в -p 15.10.2026): контекст падает до
+ * краткой выжимки, следующие шаги дешевле, нить сохраняется. Ротация остаётся запасным путём, если сжатие не удалось.
+ */
+export const COMPACT_CONTEXT_TOKENS = Number(process.env.MBOX_WATCH_COMPACT_TOKENS || 80_000);
+
+/**
+ * Встроенные инструменты Claude Code для чата. Замер 15.10.2026 (claude 2.1.291, «ответь: ок»): полный набор — 49,7 тыс.
+ * токенов контекста на КАЖДОМ запросе сессии, из них ~20 тыс. — описания инструментов, которые чату не нужны (агенты,
+ * артефакты, документы, расписания, ноутбуки, планы…). С этим списком — 34,7 тыс.; MCP MBOX (через ToolSearch) и навыки
+ * (Skill) остаются. MBOX_WATCH_TOOLS=all — вернуть всё; свой список — через запятую.
+ */
+export const CHAT_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,WebFetch,WebSearch,TodoWrite,Skill,ToolSearch";
+export function chatToolsArg(value = process.env.MBOX_WATCH_TOOLS) {
+  const raw = String(value || "").trim();
+  if (raw.toLowerCase() === "all") return "";
+  return /^[A-Za-z_,\s]+$/.test(raw) && raw ? raw.replace(/\s+/g, "") : CHAT_TOOLS;
+}
+
+/**
  * Параллельные чаты. Раньше наблюдатель отвечал строго по одному: пока Claude 11 минут делал #1235,
  * сообщения из других чатов ждали, и человек видел «не дошло». Теперь у каждого чата своя очередь
  * (внутри чата — по порядку, сессия CLI одна), разные чаты идут одновременно, но не больше limit.
@@ -91,9 +111,11 @@ export function laneOf(item) {
 }
 
 /**
- * Фаза («Думает», «Работает») хранится на сервере одна на агента. При нескольких запусках сразу конец
- * одного сбрасывал бы фазу другого — поэтому фазы запусков сводятся здесь: показываем самую свежую,
- * пустую отправляем, только когда не работает ни один.
+ * Фазы («Думает», «Работает»). У каждого сообщения своя — её чат показывает у себя (сервер хранит по inbox_id, как у
+ * Джарвиса), поэтому параллельные чаты одного агента больше не перекрывают друг друга. Общая фаза агента (для ростера) —
+ * самая свежая из идущих, пустая — только когда не работает ни один. Раньше в неё дописывалось «· чатов: N», и эта
+ * строка показывалась в каждом чате как будто про него («пишет про 2 процесса»).
+ * send(общая, inboxId, фазаСообщения).
  */
 export function createPhaseBoard(send) {
   const phases = new Map();
@@ -101,8 +123,7 @@ export function createPhaseBoard(send) {
     const key = String(inboxId || "");
     phases.delete(key);
     if (phase) phases.set(key, phase);
-    const current = [...phases.values()].pop() || "";
-    send(current && phases.size > 1 ? `${current} · чатов: ${phases.size}` : current);
+    send([...phases.values()].pop() || "", key, phase || "");
   };
 }
 

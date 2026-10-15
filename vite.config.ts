@@ -1277,7 +1277,7 @@ function mboxDevApi() {
           }
 
           if (url.pathname === "/api/mbox/agent/ping" && req.method === "POST") {
-            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string; phase?: string; step?: Record<string, unknown>; inbox_id?: string }>(req);
+            const body = await readBody<{ agent?: string; kind?: string; client?: string; scope?: string; event?: string; phase?: string; step?: Record<string, unknown>; inbox_id?: string; item_phase?: string }>(req);
             const name = String(body.agent || req.headers["x-mbox-agent"] || "Agent").trim() || "Agent";
             const started = body.event === "session_start";
             const result = await queryPostgres<{ agent_name: string; kind: string; client: string; scope: string; sessions: number; last_seen: string }>(
@@ -1296,6 +1296,12 @@ function mboxDevApi() {
             if (typeof body.phase === "string") {
               setAgentPhase(name, body.phase.trim());
               broadcastRealtime(realtimeClients, "agent_presence", { agent: name, event: "phase" });
+            }
+            // Фаза конкретного сообщения — в паре с server/mbox-server.mjs.
+            if (/^d{1,18}$/.test(String(body.inbox_id || "")) && typeof body.item_phase === "string") {
+              const itemPhase = body.item_phase.trim().slice(0, 120);
+              if (itemPhase) jarvisPhase.set(String(body.inbox_id), { phase: itemPhase, at: Date.now() });
+              else jarvisPhase.delete(String(body.inbox_id));
             }
             // Зеркало прод-ручки: шаг работы уходит в эфир отдельным типом события, без записи
             // в базу и без перечитывания ростера (см. server/mbox-server.mjs).
@@ -2621,11 +2627,14 @@ function mboxDevApi() {
           if (cancelMatch && req.method === "POST") {
             const controller = activeJarvisRequests.get(cancelMatch[1]);
             if (controller) controller.abort();
+            // cancelled_at — сигнал наблюдателям: убить CLI этого сообщения (держать в паре с server/mbox-server.mjs).
             await queryPostgres(
-              `UPDATE agent_inbox SET status = 'done', updated_at = now()
+              `UPDATE agent_inbox SET status = 'done', updated_at = now(),
+                      props = COALESCE(props, '{}'::jsonb) || jsonb_build_object('cancelled_at', now()::text, 'cancelled_by', $4::text)
                WHERE id = $1 AND (props->>'mbox_user_id' = $2 OR ($3::boolean AND NOT (props ? 'mbox_user_id')))`,
-              [cancelMatch[1], String(sessionUser.id), sessionUser.role === "owner"],
+              [cancelMatch[1], String(sessionUser.id), sessionUser.role === "owner", String(sessionUser.username || "")],
             );
+            broadcastRealtime(realtimeClients, "entity_changed", { entity: "agent_inbox", action: "cancel", id: cancelMatch[1], silent: true });
             return sendJson(res, 200, { ok: true, aborted: Boolean(controller) });
           }
 

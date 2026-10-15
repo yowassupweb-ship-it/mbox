@@ -498,9 +498,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   // или реально работает. Опрашиваем ту же фазу, что сервер пишет в jarvisPhase (см. server/vite).
   useEffect(() => {
     if (!awaitingJarvisId || awaitingJarvisId.startsWith(PENDING_ID)) { setAwaitingJarvisPhase(null); return; }
-    // Фаза Джарвиса привязана к сообщению (он отвечает внутри сервера), фаза локального агента —
-    // к нему самому: наблюдатель шлёт её через POST /agent/ping, и она приезжает в списке агентов.
-    if (awaitingAgent.toLowerCase() !== JARVIS_NAME.toLowerCase()) return;
+    // Фаза привязана к сообщению у всех агентов: Джарвис пишет её внутри сервера, наблюдатели Claude и Codex — через
+    // POST /agent/ping с inbox_id. Общая фаза агента из ростера — только запасной путь (старый наблюдатель): по ней
+    // параллельные чаты одного агента показывали одно и то же и перекрывали друг друга.
     let cancelled = false;
     const poll = () => {
       fetchJson<{ phase: string | null }>(`/api/mbox/agent/inbox/${awaitingJarvisId}/phase`)
@@ -539,7 +539,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     // Шаги по сокету — самый прямой признак работы: Codex не шлёт ни фазу, ни запуск, а цепочка идёт.
     const lastStep = liveSteps[liveSteps.length - 1];
     if (lastStep) return lastStep.kind === "text" ? "пишет ответ" : `${describeStep(lastStep).label.toLowerCase()}${liveSteps.length > 1 ? ` · шаг ${liveSteps.length}` : ""}`;
-    if (row?.phase) return row.phase;
+    if (awaitingJarvisPhase) return awaitingJarvisPhase;
+    if (row?.phase) return row.phase.replace(/\s*·\s*чатов:\s*\d+$/, "");
     if (!row) return "не на связи — сообщение ждёт, пока запустится наблюдатель";
     const state = agentState(row, runs);
     if (state.key === "working") return row.phase || state.label || "работает";
