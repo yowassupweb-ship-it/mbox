@@ -317,6 +317,16 @@
   .app.app-workbench,
   .wb { height: var(--app-height, 100dvh); }
 }
+/* Касание (useVisualViewport): документ не прокручивается вовсе, оболочка приколота к видимой области — iOS двигает её
+   при клавиатуре (offsetTop), и шапка больше не уезжает за верх экрана, а композер не катается за пальцем. */
+:root[data-touch="1"],
+:root[data-touch="1"] body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+:root[data-touch="1"] body { position: fixed; inset: 0; width: 100%; }
+@media (max-width: 720px) {
+  :root[data-touch="1"] .app.app-workbench { position: fixed; left: 0; right: 0; top: var(--app-top, 0px); }
+  /* Все поля ввода на телефоне — 16px: иначе iOS при фокусе приближает страницу и ломает раскладку. */
+  :root[data-touch="1"] :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"]) { font-size: max(16px, 1em); }
+}
 
 /* Чат на телефоне — модальное окно на весь экран: без нижнего меню, закрывается крестиком.
    Высота по видимой области (--app-height из useVisualViewport), поэтому клавиатура не закрывает поле ввода. */
