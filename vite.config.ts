@@ -18,6 +18,7 @@ import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi }
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./server/tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./server/documents.mjs";
 import { ensurePresentationsSchema, handlePresentationsApi } from "./server/presentations.mjs";
+import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./server/design-systems.mjs";
 import { handleSpotlightApi } from "./server/spotlight.mjs";
 import { handlePlannerApi } from "./server/planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./server/presence.mjs";
@@ -992,6 +993,7 @@ function mboxDevApi() {
       ensureSkillOverridesSchema(queryPostgres).catch((error: Error) => console.error(`skill overrides schema: ${error.message}`));
       ensureIntegrationsSchema(queryPostgres).catch((error: Error) => console.error(`integrations schema: ${error.message}`));
       ensurePresentationsSchema(queryPostgres).catch((error: Error) => console.error(`presentations schema: ${error.message}`));
+      ensureDesignSystemsSchema(queryPostgres).catch((error: Error) => console.error(`design systems schema: ${error.message}`));
       ensureItemIconsSchema(queryPostgres).catch((error: Error) => console.error(`icons schema: ${error.message}`));
       ensureSkillAccessSchema(queryPostgres).then(() => ensureSkillStoreSchema(queryPostgres)).catch((error: Error) => console.error(`skill access schema: ${error.message}`));
       ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
@@ -1150,6 +1152,7 @@ function mboxDevApi() {
           if (await handleTablesApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleDocumentsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handlePresentationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
+          if (await handleDesignSystemsApi({ req, res, url, query: queryPostgres, readBody, sendJson, actor: devActor, scope: { ...devScope, userId: String(sessionUser.id) }, broadcast: (type, payload) => broadcastRealtime(realtimeClients, type, payload) })) return;
           if (await handleSpotlightApi({ req, res, url, query: queryPostgres, sendJson, scope: { ...devScope, userId: String(sessionUser.id) }, searchTerms })) return;
           if (await handleNotificationsApi({ req, res, url, query: queryPostgres, readBody, sendJson, user: sessionUser, scope: devScope, hasProjectAccess: devHasProjectAccess })) return;
           if (url.pathname.startsWith("/api/mbox/storage")) {

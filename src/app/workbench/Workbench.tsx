@@ -53,6 +53,7 @@ import { StorageView } from "./StorageView";
 import { STORAGE_SHEET_TAB, StorageSheetDocument } from "./StorageSheetDocument";
 import { StorageFileDocument } from "./StorageFileDocument";
 import { PresentationDocument } from "./PresentationDocument";
+import { DesignSystemDocument } from "./DesignSystemDocument";
 import { SHEETS_MODE_EVENT } from "./DocumentsView";
 import { FOLDERS_MODE_EVENT, FoldersView } from "./FoldersView";
 import { createPresentationAndOpen } from "./presentationsStore";
@@ -989,6 +990,8 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
         return <TableDocument tableId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "slides":
         return <PresentationDocument presentationId={first} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
+      case "design":
+        return <DesignSystemDocument designId={first} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "doc":
         return <DocDocument docId={first} data={data} tabs={tabs} tabKey={key} visible={documentVisible} onDirty={onDirty} />;
       case "storage":

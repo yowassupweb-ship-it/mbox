@@ -1537,6 +1537,74 @@ server.registerTool(
 );
 
 // ─── Презентации «на глазах» ─────────────────────────────────────────────────
+// Дизайн-системы проектов: одна страница HTML на систему (палитра, шрифты, компоненты, правила). Человек видит её во вкладке
+// в изолированной рамке, поэтому стили и разметка системы живут в самом файле: <style> внутри, внешних файлов нет.
+
+server.registerTool(
+  "design_system_list",
+  {
+    title: "List design systems",
+    description: "List the person's design systems (title, project, size, updated). Read one with design_system_read before building UI for that project so the result matches its colors, type and components.",
+    inputSchema: { project: z.string().default("").describe("project name or id; empty = all"), query: z.string().default("") },
+  },
+  async ({ project, query }) => {
+    let projectId = "";
+    if (project) {
+      const { projects = [] } = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}&limit=20`).catch(() => ({}));
+      projectId = String((projects.find((item) => item.name.toLowerCase() === project.toLowerCase() || String(item.id) === project) || projects[0])?.id || "");
+      if (!projectId) return textResult(`No project «${project}».`);
+    }
+    const qs = new URLSearchParams({ ...(query ? { q: query } : {}), ...(projectId ? { project_id: projectId } : {}) });
+    const { design_systems: items } = await mboxFetch(`/api/mbox/design-systems?${qs}`);
+    if (!items?.length) return textResult("No design systems.");
+    return textResult(items.map((item) => `#${item.id} ${item.title}${item.project_id ? ` · project ${item.project_id}` : ""} · ${Math.round(item.size_bytes / 1024)} KB · ${item.updated_at.slice(0, 16)}`).join("\n"));
+  },
+);
+
+server.registerTool(
+  "design_system_read",
+  {
+    title: "Read a design system",
+    description: "Read a design system as the HTML page the person sees. Use its colors, type scale, spacing and component rules when building UI for the project.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const { design_system: item } = await mboxFetch(`/api/mbox/design-systems/${encodeURIComponent(id)}`);
+    return textResult(`#${item.id} «${item.title}»${item.description ? `\n${item.description}` : ""}\n\n${item.html}`);
+  },
+);
+
+server.registerTool(
+  "design_system_write",
+  {
+    title: "Create or update a design system",
+    description: "Create (no id) or replace (id) a design system: one self-contained HTML page, styles inline in <style>, no external files or scripts. show=true opens it as a tab so the person sees the page appear. When updating, pass the whole page; read it first.",
+    inputSchema: {
+      id: z.string().default("").describe("empty = create"),
+      title: z.string().default(""),
+      html: z.string().default("").describe("full HTML document; empty on create = a starter page"),
+      description: z.string().optional(),
+      project: z.string().default("").describe("project name or id for a new design system"),
+      show: z.boolean().default(true),
+    },
+  },
+  async ({ id, title, html, description, project, show }) => {
+    let item;
+    if (id) {
+      ({ design_system: item } = await mboxFetch(`/api/mbox/design-systems/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ ...(html ? { html } : {}), ...(title ? { title } : {}), ...(description !== undefined ? { description } : {}) }) }));
+    } else {
+      let projectId = null;
+      if (project) {
+        const { projects = [] } = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}&limit=20`).catch(() => ({}));
+        projectId = (projects.find((entry) => entry.name.toLowerCase() === project.toLowerCase() || String(entry.id) === project) || projects[0])?.id || null;
+      }
+      ({ design_system: item } = await mboxFetch("/api/mbox/design-systems", { method: "POST", body: JSON.stringify({ title, html: html || undefined, description, project_id: projectId || undefined }) }));
+    }
+    const shown = show ? await showInMbox(`design:${item.id}`, item.title) : "";
+    return textResult(`Design system #${item.id} «${item.title}» ${id ? "updated" : "created"} (${Math.round(item.size_bytes / 1024)} KB).${shown}`);
+  },
+);
+
 // Презентация — JSON: { version: 1, theme, slides: [{ id, background?, notes, elements: [...] }] }, слайд 960×540.
 // Элементы: text { x, y, w, h, html, role?: title|subtitle|body, style?: { fontSize, color, align, valign, bold, italic } },
 // shape { shape: rect|round|ellipse|line, fill, stroke, strokeWidth, html? }, image { src (https или data:), fit: cover|contain }.

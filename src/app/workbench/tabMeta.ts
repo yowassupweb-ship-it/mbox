@@ -1,4 +1,5 @@
 import { presentationTitle } from "./presentationsStore";
+import { designSystemTitle } from "./designSystemsStore";
 import { incognitoTabUrl, isIncognitoKey } from "./incognito";
 import { projectEntityKinds, type ProjectEntityKind } from "../../features/tree/entityKinds";
 import type { MboxData } from "../../hooks/useMboxData";
@@ -72,6 +73,8 @@ export function tabMeta(key: string, data: MboxData, titles: Record<string, stri
       return { title: tableTitle(key) || "Таблица", hint: "Таблица", icon: "/icons/sheets.png" };
     case "slides":
       return { title: presentationTitle(key) || "Презентация", hint: "Презентация", icon: `${PROJECT}/documents.png` };
+    case "design":
+      return { title: designSystemTitle(key) || "Дизайн-система", hint: "Дизайн-система проекта", icon: `${PROJECT}/documents.png` };
     case "doc":
       return { title: docTitle(key) || "Документ", hint: "Документ", icon: `${PROJECT}/documents.png` };
     case "storage":

@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, ArchiveRestore, Building2, ChevronRight, ExternalLink, FileText, GitBranch, Globe, MoreHorizontal, NotebookPen, Pencil, Plus, Presentation, Table2, Trash2, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Building2, ChevronRight, ExternalLink, FileText, GitBranch, Globe, MoreHorizontal, NotebookPen, Palette, Pencil, Plus, Presentation, Table2, Trash2, Upload, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { projectEntityKinds, type ProjectEntityKind } from "../../../features/tree/entityKinds";
 import type { MboxData } from "../../../hooks/useMboxData";
@@ -11,6 +11,7 @@ import type { Project } from "../../../types";
 import { askConfirm, askText, showNotice } from "../../../ui/askText";
 import { browserTabKey } from "../BrowserDocument";
 import { createDocAndOpen } from "../docsStore";
+import { createDesignSystemAndOpen, DESIGN_TAB, pickHtmlFile } from "../designSystemsStore";
 import { createNoteAndOpen } from "../Notes";
 import { createPresentationAndOpen, SLIDES_TAB } from "../presentationsStore";
 import { createTableAndOpen } from "../TablesView";
@@ -185,6 +186,14 @@ export function ProjectPage({ project, data, tabs, isOwner }: { project: Project
           <MaterialGroup icon={<Table2 size={14} />} title="Таблицы" items={materials.tables} open={(id) => tabs.open(`table:${id}`, true)} onCreate={() => void createTableAndOpen(tabs, project.id)} />
           <MaterialGroup icon={<Presentation size={14} />} title="Презентации" items={materials.slides} open={(id) => tabs.open(`${SLIDES_TAB}${id}`, true)} onCreate={() => void createPresentationAndOpen(tabs, project.id)} />
           <MaterialGroup icon={<NotebookPen size={14} />} title="Заметки" items={materials.notes} open={(id) => tabs.open(`note:${id}`, true)} onCreate={() => void createNoteAndOpen(tabs, project.id)} />
+          <MaterialGroup
+            icon={<Palette size={14} />}
+            title="Дизайн-системы"
+            items={materials.designs}
+            open={(id) => tabs.open(`${DESIGN_TAB}${id}`, true)}
+            onCreate={() => void createDesignSystemAndOpen(tabs, project.id, { title: `Дизайн-система · ${project.name}` })}
+            onImport={async () => { const file = await pickHtmlFile(); if (file) await createDesignSystemAndOpen(tabs, project.id, file); }}
+          />
           <div className="pj-mat-row">
             <button type="button" className="pj-mat-title" onClick={() => tabs.open(`entity:${project.id}:memories`, true)}><TreeGlyph kind="memories" size={14} /> Память <span className="pj-count">{memories.length}</span></button>
           </div>
@@ -262,10 +271,11 @@ export function ProjectPage({ project, data, tabs, isOwner }: { project: Project
   );
 }
 
-function MaterialGroup({ icon, title, items, open, onCreate }: { icon: ReactNode; title: string; items: Material[]; open: (id: string) => void; onCreate: () => void }) {
+function MaterialGroup({ icon, title, items, open, onCreate, onImport }: { icon: ReactNode; title: string; items: Material[]; open: (id: string) => void; onCreate: () => void; onImport?: () => void }) {
   return (
     <div className={`pj-mat-row${items.length ? " is-list" : ""}`}>
       <span className="pj-mat-title is-static">{icon} {title} {items.length > 0 && <span className="pj-count">{items.length}</span>}</span>
+      {onImport && <button type="button" className="pj-icon" onClick={onImport} title={`Загрузить HTML-файл: ${title.toLowerCase()}`} aria-label={`Загрузить HTML-файл: ${title.toLowerCase()}`}><Upload size={13} /></button>}
       <button type="button" className="pj-icon" onClick={onCreate} title={`Создать: ${title.toLowerCase()}`} aria-label={`Создать: ${title.toLowerCase()}`}><Plus size={13} /></button>
       {items.length > 0 && (
         <ul>{items.slice(0, 4).map((item) => <li key={item.id}><button type="button" onClick={() => open(item.id)}>{item.title || "Без названия"}</button><small>{formatSince(item.updated_at)}</small></li>)}</ul>

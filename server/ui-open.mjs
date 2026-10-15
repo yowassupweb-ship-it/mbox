@@ -9,7 +9,7 @@
 //   url:https://…              — внешняя страница, открывается в браузере
 //   file:<id>, memory:<id>, note:<id>, todo:<id>, todos:<projectId>, … — любая вкладка рабочего места по её адресу
 
-const TAB_KEY = /^(welcome|artifacts|abilities|history|settings|storage|todos|entity|folder|todo|memory|note|table|doc|slides|s3file|skillstore|api|file|skill|tool|local|project|company)(:|$)/;
+const TAB_KEY = /^(welcome|artifacts|abilities|history|settings|storage|todos|entity|folder|todo|memory|note|table|doc|slides|design|s3file|skillstore|api|file|skill|tool|local|project|company)(:|$)/;
 const SKILL_FILE = /^skill-file:([a-z0-9][a-z0-9-]*)\/([^\\]+\.(?:html?|md))$/i;
 
 /** Проверяет запрос агента и приводит его к событию для интерфейса. Ошибка — строка для ответа 400. */

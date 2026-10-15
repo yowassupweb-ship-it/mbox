@@ -21,6 +21,7 @@ import { canAccessNote, ensureNotesSchema, handleNotesApi, handleSharedNoteApi }
 import { ensureTablesSchema, handleSharedTableApi, handleTablesApi } from "./tables.mjs";
 import { ensureDocumentsSchema, handleDocumentsApi, handleSharedDocumentApi } from "./documents.mjs";
 import { ensurePresentationsSchema, handlePresentationsApi } from "./presentations.mjs";
+import { ensureDesignSystemsSchema, handleDesignSystemsApi } from "./design-systems.mjs";
 import { handleSpotlightApi } from "./spotlight.mjs";
 import { handlePlannerApi, startPlannerAutomations } from "./planner.mjs";
 import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
@@ -1217,6 +1218,8 @@ function memberRouteAllowed(pathname) {
     || /^\/api\/mbox\/planner\/(?:tasks|events)(?:\/\d+)?$/.test(pathname)
     || pathname === "/api/mbox/presentations"
     || /^\/api\/mbox\/presentations\/\d+(?:\/slides|\/assets(?:\/\d+)?)?$/.test(pathname)
+    || pathname === "/api/mbox/design-systems"
+    || /^\/api\/mbox\/design-systems\/\d+$/.test(pathname)
     || pathname === "/api/mbox/spotlight"
     // Отметки прочитанного и состояние встроенного браузера — у каждого пользователя свои.
     || pathname === "/api/mbox/seen"
@@ -1345,6 +1348,7 @@ async function handleApiWithContext(req, res, url) {
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleDocumentsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handlePresentationsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handleDesignSystemsApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handleSpotlightApi({ req, res, url, query, sendJson, scope: { ...scope, userId: String(user.id) }, searchTerms })) return;
   if (url.pathname.startsWith("/api/mbox/storage")) {
     const { access, labels } = await storageAccessFor(scope, user);
@@ -3544,6 +3548,7 @@ ensureNodesSchema(query).catch((error) => console.error(`nodes schema: ${error.m
 configureTelegram({ broadcast: (entity) => broadcastRealtime("entity_changed", { entity }) });
 ensureTelegramSchema(query).then(() => startTelegramScheduler(query)).catch((error) => console.error(`telegram schema: ${error.message}`));
 ensurePresentationsSchema(query).catch((error) => console.error(`presentations schema: ${error.message}`));
+ensureDesignSystemsSchema(query).catch((error) => console.error(`design systems schema: ${error.message}`));
 ensureItemIconsSchema(query).catch((error) => console.error(`icons schema: ${error.message}`));
 ensureSkillAccessSchema(query).then(() => ensureSkillStoreSchema(query)).catch((error) => console.error(`skill access schema: ${error.message}`));
 ensureSkillOverridesSchema(query).catch((error) => console.error(`skill overrides schema: ${error.message}`));
