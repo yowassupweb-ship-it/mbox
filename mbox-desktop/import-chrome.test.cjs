@@ -80,8 +80,13 @@ test("re-import merges Chrome bookmarks without overwriting manual bookmarks", (
 test("imports quoted Chrome CSV locally and matches credentials by HTTPS origin", () => {
   const csv = path.join(root, "passwords.csv");
   fs.writeFileSync(csv, 'name,url,username,password,note\r\nSite,https://example.com/login,user,"sec,ret","line 1\nline 2"\r\n');
-  assert.deepEqual(imported.importPasswordsCsv(csv), { ok: true, count: 1 });
-  assert.equal(imported.credentialsFor("https://example.com/account")[0].password, "sec,ret");
+  assert.deepEqual(imported.importPasswordsCsv(csv), { ok: true, count: 1, added: 1, updated: 0, total: 1 });
+  const [entry] = imported.credentialsFor("https://example.com/account");
+  // Список паролей для страницы пароль не содержит: его отдают только по id и адресу той же страницы.
+  assert.equal(entry.password, undefined);
+  const store = require("./password-store");
+  assert.equal(store.secretForPage(entry.id, "https://example.com/account").password, "sec,ret");
+  assert.equal(store.secretForPage(entry.id, "https://other.example/"), null);
   assert.deepEqual(imported.credentialsFor("http://example.com/"), []);
   assert.deepEqual(imported.credentialsFor("https://other.example/"), []);
   const vault = fs.readFileSync(path.join(userData, "mbox-browser-vault.bin"));

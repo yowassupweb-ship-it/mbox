@@ -29,10 +29,10 @@ test("пока режим не включён, владелец видит вс�
 test("в личных пространствах владелец видит только свои проекты", async () => {
   resetSpacesCache();
   const scope = await projectScopeFor(fakeDb({ flag: true, memberships: { 1: ["5", "6"], 2: ["7"] } }), owner);
-  assert.deepEqual(scope, { all: false, owner: true, projectIds: ["5", "6"] });
+  assert.deepEqual(scope, { all: false, owner: true, projectIds: ["5", "6"], companyIds: [] });
   resetSpacesCache();
   const other = await projectScopeFor(fakeDb({ flag: true, memberships: { 2: ["7"] } }), member);
-  assert.deepEqual(other, { all: false, owner: false, projectIds: ["7"] });
+  assert.deepEqual(other, { all: false, owner: false, projectIds: ["7"], companyIds: [] });
 });
 
 test("чужой личный навык владельцу не виден, общий и выданный — виден", async () => {
