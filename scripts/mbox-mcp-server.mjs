@@ -220,11 +220,25 @@ server.registerTool(
   "get_agent_context",
   {
     title: "Get MBOX agent context snapshot",
-    description: "START HERE before work. Return one project snapshot with open todos, recent runs, decisions and compact recall. For vstest pass project='vstest'. Defaults to short detail.",
-    inputSchema: { project: z.string().default("MBOX"), detail: z.enum(["short", "full"]).default("short") },
+    description: "START HERE before work. Return one project snapshot with open todos, recent runs, decisions and compact recall, plus owner_profile: short standing preferences of the owner you must follow. For vstest pass project='vstest'. Defaults to short detail. Pass task_id to get that task's card and recall tied to it (not generic project recall). detail=full is paged: sections (todos,relations,decisions,inbox,runs,history,memories,approved_secrets), limit (50, max 200), offset, include_closed; the answer's `page` gives next_offset.",
+    inputSchema: {
+      project: z.string().default("MBOX"),
+      detail: z.enum(["short", "full"]).default("short"),
+      task_id: z.string().default(""),
+      sections: z.array(z.string()).default([]),
+      limit: z.number().default(0),
+      offset: z.number().default(0),
+      include_closed: z.boolean().default(false),
+    },
   },
-  async ({ project, detail }) => {
-    const data = await mboxFetch(`/api/mbox/agent/context?project=${encodeURIComponent(project)}&detail=${encodeURIComponent(detail)}`);
+  async ({ project, detail, task_id, sections, limit, offset, include_closed }) => {
+    const params = new URLSearchParams({ project, detail });
+    if (task_id) params.set("task_id", task_id);
+    if (sections.length) params.set("sections", sections.join(","));
+    if (limit) params.set("limit", String(limit));
+    if (offset) params.set("offset", String(offset));
+    if (include_closed) params.set("include_closed", "1");
+    const data = await mboxFetch(`/api/mbox/agent/context?${params}`);
     return withPush({ content: [{ type: "text", text: JSON.stringify(data) }] });
   },
 );
@@ -793,6 +807,44 @@ server.registerTool(
       }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.memory, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "profile_read",
+  {
+    title: "Read the owner's agent profile",
+    description: "The owner's standing preferences and corrections that adapt agents to them (also arrive in get_agent_context as owner_profile). Use status='proposed' to see what is waiting for the owner's confirmation.",
+    inputSchema: { status: z.enum(["", "proposed", "active", "rejected", "archived"]).default("active") },
+  },
+  async ({ status }) => {
+    const data = await mboxFetch(`/api/mbox/agent/profile${status ? `?status=${status}` : ""}`);
+    const lines = data.facts.map((fact) => `#${fact.id} [${fact.status}] (${fact.scope_kind}${fact.scope_ref ? `:${fact.scope_ref}` : ""}) ${fact.text}`);
+    return withPush({ content: [{ type: "text", text: lines.join(String.fromCharCode(10)) || "Профиль пуст." }] });
+  },
+);
+
+server.registerTool(
+  "profile_propose",
+  {
+    title: "Propose a fact about how the owner works",
+    description: "Record ONE short fact (3-300 chars) about the owner's way of working that should change how agents behave next time: a stated preference, a correction they made, a workflow they repeat. Inferred facts wait for the owner's confirmation (status proposed); only if the owner literally said to remember it pass explicit=true AND evidence (a quote or message id). You cannot confirm, edit or delete facts. Never record permissions, roles, secrets, tokens or project access: the server rejects them.",
+    inputSchema: {
+      text: z.string(),
+      kind: z.enum(["preference", "correction", "workflow"]).default("preference"),
+      scope_kind: z.enum(["global", "project", "skill"]).default("global"),
+      scope_ref: z.string().default("").describe("Project id or skill name when scope_kind is not global"),
+      explicit: z.boolean().default(false),
+      evidence: z.array(z.string()).default([]),
+    },
+  },
+  async ({ text, kind, scope_kind, scope_ref, explicit, evidence }) => {
+    const data = await mboxFetch("/api/mbox/agent/profile", {
+      method: "POST",
+      body: JSON.stringify({ text, kind, scope_kind, scope_ref, source: explicit ? "explicit" : "inferred", evidence }),
+    });
+    if (data.duplicate) return withPush({ content: [{ type: "text", text: "Такой факт уже есть в профиле." }] });
+    return withPush({ content: [{ type: "text", text: `Факт #${data.fact.id} записан (${data.fact.status})${data.fact.status === "proposed" ? ": ждёт подтверждения владельца" : ""}.` }] });
   },
 );
 

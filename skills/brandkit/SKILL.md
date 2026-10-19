@@ -1,6 +1,6 @@
 ---
 name: brandkit
-description: Generate a complete, accessible brand design system from a brief — primitive → semantic → component DTCG tokens (color, type, spacing, radius, shadow, motion), light + dark, plus a single theme.css — verified for WCAG. Use when the user wants a from-scratch brand/design foundation, a new palette + type system, or a themeable token kit for a product.
+description: Create a complete brand and design-system foundation from a brief: DTCG tokens, typography, themes, and theme.css. Use for a new product or an explicit rebrand that needs a coherent system. Do not use for one aesthetic adjustment (apply-aesthetic), token-file maintenance (design-tokens), or polishing an existing product without rebranding (redesign).
 invocation: user
 ---
 

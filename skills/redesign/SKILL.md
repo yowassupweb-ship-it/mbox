@@ -1,6 +1,6 @@
 ---
 name: redesign
-description: Upgrade an existing website or app to premium quality without breaking functionality — audit the current design, identify generic/AI tells, then apply taste and system rules surgically. Use when the user wants to improve, modernize, polish, or "make better" an existing UI/codebase.
+description: Audit and materially improve an existing website or app while preserving behavior, then implement and verify the changes. Use for broad modernize, polish, or make-better requests against an existing product. Do not use for findings only (design-review), one isolated component (design-component or design-code), a new brand foundation (brandkit), or visual-direction-only work (apply-aesthetic).
 invocation: user
 ---
 

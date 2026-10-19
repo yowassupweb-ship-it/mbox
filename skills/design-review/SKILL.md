@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: Review or audit a design/UI across 6 weighted dimensions with Nielsen's 10 heuristics and a prioritized findings table. Use when the user wants a design critique, quality score, heuristic evaluation, or audit of an existing screen, page, or product before/after build.
+description: Critique an existing UI with a weighted rubric, Nielsen heuristics, and prioritized findings. Use when the deliverable is an assessment, score, or recommendations without implementation. Do not use for automated regression gates (design-qa), WCAG-only compliance (a11y-audit), or an audit-plus-overhaul request (redesign).
 invocation: model
 ---
 

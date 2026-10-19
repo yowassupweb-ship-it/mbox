@@ -1,6 +1,6 @@
 ---
 name: apply-aesthetic
-description: Apply a visual direction — an archetype (high-end agency, editorial minimal, brutalist, soft-SaaS, dark-tech) or one of 138 named design systems (apple, linear-app, stripe, vercel, notion, material, shadcn, spotify, tesla…) — by resolving it into the token system. Use when the user wants a specific look/vibe/brand feel, or asks to make a design feel premium/expensive/non-generic.
+description: Choose and apply a visual direction to an existing design foundation by resolving an archetype or named design system into tokens. Use when the request is primarily about look, vibe, or art direction. Do not use for a full brand system (brandkit), a broad existing-product overhaul (redesign), or implementation-only work (design-code).
 invocation: model
 ---
 

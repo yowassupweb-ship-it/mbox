@@ -11,6 +11,8 @@ COPY server ./server
 COPY schema/migrations ./schema/migrations
 COPY scripts ./scripts
 COPY skills ./skills
+# Миграции БД: раннер (server/migrations.mjs) читает /app/schema/migrations при старте. Без этой папки они не применялись.
+COPY schema ./schema
 
 EXPOSE 3000
 CMD ["npm", "start"]

@@ -1,6 +1,6 @@
 ---
 name: design-doctrine
-description: The house rules for ANY design or UI work - the verification protocol (run the gate, never claim a number), the absolute no-emoji rule, token by intent, one shared theme, the eight states, one thing leads, and output completeness. Load this FIRST whenever building, reviewing, or theming a screen, component, or token set. Installed as a plugin, this skill carries what CLAUDE.md carries in the repo.
+description: Shared house rules and routing for design work; load alongside the task-specific design skill whenever building, reviewing, or theming UI. This is a policy layer, not a standalone deliverable skill: do not use it instead of design-code, design-review, design-tokens, redesign, or another specialist skill.
 invocation: model
 ---
 
@@ -73,3 +73,14 @@ Then pick the runnable skill for the job: `design-tokens`, `design-component`,
 `design-code`, `design-review`, `a11y-audit`, `apply-aesthetic`, `brandkit`,
 `image-to-code`, `redesign`, and the rest. Interrogate the brief first with
 `/grill-me`; prove the result with `/gate`; judge it with `/critique`.
+
+| Primary task | Choose | Do not choose instead |
+|---|---|---|
+| New brand foundation or explicit rebrand | `brandkit` | `apply-aesthetic`, `redesign` |
+| Visual direction on an existing foundation | `apply-aesthetic` | `brandkit` |
+| Broad improvement of an existing product | `redesign` | `design-review` alone |
+| Findings only, with no implementation | `design-review` | `redesign` |
+| Component contract without framework code | `design-component` | `design-code` |
+| Working UI implementation | `design-code` | `design-component` |
+| Create, extend, or audit token files | `design-tokens` | `brandkit` unless a full brand is requested |
+| Regression gates or pre-ship verification | `design-qa` | `design-review` |

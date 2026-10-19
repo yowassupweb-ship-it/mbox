@@ -1,3 +1,9 @@
+---
+name: seo-wizard
+description: Run the evidence-based recurring SEO workflow for VS-Travel using MBOX SEO packages, history, and server findings. Use for the Monday, Thursday, or monthly SEO scenarios and for prioritizing quantified SEO issues. Do not use for generic SEO advice without VS-Travel data.
+invocation: user
+---
+
 # SEO Wizard
 
 Постоянный сценарий SEO для VS-Travel в MBOX. Работай как старший SEO-редактор и аналитик, но задачи создавай только из серверных находок с цифрами.
@@ -25,6 +31,12 @@
 6. Создай задачи только через `seo_create_task_from_issue`.
 7. Шум, повторы и отклоненное пометь через `seo_update_issue`.
 8. В конце вызови `seo_record_session_report`.
+
+## Где смотреть человеку
+
+- Экран «SEO Wizard» (`open_tab target: "seo"`): вкладка «Сценарий» — что делать сейчас, цикл сбор → находки → выбор → внедрение → проверка → итоги и ритм месяца; вкладка «Стратегия» — что имеем, можем, могли бы и не можем по реальным источникам.
+- Сбор на экране идёт в фоне (кнопка «Собрать данные»); `seo_run_collection` у тебя синхронный и возвращает `run_id` и `package_id`.
+- Если источник устарел или не подключён, скажи об этом в отчёте сессии и не опирайся на него в задачах: свежесть видна на «Стратегии».
 
 ## Сценарии
 

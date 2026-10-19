@@ -61,6 +61,8 @@ import { callIntegration, canManageTool, ensureIntegrationsSchema, handleIntegra
 import { handleVkTourBot } from "./vk-tour-bot.mjs";
 import { publishAgentUsage, readAgentUsage } from "./agent-usage.mjs";
 import { buildShortAgentContext } from "./agent-context-short.mjs";
+import { buildFullAgentContext, parseContextParams, taskRecallQuery } from "./agent-context-scope.mjs";
+import { handleAgentProfileApi, loadActiveProfile, markProfileUsed, selectProfileForContext } from "./agent-profile.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -1249,6 +1251,7 @@ function memberRouteAllowed(pathname) {
     || pathname === "/api/mbox/agent/inbox"
     // Контекст проекта и следующая задача — только по проектам участника (проверка внутри обработчиков).
     || pathname === "/api/mbox/agent/context"
+    || /^\/api\/mbox\/agent\/profile(?:\/\d+)?$/.test(pathname)
     || pathname === "/api/mbox/agent/next-task"
     // Уведомления по своим проектам: лента, «прочитать всё», отключение проекта (server/notifications.mjs).
     || /^\/api\/mbox\/notifications(?:\/(?:read|prefs))?$/.test(pathname)
@@ -1365,6 +1368,7 @@ async function handleApiWithContext(req, res, url) {
 
   if (await handleWorkspaceApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: isOwner(user), broadcast: broadcastRealtime })) return;
   if (await handleNotesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), allowed: true, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
+  if (await handleAgentProfileApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
   if (await handlePlannerApi({ req, res, url, query, readBody, sendJson, scope: { ...scope, userId: String(user.id) }, broadcast: (type, payload) => { broadcastRealtime(type, payload); if (payload?.entity === "calendar_events" || payload?.entity === "todos") scheduleGoogleSync(query, user.id, broadcastRealtime); }, actor: actorFromReq(req), userName: user.username })) return;
   if (await handleGooglePlannerApi({ req, res, url, query, readBody, sendJson, userId: String(user.id), origin: publicOrigin(req), broadcast: broadcastRealtime })) return;
   if (await handleTablesApi({ req, res, url, query, readBody, sendJson, actor: actorFromReq(req), scope: { ...scope, userId: String(user.id) }, broadcast: broadcastRealtime })) return;
@@ -2847,7 +2851,14 @@ async function handleApiWithContext(req, res, url) {
     const inbox = await query("SELECT id::text, agent_name, item_type, title, body, status, priority, requires_human, props, created_at::text, updated_at::text FROM agent_inbox WHERE project_id = $1 AND status <> 'done' ORDER BY created_at DESC LIMIT 50", [project.id]);
     const runs = await query("SELECT id::text, todo_id::text, agent_name, status, goal, read_context, commands, touched_files, result, props, started_at::text, heartbeat_at::text, finished_at::text FROM agent_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 20", [project.id]);
     const history = await query("SELECT id::text, actor, action, entity_type, entity_id::text, summary, metadata, created_at::text FROM audit_events WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50", [project.id]);
-    const memories = await relevantMemories(`${project.name} ${project.stack.join(" ")} ${JSON.stringify(project.props || {})}`, { projectId: project.id, limit: 5 });
+    const ctx = parseContextParams(url);
+    const taskRow = ctx.taskId ? todos.rows.find((todo) => todo.id === ctx.taskId) || null : null;
+    if (ctx.taskId && !taskRow) return sendJson(res, 404, { error: "task_not_found_in_project" });
+    const memories = taskRow
+      ? await relevantMemories(taskRecallQuery(taskRow, project), { projectId: project.id, todoId: taskRow.id, limit: 5 })
+      : await relevantMemories(`${project.name} ${project.stack.join(" ")} ${JSON.stringify(project.props || {})}`, { projectId: project.id, limit: 5 });
+    const ownerProfile = selectProfileForContext(await loadActiveProfile(query, user.id), { projectId: project.id });
+    if (ownerProfile.length) markProfileUsed(query, ownerProfile.map((fact) => fact.id)).catch(() => {});
     // Одобренные агенту пароли этого проекта — только свои записи того, от чьего имени агент (server/passwords.mjs).
     const secrets = await query(
       `SELECT s.id::text, s.title, s.login, s.url,
@@ -2861,9 +2872,9 @@ async function handleApiWithContext(req, res, url) {
       [project.id, process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key", String(user.id)],
     );
     if (detail === "full") {
-      return sendJson(res, 200, { project, detail, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, memories, approved_secrets: secrets.rows });
+      return sendJson(res, 200, { ...buildFullAgentContext({ project, todos: todos.rows, relations: relations.rows, decisions: decisions.rows, inbox: inbox.rows, runs: runs.rows, history: history.rows, memories, secrets: secrets.rows, task: taskRow }, ctx), owner_profile: ownerProfile });
     }
-    return sendJson(res, 200, buildShortAgentContext({
+    const short = buildShortAgentContext({
       project,
       todos: todos.rows,
       relations: relations.rows,
@@ -2873,7 +2884,8 @@ async function handleApiWithContext(req, res, url) {
       history: history.rows,
       memories,
       secrets: secrets.rows,
-    }));
+    });
+    return sendJson(res, 200, { ...short, ...(taskRow ? { task: taskRow } : {}), owner_profile: ownerProfile });
   }
 
   // Отметки «просмотрено», привязанные к пользователю, а не к браузеру.
