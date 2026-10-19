@@ -8,6 +8,13 @@ import { usePersistentState } from "../../app/workbench/tabs";
 
 const HUMAN = "Человек";
 
+/** Варианты ответа, которые агент приложил к вопросу (MCP ask_owner → props.actions); пусто — обычный запрос с «Одобрить/Отклонить». */
+function optionsOf(item: AgentInboxItem): string[] {
+  const raw = item.props?.actions;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => String((entry as { value?: unknown })?.value ?? "")).filter(Boolean).slice(0, 8);
+}
+
 /**
  * Запросы, где агент ждёт РЕШЕНИЯ человека (requires_human), — не текст «к сведению», а карточки
  * с ответом в один тап. Ответ уходит агенту репликой в inbox (MCP прицепит её к его следующему
@@ -118,8 +125,14 @@ export function NeedsAnswer({ inbox, onSaved }: { inbox: AgentInboxItem[]; onSav
               <button type="button" className="needs-item-dismiss" onClick={() => void dismiss(item)} disabled={busy[item.id]} title="Обработано — закрыть без ответа агенту" aria-label={`Обработано: ${item.title}`}>
                 <CheckCheck size={15} />
               </button>
-              <Button variant="ghost" icon={Check} disabled={busy[item.id]} onClick={() => void answer(item, "Да, одобряю")}>Одобрить</Button>
-              <Button variant="ghost" icon={X} disabled={busy[item.id]} onClick={() => void answer(item, "Нет, отклоняю")}>Отклонить</Button>
+              {optionsOf(item).length ? optionsOf(item).map((option) => (
+                <Button key={option} variant="ghost" disabled={busy[item.id]} onClick={() => void answer(item, option)}>{option}</Button>
+              )) : (
+                <>
+                  <Button variant="ghost" icon={Check} disabled={busy[item.id]} onClick={() => void answer(item, "Да, одобряю")}>Одобрить</Button>
+                  <Button variant="ghost" icon={X} disabled={busy[item.id]} onClick={() => void answer(item, "Нет, отклоняю")}>Отклонить</Button>
+                </>
+              )}
             </div>
           </article>
         );

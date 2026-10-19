@@ -45,6 +45,9 @@ export type LogLine = {
   steps?: ChainStep[];
   highlights?: string[];
   actions?: MessageAction[];
+  /** Вопрос агента владельцу (MCP ask_owner): confirm — да/нет, choice — один вариант, multi — несколько. */
+  ask?: { kind: "confirm" | "choice" | "multi" };
+  answered?: boolean;
   postBuilder?: PostPart[];
   /** id записи инбокса — есть только у настоящих сообщений, на них можно ответить. */
   inboxId?: string;

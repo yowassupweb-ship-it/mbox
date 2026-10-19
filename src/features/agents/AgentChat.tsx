@@ -688,6 +688,10 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         ? (item.props.highlights as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
       actions: parseActions(item.props?.actions),
+      ask: item.props?.ask && typeof item.props.ask === "object" && ["confirm", "choice", "multi"].includes(String((item.props.ask as { kind?: unknown }).kind))
+        ? { kind: (item.props.ask as { kind: "confirm" | "choice" | "multi" }).kind }
+        : undefined,
+      answered: item.status === "done",
       postBuilder: parsePostBuilder(item.props?.post_builder),
       failed: item.item_type === "agent_error",
       inboxId: String(item.id),
@@ -747,6 +751,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     stickToBottomRef.current = true;
     scrollToBottom();
   }, [open, visibleLines.length, awaitingJarvisId, working.length, scrollToBottom]);
+
+  const [askAnswered, setAskAnswered] = useState<Record<string, boolean>>({});
+  const [askPicked, setAskPicked] = useState<Record<string, string[]>>({});
+  /** Ответ на вопрос агента кнопкой: уходит обычным сообщением в этот чат, а сам вопрос закрывается. */
+  function answerAsk(inboxId: string, answer: string) {
+    if (!answer.trim() || askAnswered[inboxId]) return;
+    setAskAnswered((current) => ({ ...current, [inboxId]: true }));
+    void send(answer, undefined, inboxId);
+    fetchJson(`/api/mbox/agent/inbox/${inboxId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "done" }) }).catch(() => {});
+  }
 
   function pushLocal(kind: "sys" | "cmd", text: string) {
     setLocalLines((current) => [...current, { id: `local-${Date.now()}-${Math.random()}`, kind, actor: kind === "cmd" ? "Ты" : "mbox", text, at: new Date().toISOString() }]);
@@ -833,7 +847,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   // overrideText — клик по кнопке варианта (см. parseActions/props.actions) шлёт готовый ответ
   // тем же путём, что и обычное сообщение, без похода через textarea/историю ввода.
-  async function send(overrideText?: string, control?: { type: string; focus?: string }) {
+  async function send(overrideText?: string, control?: { type: string; focus?: string }, answerTo?: string) {
     const raw = (overrideText ?? text).trim();
     const files: Attachment[] = overrideText === undefined ? readyFiles.map(({ name, key, size, type }) => ({ name, key, size, type })) : [];
     if (!raw && !files.length) return;
@@ -874,6 +888,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
         messageProps.re = replying.id;
         messageProps.in_reply_to = replying.id;
       }
+      // Ответ на вопрос агента (ask_owner): привязан к нему, чтобы агент, ждущий ответа, его нашёл.
+      if (answerTo) { messageProps.re = answerTo; messageProps.in_reply_to = answerTo; }
       if (currentProjectName) messageProps.current_project_name = currentProjectName;
       // Модель и «усилие» выбираются рядом с полем ввода; пустое значение = как было (по умолчанию).
       if (effectiveModel) messageProps.model = effectiveModel;
@@ -1271,14 +1287,31 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         <pre className="console-trace">{line.trace.join("\n\n")}</pre>
                       </details>
                     )}
-                    {!!line.actions?.length && (
-                      <span className="console-actions">
-                        {line.actions.map((action) => (
-                          <button key={action.value} type="button" className="console-action-btn" onClick={() => void send(action.value)}>
-                            {action.label}
-                          </button>
-                        ))}
-                      </span>
+                    {!!line.actions?.length && !(line.ask && (line.answered || (line.inboxId && askAnswered[line.inboxId]))) && (
+                      line.ask?.kind === "multi" && line.inboxId ? (
+                        <span className="console-actions is-multi">
+                          {line.actions.map((action) => {
+                            const picked = (askPicked[line.inboxId as string] || []).includes(action.value);
+                            return (
+                              <button key={action.value} type="button" className={picked ? "console-action-btn is-on" : "console-action-btn"} aria-pressed={picked} onClick={() => setAskPicked((current) => {
+                                const now = current[line.inboxId as string] || [];
+                                return { ...current, [line.inboxId as string]: picked ? now.filter((value) => value !== action.value) : [...now, action.value] };
+                              })}>
+                                {action.label}
+                              </button>
+                            );
+                          })}
+                          <button type="button" className="console-action-btn is-send" disabled={!(askPicked[line.inboxId] || []).length} onClick={() => answerAsk(line.inboxId as string, (askPicked[line.inboxId as string] || []).join(", "))}>Отправить выбранное</button>
+                        </span>
+                      ) : (
+                        <span className="console-actions">
+                          {line.actions.map((action) => (
+                            <button key={action.value} type="button" className="console-action-btn" onClick={() => (line.ask && line.inboxId ? answerAsk(line.inboxId, action.value) : void send(action.value))}>
+                              {action.label}
+                            </button>
+                          ))}
+                        </span>
+                      )
                     )}
                     {!!line.postBuilder?.length && (
                       <PostBuilderCard parts={line.postBuilder} onSend={(text) => void send(text)} />

@@ -186,6 +186,7 @@ async function withPush(result) {
 const server = new McpServer({ name: "mbox-prod", version: "1.0.0" }, {
   instructions: [
     "MBOX is the owner's workspace and task source. Start meaningful work with get_agent_context and track work in MBOX todos.",
+    "Before a destructive, outward-facing or costly step (deploy, send, publish, delete, spend) or a real either/or choice, ask the owner with ask_owner (confirm / choice / multi) instead of guessing, then end your turn and wait for the answer in the chat. Silence is never a yes.",
     "Bugs in MBOX itself: if any MBOX tool, API or screen misbehaves while you work (error, wrong data, crash, silent no-op), file it yourself with report_bug right away. Do not ask the owner first and do not stop your task for it. Skip your own mistakes, bad input and intended permission denials; duplicates are merged on the server.",
   ].join("\n"),
 });
@@ -583,6 +584,72 @@ server.registerTool(
       body: JSON.stringify({ project_id: target?.id || null, agent_name: agentName, title, body, item_type, priority, requires_human, props: itemProps }),
     });
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.inbox_item, null, 2) }] });
+  },
+);
+
+server.registerTool(
+  "ask_owner",
+  {
+    title: "Ask the owner a question or for a confirmation",
+    description: "Ask the OWNER a question with ready answer buttons in the chat you work in (and in the «Требуют ответа» list). Use it instead of guessing when the next step is destructive, outward-facing (deploy, send, delete, publish), costs money, or you must choose between real alternatives. kind='confirm' (default) gives «Да»/«Нет»; kind='choice' lets the owner pick one of your options; kind='multi' lets them tick several (a poll). The question must be self-contained and name what exactly will happen. Do not ask about things you can decide or check yourself. Non-blocking by default: ask, say in your reply that you are waiting, and END your turn; the answer arrives as the next message in the same chat. With wait_seconds (max 40) the tool waits for a quick answer and returns it; if it returns «no answer yet», do not repeat the question — end your turn. Never treat silence as «yes».",
+    inputSchema: {
+      question: z.string().describe("The question, one or two sentences, e.g. 'Выкатить сервер на прод сейчас?'"),
+      detail: z.string().default("").describe("What exactly happens on each answer, files/services touched"),
+      kind: z.enum(["confirm", "choice", "multi"]).default("confirm"),
+      options: z.array(z.string()).default([]).describe("Answer options for choice/multi (2-8). For confirm leave empty or override the default Да/Нет"),
+      wait_seconds: z.number().default(0),
+      project: z.string().default("MBOX"),
+      thread: z.string().default("").describe("Chat id. Normally omit: it is taken from the chat message you are answering"),
+    },
+  },
+  async ({ question, detail, kind, options, wait_seconds, project, thread }) => {
+    const clean = options.map((option) => option.trim()).filter(Boolean).slice(0, 8);
+    if (kind !== "confirm" && clean.length < 2) throw new Error("choice/multi need at least 2 options");
+    const labels = clean.length ? clean : ["Да", "Нет"];
+    const projects = await mboxFetch(`/api/mbox/projects?q=${encodeURIComponent(project)}`);
+    const target = projects.projects.find((item) => item.name === project) || projects.projects[0];
+    // Чат и сообщение, на которое отвечаем: то, что наблюдатель сейчас обрабатывает для этого агента.
+    let chatThread = thread.trim();
+    let replyTo = "";
+    try {
+      const recent = await mboxFetch("/api/mbox/agent/inbox?light=1&limit=40&status=doing");
+      const current = (recent.inbox || [])
+        .filter((item) => item.status === "doing" && String(item.props?.handled_by || "").toLowerCase() === agentName.toLowerCase())
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+      if (current) { replyTo = String(current.id); if (!chatThread) chatThread = String(current.props?.thread || ""); }
+    } catch { /* без чата вопрос уйдёт в общую консоль и список «Требуют ответа» */ }
+    const data = await mboxFetch("/api/mbox/agent/inbox", {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: target?.id || null,
+        agent_name: agentName,
+        item_type: "agent_response",
+        title: question,
+        body: [question, detail].filter(Boolean).join("\n\n"),
+        priority: "high",
+        requires_human: true,
+        props: {
+          to: "Человек",
+          source: "ask_owner",
+          ask: { kind },
+          actions: labels.map((label) => ({ label, value: label })),
+          ...(chatThread ? { thread: chatThread } : {}),
+          ...(replyTo ? { in_reply_to: replyTo } : {}),
+        },
+      }),
+    });
+    const id = String(data.inbox_item?.id || "");
+    const wait = Math.min(Math.max(Number(wait_seconds) || 0, 0), 40);
+    if (id && wait) {
+      const deadline = Date.now() + wait * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const list = await mboxFetch(`/api/mbox/agent/inbox?light=1&limit=40${chatThread ? `&thread=${encodeURIComponent(chatThread)}` : ""}`);
+        const reply = (list.inbox || []).find((item) => String(item.props?.re || item.props?.in_reply_to || "") === id && item.agent_name !== agentName);
+        if (reply) return withPush({ content: [{ type: "text", text: `Ответ владельца на вопрос #${id}: ${reply.body || reply.title}` }] });
+      }
+    }
+    return withPush({ content: [{ type: "text", text: `Вопрос #${id} задан владельцу (${kind}: ${labels.join(" / ")}). Ответа пока нет: не повторяй вопрос и не считай молчание согласием. Скажи в ответе, что ждёшь решения, и закончи ход: ответ придёт следующим сообщением в этом чате.` }] });
   },
 );
 

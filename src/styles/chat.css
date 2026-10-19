@@ -853,6 +853,9 @@
 }
 
 .console-action-btn:hover { background: color-mix(in srgb, var(--accent-color) 26%, transparent); border-color: color-mix(in srgb, var(--accent-color) 40%, transparent); }
+.console-action-btn.is-on { background: color-mix(in srgb, var(--accent-color) 34%, transparent); border-color: color-mix(in srgb, var(--accent-color) 55%, transparent); }
+.console-action-btn.is-send { font-weight: var(--weight-semibold); }
+.console-action-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Конструктор поста по частям (props.post_builder) — карточка на часть (заголовок/тело/CTA),
    листается свайпом или стрелками; "Готово" собирает выбранные части в одно сообщение. */
