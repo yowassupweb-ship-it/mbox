@@ -775,6 +775,9 @@ function compactContextText(value) {
 async function runCodex(item) {
   const thread = threadOf(item);
   let sessionId = sessions.get(thread);
+  if (item.props?.control?.type === "compact") {
+    return { text: "Codex не умеет сжимать сессию командой. Чтобы разгрузить контекст, начните новый чат (/new): старая сессия останется в истории.", toolsUsed: [], trace: [], steps: [], stats: {}, sessionId: sessionId || "" };
+  }
   // См. ROTATE_CONTEXT_TOKENS: сессии чатов Codex дорастали до 225k контекста и 9 млн входа на ответ.
   const rotated = Boolean(sessionId && sessions.contextOf(thread) > ROTATE_CONTEXT_TOKENS);
   if (rotated) {

@@ -737,6 +737,7 @@ function formatContextLine(entry) {
 async function runClaude(item) {
   const thread = threadOf(item);
   let sessionId = sessions.get(thread);
+  if (item.props?.control?.type === "compact") return runCompactCommand(item, thread, sessionId);
   // Раздутая сессия дороже новой: каждый шаг пересылает весь контекст (см. ROTATE_CONTEXT_TOKENS).
   // Сначала пробуем сжать: дешевле новой сессии и не теряет ход разговора (см. COMPACT_CONTEXT_TOKENS).
   if (sessionId && sessions.contextOf(thread) > COMPACT_CONTEXT_TOKENS) {
@@ -768,13 +769,25 @@ async function runClaude(item) {
   return outcome;
 }
 
+/** Ручное `/compact [что сохранить]` из чата: сжимает сессию этого чата и отвечает итогом, обычный ход не запускается. */
+async function runCompactCommand(item, thread, sessionId) {
+  const answer = (text, extra = {}) => ({ text, toolsUsed: [], trace: [], steps: [], stats: extra, rateLimit: null, sessionId: sessionId || "" });
+  if (!sessionId) return answer("В этом чате ещё нечего сжимать: сессия не началась или уже закончилась.");
+  const before = sessions.contextOf(thread);
+  const focus = String(item.props.control.focus || "").replace(/[^\p{L}\p{N} .,:;()_\/-]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  const compacted = await compactSession(thread, sessionId, focus);
+  if (!compacted) return answer("Сжать не удалось, сессия осталась как была. Если контекст слишком тяжёлый, начните новый чат (/new).");
+  return answer(`Контекст сжат${before ? `: было около ${Math.round(before / 1000)} тыс. токенов` : ""}. Нить разговора сохранена${focus ? `, с упором на: ${focus}` : ""}. Точный размер покажет следующий ответ.`, { context_tokens: Math.min(before, 20_000), compacted: true });
+}
+
 /** `/compact` в сессии чата отдельным коротким запуском. Возвращает id сессии после сжатия или "" — тогда сработает ротация. */
-async function compactSession(thread, sessionId) {
+async function compactSession(thread, sessionId, focus = "") {
   killWarm(thread);
   const before = sessions.contextOf(thread);
   try {
     const result = await new Promise((resolve, reject) => {
-      const args = ["-p", "/compact", "--resume", sessionId, "--output-format", "json", "--permission-mode", "bypassPermissions"];
+      const command = focus ? `/compact ${focus}` : "/compact";
+      const args = ["-p", process.platform === "win32" && focus ? `"${command}"` : command, "--resume", sessionId, "--output-format", "json", "--permission-mode", "bypassPermissions"];
       const child = process.platform === "win32"
         ? spawn("cmd.exe", ["/d", "/s", "/c", `"${[claudeCommand, ...args].join(" ")}"`], { cwd: workdir, env: process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, windowsVerbatimArguments: true })
         : spawn(claudeCommand, args, { cwd: workdir, env: process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });

@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { AnchoredPopover } from "../../components/AnchoredPopover";
-import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, X } from "lucide-react";
+import { AlertTriangle, AppWindow, Archive, ArrowUp, AtSign, Brain, Bug, ChevronDown, Cloud, CornerDownRight, DollarSign, FileText, Globe, Hash, MessageSquarePlus, MessagesSquare, Minimize2, Monitor, PanelLeft, Paperclip, Pencil, Reply, Slash, SquareCheck, StickyNote, Table2, X } from "lucide-react";
 import { describeStep } from "./chainSteps";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { NeedsAnswer } from "./NeedsAnswer";
@@ -51,6 +51,9 @@ const SLASH_COMMANDS = [
   { value: "jarvis", hint: "из чего состоит Джарвис — агенты, инструменты, скиллы" },
   { value: "clear", hint: "очистить окно" },
   { value: "new", hint: "новый чат — агент начнёт с чистого контекста" },
+  { value: "compact", hint: "сжать контекст этого чата, не теряя нити разговора (можно добавить, что сохранить)" },
+  { value: "context", hint: "сколько контекста занято в этом чате" },
+  { value: "rename", hint: "переименовать этот чат" },
 ];
 
 /** Ручной список — тот же набор function-схем живёт в JARVIS_TOOLS на сервере (см.
@@ -753,6 +756,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   function runCommand(raw: string) {
     const [cmd, ...rest] = raw.trim().slice(1).split(/\s+/);
     const arg = rest.join(" ");
+    // Сжатие выполняет агент в сессии этого чата: уходит обычным сообщением с пометкой control.
+    if (cmd === "compact") {
+      if (target === JARVIS_NAME.toLowerCase()) { pushLocal("cmd", raw); pushLocal("sys", "У Джарвиса нет долгой сессии: историю чата он сжимает сам. /compact работает с Claude."); return; }
+      void send(raw, { type: "compact", focus: arg });
+      return;
+    }
     pushLocal("cmd", raw);
 
     switch (cmd) {
@@ -765,6 +774,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
           "  /jarvis           — из чего состоит Джарвис: агенты, tools, skills",
           "  /clear            — очистить окно (переписка не удаляется)",
           "  /new              — новый чат: агент начнёт с чистого контекста",
+          "  /compact [текст]  — сжать контекст чата (что сохранить — в тексте)",
+          "  /context          — сколько контекста занято",
+          "  /rename <имя>     — переименовать чат",
           "  /help             — эта справка",
           "что угодно без / — уходит агентам в общую или адресную (кнопки выше) переписку",
           "",
@@ -804,6 +816,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       case "new":
         startNewChat();
         return;
+      case "context":
+        pushLocal("sys", contextLoad ? `контекст ${contextLoad.agent} в этом чате: ${contextLoadText(contextLoad)}${contextShare >= 0.6 ? " — тяжёлый, лучше /compact или /new" : ""}` : "сессия в этом чате ещё не началась — контекст пуст");
+        return;
+      case "rename": {
+        if (!thread) { pushLocal("sys", "это общий чат без названия — создай чат через /new"); return; }
+        if (!arg) { pushLocal("sys", "укажи имя: /rename Новая задача"); return; }
+        renameThread(thread, arg);
+        pushLocal("sys", `чат переименован: ${arg}`);
+        return;
+      }
       default:
         pushLocal("sys", `неизвестная команда: /${cmd} — попробуй /help`);
     }
@@ -811,7 +833,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   // overrideText — клик по кнопке варианта (см. parseActions/props.actions) шлёт готовый ответ
   // тем же путём, что и обычное сообщение, без похода через textarea/историю ввода.
-  async function send(overrideText?: string) {
+  async function send(overrideText?: string, control?: { type: string; focus?: string }) {
     const raw = (overrideText ?? text).trim();
     const files: Attachment[] = overrideText === undefined ? readyFiles.map(({ name, key, size, type }) => ({ name, key, size, type })) : [];
     if (!raw && !files.length) return;
@@ -823,7 +845,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       setDrafts([]);
     }
 
-    if (raw.startsWith("/") && !files.length) {
+    if (raw.startsWith("/") && !files.length && !control) {
       runCommand(raw);
       return;
     }
@@ -858,6 +880,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
       if (effectiveEffort) messageProps.effort = effectiveEffort;
       if (files.length) messageProps.attachments = files;
       if (thread) messageProps.thread = thread;
+      if (control) messageProps.control = control;
       if (sharedFocus.length) messageProps.context = sharedFocus.map(({ kind, title, id, detail, state }) => ({ kind, title, ...(id ? { id } : {}), ...(detail ? { detail } : {}), ...(state ? { state } : {}) }));
       const result = await fetchJson<{ inbox_item?: AgentInboxItem }>("/api/mbox/agent/inbox", {
         method: "POST",
@@ -1100,6 +1123,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 <span className="console-context-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.round(contextShare * 100))}%` }} /></span>
                 <span className="console-context-text">{formatWorkTokens(contextLoad.tokens)}</span>
               </div>
+            )}
+            {contextLoad && (
+              <button type="button" className="console-thread-icon" onClick={() => runCommand("/compact")} title="Сжать контекст этого чата (/compact): агент пересказывает разговор и дальше читает только его" aria-label="Сжать контекст чата"><Minimize2 size={14} /></button>
             )}
             <button
               ref={newChatButtonRef}
