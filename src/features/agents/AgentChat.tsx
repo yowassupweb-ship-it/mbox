@@ -229,13 +229,16 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
   const [history, setHistory] = usePersistentState<string[]>("mbox.chat.history", []);
   const [historyPos, setHistoryPos] = useState(-1);
   const [localLines, setLocalLines] = useState<LogLine[]>([]);
-  const [pending, setPending] = useState<Array<{ id: string; body: string; at: string; inboxId?: string; sent?: boolean; failed?: boolean; attachments?: Attachment[] }>>([]);
+  const [pending, setPending] = useState<Array<{ id: string; body: string; at: string; thread: string; inboxId?: string; sent?: boolean; failed?: boolean; attachments?: Attachment[] }>>([]);
   const [drafts, setDrafts] = useState<DraftAttachment[]>([]);
   const [dragFiles, setDragFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadingFiles = drafts.some((file) => !file.done && !file.error);
   const readyFiles = drafts.filter((file) => file.done);
   const [awaitingJarvisId, setAwaitingJarvisId] = useState<string | null>(null);
+  // Чат, в котором отправлено ожидаемое сообщение: статус и неотправленные строки показываем только в нём, иначе при
+  // переключении чатов «думает…» из соседнего чата висит в новом (баг #3329, 1 чат = 1 сессия).
+  const [awaitingThread, setAwaitingThread] = useState("");
   const [awaitingJarvisSince, setAwaitingJarvisSince] = useState<number | null>(null);
   const [awaitingJarvisPhase, setAwaitingJarvisPhase] = useState<string | null>(null);
   const [awaitingJarvisVerb, setAwaitingJarvisVerb] = useState("думает");
@@ -468,7 +471,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   const arrived = useMemo(() => new Set(conversation.map((item) => (item.body || item.title).trim())), [conversation]);
   const arrivedIds = useMemo(() => new Set(conversation.map((item) => String(item.id))), [conversation]);
-  const stillPending = pending.filter((item) => item.failed || !(item.inboxId ? arrivedIds.has(item.inboxId) : arrived.has(item.body.trim())));
+  const stillPending = pending.filter((item) => item.thread === thread).filter((item) => item.failed || !(item.inboxId ? arrivedIds.has(item.inboxId) : arrived.has(item.body.trim())));
 
   // "Ответ приходит резко" — раньше не было вообще никакого признака, что Джарвис работает над
   // ответом (в отличие от "печатает" у сессионных агентов ниже, у него нет agent_runs). Плашка
@@ -640,8 +643,8 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
 
   useEffect(() => {
     if (!pending.length) return;
-    setPending((current) => current.filter((item) => item.failed || !(item.inboxId ? arrivedIds.has(item.inboxId) : arrived.has(item.body.trim()))));
-  }, [arrived, arrivedIds, pending.length]);
+    setPending((current) => current.filter((item) => item.thread !== thread || item.failed || !(item.inboxId ? arrivedIds.has(item.inboxId) : arrived.has(item.body.trim()))));
+  }, [arrived, arrivedIds, pending.length, thread]);
 
   // Единый лог: реальная переписка + оптимистичные отправки + локальные команды, всё по времени.
   const lines = useMemo<LogLine[]>(() => {
@@ -833,11 +836,12 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
     const mentionTarget = parseMention(raw) || chatTarget || (replying && replying.actor !== HUMAN ? replying.actor : "") || defaultResponder;
     const localId = `local-${Date.now()}`;
     const localAt = new Date().toISOString();
-    setPending((current) => [...current, { id: localId, body, at: localAt, sent: false, attachments: files.length ? files : undefined }]);
+    setPending((current) => [...current, { id: localId, body, at: localAt, thread, sent: false, attachments: files.length ? files : undefined }]);
     // Строка статуса появляется в ту же секунду, что и сообщение: id у него ещё нет, поэтому пока временный.
     const optimisticId = `${PENDING_ID}${localId}`;
     setAwaitingAgent(mentionTarget || defaultResponder);
     setAwaitingJarvisId(optimisticId);
+    setAwaitingThread(thread);
     setAwaitingJarvisSince(Date.now());
     setAwaitingJarvisVerb("думает");
 
@@ -1259,7 +1263,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
             })}
             {/* Цепочка растёт на глазах: шаги приезжают по сокету, пока агент работает, и стоят
                 там же, где потом встанет готовая — над ответом. */}
-            {awaitingJarvisId && !awaitingDead && (
+            {awaitingJarvisId && awaitingThread === thread && !awaitingDead && (
               <ChainLine
                 steps={liveSteps}
                 state="live"
@@ -1271,7 +1275,7 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                 )}
               />
             )}
-            {awaitingJarvisId && awaitingDead && (
+            {awaitingJarvisId && awaitingThread === thread && awaitingDead && (
               <div className="console-log-line sys typing">
                 <span className="console-log-time" />
                 <span className="console-thinking-row is-dead">
