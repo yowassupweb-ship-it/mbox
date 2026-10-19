@@ -270,6 +270,11 @@ export async function saveIntegration(query, id, input = {}, ctx = { owner: true
     return;
   }
   if (!SERVICE_ID.test(id)) throw new Error("Код сервиса: латиница, цифры, - и _, 2–40 знаков, с буквы");
+  // Символ замены U+FFFD — следствие записи не в UTF-8 (curl/PowerShell из консоли Windows): исходный текст уже потерян,
+  // и молча сохранить такую запись значило бы отдавать агентам кракозябры в integration_list.
+  for (const text of [input.label, input.notes]) {
+    if (typeof text === "string" && text.includes("\uFFFD")) throw new Error("Текст пришёл в битой кодировке (символы замены U+FFFD): отправьте название и описание в UTF-8");
+  }
   const existing = await customRow(query, id, ctx);
   if (!existing && (await query("SELECT 1 FROM integrations WHERE service = $1", [id])).rows[0]) throw new Error("Этот код сервиса уже занят — выберите другой");
   const label = String(input.label || existing?.label || id).trim().slice(0, 80);
