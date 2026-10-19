@@ -2800,7 +2800,7 @@ async function handleApiWithContext(req, res, url) {
   if (url.pathname === "/api/mbox/history" || url.pathname === "/api/mbox/history/days") {
     // История — только своя: события этого аккаунта и его агентов (server/audit-scope.mjs), без чужих сообщений и действий.
     // Страницами и по дням — server/history.mjs.
-    const others = (await query("SELECT username FROM users WHERE id <> $1 AND username <> ", [user.id])).rows.map((row) => row.username);
+    const others = (await query("SELECT username FROM users WHERE id <> $1", [user.id])).rows.map((row) => row.username);
     await handleHistoryApi({ url, query, sendJson, res, scope: (first) => ({ sql: auditVisibility("e", first), params: [String(user.id), isOwner(user), String(user.username || ""), others] }) });
     return;
   }
