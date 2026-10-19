@@ -36,3 +36,25 @@ test("картинки из папки генерации Codex: берутся 
   assert.deepEqual(found, ["ig_fresh.png"]);
   assert.deepEqual(turnImages(turn, "", since, [path.join(root, "нет-такой")]), []);
 });
+
+import { leanFlags, warmKey } from "./chat-threads.mjs";
+
+test("строгий MCP: у облачного включён по умолчанию, у локального нет, env перебивает", () => {
+  assert.deepEqual(leanFlags({ cloud: true, mcpConfig: true, env: {} }), ["--strict-mcp-config"]);
+  assert.deepEqual(leanFlags({ cloud: false, mcpConfig: true, env: {} }), []);
+  assert.deepEqual(leanFlags({ cloud: false, mcpConfig: true, env: { MBOX_WATCH_STRICT_MCP: "1" } }), ["--strict-mcp-config"]);
+  assert.deepEqual(leanFlags({ cloud: true, mcpConfig: true, env: { MBOX_WATCH_STRICT_MCP: "0" } }), []);
+  assert.deepEqual(leanFlags({ cloud: true, mcpConfig: false, env: {} }), []);
+});
+
+test("навыки отключаются только явно", () => {
+  assert.deepEqual(leanFlags({ env: {} }), []);
+  assert.deepEqual(leanFlags({ env: { MBOX_WATCH_SKILLS: "off" } }), ["--disable-slash-commands"]);
+});
+
+test("ключ тёплого процесса не зависит от --resume, но зависит от модели", () => {
+  const first = ["-p", "--model", "sonnet", "--effort", "medium"];
+  const second = ["-p", "--resume", "abc-123", "--model", "sonnet", "--effort", "medium"];
+  assert.equal(warmKey(first), warmKey(second));
+  assert.notEqual(warmKey(first), warmKey(["-p", "--model", "opus", "--effort", "medium"]));
+});

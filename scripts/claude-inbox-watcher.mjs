@@ -9,7 +9,7 @@ import { createInboxWake } from "./inbox-wake.mjs";
 import { claudeCliModels, publishModelCatalog } from "./model-catalog.mjs";
 import { claudeWindowsFromEvent, postUsage } from "./usage-report.mjs";
 import { enrichFocus } from "./focus-excerpt.mjs";
-import { chatRules, clipError, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, ROTATE_CONTEXT_TOKENS, COMPACT_CONTEXT_TOKENS, chatToolsArg, sameThread, threadOf } from "./chat-threads.mjs";
+import { chatRules, clipError, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, ROTATE_CONTEXT_TOKENS, COMPACT_CONTEXT_TOKENS, chatToolsArg, leanFlags, warmKey, sameThread, threadOf } from "./chat-threads.mjs";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const LOCK_TOUCH_MS = 30_000;
@@ -839,12 +839,13 @@ async function runClaudeTurn(item, resumeId) {
   const tools = chatToolsArg();
   if (tools) args.push("--tools", tools);
   if (mcpConfigReady) args.push("--mcp-config", cliPath(mcpConfigPath));
+  args.push(...leanFlags({ cloud: agentKind === "cloud_agent", mcpConfig: mcpConfigReady }));
   if (rulesReady) args.push("--append-system-prompt-file", cliPath(rulesPath));
 
   timings.spawn(item.id);
   // Тёплый процесс: CLI грузит MCP и навыки секунды, и платить за это на каждое сообщение чата незачем.
   // Процесс живёт на чат, пока модель и усилие те же; следующее сообщение просто дописывается ему в stdin.
-  const warm = WARM_ENABLED ? { thread: threadOf(item), key: args.join("\u0000") } : null;
+  const warm = WARM_ENABLED ? { thread: threadOf(item), key: warmKey(args) } : null;
   const outcome = await spawnStreaming(claudeCommand, args, { cwd: workdir, env: process.env }, prompt, item.id, warm);
   if (outcome.stats) outcome.stats.resumed = Boolean(resumeId);
   return outcome;

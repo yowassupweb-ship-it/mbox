@@ -97,6 +97,34 @@ export function chatToolsArg(value = process.env.MBOX_WATCH_TOOLS) {
 }
 
 /**
+ * Лишние MCP-серверы пользователя и каталог навыков — основной вес контекста каждого хода (замер claude 2.1.291, «ответь: ок»:
+ * все флаги вместе — 8,6 тыс. входа против 23,6 тыс. с одним --tools). Строгий MCP (только mbox-prod из --mcp-config) включён
+ * по умолчанию у облачных агентов, у локального — выключен: там на машине могут быть нужные человеку серверы.
+ * MBOX_WATCH_STRICT_MCP=1|0 меняет умолчание. Навыки отключает MBOX_WATCH_SKILLS=off (теряются навыки в чате, зато минус ~10 тыс.).
+ */
+export function leanFlags({ cloud = false, mcpConfig = false, env = process.env } = {}) {
+  const flags = [];
+  const strict = String(env.MBOX_WATCH_STRICT_MCP ?? (cloud ? "1" : "0"));
+  if (mcpConfig && /^(1|true|on|yes)$/i.test(strict)) flags.push("--strict-mcp-config");
+  if (/^(off|0|false|no)$/i.test(String(env.MBOX_WATCH_SKILLS || ""))) flags.push("--disable-slash-commands");
+  return flags;
+}
+
+/**
+ * Ключ «тёплого» процесса чата. В него входит всё, что процесс нельзя менять на лету (модель, усилие, инструменты), но не
+ * --resume <id>: у первого хода чата флага нет, у второго он уже есть, и по старому ключу процесс убивался и поднимался заново
+ * на втором сообщении каждого чата.
+ */
+export function warmKey(args) {
+  const parts = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--resume") { index += 1; continue; }
+    parts.push(args[index]);
+  }
+  return parts.join(" ");
+}
+
+/**
  * Параллельные чаты. Раньше наблюдатель отвечал строго по одному: пока Claude 11 минут делал #1235,
  * сообщения из других чатов ждали, и человек видел «не дошло». Теперь у каждого чата своя очередь
  * (внутри чата — по порядку, сессия CLI одна), разные чаты идут одновременно, но не больше limit.
