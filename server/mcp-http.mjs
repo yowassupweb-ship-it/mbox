@@ -187,7 +187,7 @@ export async function handleMcpHttp({ req, res, url, authenticate, scriptPath, b
   const user = key ? await authenticate(key) : null;
   if (!user) {
     noteFailure(ip);
-    send(res, 401, { error: "invalid_key", hint: "Создайте ключ: Настройки → MCP" }, { ...cors, "www-authenticate": 'Bearer realm="MBOX MCP"' });
+    send(res, 401, { error: "invalid_key", hint: "Создайте ключ: Настройки → MCP. Клиентам без своих заголовков (Claude.ai, приложения ChatGPT) вставляйте адрес вместе с ключом: /mcp/<ключ>. OAuth-входа у MBOX нет." }, { ...cors, "www-authenticate": 'Bearer realm="MBOX MCP"' });
     return true;
   }
 

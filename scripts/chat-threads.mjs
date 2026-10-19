@@ -194,8 +194,24 @@ export function imageLine(dir) {
   return `To show the owner an image in this chat (generated, edited, a chart, a screenshot), save it as PNG/JPG/WebP/GIF into ${dir} — the watcher uploads every image from that folder to MBOX storage and shows it under your answer. Never paste base64 into the answer.`;
 }
 
+/** Свежие картинки (изменены с начала хода) в папке и её подпапках до двух уровней вглубь. */
+export function recentImageFiles(root, since, depth = 2) {
+  const files = [];
+  const walk = (dir, level) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (level < depth) walk(full, level + 1); continue; }
+      try { if (IMAGE_TYPES[path.extname(entry.name).toLowerCase()] && fs.statSync(full).mtimeMs >= since - 1000) files.push(full); } catch { /* исчез */ }
+    }
+  };
+  walk(root, 0);
+  return files;
+}
+
 /** Картинки хода: всё из папки хода плюс свежие файлы, путь к которым агент назвал в ответе. */
-export function turnImages(dir, text, since) {
+export function turnImages(dir, text, since, extraDirs = []) {
   const found = new Map();
   const add = (file) => {
     try {
@@ -205,6 +221,10 @@ export function turnImages(dir, text, since) {
     } catch { /* файла нет — агент ошибся путём */ }
   };
   try { for (const name of fs.readdirSync(dir)) add(path.join(dir, name)); } catch { /* папку удалили */ }
+  // Встроенная генерация картинок Codex сама кладёт файлы в свою папку и пути в ответе не называет: берём оттуда только свежее.
+  for (const root of extraDirs) {
+    for (const file of recentImageFiles(root, since)) add(file);
+  }
   const mentioned = String(text || "").match(/(?:[A-Za-z]:[\\/]|\/)[^\s"'`<>|*?()\[\]]+?\.(?:png|jpe?g|webp|gif)\b/gi) || [];
   for (const file of mentioned) {
     const before = found.size;
@@ -236,6 +256,11 @@ export async function uploadTurnImages({ images, projectId, inboxId, upload, log
 
 export function dropTurnImageDir(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* временная папка — не страшно */ }
+}
+
+/** Codex отказал по модели: её нет в подписке/аккаунте или она не поддерживается при входе через ChatGPT. Тогда ход повторяется без -m. */
+export function isModelRejected(error) {
+  return /model.{0,120}not supported|unsupported model|model_not_found|unknown model|model .{0,80}does not exist|not supported when using codex/i.test(String(error?.message || error || ""));
 }
 
 /** CLI не нашёл сессию (удалили файлы, сменилась папка) — тогда начинаем чат заново. */

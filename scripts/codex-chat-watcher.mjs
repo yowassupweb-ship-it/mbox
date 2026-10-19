@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createInboxWake } from "./inbox-wake.mjs";
 import { locateMcpServer } from "./mcp-locate.mjs";
 import { enrichFocus } from "./focus-excerpt.mjs";
-import { chatRules, clipError, codexContextUsage, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, laneOf, messageBlock, parallelLimit, RESUME_REMINDER, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
+import { chatRules, clipError, codexContextUsage, createPhaseBoard, dropTurnImageDir, imageLine, turnImageDir, turnImages, uploadTurnImages, createRunTimings, createSessionStore, describeTimings, historyBlock, isLostSession, isModelRejected, laneOf, messageBlock, parallelLimit, RESUME_REMINDER, ROTATE_CONTEXT_TOKENS, sameThread, threadOf } from "./chat-threads.mjs";
 import { codexCachedModels, publishModelCatalog } from "./model-catalog.mjs";
 import { latestCodexRateLimits, postUsage } from "./usage-report.mjs";
 
@@ -671,7 +671,7 @@ async function uploadStorage(key, buffer, type) {
 /** Картинки хода — в хранилище и ссылками в конец текста: карточки в чате строятся по props.attachments,
  *  а агенты в следующих ходах читают текст (тот же формат «Вложения:», что у сообщений человека). */
 async function attachTurnImages(item, dir, text, since) {
-  const images = turnImages(dir, text, since);
+  const images = turnImages(dir, text, since, [path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "generated_images")]);
   if (!images.length) return { attachments: [], body: text };
   const projectId = item.project_id || (await targetProject())?.id || "";
   const attachments = await uploadTurnImages({ images, projectId, inboxId: item.id, upload: uploadStorage, log: (message) => console.log(`${logPrefix} ${message}`) });
@@ -817,7 +817,21 @@ async function freshPrompt(item) {
   ].filter(Boolean).join("\n\n");
 }
 
+/** Выбранная в чате модель может не подходить аккаунту (gpt-6-astra при входе через ChatGPT): вместо ошибки на каждое сообщение повторяем без -m. */
 async function runCodexTurn(item, resumeId) {
+  try {
+    return await runCodexTurnOnce(item, resumeId, false);
+  } catch (error) {
+    const asked = pickModel(item.props?.model) || pickModel(codexModel);
+    if (!asked || !isModelRejected(error)) throw error;
+    console.log(`${logPrefix} модель ${asked} не принята аккаунтом — повторяю ход с моделью Codex по умолчанию`);
+    const outcome = await runCodexTurnOnce(item, resumeId, true);
+    outcome.stats = { ...(outcome.stats || {}), model_rejected: asked };
+    return outcome;
+  }
+}
+
+async function runCodexTurnOnce(item, resumeId, ignoreModel) {
   const outputFile = path.join(os.tmpdir(), `codex-mbox-chat-${item.id}-${Date.now()}.txt`);
   const prompt = resumeId
     ? [RESUME_REMINDER, messageBlock(await enrichFocus(item, mboxFetch)), item.imageDir ? imageLine(item.imageDir) : ""].filter(Boolean).join("\n\n")
@@ -827,7 +841,7 @@ async function runCodexTurn(item, resumeId) {
   const args = resumeId
     ? ["exec", "resume", "-c", 'sandbox_mode="danger-full-access"', "--skip-git-repo-check", "--json", "--output-last-message", outputFile]
     : ["exec", "-C", workdir, "--sandbox", "danger-full-access", "--skip-git-repo-check", "--json", "--output-last-message", outputFile];
-  const wantedModel = pickModel(item.props?.model) || pickModel(codexModel);
+  const wantedModel = ignoreModel ? "" : pickModel(item.props?.model) || pickModel(codexModel);
   const wantedEffort = pickEffort(item.props?.effort) || pickEffort(codexEffort);
   if (wantedModel) args.push("-m", wantedModel);
   if (wantedEffort) args.push("-c", `model_reasoning_effort="${wantedEffort}"`);
