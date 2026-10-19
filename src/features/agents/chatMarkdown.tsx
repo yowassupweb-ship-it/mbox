@@ -1,9 +1,11 @@
-import { type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
+import { parseMarkdownBlocks, type MarkdownBlock } from "./markdownBlocks.mjs";
 import { mboxTabOfUrl } from "../../lib/mboxLinks";
 import { serverOrigin } from "../../lib/serverOrigin";
 
 // Ссылки идут первыми: внутри URL бывают «_» и «*», которые иначе съел бы курсив.
-export const MARKDOWN_TOKEN = /(\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?»"'`]|\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\p{L}\p{N}_*])\*[^*\n]+\*(?![\p{L}\p{N}_*])|(?<![\p{L}\p{N}_])_[^_\n]+_(?![\p{L}\p{N}_]))/gu;
+export const MARKDOWN_TOKEN = /(\[[^\]\n]+\]\([^)\s]+\)|https?:\/\/[^\s<>()]*[^\s<>().,;:!?»"'`]|\*\*[^*\n]+\*\*|~~[^~\n]+~~|`[^`\n]+`|(?<![\p{L}\p{N}_*])\*[^*\n]+\*(?![\p{L}\p{N}_*])|(?<![\p{L}\p{N}_])_[^_\n]+_(?![\p{L}\p{N}_]))/gu;
 export const MARKDOWN_LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
 
 /** Локальный путь из markdown-ссылки, file:// URL или `инлайн-кода`. */
@@ -52,6 +54,7 @@ export function renderInlineMarkdown(content: string, keyPrefix: string): ReactN
     if (link) return <ChatLink key={key} href={link[2]}>{link[1]}</ChatLink>;
     if (/^https?:\/\//i.test(part)) return <ChatLink key={key} href={part}>{part}</ChatLink>;
     if (part.startsWith("**") && part.endsWith("**")) return <b key={key}>{part.slice(2, -2)}</b>;
+    if (part.startsWith("~~") && part.endsWith("~~")) return <s key={key}>{part.slice(2, -2)}</s>;
     if (part.startsWith("`") && part.endsWith("`")) {
       const code = part.slice(1, -1);
       return localPathOf(code) ? <ChatLink key={key} href={`path:${code}`}><code>{code}</code></ChatLink> : <code key={key}>{code}</code>;
@@ -62,64 +65,112 @@ export function renderInlineMarkdown(content: string, keyPrefix: string): ReactN
   });
 }
 
-/** `| a | b |` + разделитель `|---|---|` — Джарвис пересказывает даты туров именно так, и без
- * разбора это была нечитаемая простыня труб в моноширинном логе. Только через дефис/двоеточие,
- * без выравнивания колонок и вложенных markdown-таблиц — этого достаточно для реальных ответов. */
-export const TABLE_SEPARATOR_ROW = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/;
-
-export function splitTableRow(line: string): string[] {
-  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+/** Копирование в буфер: в окне без прав на clipboard API (iframe, старый webview) — через скрытое поле. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
 }
 
-/** Модель (например, Джарвис) иногда шлёт **bold**/`code`/*italic*, списки и markdown-таблицы —
- * раньше это лежало в логе буквальным текстом со звёздочками и трубами. Без внешней библиотеки:
- * разбор построчно, таблицы — отдельным блоком поверх обычных строк. */
-export function renderMarkdownLite(text: string): ReactNode {
-  const lines = text.split("\n");
-  const blocks: ReactNode[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    // Блок кода ```…``` — раньше разбирался как инлайн-код, и от ограды оставались одиночные кавычки.
-    if (lines[i].trim().startsWith("```")) {
-      const code: string[] = [];
-      i += 1;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) { code.push(lines[i]); i += 1; }
-      i += 1;
-      blocks.push(<pre key={`pre-${blocks.length}`} className="console-log-pre">{code.join("\n")}</pre>);
-      continue;
-    }
-    const isTableStart = lines[i].includes("|") && i + 1 < lines.length && TABLE_SEPARATOR_ROW.test(lines[i + 1]);
-    if (isTableStart) {
-      const header = splitTableRow(lines[i]);
-      i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
-        rows.push(splitTableRow(lines[i]));
-        i += 1;
-      }
-      blocks.push(
-        <table key={`table-${blocks.length}`} className="console-log-table">
-          <thead><tr>{header.map((cell, ci) => <th key={ci}>{renderInlineMarkdown(cell, `th-${ci}`)}</th>)}</tr></thead>
+/** Кнопка «копировать» с короткой отметкой «скопировано». */
+export function CopyButton({ text, className = "", label = "Копировать", children }: { text: string | (() => string); className?: string; label?: string; children?: ReactNode }) {
+  const [done, setDone] = useState(false);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+  return (
+    <button
+      type="button"
+      className={className}
+      title={done ? "Скопировано" : label}
+      aria-label={label}
+      onClick={() => {
+        void copyText(typeof text === "function" ? text() : text).then((ok) => {
+          if (!ok) return;
+          setDone(true);
+          if (timer.current) window.clearTimeout(timer.current);
+          timer.current = window.setTimeout(() => setDone(false), 1500);
+        });
+      }}
+    >
+      {done ? <Check size={12} /> : <Copy size={12} />}
+      {children && <span>{done ? "скопировано" : children}</span>}
+    </button>
+  );
+}
+
+function CodeBlock({ lang, text }: { lang: string; text: string }) {
+  return (
+    <div className="console-code">
+      <div className="console-code-head">
+        <span className="console-code-lang">{lang || "код"}</span>
+        <CopyButton text={text} className="console-code-copy" label="Копировать код">копировать</CopyButton>
+      </div>
+      <pre className="console-log-pre">{text}</pre>
+    </div>
+  );
+}
+
+function renderLines(lines: string[], keyPrefix: string): ReactNode[] {
+  return lines.flatMap((line, index) => [index > 0 ? <br key={`${keyPrefix}-br-${index}`} /> : null, ...renderInlineMarkdown(line, `${keyPrefix}-${index}`)]);
+}
+
+function renderBlock(block: MarkdownBlock, key: string): ReactNode {
+  switch (block.type) {
+    case "code":
+      return <CodeBlock key={key} lang={block.lang} text={block.text} />;
+    case "heading":
+      return <div key={key} className={`console-md-h h${Math.min(block.level, 4)}`} role="heading" aria-level={block.level}>{renderInlineMarkdown(block.text, key)}</div>;
+    case "rule":
+      return <hr key={key} className="console-md-rule" />;
+    case "quote":
+      return <blockquote key={key} className="console-md-quote">{block.blocks.map((inner, index) => renderBlock(inner, `${key}-q${index}`))}</blockquote>;
+    case "table":
+      return (
+        <table key={key} className="console-log-table">
+          <thead><tr>{block.header.map((cell, ci) => <th key={ci}>{renderInlineMarkdown(cell, `${key}-th-${ci}`)}</th>)}</tr></thead>
           <tbody>
-            {rows.map((row, ri) => (
-              <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{renderInlineMarkdown(cell, `td-${ri}-${ci}`)}</td>)}</tr>
+            {block.rows.map((row, ri) => (
+              <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{renderInlineMarkdown(cell, `${key}-td-${ri}-${ci}`)}</td>)}</tr>
             ))}
           </tbody>
-        </table>,
+        </table>
       );
-      continue;
+    case "list": {
+      // Плоский список с отступом по глубине: номера берём из текста ответа (1. 2. 3.), маркеры меняются по уровню.
+      const bullets = ["•", "◦", "▪", "▪"];
+      return (
+        <div key={key} className="console-md-list" role="list">
+          {block.items.map((item, index) => (
+            <div key={index} className="console-md-li" role="listitem" style={{ paddingLeft: `${item.depth * 16}px` }}>
+              <span className="console-md-bullet" aria-hidden="true">{item.ordered ? `${item.number}.` : bullets[item.depth]}</span>
+              <span className="console-md-li-text">{renderLines(item.text.split("\n"), `${key}-li${index}`)}</span>
+            </div>
+          ))}
+        </div>
+      );
     }
-    const line = lines[i];
-    const isListItem = /^\s*[-*]\s/.test(line);
-    const content = isListItem ? line.replace(/^\s*[-*]\s/, "") : line;
-    blocks.push(
-      <span key={`line-${blocks.length}`}>
-        {isListItem ? "• " : ""}
-        {renderInlineMarkdown(content, `line-${blocks.length}`)}
-        {i < lines.length - 1 && <br />}
-      </span>,
-    );
-    i += 1;
+    default:
+      return <p key={key} className="console-md-p">{renderLines(block.lines, key)}</p>;
   }
-  return blocks;
+}
+
+/** Markdown ответов агентов: заголовки, абзацы, списки (в т.ч. нумерованные и вложенные), цитаты, таблицы, код с копированием.
+ * Без внешней библиотеки: блоки разбирает markdownBlocks.mjs (с тестами), здесь только отрисовка. */
+export function renderMarkdownLite(text: string): ReactNode {
+  return parseMarkdownBlocks(text).map((block, index) => renderBlock(block, `md-${index}`));
 }

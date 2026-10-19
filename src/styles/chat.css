@@ -2081,3 +2081,34 @@
    С max-width: 100% таблицы, код и длинные ссылки выталкивали ответ за правый край телефона. */
 .console-log-line.in .console-bubble { max-width: min(calc(100% - 26px), 760px); }
 .console-log-line.in .console-bubble > * { max-width: 100%; }
+
+/* ─── Разметка ответов агента: заголовки, списки, цитаты, код с копированием ─── */
+.console-md-p { margin: 0; }
+.console-md-p + .console-md-p, .console-md-p + .console-md-list, .console-md-list + .console-md-p,
+.console-md-list + .console-md-h, .console-md-p + .console-md-h, .console-code + .console-md-p, .console-md-p + .console-code { margin-top: 8px; }
+.console-md-h { margin: 12px 0 4px; color: var(--text-main); font-weight: var(--weight-semibold); line-height: 1.3; }
+.console-md-h:first-child { margin-top: 0; }
+.console-md-h.h1 { font-size: var(--text-lg); }
+.console-md-h.h2 { font-size: var(--text-md); }
+.console-md-h.h3, .console-md-h.h4 { font-size: var(--text-md); }
+.console-md-rule { margin: 10px 0; border: 0; border-top: 1px solid var(--border-color); }
+.console-md-quote {
+  margin: 6px 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid color-mix(in srgb, var(--accent-color) 55%, transparent);
+  color: var(--text-2);
+}
+.console-md-list { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
+.console-md-li { display: flex; gap: 8px; align-items: baseline; }
+.console-md-bullet { flex: none; min-width: 1.1em; color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.console-md-li-text { min-width: 0; flex: 1; }
+.console-log-text s { color: var(--text-muted); }
+
+.console-code { margin: 6px 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-chrome); overflow: hidden; }
+.console-code-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 6px 3px 10px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: var(--text-xs); }
+.console-code-lang { font-family: var(--font-mono); }
+.console-code-copy { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); font: inherit; cursor: pointer; }
+.console-code-copy:hover, .console-code-copy:focus-visible { background: color-mix(in srgb, var(--text-main) 8%, transparent); color: var(--accent-color); }
+.console-code .console-log-pre { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.console-copy-btn + .console-reply-btn { margin-left: 0; }
+.console-copy-btn { gap: 4px; }

@@ -18,7 +18,7 @@ import { ChatHeadSlot } from "../../app/workbench/chatHeadSlot";
 import { createPortal } from "react-dom";
 import { showToast } from "../planner/ui/Toast";
 import { parseMention, HUMAN, READ_KEY, CONVERSATION, repliedId, snippet, threadOfItem, newThreadId, type ChatThread, type ContextLoad, contextLoadText, cloudPeerOf, catalogAgent, peerNames, threadMatchesPeer, belongsToPeer, agentState, humanizeAgentError, type JarvisCatalog, catalogNote } from "./chatModel";
-import { renderMarkdownLite } from "./chatMarkdown";
+import { CopyButton, renderMarkdownLite } from "./chatMarkdown";
 import { type ChainStep, EFFORT_LABEL, workSummary, chainSummary, ChainLine, formatWorkTokens, rateLimitText } from "./chatChain";
 import { ComposerPicker } from "./ComposerPicker";
 import { type LogLine, type ReplyTarget, type Attachment, type DraftAttachment } from "./chatTypes";
@@ -1228,6 +1228,9 @@ export function AgentChat({ inbox, agents, runs, projects, artifacts, projectId,
                         {line.kind === "cmd" ? "$" : line.kind === "sys" ? "mbox" : line.kind === "out" ? "Вы" : <AgentName name={line.actor} />}
                       </span>
                       <span className="console-log-time" title={new Date(line.at).toLocaleString("ru-RU")}>{time}</span>
+                      {(line.kind === "in" || line.kind === "out") && !!line.text.trim() && (
+                        <CopyButton className="console-reply-btn console-copy-btn" text={line.text} label="Копировать сообщение">копировать</CopyButton>
+                      )}
                       {line.inboxId && (
                         <button type="button" className="console-reply-btn" onClick={() => startReply(line)} title="Ответить на это сообщение">
                           <Reply size={12} /> ответить
