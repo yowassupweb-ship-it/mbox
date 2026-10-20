@@ -132,7 +132,7 @@ test("чат с Claude или GPT: вопрос уходит облачному 
     if (/count\(\*\) FILTER/.test(sql)) return { rows: [{ hour: 0, day: 0 }] };
     if (/AND NOT EXISTS/.test(sql)) return { rows: [] };
     if (/SELECT 1 FROM agent_inbox WHERE id = \$1/.test(sql)) { const q = inbox.find((r) => r.id === params[0] && String(r.props.share_id) === params[1] && `ash${r.props.share_id}-abcdefgh12` === params[2]); return { rows: q ? [{}] : [] }; }
-    if (/WHERE props->>'re' = \$1/.test(sql)) return { rows: inbox.filter((r) => r.answer && r.id === params[0]).map((r) => ({ body: r.answer, item_type: "answer" })) };
+    if (/props->>'in_reply_to' = \$1/.test(sql)) return { rows: inbox.filter((r) => r.answer && r.id === params[0]).map((r) => ({ body: r.answer, item_type: "answer" })) };
     throw new Error(`неожиданный запрос: ${sql.slice(0, 70)}`);
   };
   const call = async (method, path, body, share) => {
