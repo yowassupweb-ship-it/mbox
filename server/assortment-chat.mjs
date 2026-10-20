@@ -116,9 +116,9 @@ async function askCloud(query, { share, access, thread, text }) {
   return row.id;
 }
 
-/** Ответ облачного агента на вопрос, заданный именно этой ссылкой в этом чате: чужие записи очереди не читаются. */
+/** Ответ облачного агента на вопрос, заданный именно этой ссылкой в этом чате: чужие записи очереди не читаются. Метку source наблюдатель Codex перезаписывает, поэтому владение проверяется по share_id и thread. */
 async function cloudAnswer(query, { share, thread, ref }) {
-  const own = (await query("SELECT 1 FROM agent_inbox WHERE id = $1 AND props->>'source' = 'assortment-share' AND props->>'share_id' = $2 AND props->>'thread' = $3", [ref, String(share.id), `ash${share.id}-${thread}`])).rows[0];
+  const own = (await query("SELECT 1 FROM agent_inbox WHERE id = $1 AND props->>'share_id' = $2 AND props->>'thread' = $3", [ref, String(share.id), `ash${share.id}-${thread}`])).rows[0];
   if (!own) return { found: false, invalid: true };
   const answer = (await query(
     `SELECT body, item_type FROM agent_inbox WHERE (props->>'re' = $1 OR props->>'in_reply_to' = $1) AND item_type IN ('answer', 'agent_response', 'agent_error') AND agent_name <> 'Человек' ORDER BY id DESC LIMIT 1`, [ref])).rows[0];
@@ -170,7 +170,7 @@ export async function handleAssortmentChat({ req, res, url, query, readBody, sen
   if (counts.hour >= HOUR_LIMIT || counts.day >= DAY_LIMIT) return reply(429, { error: "chat_rate_limited", message: "Слишком много вопросов, попробуйте позже" });
   if (cloud) {
     const pending = (await query(
-      `SELECT 1 FROM agent_inbox q WHERE q.props->>'source' = 'assortment-share' AND q.props->>'share_id' = $1 AND q.props->>'thread' = $2 AND q.created_at > now() - interval '10 minutes'
+      `SELECT 1 FROM agent_inbox q WHERE q.props->>'share_id' = $1 AND q.props->>'thread' = $2 AND q.created_at > now() - interval '10 minutes'
          AND NOT EXISTS (SELECT 1 FROM agent_inbox a WHERE (a.props->>'re' = q.id::text OR a.props->>'in_reply_to' = q.id::text) AND a.item_type IN ('answer', 'agent_response', 'agent_error')) LIMIT 1`,
       [String(share.id), `ash${share.id}-${thread}`])).rows[0];
     if (pending) return reply(409, { error: "chat_busy", message: "Агент ещё отвечает на прошлый вопрос" });
