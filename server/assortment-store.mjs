@@ -10,6 +10,8 @@ import { runLearning, shouldLearn, describeResult } from "./assortment-learn.mjs
 export const DEFAULT_CONFIG = JSON.parse(readFileSync(new URL("./assortment-config.json", import.meta.url), "utf8"));
 const LEARNINGS_SEED = readFileSync(new URL("./assortment-learnings-seed.md", import.meta.url), "utf8");
 const TEMPLATE = readFileSync(new URL("./assortment-report.html", import.meta.url), "utf8");
+// Решения владельца, принятые до переноса в MBOX (правила «вне анализа» и первые оценки): кладутся один раз при первом запуске.
+const SEED = JSON.parse(readFileSync(new URL("./assortment-seed.json", import.meta.url), "utf8"));
 
 const USER_AGENT = "mbox-assortment/1.0";
 const HISTORY_DAYS = 60;
@@ -40,6 +42,20 @@ export async function ensureAssortmentSchema(query) {
   )`);
   await query("CREATE TABLE IF NOT EXISTS assortment_sales (tour_id BIGINT PRIMARY KEY, sold INT NOT NULL)");
   await query("CREATE TABLE IF NOT EXISTS assortment_state (key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+  await seedDefaults(query);
+}
+
+/** Один раз: правила «вне анализа» и оценки, которые владелец дал до переноса. Повторный запуск ничего не меняет и чужое не перезаписывает. */
+export async function seedDefaults(query, seed = SEED) {
+  const claimed = await query("INSERT INTO assortment_state(key, value) VALUES ('seeded', $1) ON CONFLICT (key) DO NOTHING RETURNING key", [JSON.stringify({ at: new Date().toISOString() })]);
+  if (!claimed.rows.length) return false;
+  for (const rule of seed.exclusions) {
+    await query("INSERT INTO assortment_exclusions(id, title, reason, rule_match) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING", [rule.id, rule.title, rule.reason || "", JSON.stringify(rule.match)]);
+  }
+  for (const [key, item] of Object.entries(seed.feedback)) {
+    await query("INSERT INTO assortment_feedback(key, label, note, rated_by) VALUES ($1, $2, $3, 'перенос из Python-версии') ON CONFLICT (key) DO NOTHING", [key, item.label, item.note || ""]);
+  }
+  return true;
 }
 
 // ---------- каталог vs-travel.ru ----------
@@ -191,7 +207,7 @@ export async function getReportData(query, an) {
 export async function renderReport(query, an, runtime = {}) {
   const data = await getReportData(query, an);
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
-  const boot = JSON.stringify({ readOnly: !!runtime.readOnly, feedbackUrl: runtime.feedbackUrl || "", canRate: !runtime.readOnly, badge: runtime.badge || "" }).replace(/</g, "\\u003c");
+  const boot = JSON.stringify({ readOnly: !!runtime.readOnly, feedbackUrl: runtime.feedbackUrl || "", canRate: !runtime.readOnly, badge: runtime.badge || "", viaParent: !!runtime.viaParent }).replace(/</g, "\\u003c");
   return TEMPLATE.replace("/*BOOT*/null", boot).replace("/*DATA*/null", () => json);
 }
 

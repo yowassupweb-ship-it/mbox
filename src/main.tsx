@@ -663,6 +663,10 @@ const sharedTableToken = window.location.pathname.match(/^\/t\/([A-Za-z0-9_-]{24
 const SharedSeoPage = lazy(() => import("./pages/SharedSeoPage").then((module) => ({ default: module.SharedSeoPage })));
 const sharedSeoToken = window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 const sharedSeoLogin = /^\/seo-access\/?$/.test(window.location.pathname);
+// Ассортимент по ссылке (/a/<токен>) и по логину с паролем (/assortment-access): без входа в MBOX, только ассортимент.
+const SharedAssortmentPage = lazy(() => import("./pages/SharedAssortmentPage").then((module) => ({ default: module.SharedAssortmentPage })));
+const sharedAssortmentToken = window.location.pathname.match(/^\/a\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
+const sharedAssortmentLogin = /^\/assortment-access\/?$/.test(window.location.pathname);
 const SharedDocumentPage = lazy(() => import("./pages/SharedDocumentPage").then((module) => ({ default: module.SharedDocumentPage })));
 const sharedDocumentToken = window.location.pathname.match(/^\/d\/([A-Za-z0-9_-]{24,64})\/?$/)?.[1];
 // Окно заметки на рабочем столе (MBOX Desktop, ?sticky=<id> или ?sticky=list): только заметка, без всего приложения.
@@ -694,6 +698,10 @@ createRoot(document.getElementById("root")!).render(
     ) : sharedSeoToken || sharedSeoLogin ? (
       <Suspense fallback={null}>
         <SharedSeoPage token={sharedSeoToken ?? null} />
+      </Suspense>
+    ) : sharedAssortmentToken || sharedAssortmentLogin ? (
+      <Suspense fallback={null}>
+        <SharedAssortmentPage token={sharedAssortmentToken ?? null} />
       </Suspense>
     ) : sharedDocumentToken ? (
       <Suspense fallback={null}>

@@ -4,6 +4,8 @@ import { z } from "zod";
 import { pickWorkspace } from "./workspace-resolve.mjs";
 import { applyFragmentEdit } from "./fragment-edit.mjs";
 import { formatSearch, SEARCH_KINDS } from "./search-format.mjs";
+// Описания инструментов ассортимента лежат в server/: если копия скриптов осталась без папки server, остальные инструменты работают как раньше.
+const { ASSORTMENT_TOOLS } = await import("../server/assortment-tool-defs.mjs").catch(() => ({ ASSORTMENT_TOOLS: [] }));
 
 const baseUrl = process.env.MBOX_URL;
 const username = process.env.MBOX_USERNAME || "";
@@ -462,6 +464,31 @@ server.registerTool(
     return withPush({ content: [{ type: "text", text: JSON.stringify(data.change, null, 2) }] });
   },
 );
+
+// Ассортимент (анализ каталога vs-travel.ru): инструменты описаны в server/assortment-tool-defs.mjs, исполняет сервер.
+// Агент видит те же ответы, что владелец на экране «Ассортимент»; оценки и правила записываются в базу и в журнал выученного.
+function assortmentZod(schema) {
+  const base = schema.enum ? z.enum(schema.enum)
+    : schema.type === "integer" ? z.number().int().min(schema.minimum ?? -1e9).max(schema.maximum ?? 1e9)
+    : schema.type === "boolean" ? z.boolean()
+    : schema.type === "array" ? z.array(assortmentZod(schema.items || { type: "string" }))
+    : z.string();
+  return schema.description ? base.describe(schema.description) : base;
+}
+const ASSORTMENT_MAX_CHARS = 60000;
+for (const tool of ASSORTMENT_TOOLS) {
+  const required = new Set(tool.inputSchema.required || []);
+  const shape = Object.fromEntries(Object.entries(tool.inputSchema.properties || {}).map(([key, schema]) => [key, required.has(key) ? assortmentZod(schema) : assortmentZod(schema).optional()]));
+  server.registerTool(
+    tool.name,
+    { title: tool.name, description: tool.description, inputSchema: shape },
+    async (args) => {
+      const data = await mboxFetch("/api/mbox/assortment/tool", { method: "POST", body: JSON.stringify({ name: tool.name, args }) });
+      const text = JSON.stringify(data.result);
+      return withPush({ content: [{ type: "text", text: text.length > ASSORTMENT_MAX_CHARS ? `${text.slice(0, ASSORTMENT_MAX_CHARS)}… [ответ обрезан: уточните limit, offset, direction или segment]` : text }] });
+    },
+  );
+}
 
 server.registerTool(
   "create_project_relation",

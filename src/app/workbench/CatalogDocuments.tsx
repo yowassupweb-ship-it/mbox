@@ -8,6 +8,7 @@ import { formatLastUsed, formatTokens, isSeoWizardTool, useSkillsCatalog, useToo
 import { ToolIcon } from "./CatalogViews";
 import { fetchJson } from "../../lib/api";
 import { SeoBoard } from "../../pages/Seo";
+import { AssortmentBoard } from "../../pages/Assortment";
 import { Crumbs, reveal } from "./Crumbs";
 
 function useCopy() {
@@ -141,6 +142,7 @@ export function ToolDocument({ toolId, tabs }: { toolId: string; tabs: TabsApi }
 
 function ToolPage({ tool, tabs }: { tool: LocalTool; tabs: TabsApi }) {
   if (isSeoWizardTool(tool)) return <SeoBoard toolId={tool.id} />;
+  if (tool.id === "assortment") return <AssortmentBoard />;
 
   const { copied, copy } = useCopy();
   const [run, setRun] = useState<RunState>(EMPTY_RUN);

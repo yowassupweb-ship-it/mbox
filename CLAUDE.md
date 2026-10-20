@@ -138,6 +138,10 @@ MCP-сервер `mbox-prod` подключён на уровне пользов
 
 Навыки Claude и Codex (`SKILL.md`, правила, шаблоны, скрипты) хранятся в `skills/` и выкатываются вместе с сервером — см. [skills/README.md](skills/README.md). Установленные копии в `~/.claude/skills` и `~/.codex/skills` ставит и перезаписывает `scripts/sync-skills.mjs` (наблюдатель Claude — сам, при старте и раз в час); правки — только в `skills/`, потом деплой. Каталог для страницы «Навыки» — `server/skill-catalog.mjs` (`pages` — вкладки навыка, первая — «Запустить»). Агенты правят файлы навыков на лету (MCP `edit_skill_file`, база `skill_file_versions`, `server/skill-overrides.mjs`; в репозиторий — `npm run mbox:skills-pull`) и открывают вкладки в интерфейсе владельца (MCP `open_tab` → `POST /api/mbox/ui/open` → вебсокет только окнам этого пользователя, `server/ui-open.mjs`, `src/app/workbench/agentTabs.ts`).
 
+## Ассортимент
+
+Анализ каталога vs-travel.ru (конфликты «свой против партнёрского», перебор по направлениям, что нового со вчера), доступ по ссылке и паролю с выбором «только инструмент / инструмент + чат», MCP-инструменты `assortment_*` и навык `skills/assortment`. Движок — Node-порт Python-анализатора со сходимостью до знака (`server/assortment-engine.test.mjs`), состояние в таблицах `assortment_*`. Устройство, лимиты, решения владельца и проверка — [docs/assortment.md](docs/assortment.md). Правка ручек — в `server/assortment-api.mjs` (общий код прода и dev).
+
 ## Деплой
 
 `docker-compose.production.yml`: `app` (Dockerfile.mbox, node 22, `npm start`) + `caddy` (TLS на

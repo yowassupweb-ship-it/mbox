@@ -1,0 +1,42 @@
+/* Ассортимент: полоса состояния, рамка с отчётом и чат с агентом. */
+.assortment { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-color); color: var(--text-main); }
+.shared-assortment { height: 100dvh; }
+.shared-assortment > .assortment { flex: 1; min-height: 0; }
+.assortment-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: 40px; padding: 4px var(--space-4); border-bottom: var(--border-width) solid var(--border-color); }
+.assortment-meta { color: var(--text-muted); font-size: var(--text-xs); }
+.assortment-space { flex: 1; }
+.assortment-bar button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.assortment-bar button:hover:not(:disabled) { background: var(--surface-hover); }
+.assortment-bar button:disabled { opacity: .68; cursor: default; }
+.assortment-bar button[aria-pressed="true"] { border-color: var(--accent-fill); }
+.assortment-bar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.assortment-bar .is-spinning { animation: assortment-spin 1s linear infinite; }
+@keyframes assortment-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .assortment-bar .is-spinning { animation: none; } }
+.assortment-error { margin: 0; padding: var(--space-2) var(--space-4); color: var(--state-danger); font-size: var(--text-sm); }
+.assortment-body { flex: 1; min-height: 0; display: flex; }
+.assortment-frame { flex: 1; min-width: 0; position: relative; }
+.assortment-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }
+.assortment-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+
+.assortment-chat { width: min(380px, 42%); display: flex; flex-direction: column; min-height: 0; border-left: var(--border-width) solid var(--border-color); background: var(--element-bg); }
+.assortment-chat header { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-color); }
+.assortment-chat header button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
+.assortment-chat header button:hover { background: var(--surface-hover); color: var(--text-main); }
+.assortment-chat-log { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: var(--space-2); padding: var(--space-3); }
+.assortment-chat-hint { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+.assortment-msg { display: grid; gap: 4px; max-width: 92%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.5; }
+.assortment-msg p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assortment-msg small { color: var(--text-muted); font-size: var(--text-xs); }
+.assortment-msg.is-user { justify-self: end; background: var(--accent-fill); color: #fff; }
+.assortment-msg.is-assistant { justify-self: start; background: var(--bg-color); border: var(--border-width) solid var(--border-color); }
+.assortment-chat form { display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3); border-top: var(--border-width) solid var(--border-color); }
+.assortment-chat textarea { flex: 1; resize: none; padding: var(--space-2); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.assortment-chat textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.assortment-chat form button { align-self: end; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 0; border-radius: var(--radius-sm); background: var(--accent-fill); color: #fff; cursor: pointer; }
+.assortment-chat form button:disabled { opacity: .5; cursor: default; }
+.assortment-chat form button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (max-width: 760px) {
+  .assortment.has-chat .assortment-body { flex-direction: column; }
+  .assortment-chat { width: 100%; height: 50%; border-left: 0; border-top: var(--border-width) solid var(--border-color); }
+}

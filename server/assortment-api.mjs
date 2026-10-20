@@ -45,7 +45,9 @@ export async function handleAssortmentApi({ req, res, url, query, readBody, send
         res.end(waitingPage("Загружаю каталог vs-travel.ru и считаю анализ. Страница обновится сама, обычно это занимает до минуты."));
         return true;
       }
-      const html = await renderReport(query, an, runtime || { readOnly: false, feedbackUrl: "/api/mbox/assortment/feedback", badge: "" });
+      // embed=1: страница во встроенной рамке без доступа к cookie, оценки за неё отправляет окно-хозяин (postMessage)
+      const page = { ...(runtime || { readOnly: false, feedbackUrl: "/api/mbox/assortment/feedback", badge: "" }), viaParent: url.searchParams.get("embed") === "1" };
+      const html = await renderReport(query, an, page);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
       res.end(html);
       return true;

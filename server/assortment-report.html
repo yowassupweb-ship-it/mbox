@@ -285,6 +285,7 @@ tr.pair.hot td:first-child{box-shadow:inset 4px 0 0 var(--alarm)}
 <script>
 "use strict";
 const BOOT = /*BOOT*/null || {};
+window.addEventListener("error", e => { try { parent.postMessage({source: "assortment-report", type: "error", message: String(e.message || "ошибка"), line: e.lineno || 0}, "*"); } catch (_) {} });
 const D = /*DATA*/null;
 const T = D.tours, M = D.meta, SUM = D.summary;
 const SNAP_Y = M.snapshot_at.slice(0, 4);
@@ -384,7 +385,11 @@ const empty = text => `<div class="empty">${text}</div>`;
 
 /* ---------- оценки находок ---------- */
 const FB = Object.fromEntries(Object.entries(D.feedback || {}));
-const served = location.protocol.startsWith("http");
+const served = !!BOOT.viaParent || location.protocol.startsWith("http");
+// Страница во встроенной рамке без доступа к cookie и серверу: оценки и перезагрузку выполняет окно-хозяин (postMessage).
+const hostWaiting = new Map(); let hostSeq = 0;
+window.addEventListener("message", e => { const m = e.data; if (!m || m.source !== "assortment-host") return; const done = hostWaiting.get(m.id); if (done) { hostWaiting.delete(m.id); done(!!m.ok); } });
+const hostCall = (type, payload) => new Promise(resolve => { const id = ++hostSeq; hostWaiting.set(id, resolve); parent.postMessage({source: "assortment-report", id, type, ...payload}, "*"); setTimeout(() => { if (hostWaiting.delete(id)) resolve(false); }, 15000); });
 if (!served) { try { Object.assign(FB, JSON.parse(localStorage.getItem("vsa-fb") || "{}")); } catch (_) {} }
 let fbDirty = 0, fbError = "";
 const fbl = k => (FB[k] && FB[k].l) || null;
@@ -421,9 +426,12 @@ async function saveFb(key, val, note) {
   fbDirty++; fbError = "";
   if (served) {
     try {
-      const r = await fetch(BOOT.feedbackUrl || "/api/feedback", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({key, label: val, note: val ? FB[key].n : ""})});
-      if (!r.ok) throw new Error(r.status);
+      if (BOOT.viaParent) { if (!(await hostCall("feedback", {key, label: val, note: val ? FB[key].n : ""}))) throw new Error("host"); }
+      else {
+        const r = await fetch(BOOT.feedbackUrl || "/api/feedback", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({key, label: val, note: val ? FB[key].n : ""})});
+        if (!r.ok) throw new Error(r.status);
+      }
     } catch (e) { fbError = "Не удалось сохранить оценку на сервере. Обновите страницу и попробуйте ещё раз."; }
   } else { try { localStorage.setItem("vsa-fb", JSON.stringify(FB)); } catch (_) {} }
   render();
@@ -768,7 +776,7 @@ document.addEventListener("click", e => {
     if (k && FB[k]) saveFb(k, FB[k].l, note); else render();
     return;
   }
-  if (e.target.closest("[data-reload]")) { location.reload(); return; }
+  if (e.target.closest("[data-reload]")) { if (BOOT.viaParent) { void hostCall("reload", {}); return; } location.reload(); return; }
   if (e.target.closest("[data-fbexport]")) { exportFb(); return; }
   const fbU = e.target.closest("[data-fbundo]"); if (fbU) { saveFb(fbU.dataset.fbundo, null); return; }
   const g = e.target.closest("[data-go]"); if (g) { go({tab: g.dataset.go, tour: null}); window.scrollTo(0, 0); return; }

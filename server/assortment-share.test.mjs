@@ -41,8 +41,8 @@ test("уровни инструментов: просмотр не пишет, �
   assert.equal(accessOf(manage), "manage");
   const levels = Object.fromEntries(ASSORTMENT_TOOLS.map((t) => [t.name, t.level]));
   for (const name of ["assortment_summary", "assortment_insights", "assortment_conflicts", "assortment_learnings"]) assert.equal(levels[name], "read");
-  for (const name of ["assortment_rate", "assortment_exclude", "assortment_include", "assortment_learn_now", "assortment_refresh", "assortment_record_learning"]) assert.equal(levels[name], "manage");
-  for (const name of ["assortment_reset_learned", "assortment_import_sales"]) assert.equal(levels[name], "owner");
+  for (const name of ["assortment_rate", "assortment_exclude", "assortment_include", "assortment_learn_now", "assortment_record_learning"]) assert.equal(levels[name], "manage");
+  for (const name of ["assortment_reset_learned", "assortment_import_sales", "assortment_refresh"]) assert.equal(levels[name], "owner");
   assert.equal(canUseTool("read", "assortment_rate"), false);
   assert.equal(canUseTool("manage", "assortment_rate"), true);
   assert.equal(canUseTool("manage", "assortment_import_sales"), false);
@@ -92,4 +92,30 @@ test("планировщик: ночью не обновляет, при сни�
   const now = new Date("2026-10-20T08:00:00Z");
   assert.deepEqual(await runDailyTick(without, { now, lastAttempt: now.getTime() - 60_000, log() {} }), { attempted: false }, "повтор не чаще раза в 30 минут");
   assert.equal(today, "2026-10-20");
+});
+
+test("чат: агент получает только инструменты своего уровня, ошибка инструмента возвращается модели, ответ сохраняется", async () => {
+  const { chatTurn } = await import("./assortment-chat.mjs");
+  const saved = [];
+  const query = async (sql, params = []) => {
+    if (/FROM \(SELECT id, role, content FROM assortment_chat_messages/.test(sql)) return { rows: [] };
+    if (/FROM assortment_state/.test(sql)) return { rows: [] };
+    if (/INSERT INTO assortment_chat_messages/.test(sql)) { saved.push([params[2], params[3]]); return { rows: [] }; }
+    throw new Error(`неожиданный запрос: ${sql.slice(0, 60)}`);
+  };
+  const seen = [];
+  const completer = async (messages, tools) => {
+    seen.push({ names: tools.map((t) => t.function.name), last: messages[messages.length - 1] });
+    if (seen.length === 1) return { content: "", tool_calls: [{ id: "c1", function: { name: "assortment_rate", arguments: JSON.stringify({ key: "c:1-2", label: "no" }) } }] };
+    return { content: "Оценку поставить не могу: у вас режим просмотра." };
+  };
+  const result = await chatTurn(query, { share: { id: "7", label: "тест" }, access: "read", thread: "abcdefgh12", text: "поставь оценку", completer });
+  assert.equal(result.reply, "Оценку поставить не могу: у вас режим просмотра.");
+  assert.deepEqual(result.tools, ["assortment_rate"]);
+  assert.ok(seen[0].names.includes("assortment_summary") && !seen[0].names.some((n) => ["assortment_rate", "assortment_exclude", "assortment_refresh", "assortment_import_sales", "assortment_reset_learned"].includes(n)), "в режиме просмотра инструментов записи нет");
+  assert.match(seen[1].last.content, /Ошибка: .*просмотр/, "ошибка уровня доступа вернулась модели, а не выполнилась запись");
+  assert.deepEqual(saved.map((x) => x[0]), ["поставь оценку", "Оценку поставить не могу: у вас режим просмотра."]);
+  const manage = [];
+  await chatTurn(query, { share: { id: "7", label: "тест" }, access: "manage", thread: "abcdefgh12", text: "привет", completer: async (m, tools) => { manage.push(tools.map((t) => t.function.name)); return { content: "ок" }; } });
+  assert.ok(manage[0].includes("assortment_rate") && manage[0].includes("assortment_exclude") && !manage[0].includes("assortment_refresh") && !manage[0].includes("assortment_import_sales"), "при управлении запись есть, владельческого нет");
 });

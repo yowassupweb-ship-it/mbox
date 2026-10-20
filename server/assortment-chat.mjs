@@ -13,7 +13,7 @@ const MAX_STEPS = 8;
 const MAX_RESULT_CHARS = 6500;
 const busy = new Set();
 
-const chatTools = (access) => ASSORTMENT_TOOLS.filter((t) => canUseTool(access, t.name) && !["assortment_import_sales", "assortment_reset_learned"].includes(t.name))
+const chatTools = (access) => ASSORTMENT_TOOLS.filter((t) => canUseTool(access, t.name) && !["assortment_import_sales", "assortment_reset_learned", "assortment_refresh"].includes(t.name))
   .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
 
 export function chatAvailable(env = process.env) {
@@ -49,7 +49,7 @@ async function complete(messages, tools, signal) {
 const clip = (text) => (text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}… [ответ обрезан, уточните запрос: limit, direction, segment]` : text);
 
 /** Один ход чата: вопрос человека → цикл «модель — инструменты» → ответ. */
-export async function chatTurn(query, { share, access, thread, text, signal }) {
+export async function chatTurn(query, { share, access, thread, text, signal, completer = complete }) {
   const history = (await query(
     "SELECT role, content FROM (SELECT id, role, content FROM assortment_chat_messages WHERE share_id = $1 AND thread = $2 ORDER BY id DESC LIMIT $3) h ORDER BY id",
     [share.id, thread, HISTORY],
@@ -59,7 +59,7 @@ export async function chatTurn(query, { share, access, thread, text, signal }) {
   const used = [];
   let reply = "";
   for (let step = 0; step < MAX_STEPS; step++) {
-    const message = await complete(messages, tools, signal);
+    const message = await completer(messages, tools, signal);
     if (!message.tool_calls?.length) { reply = message.content || ""; break; }
     messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
     for (const call of message.tool_calls) {
