@@ -104,11 +104,13 @@ export function cloudQuestion(text, access) {
 async function askCloud(query, { share, access, thread, text }) {
   const owner = (await query("SELECT id::text FROM users WHERE role = 'owner' ORDER BY id LIMIT 1")).rows[0];
   if (!owner) throw new Error("владелец не найден");
+  // Наблюдатели облачных агентов видят очередь только по проектам своего доступа: вопрос без проекта они не получают.
+  const project = (await query("SELECT id::text FROM projects WHERE name = 'MBOX' ORDER BY id LIMIT 1")).rows[0] || (await query("SELECT id::text FROM projects ORDER BY id LIMIT 1")).rows[0];
   const props = { to: cloudAgent(share), thread: `ash${share.id}-${thread}`, source: "assortment-share", share_id: String(share.id), mbox_user_id: owner.id, mbox_owner: true, question: text };
   const row = (await query(
     `INSERT INTO agent_inbox(project_id, agent_name, item_type, title, body, status, priority, requires_human, props)
-     VALUES (NULL, 'Человек', 'question', $1, $2, 'open', 'normal', false, $3) RETURNING id::text`,
-    [`Ассортимент по ссылке: ${text.slice(0, 80)}`, cloudQuestion(text, access), JSON.stringify(props)],
+     VALUES ($4, 'Человек', 'question', $1, $2, 'open', 'normal', false, $3) RETURNING id::text`,
+    [`Ассортимент по ссылке: ${text.slice(0, 80)}`, cloudQuestion(text, access), JSON.stringify(props), project?.id || null],
   )).rows[0];
   await query("INSERT INTO assortment_chat_messages(share_id, thread, role, content) VALUES ($1, $2, 'user', $3)", [share.id, thread, text]);
   return row.id;

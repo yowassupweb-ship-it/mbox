@@ -61,7 +61,10 @@ def rollback(reason):
 try:
     base = run(f"cat {REMOTE}/.deployed-commit").split()[0]
     # History of main was rewritten on 2026-10-19, so the deployed commit is not an ancestor of HEAD: compare trees instead.
-    fork = git("merge-base", head, "main")
+    if subprocess.run(["git", "merge-base", "--is-ancestor", base, head], cwd=ROOT).returncode == 0:
+        fork = base  # deployed commit is in our history: nothing to compare
+    else:
+        fork = git("merge-base", head, "main")
     drift = git("diff", "--name-only", base, fork, "--", ".", ":(exclude)public").splitlines()
     if drift:
         raise SystemExit(f"Deployed {base[:7]} differs from main {fork[:7]} outside public/: {drift[:10]}")

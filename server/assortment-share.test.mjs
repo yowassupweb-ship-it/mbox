@@ -126,7 +126,8 @@ test("чат с Claude или GPT: вопрос уходит облачному 
   const messages = [];
   const query = async (sql, params = []) => {
     if (/FROM users WHERE role = 'owner'/.test(sql)) return { rows: [{ id: "1" }] };
-    if (/INSERT INTO agent_inbox/.test(sql)) { const row = { id: String(100 + inbox.length), title: params[0], body: params[1], props: JSON.parse(params[2]) }; inbox.push(row); return { rows: [{ id: row.id }] }; }
+    if (/FROM projects WHERE name = 'MBOX'/.test(sql)) return { rows: [{ id: "1" }] };
+    if (/INSERT INTO agent_inbox/.test(sql)) { const row = { id: String(100 + inbox.length), title: params[0], body: params[1], props: JSON.parse(params[2]), project: params[3] }; inbox.push(row); return { rows: [{ id: row.id }] }; }
     if (/INSERT INTO assortment_chat_messages/.test(sql)) { messages.push(params); return { rows: [] }; }
     if (/count\(\*\) FILTER/.test(sql)) return { rows: [{ hour: 0, day: 0 }] };
     if (/AND NOT EXISTS/.test(sql)) return { rows: [] };
@@ -145,6 +146,7 @@ test("чат с Claude или GPT: вопрос уходит облачному 
   assert.equal(r.body.pending, true);
   const q = inbox[0];
   assert.equal(q.props.to, "ClaudeCloud");
+  assert.equal(q.project, "1", "вопрос привязан к проекту MBOX: без него наблюдатель облачного агента очередь не видит");
   assert.equal(q.props.source, "assortment-share");
   assert.equal(q.props.thread, "ash7-abcdefgh12");
   assert.match(q.body, /режим: просмотр/);
