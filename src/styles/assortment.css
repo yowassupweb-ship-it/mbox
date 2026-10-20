@@ -19,24 +19,39 @@
 .assortment-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }
 .assortment-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 
-.assortment-chat { width: min(380px, 42%); display: flex; flex-direction: column; min-height: 0; border-left: var(--border-width) solid var(--border-color); background: var(--element-bg); }
-.assortment-chat header { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-color); }
-.assortment-chat header button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
-.assortment-chat header button:hover { background: var(--surface-hover); color: var(--text-main); }
-.assortment-chat-log { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: var(--space-2); padding: var(--space-3); }
-.assortment-chat-hint { margin: 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
-.assortment-msg { display: grid; gap: 4px; max-width: 92%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.5; }
-.assortment-msg p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.assortment-msg small { color: var(--text-muted); font-size: var(--text-xs); }
-.assortment-msg.is-user { justify-self: end; background: var(--accent-fill); color: #fff; }
-.assortment-msg.is-assistant { justify-self: start; background: var(--bg-color); border: var(--border-width) solid var(--border-color); }
-.assortment-chat form { display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3); border-top: var(--border-width) solid var(--border-color); }
-.assortment-chat textarea { flex: 1; resize: none; padding: var(--space-2); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
-.assortment-chat textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.assortment-chat form button { align-self: end; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 0; border-radius: var(--radius-sm); background: var(--accent-fill); color: #fff; cursor: pointer; }
-.assortment-chat form button:disabled { opacity: .5; cursor: default; }
-.assortment-chat form button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.assortment-chat { width: min(420px, 44%); display: flex; flex-direction: column; min-height: 0; border-left: var(--border-width) solid var(--border-color); background: var(--bg-color); }
+.assortment-chat-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--border-color); }
+.assortment-chat-head button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
+.assortment-chat-head button:hover { background: var(--surface-hover); color: var(--text-main); }
+.assortment-chat-head button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* Чат консоли MBOX (agent-chat) рассчитан на панель рабочего места; здесь он занимает колонку справа: то же, что делает `.wb .agent-chat.is-embedded`. */
+.assortment-chat-host { flex: 1; min-height: 0; display: flex; }
+.assortment-chat-host .agent-chat.is-embedded { position: static; height: 100%; width: 100%; display: block; }
+.assortment-chat-host .agent-chat.is-embedded .agent-chat-shell.console { position: static; width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; animation: none; }
+.assortment-chat-host .console-composer .assortment-error { padding: 0 0 var(--space-2); }
 @media (max-width: 760px) {
   .assortment.has-chat .assortment-body { flex-direction: column; }
-  .assortment-chat { width: 100%; height: 50%; border-left: 0; border-top: var(--border-width) solid var(--border-color); }
+  .assortment-chat { width: 100%; height: 55%; border-left: 0; border-top: var(--border-width) solid var(--border-color); }
 }
+
+/* Навык: правка файлов и «Запомнить правило». */
+.assortment-skill { width: min(720px, 100%); }
+.assortment-skill h3 { display: flex; align-items: center; gap: 6px; }
+.assortment-skill-rule, .assortment-skill-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.assortment-skill input, .assortment-skill-editor { min-height: 32px; padding: 0 var(--space-2); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); }
+.assortment-skill-rule input, .assortment-skill-actions input { flex: 1 1 240px; }
+.assortment-skill button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-main); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.assortment-skill button:hover:not(:disabled) { background: var(--surface-hover); }
+.assortment-skill button:disabled { opacity: .6; cursor: default; }
+.assortment-skill button.is-primary { background: var(--accent-fill); border-color: transparent; color: #fff; }
+.assortment-skill button:focus-visible, .assortment-skill input:focus-visible, .assortment-skill-editor:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.assortment-skill-files { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-bottom: var(--space-2); }
+.assortment-skill-files button.is-on { border-color: var(--accent-fill); }
+.assortment-skill-editor { width: 100%; box-sizing: border-box; padding: var(--space-2); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-xs); line-height: 1.5; resize: vertical; }
+.assortment-skill-mine { margin: var(--space-2) 0 0; padding: var(--space-2); border-radius: var(--radius-sm); background: var(--element-bg); font: inherit; font-size: var(--text-xs); white-space: pre-wrap; max-height: 160px; overflow: auto; }
+.assortment-skill-history { display: grid; gap: var(--space-1); margin: var(--space-2) 0 0; padding: 0; list-style: none; font-size: var(--text-xs); }
+.assortment-skill-history li { display: grid; gap: 2px; padding: var(--space-2); border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); }
+.assortment-skill-history em { color: var(--text-muted); font-style: normal; }
+.assortment-chat.is-owner { width: min(480px, 46%); }
+/* В поле ввода нет кнопки вложений (в чате MBOX это первая колонка сетки). */
+.assortment-chat-host .console-input-row { grid-template-columns: minmax(0, 1fr) 32px; }

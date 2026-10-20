@@ -53,8 +53,10 @@ export async function ensureAssortmentShareSchema(query) {
     content TEXT NOT NULL,
     tools JSONB NOT NULL DEFAULT '[]',
     ref TEXT,
+    steps JSONB NOT NULL DEFAULT '[]',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  await query("ALTER TABLE assortment_chat_messages ADD COLUMN IF NOT EXISTS steps JSONB NOT NULL DEFAULT '[]'");
   await query("ALTER TABLE assortment_chat_messages ADD COLUMN IF NOT EXISTS ref TEXT");
   await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_assortment_chat_ref ON assortment_chat_messages(share_id, ref) WHERE role = 'assistant' AND ref IS NOT NULL");
   await query("CREATE INDEX IF NOT EXISTS idx_assortment_chat_thread ON assortment_chat_messages(share_id, thread, id)");

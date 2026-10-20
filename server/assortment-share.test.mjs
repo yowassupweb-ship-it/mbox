@@ -167,3 +167,12 @@ test("чат с Claude или GPT: вопрос уходит облачному 
   assert.equal(inbox[1].props.to, "CodexCloud");
   assert.match(cloudQuestion("x", "manage"), /режим: управление/);
 });
+
+test("шаги цепочки для страницы: только инструменты ассортимента, вывод укорочен, чужие шаги агента не выходят наружу", async () => {
+  const { publicStep } = await import("./assortment-chat.mjs");
+  const own = publicStep({ name: "mcp__mbox-prod__assortment_summary", input: "{}", output: "x".repeat(5000), is_error: false, ms: 120 });
+  assert.equal(own.name, "assortment_summary");
+  assert.ok(own.output.length <= 1201);
+  assert.equal(publicStep({ name: "assortment_insights", input: "{}", output: "ok" }).name, "assortment_insights");
+  for (const name of ["mcp__mbox-prod__note_read", "mcp__mbox-prod__gmail_search", "Read", "Bash", "shell_command", "", undefined]) assert.equal(publicStep({ name, input: "секрет", output: "секрет" }), null, String(name));
+});

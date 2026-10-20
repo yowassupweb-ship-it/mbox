@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { MessageSquare, RefreshCw, Share2 } from "lucide-react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { BookOpen, MessageSquare, RefreshCw, Share2 } from "lucide-react";
+import { ChatRenderContext } from "../app/workbench/chatRenderContext";
+import { AssortmentSkillPanel } from "./assortment/AssortmentSkillPanel";
 import { OctopusSpinner } from "../components/OctopusSpinner";
 import { AssortmentChat } from "./assortment/AssortmentChat";
 import { AssortmentShareDialog } from "./assortment/AssortmentShareDialog";
@@ -31,6 +33,9 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
   const [refreshing, setRefreshing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
+  // У владельца справа настоящий чат MBOX (тот же, что в консоли): со всеми агентами, моделями, вложениями и историей чатов.
+  const renderChat = useContext(ChatRenderContext);
   const frame = useRef<HTMLIFrameElement | null>(null);
 
   const loadReport = useCallback(async () => {
@@ -84,6 +89,7 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
   const refreshInfo = status?.last_refresh;
   const stale = refreshInfo && refreshInfo.ok === false;
   const chatAllowed = Boolean(shared?.chat);
+  const ownerChat = owner && renderChat !== null;
 
   return (
     <div className={`assortment${chatOpen ? " has-chat" : ""}`}>
@@ -91,7 +97,8 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
         <span className="assortment-meta">Каталог от {when(status?.snapshot_at)}{stale ? " · последнее обновление не удалось" : ""}{status?.learned?.labels ? ` · выучено по ${status.learned.labels} оценкам` : ""}</span>
         <span className="assortment-space" />
         {owner && <button type="button" onClick={() => void refresh()} disabled={refreshing}><RefreshCw size={14} aria-hidden="true" className={refreshing ? "is-spinning" : undefined} /> {refreshing ? "Обновляю…" : "Обновить данные"}</button>}
-        {chatAllowed && <button type="button" aria-pressed={chatOpen} onClick={() => setChatOpen((value) => !value)}><MessageSquare size={14} aria-hidden="true" /> Чат с агентом</button>}
+        {(chatAllowed || ownerChat) && <button type="button" aria-pressed={chatOpen} onClick={() => setChatOpen((value) => !value)}><MessageSquare size={14} aria-hidden="true" /> Чат с агентом</button>}
+        {owner && <button type="button" onClick={() => setSkillOpen(true)}><BookOpen size={14} aria-hidden="true" /> Навык</button>}
         {owner && <button type="button" onClick={() => setSharing(true)}><Share2 size={14} aria-hidden="true" /> Поделиться</button>}
       </div>
       {error && <p className="assortment-error" role="alert">{error}</p>}
@@ -100,9 +107,11 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
           {html === null && !error && <div className="assortment-center"><OctopusSpinner label="Загружаю отчёт…" /></div>}
           {html !== null && <iframe ref={frame} title="Ассортимент: отчёт" srcDoc={html} sandbox={SANDBOX} />}
         </div>
+        {ownerChat && chatOpen && <aside className="assortment-chat is-owner" aria-label="Чат MBOX"><div className="assortment-chat-host">{renderChat!(true, "assortment")}</div></aside>}
         {chatAllowed && chatOpen && <AssortmentChat base={base} manage={shared?.mode === "manage"} agent={shared?.agent ?? "jarvis"} onClose={() => setChatOpen(false)} />}
       </div>
       {sharing && <AssortmentShareDialog onClose={() => setSharing(false)} />}
+      {skillOpen && <AssortmentSkillPanel onClose={() => setSkillOpen(false)} />}
     </div>
   );
 }

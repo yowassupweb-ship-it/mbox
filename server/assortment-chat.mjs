@@ -49,6 +49,15 @@ async function complete(messages, tools, signal) {
   throw firstError || new Error("нет ключа модели");
 }
 
+/** Шаг цепочки для страницы: имя, аргументы и укороченный вывод. Берутся только инструменты ассортимента: чужие шаги агента наружу не уходят. */
+export function publicStep(step) {
+  const name = String(step?.name || "").replace(/^mcp__[^_]+(?:-[^_]+)*__/, "");
+  if (!/^assortment_/.test(name)) return null;
+  const cut = (value, max) => { const text = String(value ?? ""); return text.length > max ? `${text.slice(0, max)}…` : text; };
+  return { kind: "tool", name, input: cut(step.input, 400), output: cut(step.output, 1200), is_error: Boolean(step.is_error), ms: Number(step.ms) || undefined };
+}
+const publicSteps = (steps) => (Array.isArray(steps) ? steps.map(publicStep).filter(Boolean).slice(0, 12) : []);
+
 const clip = (text) => (text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}… [ответ обрезан, уточните запрос: limit, direction, segment]` : text);
 
 /** Один ход чата: вопрос человека → цикл «модель — инструменты» → ответ. */
@@ -60,6 +69,7 @@ export async function chatTurn(query, { share, access, thread, text, signal, com
   const messages = [{ role: "system", content: await systemPrompt(query, access) }, ...history.map((m) => ({ role: m.role, content: m.content })), { role: "user", content: text }];
   const tools = chatTools(access);
   const used = [];
+  const steps = [];
   let reply = "";
   for (let step = 0; step < MAX_STEPS; step++) {
     const message = await completer(messages, tools, signal);
@@ -68,22 +78,27 @@ export async function chatTurn(query, { share, access, thread, text, signal, com
     for (const call of message.tool_calls) {
       const name = call.function?.name || "";
       let result;
+      const startedAt = Date.now();
+      let failed = false;
       try {
         const args = JSON.parse(call.function?.arguments || "{}");
         if (args && typeof args === "object" && "limit" in args) args.limit = Math.min(Number(args.limit) || 10, 20);
         else if (args && typeof args === "object") args.limit = 10;
         result = clip(JSON.stringify(await runAssortmentTool(query, name, args, { access, actor: `чат по ссылке: ${share.label || "ссылка"}` })));
       } catch (error) {
+        failed = true;
         result = error instanceof ToolError ? `Ошибка: ${error.message}` : `Ошибка инструмента: ${String(error.message || error).slice(0, 200)}`;
       }
       if (!used.includes(name)) used.push(name);
+      steps.push(publicStep({ name, input: call.function?.arguments || "", output: result, is_error: failed, ms: Date.now() - startedAt }));
       messages.push({ role: "tool", tool_call_id: call.id, name, content: result });
     }
   }
   if (!reply) reply = "Не удалось собрать ответ за отведённое число шагов. Уточните вопрос, пожалуйста.";
   await query("INSERT INTO assortment_chat_messages(share_id, thread, role, content) VALUES ($1, $2, 'user', $3)", [share.id, thread, text]);
-  await query("INSERT INTO assortment_chat_messages(share_id, thread, role, content, tools) VALUES ($1, $2, 'assistant', $3, $4)", [share.id, thread, reply, JSON.stringify(used)]);
-  return { reply, tools: used };
+  const shown = steps.filter(Boolean);
+  await query("INSERT INTO assortment_chat_messages(share_id, thread, role, content, tools, steps) VALUES ($1, $2, 'assistant', $3, $4, $5)", [share.id, thread, reply, JSON.stringify(used), JSON.stringify(shown)]);
+  return { reply, tools: used, steps: shown };
 }
 
 const cloudAgent = (share) => (Object.hasOwn(CLOUD_AGENTS, share.chat_agent) ? CLOUD_AGENTS[share.chat_agent] : null);
@@ -121,11 +136,12 @@ async function cloudAnswer(query, { share, thread, ref }) {
   const own = (await query("SELECT 1 FROM agent_inbox WHERE id = $1 AND props->>'share_id' = $2 AND props->>'thread' = $3", [ref, String(share.id), `ash${share.id}-${thread}`])).rows[0];
   if (!own) return { found: false, invalid: true };
   const answer = (await query(
-    `SELECT body, item_type FROM agent_inbox WHERE (props->>'re' = $1 OR props->>'in_reply_to' = $1) AND item_type IN ('answer', 'agent_response', 'agent_error') AND agent_name <> 'Человек' ORDER BY id DESC LIMIT 1`, [ref])).rows[0];
+    `SELECT body, item_type, props->'steps' AS steps FROM agent_inbox WHERE (props->>'re' = $1 OR props->>'in_reply_to' = $1) AND item_type IN ('answer', 'agent_response', 'agent_error') AND agent_name <> 'Человек' ORDER BY id DESC LIMIT 1`, [ref])).rows[0];
   if (!answer) return { found: false };
   const content = answer.item_type === "agent_error" ? "Агент не смог ответить на этот вопрос. Попробуйте ещё раз." : String(answer.body || "").trim() || "Агент ответил пустым сообщением.";
-  await query("INSERT INTO assortment_chat_messages(share_id, thread, role, content, ref) VALUES ($1, $2, 'assistant', $3, $4) ON CONFLICT DO NOTHING", [share.id, thread, content, ref]);
-  return { found: true, reply: content, failed: answer.item_type === "agent_error" };
+  const steps = publicSteps(answer.steps);
+  await query("INSERT INTO assortment_chat_messages(share_id, thread, role, content, ref, steps) VALUES ($1, $2, 'assistant', $3, $4, $5) ON CONFLICT DO NOTHING", [share.id, thread, content, ref, JSON.stringify(steps)]);
+  return { found: true, reply: content, failed: answer.item_type === "agent_error", steps };
 }
 
 /** Маршруты чата по ссылке: GET история, GET answer (ответ облачного агента), POST вопрос, DELETE очистить. */
@@ -140,13 +156,13 @@ export async function handleAssortmentChat({ req, res, url, query, readBody, sen
     if (!thread || !cloud || !/^\d{1,15}$/.test(ref)) return reply(400, { error: "invalid_request" });
     const result = await cloudAnswer(query, { share, thread, ref });
     if (result.invalid) return reply(404, { error: "not_found" });
-    return reply(200, result.found ? { done: true, reply: result.reply, failed: result.failed } : { done: false });
+    return reply(200, result.found ? { done: true, reply: result.reply, failed: result.failed, steps: result.steps } : { done: false });
   }
 
   if (req.method === "GET") {
     const thread = threadOf(url.searchParams.get("thread"));
     if (!thread) return reply(400, { error: "invalid_thread" });
-    const rows = (await query("SELECT role, content, tools, created_at::text FROM assortment_chat_messages WHERE share_id = $1 AND thread = $2 ORDER BY id DESC LIMIT 60", [share.id, thread])).rows.reverse();
+    const rows = (await query("SELECT role, content, tools, steps, created_at::text FROM assortment_chat_messages WHERE share_id = $1 AND thread = $2 ORDER BY id DESC LIMIT 60", [share.id, thread])).rows.reverse();
     return reply(200, { available: cloud ? true : chatAvailable(), agent: share.chat_agent || "jarvis", messages: rows });
   }
   if (req.method === "DELETE") {

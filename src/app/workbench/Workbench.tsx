@@ -6,6 +6,7 @@ import { UsageMeters } from "../../components/UsageMeters";
 import { AlertTriangle, ArrowLeft, Bug, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronUp, Archive, Bot, CalendarDays, Cloud, Columns2, Database, ExternalLink, FilePlus2, FileText, FolderKanban, Globe2, History, LayoutDashboard, ListTodo, SlidersHorizontal, TerminalSquare, HardDrive, MessageSquare, NotebookPen, ArrowRightToLine, ArrowUpRight, CircleX, Copy, Layers, Link2, MessagesSquare, Pin, Star, RotateCw, VenetianMask, PanelBottom, PanelLeft, PanelRight, Plug, Plus, Power, Presentation, RefreshCw, RotateCcw, Search, Sparkles, Store, Table2, Trash2, X, type LucideIcon } from "lucide-react";
 import { AgentAvatar, AgentName } from "../../components/AgentAvatar";
 import { AgentChat, type FocusItem } from "../../features/agents/AgentChat";
+import { ChatRenderContext } from "./chatRenderContext";
 import { NeedsAnswer } from "../../features/agents/NeedsAnswer";
 import { FolderBoard } from "../../features/projects/FolderBoard";
 import { ProjectEntityView } from "../../features/projects/EntityPanels";
@@ -1179,7 +1180,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
   const phoneBack = () => { setActivity(phoneListActivity); setSidebarOpen(true); };
 
   return (
-    <>
+    <ChatRenderContext.Provider value={renderChat}>
     <PlannerHosts />
     <div className={["wb", sidebarOpen ? "has-sidebar" : "", panelOpen ? "has-panel" : "", consoleDock === "right" && rightOpen ? "has-right" : "", phoneDoc ? "is-phone-doc" : ""].filter(Boolean).join(" ")} style={layoutStyle}>
       <div className="wb-titlebar">{titleBar({
@@ -1578,7 +1579,7 @@ export function Workbench({ data, titleBar, renderers, status, user, onProjectCo
       {domFind && <DomFind root={domFind.root} focusKey={domFind.n} onClose={() => setDomFind(null)} />}
       {spotlightOpen && <Spotlight open scope={spotlightScope} onClose={() => setSpotlightOpen(false)} tabs={tabs} commands={spotlightCommands} />}
     </div>
-    </>
+    </ChatRenderContext.Provider>
   );
 }
 
