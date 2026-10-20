@@ -57,6 +57,7 @@ def run(client, command, timeout=1800, check=True):
 client = paramiko.SSHClient()
 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 client.connect(cfg["MBOX_SSH_HOST"], username=cfg["MBOX_SSH_USER"], password=cfg["MBOX_SSH_PASSWORD"], look_for_keys=False, allow_agent=False, timeout=30)
+client.get_transport().set_keepalive(15)
 try:
     deployed = run(client, "cat /opt/mbox/.deployed-commit 2>/dev/null || true", check=False).strip()
     if deployed and subprocess.run(["git", "cat-file", "-e", f"{deployed}^{{commit}}"], cwd=ROOT, capture_output=True).returncode == 0:
@@ -86,16 +87,44 @@ try:
     local_hash = hashlib.sha512(INSTALLER.read_bytes()).hexdigest()
     remote_installer = posixpath.join(REMOTE, "public/downloads", INSTALLER.name)
     existing = run(client, f"sha512sum {remote_installer} 2>/dev/null || true").split()
-    sftp = client.open_sftp()
-    try:
-        remote_archive = f"/tmp/mbox-deploy-{short}.tar.gz"
-        print("> upload archive", archive.stat().st_size, flush=True)
-        sftp.put(str(archive), remote_archive)
-        if not existing or existing[0] != local_hash:
+    for attempt in range(4):
+        sftp = client.open_sftp()
+        try:
+            remote_archive = f"/tmp/mbox-deploy-{short}.tar.gz"
+            print("> upload archive", archive.stat().st_size, flush=True)
+            sftp.put(str(archive), remote_archive)
             print("> upload installer", INSTALLER.stat().st_size, flush=True)
-            sftp.put(str(INSTALLER), remote_installer)
-    finally:
-        sftp.close()
+            try:
+                done = sftp.stat(remote_installer).st_size
+            except IOError:
+                done = 0
+            total = INSTALLER.stat().st_size
+            if done > total:
+                sftp.remove(remote_installer)
+                done = 0
+            print(f"> installer resume from {done} of {total}", flush=True)
+            with INSTALLER.open("rb") as source, sftp.open(remote_installer, "ab") as target:
+                target.set_pipelined(True)
+                source.seek(done)
+                while True:
+                    chunk = source.read(262144)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+            break
+        except (EOFError, OSError, paramiko.SSHException) as error:
+            print(f"upload attempt {attempt + 1} failed: {error!r}", flush=True)
+            if attempt == 3:
+                raise
+            client.close()
+            time.sleep(5)
+            client.connect(cfg["MBOX_SSH_HOST"], username=cfg["MBOX_SSH_USER"], password=cfg["MBOX_SSH_PASSWORD"], look_for_keys=False, allow_agent=False, timeout=30)
+            client.get_transport().set_keepalive(15)
+        finally:
+            try:
+                sftp.close()
+            except Exception:
+                pass
     remote_hash = run(client, f"sha512sum {remote_installer}").split()[0]
     if remote_hash != local_hash:
         raise RuntimeError("Хеш установщика на сервере не совпал")
