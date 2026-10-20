@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ассортимент туров</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f3f4f7;--surface:#fff;--surface-2:#eceef3;--text:#12161c;--muted:#4b5563;--line:#d6dbe3;
+  --own:#1d4ed8;--own-ink:#fff;--own-soft:#e8effd;--own-text:#173a9f;
+  --partner:#4b5563;--partner-line:#a5adb9;--partner-soft:#f6f7f9;
+  --alarm:#b42318;--alarm-ink:#fff;--alarm-soft:#fdecea;
+  --warn:#9a4a00;--warn-soft:#fff2e2;
+  --info:#374151;--info-soft:#eef0f4;
+  --ok:#0a6b3a;--ok-soft:#e3f5ea;
+  --focus:#1d4ed8;--shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.08);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1116;--surface:#171b22;--surface-2:#202631;--text:#e8ebf0;--muted:#a1abb9;--line:#2b323d;
+  --own:#6e9bff;--own-ink:#0b1220;--own-soft:#14223f;--own-text:#9db9ff;
+  --partner:#a1abb9;--partner-line:#4a5362;--partner-soft:#1b2029;
+  --alarm:#ff7b72;--alarm-ink:#2a0806;--alarm-soft:#35191a;
+  --warn:#f5a54a;--warn-soft:#33250f;
+  --info:#b4bdc9;--info-soft:#222831;
+  --ok:#5fd39a;--ok-soft:#10301f;
+  --focus:#9db9ff;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);}}
+:root[data-theme="dark"]{
+  --bg:#0e1116;--surface:#171b22;--surface-2:#202631;--text:#e8ebf0;--muted:#a1abb9;--line:#2b323d;
+  --own:#6e9bff;--own-ink:#0b1220;--own-soft:#14223f;--own-text:#9db9ff;
+  --partner:#a1abb9;--partner-line:#4a5362;--partner-soft:#1b2029;
+  --alarm:#ff7b72;--alarm-ink:#2a0806;--alarm-soft:#35191a;
+  --warn:#f5a54a;--warn-soft:#33250f;
+  --info:#b4bdc9;--info-soft:#222831;
+  --ok:#5fd39a;--ok-soft:#10301f;
+  --focus:#9db9ff;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.4);}
+:root[data-theme="light"]{color-scheme:light}
+:root[data-theme="dark"]{color-scheme:dark}
+
+*{box-sizing:border-box}
+html{scroll-padding-top:150px}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+a{color:var(--own-text)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
+.mono{font-variant-numeric:tabular-nums}
+
+/* ---------- каркас ---------- */
+.top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.top-in{max-width:1240px;margin:0 auto;padding:12px 16px 0}
+.bar1{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-size:18px;font-weight:700;margin:0;letter-spacing:-.01em}
+.meta{color:var(--muted);font-size:12.5px}
+.grow{flex:1}
+.search{position:relative;flex:1 1 280px;max-width:460px}
+.search input{width:100%;height:40px;padding:0 12px 0 38px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.search input:hover{border-color:var(--partner-line)}
+.search svg{position:absolute;left:12px;top:11px;width:18px;height:18px;color:var(--muted)}
+.pop{position:absolute;left:0;right:0;top:46px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:60vh;overflow:auto;z-index:40}
+.pop[hidden]{display:none}
+.pop button{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line)}
+.pop button:hover,.pop button[aria-selected="true"]{background:var(--surface-2)}
+.pop .none{padding:12px;color:var(--muted)}
+
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:3px;gap:2px}
+.seg button{border:0;background:none;height:32px;padding:0 12px;border-radius:7px;cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.seg button:hover{background:var(--surface-2);color:var(--text)}
+.seg button:active{transform:translateY(1px)}
+.seg button[aria-pressed="true"]{background:var(--text);color:var(--bg);font-weight:600}
+.seg button[aria-pressed="true"].is-own{background:var(--own);color:var(--own-ink)}
+.icon-btn{height:40px;width:40px;border:1px solid var(--line);background:var(--surface);border-radius:10px;cursor:pointer;display:grid;place-items:center}
+.icon-btn:hover{background:var(--surface-2)}
+.icon-btn:active{transform:translateY(1px)}
+.icon-btn svg{width:18px;height:18px}
+
+.legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 0 10px;font-size:13px;color:var(--muted)}
+.legend .split{flex:1 1 260px;max-width:520px}
+.split{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--partner-soft);border:1px solid var(--line)}
+.split i{display:block;height:100%}
+.split .o{background:var(--own)}
+.split .p{background:repeating-linear-gradient(135deg,var(--partner-line) 0 4px,transparent 4px 8px)}
+
+nav.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:thin;margin:0 -4px}
+nav.tabs button{border:0;background:none;padding:10px 12px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;white-space:nowrap;display:inline-flex;gap:7px;align-items:center;border-radius:8px 8px 0 0}
+nav.tabs button:hover{color:var(--text);background:var(--surface-2)}
+nav.tabs button:active{background:var(--line)}
+nav.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--text);font-weight:650}
+nav.tabs .n{font-size:12px;padding:1px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.tabs .n.hot{background:var(--alarm);color:var(--alarm-ink)}
+
+main{max-width:1240px;margin:0 auto;padding:20px 16px 72px}
+h2.sec{font-size:20px;line-height:1.25;margin:28px 0 4px;letter-spacing:-.01em}
+h2.sec:first-child{margin-top:0}
+p.hint{color:var(--muted);margin:0 0 14px;max-width:78ch}
+
+/* ---------- свой / партнёр ---------- */
+.badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:5px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;flex:none}
+.badge.own{background:var(--own);color:var(--own-ink)}
+.badge.partner{background:transparent;color:var(--partner);box-shadow:inset 0 0 0 1.5px var(--partner-line)}
+.badge.lg{height:26px;padding:0 11px;font-size:12px}
+.tour{position:relative;padding:10px 12px 10px 14px;border-radius:8px;border-left:5px solid var(--partner-line);background:var(--partner-soft);cursor:pointer}
+.tour.own{border-left-color:var(--own);background:var(--own-soft)}
+.tour:hover{box-shadow:inset 0 0 0 1px var(--line),0 1px 6px rgba(0,0,0,.08)}
+.tour:active{transform:translateY(1px)}
+.tour.dim{opacity:.38}
+.tour.sel{box-shadow:0 0 0 2px var(--focus)}
+.tour + .tour{margin-top:6px}
+.t-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.t-name{font-weight:650}
+.t-id{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.t-id::before{content:"№\00a0"}
+.t-meta{font-size:13px;color:var(--muted);margin-top:2px}
+.t-route{font-size:13px;color:var(--muted);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.t-extra{margin-top:6px}
+
+.sev{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:5px;font-size:12px;font-weight:600;white-space:nowrap}
+.sev.critical{background:var(--alarm-soft);color:var(--alarm);box-shadow:inset 0 0 0 1px var(--alarm)}
+.sev.high{background:var(--warn-soft);color:var(--warn)}
+.sev.medium{background:var(--info-soft);color:var(--info)}
+.sev.low{background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
+.flag{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:5px;font-size:12px;font-weight:700;white-space:nowrap}
+.flag.undercut{background:var(--alarm);color:var(--alarm-ink)}
+.flag.keep{background:var(--ok-soft);color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
+.flag.drop{background:var(--alarm-soft);color:var(--alarm);box-shadow:inset 0 0 0 1px var(--alarm)}
+.flag.merge{background:var(--warn-soft);color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:12px;margin:2px 4px 2px 0}
+.chip.hot{background:var(--alarm-soft);color:var(--alarm);box-shadow:inset 0 0 0 1px var(--alarm);font-weight:600}
+.chip.ev{background:var(--warn-soft);color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)}
+.chip.me{background:var(--own-soft);color:var(--own-text)}
+.fb{display:inline-flex;gap:4px;flex:none}
+.fbb{height:26px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);cursor:pointer;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.fbb:hover{background:var(--surface-2);color:var(--text)}
+.fbb:active{transform:translateY(1px)}
+.fbb.yes[aria-pressed="true"]{background:var(--ok-soft);color:var(--ok);border-color:var(--ok);font-weight:650}
+.fbb.no[aria-pressed="true"]{background:var(--alarm-soft);color:var(--alarm);border-color:var(--alarm);font-weight:650}
+.fbb[disabled]{opacity:.45;cursor:not-allowed}
+.reason{background:var(--alarm-soft);border:1px solid var(--alarm);border-radius:8px;padding:10px 12px;margin-top:6px;min-width:260px}
+.reason .chips button{height:28px;padding:0 10px;font-size:12.5px}
+.reason .row{margin-top:8px}
+.fbrow{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fbbar{background:var(--info-soft);border-bottom:1px solid var(--line)}
+.fbbar .in{max-width:1240px;margin:0 auto;padding:8px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13.5px}
+.fbbar[hidden]{display:none}
+input.note{width:100%;min-width:160px;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+
+/* ---------- карточки ---------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.card.own{border-left:6px solid var(--own)}
+.card.alarm{border-color:var(--alarm);box-shadow:inset 4px 0 0 var(--alarm)}
+.card h3{margin:0;font-size:16px;line-height:1.3}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row.between{justify-content:space-between}
+.small{font-size:13px;color:var(--muted)}
+.btn{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:600}
+.btn.primary:hover{opacity:.9}
+.btn[disabled],.btn[aria-disabled="true"]{opacity:.45;cursor:not-allowed}
+.btn.sm{height:28px;padding:0 10px;font-size:13px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{height:32px;padding:0 12px;border:1px solid var(--line);background:var(--surface);border-radius:999px;cursor:pointer;color:var(--muted)}
+.chips button:hover{background:var(--surface-2);color:var(--text)}
+.chips button:active{transform:translateY(1px)}
+.chips button[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:600}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
+.filters input[type=search],.filters select{height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.filters input[type=search]{flex:1 1 220px;max-width:360px}
+.empty{padding:36px 16px;text-align:center;color:var(--muted);background:var(--surface);border:1px dashed var(--line);border-radius:12px}
+
+/* ---------- сводка ---------- */
+.hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:12px}
+.lead{background:var(--surface);border:1px solid var(--alarm);border-radius:14px;padding:20px 22px;box-shadow:inset 6px 0 0 var(--alarm)}
+.lead.calm{border-color:var(--line);box-shadow:inset 6px 0 0 var(--own)}
+.lead .big{font-size:56px;line-height:1;font-weight:750;letter-spacing:-.03em;color:var(--alarm);font-variant-numeric:tabular-nums}
+.lead.calm .big{color:var(--own-text)}
+.lead .cap{font-size:18px;font-weight:650;margin-top:6px}
+.lead p{margin:8px 0 12px;color:var(--muted);max-width:60ch}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi b{display:block;font-size:26px;line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi span{color:var(--muted);font-size:13px}
+.insight{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;border-left-width:6px}
+.insight.alarm{border-left-color:var(--alarm)}
+.insight.warn{border-left-color:var(--warn)}
+.insight.info{border-left-color:var(--partner-line)}
+.insight h3{margin:0 0 2px;font-size:15.5px}
+.insight p{margin:0;color:var(--muted)}
+.lvl{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:5px;margin-top:2px}
+.lvl.alarm{background:var(--alarm);color:var(--alarm-ink)}
+.lvl.warn{background:var(--warn-soft);color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)}
+.lvl.info{background:var(--info-soft);color:var(--info)}
+.queue{counter-reset:q;list-style:none;padding:0;margin:0}
+.queue li{counter-increment:q;display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.queue li:first-child{border-top:0}
+.queue li::before{content:counter(q);font-weight:700;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
+
+/* ---------- полосы ---------- */
+.sbar{position:relative;display:flex;height:16px;border-radius:5px;overflow:hidden;background:var(--surface-2)}
+.sbar .o{background:var(--own);height:100%}
+.sbar .p{background:repeating-linear-gradient(135deg,var(--partner-line) 0 4px,transparent 4px 8px);height:100%}
+.avgtick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--text)}
+.dirline{display:grid;grid-template-columns:minmax(120px,200px) 1fr 120px;gap:12px;align-items:center;padding:6px 0}
+.meter{height:10px;border-radius:5px;background:var(--surface-2);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--alarm)}
+.cmp{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-variant-numeric:tabular-nums;font-size:14px}
+.cmp .bad{color:var(--alarm);font-weight:700}
+.cmp .good{color:var(--ok);font-weight:600}
+
+/* ---------- таблицы ---------- */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 12px;border-top:1px solid var(--line);vertical-align:top}
+thead th{border-top:0;background:var(--surface-2);font-size:12.5px;color:var(--muted);font-weight:650;white-space:nowrap}
+th button{border:0;background:none;cursor:pointer;color:inherit;font-weight:inherit;padding:0}
+th button:hover{color:var(--text)}
+th[aria-sort] button::after{content:" \2193"}
+th[aria-sort="ascending"] button::after{content:" \2191"}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr.pair td{padding:8px 12px}
+tr.pair.hot td:first-child{box-shadow:inset 4px 0 0 var(--alarm)}
+
+/* ---------- панель тура ---------- */
+.scrim{position:fixed;inset:0;background:rgba(10,14,20,.5);z-index:50}
+.scrim[hidden],.drawer[hidden]{display:none}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--surface);z-index:60;overflow-y:auto;box-shadow:var(--shadow);border-left:1px solid var(--line)}
+.dr-head{position:sticky;top:0;background:var(--surface);padding:16px 18px 12px;border-bottom:1px solid var(--line);z-index:1}
+.dr-body{padding:14px 18px 40px}
+.dr-body h4{margin:20px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.facts div{background:var(--surface-2);border-radius:8px;padding:8px 10px}
+.facts b{display:block;font-size:12px;color:var(--muted);font-weight:600}
+
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr}
+  .dirline{grid-template-columns:1fr;gap:4px}
+  .insight{grid-template-columns:1fr}
+  .insight .btn{justify-self:start}
+  .lead .big{font-size:48px}
+  .queue li{grid-template-columns:24px 1fr}
+  .queue li .btn{grid-column:2;justify-self:start}
+  html{scroll-padding-top:190px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .tour,.btn,.seg button,.chips button,nav.tabs button{transition:background .12s,box-shadow .12s,transform .06s}
+}
+@media print{.top,.scrim,.drawer{display:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div class="bar1">
+      <h1 class="brand">Ассортимент vs-travel.ru</h1>
+      <span class="meta" id="meta"></span>
+      <span class="grow"></span>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Найти тур: номер, название, место  ( / )" autocomplete="off" aria-label="Найти тур" aria-controls="pop" aria-expanded="false">
+        <div class="pop" id="pop" role="listbox" hidden></div>
+      </div>
+      <div class="seg" role="group" aria-label="Чьи туры показывать">
+        <button data-own="all" aria-pressed="true">Все</button>
+        <button data-own="own" class="is-own" aria-pressed="false">Свои</button>
+        <button data-own="partner" aria-pressed="false">Партнёрские</button>
+      </div>
+      <button class="icon-btn" id="theme" aria-label="Сменить тему" title="Сменить тему">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+    <div class="legend">
+      <span class="badge own">Свой</span><span>наш тур, сделан «Вокруг света»</span>
+      <span class="badge partner">Партнёр</span><span>тур партнёра</span>
+      <span class="split" id="split" role="img"></span><span id="splitnum" class="small mono"></span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Разделы" id="tabs"></nav>
+  </div>
+  <div class="fbbar" id="fbbar" hidden></div>
+</header>
+<main id="view" tabindex="-1"></main>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Карточка тура" hidden></aside>
+
+<script>
+"use strict";
+const BOOT = /*BOOT*/null || {};
+const D = /*DATA*/null;
+const T = D.tours, M = D.meta, SUM = D.summary;
+const SNAP_Y = M.snapshot_at.slice(0, 4);
+const TABS = [["overview", "Сводка"], ["own", "Свои под ударом"], ["changes", "Что нового"], ["variants", "Варианты"],
+  ["overflow", "Перебор"], ["clusters", "Дубли"], ["conflicts", "Конфликты"], ["directions", "Направления"], ["excluded", "Вне анализа"], ["learn", "Обучение"]];
+const SEV = M.sev_labels, SEVO = ["critical", "high", "medium", "low"];
+const PAIR = M.pair_labels;
+
+/* ---------- утилиты ---------- */
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const fmtD = iso => { const [y, m, d] = iso.split("-"); return d + "." + m + (y !== SNAP_Y ? "." + y.slice(2) : ""); };
+const price = t => t.p ? t.p.toLocaleString("ru-RU") + " " + t.c : "цена не указана";
+const num = n => n.toLocaleString("ru-RU");
+const dec = x => String(x).replace(".", ",");
+const pct = x => Math.round(x * 100) + "%";
+const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : (m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c); };
+const link = (k, id) => M.links[k].replace("{id}", id);
+// поездки идут в одни дни: даты начала и длительность пересекаются (двухдневные 03–04.01 и 05–06.01 — нет)
+const near = (xs, dx, ys, dy, w) => xs.filter(x => ys.some(y => { const d = (Date.parse(x) - Date.parse(y)) / 864e5; return d <= dy - 1 + w && -d <= dx - 1 + w; }));
+const badge = (t, big) => `<span class="badge ${t.o ? "own" : "partner"}${big ? " lg" : ""}">${t.o ? "Свой" : "Партнёр"}</span>`;
+
+/* ---------- индексы ---------- */
+const byTour = {}, clusterOf = {}, variantOf = {};
+D.conflicts.forEach(c => { (byTour[c.a] ||= []).push(c); (byTour[c.b] ||= []).push(c); });
+D.clusters.forEach(k => k.tours.forEach(id => clusterOf[id] = k));
+D.variants.forEach(g => g.tours.forEach(id => variantOf[id] = g));
+const dirKey = (seg, name) => seg + "|" + name;
+const dirs = Object.fromEntries(D.directions.map(d => [dirKey(d.seg, d.name), d]));
+const dirOf = id => dirs[dirKey(T[id].s, T[id].d)];
+const sevRank = s => SEVO.indexOf(s);
+const urank = c => !c.u ? 0 : c.pair === "own_vs_partner" ? (c.ch === "b" ? 4 : 1) : c.pair === "own_vs_own" ? 3 : 2;
+const beats = c => urank(c) === 4;   // партнёр дешевле нашего тура в те же даты
+const whyText = c => c.why.replace(/;\s*цены[^;]*/, "").replace(/;\s*(ПЕРЕБИВАЕТ ЦЕНОЙ|наш тур дешевле|тур \d+ дешевле).*$/, "");
+const sortConf = (a, b) => (urank(b) - urank(a)) || (sevRank(a.sev) - sevRank(b.sev)) || (b.score - a.score) || (a.a - b.a) || (a.b - b.b);
+
+/* ---------- состояние ---------- */
+let S = {tab: "overview", own: "all", tour: null};
+const U = {ownSort: "risk", ownMore: {}, vOwn: false, vQ: "", ovSeg: "", ovSort: "ratio", clQ: "", clMin: 3, clOwn: false,
+  cfSev: new Set(), cfBasis: "", cfPair: "", cfSeg: "", cfQ: "", cfUndercut: false, cfDirect: false, cfLimit: 100,
+  drSort: "ratio", drDesc: true, drQ: "", dirSel: null};
+const parse = () => {
+  const [path, qs] = location.hash.replace(/^#\/?/, "").split("?");
+  const p = new URLSearchParams(qs || "");
+  S.tab = TABS.some(t => t[0] === path) ? path : "overview";
+  S.own = ["own", "partner"].includes(p.get("own")) ? p.get("own") : "all";
+  S.tour = p.get("tour") && T[p.get("tour")] ? +p.get("tour") : null;
+  if (["light", "dark"].includes(p.get("theme"))) document.documentElement.dataset.theme = p.get("theme");
+};
+const fmtHash = () => "#/" + S.tab + "?" + new URLSearchParams({...(S.own !== "all" && {own: S.own}), ...(S.tour && {tour: S.tour})});
+const go = patch => { pendingNote = null; Object.assign(S, patch); const h = fmtHash(); if (h === location.hash) render(); else location.hash = h; };
+const passOwn = ids => S.own === "all" || ids.some(id => S.own === "own" ? T[id].o : !T[id].o);
+const dim = t => (S.own === "own" && !t.o) || (S.own === "partner" && t.o);
+
+/* ---------- компоненты ---------- */
+function tourRow(id, o = {}) {
+  const t = T[id];
+  return `<div class="tour ${t.o ? "own" : "partner"}${dim(t) ? " dim" : ""}${S.tour === id ? " sel" : ""}" data-tour="${id}" tabindex="0" role="button" aria-label="Открыть тур ${id}">
+    <div class="t-top">${badge(t)}<span class="t-name">${esc(t.n)}</span><span class="t-id">${id}</span>${evChip(t)}${o.mark || ""}</div>
+    <div class="t-meta">${t.dy} дн. · ${esc(price(t))} · ${t.dt.length} ${plural(t.dt.length, "заезд", "заезда", "заездов")}${t.so != null ? ` · продано ${t.so}` : ""}${t.dt.length ? ` (${fmtD(t.dt[0])}–${fmtD(t.dt[t.dt.length - 1])})` : ""}${t.hf ? "" : " · мест нет"}</div>
+    ${o.noRoute ? "" : `<div class="t-route">${esc(t.r)}</div>`}${o.extra ? `<div class="t-extra">${o.extra}</div>` : ""}</div>`;
+}
+const evChip = t => t.ev.length ? `<span class="chip ev" title="Событийный тур сравнивается только с турами на те же праздники">${t.eo ? "только " : "есть заезды: "}${esc(t.ev.join(", "))}</span>` : "";
+const sevPill = s => `<span class="sev ${s}">${esc(SEV[s])}</span>`;
+function undercutFlag(c) {
+  if (!c.u) return "";
+  const cheap = T[c.ch === "a" ? c.a : c.b], p = Math.round(c.chp * 100);
+  if (c.pair === "own_vs_partner" && cheap.o) return `<span class="flag keep" title="Наш тур дешевле конкурента в те же даты">наш дешевле −${p}%</span>`;
+  if (c.pair === "own_vs_partner") return `<span class="flag undercut" title="Партнёр дешевле нашего тура в те же даты на том же направлении">перебивает ценой −${p}%</span>`;
+  return `<span class="flag merge" title="Тур ${cheap.id} дешевле в те же даты на том же направлении">тур ${cheap.id} дешевле −${p}%</span>`;
+}
+function cmpPrice(c) {
+  const a = T[c.a], b = T[c.b];
+  if (c.chp == null) return `<div class="cmp"><span>${esc(price(a))}</span><span>и</span><span>${esc(price(b))}</span></div>`;
+  const cheapB = c.ch === "b", cls = c.u ? (c.pair === "own_vs_partner" ? (cheapB ? "bad" : "good") : "") : "";
+  const first = a.o ? "Наш" : "Тур " + a.id, second = b.o ? "наш" : (a.o ? "конкурент" : "тур " + b.id);
+  return `<div class="cmp"><span>${first} ${esc(price(a))}</span><span>→</span><span class="${cls}">${second} ${esc(price(b))}${c.chp ? ` (${cheapB ? "−" : "+"}${Math.round(c.chp * 100)}%)` : ""}</span></div>`;
+}
+function sbar(own, partner, max, avg) {
+  const w = x => (max ? (100 * x / max) : 0).toFixed(2) + "%";
+  return `<div class="sbar" role="img" aria-label="Свои ${own}, партнёрские ${partner}"><i class="o" style="width:${w(own)}"></i><i class="p" style="width:${w(partner)}"></i>${avg ? `<i class="avgtick" style="left:${w(avg)}" title="Среднее по сегменту ${dec(avg)}"></i>` : ""}</div>`;
+}
+function advMark(adv, id) {
+  const t = T[id];
+  if (adv.keep.some(p => p.id === id)) return `<span class="flag keep">оставить</span>`;
+  const d = adv.drop.find(p => p.id === id);
+  return d ? `<span class="flag drop" title="${esc(d.why)}">кандидат на снятие</span>` : "";
+}
+const advBlock = (adv, withWhy = true) => {
+  const li = (p, cls) => `<li>${esc(T[p.id].n)} <span class="t-id">${p.id}</span>${withWhy ? ` <span class="small">— ${esc(p.why)}</span>` : ""}</li>`;
+  return `<div class="small">${adv.note ? `<div class="flag merge" style="margin-bottom:6px">${esc(adv.note)}</div>` : ""}
+    <b>Оставить (${adv.keep.length}):</b><ul style="margin:4px 0 8px">${adv.keep.map(p => li(p)).join("") || "<li>—</li>"}</ul>
+    <b>Кандидаты на снятие (${adv.drop.length}), решает человек:</b><ul style="margin:4px 0 0">${adv.drop.map(p => li(p)).join("") || "<li>—</li>"}</ul></div>`;
+};
+const empty = text => `<div class="empty">${text}</div>`;
+
+/* ---------- оценки находок ---------- */
+const FB = Object.fromEntries(Object.entries(D.feedback || {}));
+const served = location.protocol.startsWith("http");
+if (!served) { try { Object.assign(FB, JSON.parse(localStorage.getItem("vsa-fb") || "{}")); } catch (_) {} }
+let fbDirty = 0, fbError = "";
+const fbl = k => (FB[k] && FB[k].l) || null;
+let pendingNote = null, reasonPreset = "", reasonText = "";   // находка, у которой сейчас спрашиваем причину отклонения
+const rejected = k => fbl(k) === "no" && k !== pendingNote;
+const kindOf = k => ({c: "conflict", v: "variants", d: "direction"}[k[0]] || "other");
+const FBW = {conflict: ["Верно", "Не конфликт"], variants: ["Верно", "Не варианты"], direction: ["Верно", "Не перебор"]};
+const FBT = {conflict: ["Это действительно конфликт", "Это не конфликт: больше не показывать"],
+  variants: ["Это варианты одного продукта", "Это разные туры: больше не показывать"],
+  direction: ["Это действительно перебор", "Это не перебор: больше не показывать"]};
+const REASONS = {
+  conflict: ["Разные праздники или события", "Разные программы и впечатления", "Разная аудитория", "Не конкуренты по датам", "Разные направления на деле", "Так задумано (намеренно два варианта)", "Ошибка в данных"],
+  variants: ["Это разные туры", "Разные программы", "Варианты нужны намеренно"],
+  direction: ["Для этого направления это норма", "Спрос выше среднего", "Это разные продукты, не дубли"]};
+function reasonForm(key) {
+  const kind = kindOf(key);
+  return `<div class="reason" role="group" aria-label="Причина отклонения">
+    <div class="small"><b>Почему отклоняете?</b> Это поможет инструменту учиться, причина попадёт в журнал выученного.</div>
+    <div class="chips" style="margin-top:6px">${REASONS[kind].map(r => `<button data-reason-preset="${esc(r)}" aria-pressed="${reasonPreset === r}">${esc(r)}</button>`).join("")}</div>
+    <div class="row"><input class="note" id="reasonInput" value="${esc(reasonText)}" placeholder="Своими словами (необязательно)" aria-label="Причина отклонения" style="flex:1 1 220px;width:auto">
+      <button class="btn sm primary" data-reason-save>Сохранить причину</button><button class="btn sm" data-reason-skip>Без причины</button></div></div>`;
+}
+function fbBox(key, words) {
+  if (BOOT.readOnly) return "";
+  if (pendingNote === key) return reasonForm(key);
+  const kind = kindOf(key), s = fbl(key), [y, n] = words || FBW[kind], [ty, tn] = FBT[kind];
+  return `<span class="fb" role="group" aria-label="Оценить находку"><button class="fbb yes" data-fb="${esc(key)}" data-v="yes" aria-pressed="${s === "yes"}" title="${ty}">${y}</button><button class="fbb no" data-fb="${esc(key)}" data-v="no" aria-pressed="${s === "no"}" title="${tn}">${n}</button></span>`;
+}
+const fbRow = key => `<div class="fbrow">${fbBox(key)}${fbl(key) === "yes" ? '<span class="flag keep">подтверждено</span>' : ""}</div>`;
+async function saveFb(key, val, note) {
+  if (BOOT.readOnly) return;
+  const prev = FB[key];
+  if (val) FB[key] = {l: val, n: note ?? (prev ? prev.n : ""), a: new Date().toISOString()}; else delete FB[key];
+  fbDirty++; fbError = "";
+  if (served) {
+    try {
+      const r = await fetch(BOOT.feedbackUrl || "/api/feedback", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({key, label: val, note: val ? FB[key].n : ""})});
+      if (!r.ok) throw new Error(r.status);
+    } catch (e) { fbError = "Не удалось сохранить оценку на сервере. Обновите страницу и попробуйте ещё раз."; }
+  } else { try { localStorage.setItem("vsa-fb", JSON.stringify(FB)); } catch (_) {} }
+  render();
+}
+function exportFb() {
+  const items = Object.fromEntries(Object.entries(FB).map(([k, v]) => [k, {label: v.l, note: v.n || "", at: v.a || ""}]));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({version: 1, items}, null, 1)], {type: "application/json"}));
+  a.download = "feedback-" + M.snapshot_at.slice(0, 10) + ".json";
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+/* ---------- экраны ---------- */
+const V = {};
+
+V.overview = () => {
+  const beaten = D.threats.filter(r => r.undercut > 0);
+  const maxU = Math.max(0, ...beaten.map(r => r.max_undercut || 0));
+  const lead = beaten.length
+    ? `<div class="lead"><div class="big">${beaten.length}</div><div class="cap">${plural(beaten.length, "наш тур перебивают", "наших тура перебивают", "наших туров перебивают")} ценой</div>
+       <p>Партнёр на том же направлении, той же длительности и в те же даты дешевле нашего тура (до −${Math.round(maxU * 100)}%). Покупателю нет причины выбрать наш тур.</p>
+       <button class="btn primary" data-go="own">Разобрать эти туры</button></div>`
+    : `<div class="lead calm"><div class="big">${D.threats.length}</div><div class="cap">наших туров с партнёрскими конкурентами</div>
+       <p>Перебивающих ценой нет.</p><button class="btn primary" data-go="own">Открыть</button></div>`;
+  const s = SUM, cs = s.conflicts;
+  const kpis = [
+    [cs.by_severity.critical, "критичных пар «свой – партнёр»", "conflicts"],
+    [s.directions.overflow, `направлений с перебором (лишних ${s.directions.excess_tours})`, "overflow"],
+    [s.variants.groups, `групп вариантов (карточек ${s.variants.tours})`, "variants"],
+    [cs.clusters, "групп дублей", "clusters"]];
+  const over = D.directions.filter(d => d.status === "overflow").slice(0, 10);
+  const max = Math.max(1, ...over.map(d => d.count));
+  const ch = D.changes;
+  return `<div class="hero">${lead}<div class="kpis">${kpis.map(k => `<button class="kpi" data-go="${k[2]}" style="text-align:left;cursor:pointer"><b>${k[0]}</b><span>${k[1]}</span></button>`).join("")}</div></div>
+  <h2 class="sec">Выводы</h2>
+  <p class="hint">Что именно стоит заметить. Формулировки строятся автоматически по правилам, цифры берутся из каталога.</p>
+  ${D.insights.map(i => `<div class="insight ${i.level}"><span class="lvl ${i.level}">${{alarm: "Срочно", warn: "Разобрать", info: "К сведению"}[i.level]}</span>
+    <div><h3>${esc(i.title)}</h3><p>${esc(i.text)}</p></div><button class="btn sm" data-go="${i.tab}">Показать</button></div>`).join("")}
+  ${ch ? `<h2 class="sec">Что нового</h2><p class="hint">С ${new Date(ch.since).toLocaleString("ru-RU", {dateStyle: "short", timeStyle: "short"})}: заведено ${ch.totals.added}, снято ${ch.totals.removed}, новых критичных пар ${ch.totals.new_critical}.
+    <a href="#/changes">Подробно</a></p>` : ""}
+  <h2 class="sec">Очередь разбора</h2>
+  <p class="hint">Что делать в первую очередь.</p>
+  <div class="card"><ul class="queue">${D.actions.map(a => `<li><div><b>${esc(a.title)}</b><div class="small">${esc(a.detail)}</div></div>
+    <button class="btn sm" data-act="${a.kind}" data-ref="${esc(a.ref)}" data-tab="${a.tab}">Открыть</button></li>`).join("")}</ul></div>
+  <h2 class="sec">Где туров больше всего</h2>
+  <p class="hint">Синяя часть — наши туры, штриховка — партнёрские, чёрная черта — среднее по сегменту.</p>
+  <div class="card">${over.map(d => `<div class="dirline"><b>${esc(d.name)}<span class="small"> · ${esc(M.seg_labels[d.seg])}</span></b>
+    ${sbar(d.own, d.partner, max, d.avg)}<span class="mono small">${d.count} · ×${dec(d.ratio)} · своих ${d.own}</span></div>`).join("")}</div>`;
+};
+
+V.own = () => {
+  let rows = D.threats.filter(r => r.conflicts.some(c => !rejected(c.k)));
+  const key = {risk: null, share: (a, b) => b.share - a.share || b.conflicts.length - a.conflicts.length, count: (a, b) => b.conflicts.length - a.conflicts.length};
+  if (U.ownSort !== "risk") rows.sort((a, b) => key[U.ownSort](a, b) || a.t - b.t);
+  if (S.own === "partner") return empty("Здесь только свои туры. Переключите фильтр на «Все» или «Свои».");
+  const beaten = rows.filter(r => r.undercut).length;
+  const head = `<h2 class="sec">Свои туры, с которыми конкурируют партнёрские</h2>
+    <p class="hint">Свой тур не должен конкурировать с партнёрским. «Под ударом» — заезды нашего тура, в дни которых идёт поездка конкурента. «Перебивает ценой» — конкурент дешевле на ${M.undercut_pct}% и более при той же длительности.</p>
+    <div class="filters"><div class="chips" role="group" aria-label="Сортировка">
+      ${[["risk", "Сначала перебивающие ценой"], ["share", "По доле заездов под ударом"], ["count", "По числу конкурентов"]].map(([k, l]) => `<button data-ownsort="${k}" aria-pressed="${U.ownSort === k}">${l}</button>`).join("")}</div>
+      <span class="small">${rows.length} туров, перебивают ценой: ${beaten}</span></div>`;
+  return head + rows.map(r => {
+    const t = T[r.t], rivals = r.conflicts.filter(c => !rejected(c.k)).sort(sortConf), open = U.ownMore[r.t];
+    const shown = open ? rivals : rivals.slice(0, 5);
+    const hot = new Set(r.contested);
+    return `<div class="card own${r.undercut ? " alarm" : ""}">
+      <div class="row between"><div class="row">${badge(t, true)}<h3><a href="#" data-tour="${t.id}" style="color:inherit;text-decoration:none">${esc(t.n)}</a></h3><span class="t-id">${t.id}</span></div>
+        <div class="row"><a class="small" href="${link("site", t.id)}" target="_blank" rel="noopener">на сайте</a><a class="small" href="${link("manager", t.id)}" target="_blank" rel="noopener">в менеджерке</a></div></div>
+      <div class="small" style="margin:4px 0 10px">${t.dy} дн. · ${esc(price(t))} · ${esc(t.d)} · ${esc(t.r)}</div>
+      ${r.undercut ? `<div class="row" style="margin-bottom:10px"><span class="flag undercut">перебивают ценой: ${r.undercut} ${plural(r.undercut, "конкурент", "конкурента", "конкурентов")}, до −${Math.round(r.max_undercut * 100)}%</span></div>` : ""}
+      <div class="row between small"><span>Под ударом <b>${r.contested.length} из ${t.dt.length}</b> ${plural(t.dt.length, "заезда", "заездов", "заездов")} (${pct(r.share)})</span><span>${sevPill(r.worst)} конкурентов: ${r.conflicts.length}</span></div>
+      <div class="meter" style="margin:6px 0 8px" role="img" aria-label="Доля заездов под ударом ${pct(r.share)}"><i style="width:${pct(r.share)}"></i></div>
+      <div>${t.dt.slice(0, 40).map(d => `<span class="chip${hot.has(d) ? " hot" : ""}">${fmtD(d)}</span>`).join("")}${t.dt.length > 40 ? `<span class="chip">и ещё ${t.dt.length - 40}</span>` : ""}</div>
+      <div style="margin-top:12px">${shown.map(c => {
+        const b = T[c.b];
+        return tourRow(c.b, {noRoute: true, mark: `${sevPill(c.sev)}${undercutFlag(c)}`,
+          extra: `${cmpPrice(c)}<div class="small">${esc(whyText(c))}</div>${fbRow(c.k)}`});
+      }).join("")}</div>
+      ${rivals.length > 5 ? `<button class="btn sm" style="margin-top:10px" data-ownmore="${r.t}">${open ? "Свернуть" : `Показать ещё ${rivals.length - 5}`}</button>` : ""}</div>`;
+  }).join("");
+};
+
+V.changes = () => {
+  const ch = D.changes;
+  if (!ch) return `<h2 class="sec">Что нового</h2>` + empty("Сравнивать пока не с чем: нужен снимок каталога за предыдущий день. Запускайте <b>refresh-daily.cmd</b> раз в сутки — на следующий день здесь появятся заведённые туры и их проблемы.");
+  const t = ch.totals;
+  const kp = [[t.added, "заведено туров"], [t.added_with_problems, "из них с проблемами"], [t.removed, "снято"], [t.new_critical, "новых критичных пар"], [t.became_overflow, "вышло в перебор"]];
+  return `<h2 class="sec">Что нового с ${new Date(ch.since).toLocaleString("ru-RU", {dateStyle: "short", timeStyle: "short"})}</h2>
+  <p class="hint">Менеджеры ошибаются в момент заведения тура, поэтому проверку удобно начинать отсюда.</p>
+  <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">${kp.map(k => `<div class="kpi"><b>${k[0]}</b><span>${k[1]}</span></div>`).join("")}</div>
+  <h2 class="sec">Заведённые туры</h2>
+  ${ch.added.length ? ch.added.map(r => `<div class="card">${tourRow(r.id)}
+    <div style="margin-top:8px">${r.problems.length ? r.problems.map(p => `<span class="chip hot">${esc(p)}</span>`).join("") : '<span class="chip">без проблем</span>'}</div>
+    ${r.rivals.length ? `<div class="small" style="margin-top:6px">Конфликты: ${r.rivals.slice(0, 8).map(x => `<a href="#" data-tour="${x.id}">${x.id}</a> ${esc(SEV[x.sev].toLowerCase())}`).join(", ")}</div>` : ""}</div>`).join("") : empty("Новых туров нет.")}
+  <h2 class="sec">Новые критичные конфликты</h2>
+  <p class="hint">Свой и партнёрский тур теперь делят заезд. Это может быть новый тур или новая дата у старого.</p>
+  ${ch.critical.length ? ch.critical.map(c => `<div class="card">${tourRow(c.a, {noRoute: true})}${tourRow(c.b, {noRoute: true, mark: undercutFlag(c)})}<div class="small" style="margin-top:6px">${esc(whyText(c))}</div></div>`).join("") : empty("Новых критичных конфликтов нет.")}
+  <h2 class="sec">Снятые туры</h2>
+  ${ch.removed.length ? `<div class="card">${ch.removed.map(x => `<div class="small"><span class="badge ${x.o ? "own" : "partner"}">${x.o ? "Свой" : "Партнёр"}</span> ${esc(x.n)} <span class="t-id">${x.id}</span> · ${esc(x.d)}</div>`).join("")}</div>` : empty("Ничего не снято.")}
+  <h2 class="sec">Направления, которые изменились</h2>
+  ${ch.directions.length ? `<div class="tablewrap"><table><thead><tr><th>Направление</th><th>Сегмент</th><th class="num">Было</th><th class="num">Стало</th><th>Итог</th></tr></thead><tbody>${ch.directions.map(r =>
+    `<tr><td>${esc(r.name)}</td><td>${esc(M.seg_labels[r.seg])}</td><td class="num">${r.before}</td><td class="num">${r.after}</td><td>${r.became ? '<span class="flag drop">вышло в перебор</span>' : (dirs[dirKey(r.seg, r.name)]?.status === "overflow" ? "перебор" : "в пределах среднего")}</td></tr>`).join("")}</tbody></table></div>` : empty("Состав направлений не менялся.")}`;
+};
+
+V.variants = () => {
+  const q = U.vQ.toLowerCase();
+  let rows = D.variants.filter(g => !rejected(g.k) && passOwn(g.tours) && (!U.vOwn || g.own > 0) &&
+    (!q || (g.title + " " + g.dir).toLowerCase().includes(q) || g.tours.some(id => (T[id].n + id).toLowerCase().includes(q))));
+  return `<h2 class="sec">Варианты одного продукта</h2>
+  <p class="hint">Один тур, заведённый несколькими карточками: на разное число дней, по сезонам, дням недели, отелям или один маршрут под разными названиями. Каждая карточка занимает место на направлении. Свой тур никогда не предлагается к снятию.</p>
+  <div class="filters"><input type="search" id="vq" placeholder="Название, направление, номер" value="${esc(U.vQ)}" aria-label="Поиск по вариантам">
+    <div class="chips"><button data-toggle="vOwn" aria-pressed="${U.vOwn}">Только с нашими турами</button></div>
+    <span class="small">Групп: ${rows.length}</span></div>
+  ${rows.map(g => `<div class="card${g.own ? " own" : ""}"><div class="row between"><h3>${esc(g.title)}</h3><span class="row"><span class="small">${esc(g.dir)} · ${g.tours.length} карточек${g.own ? `, наших ${g.own}` : ""}</span>${fbBox(g.k)}</span></div>
+    <div style="margin:6px 0 10px">${g.diff.map(d => `<span class="chip">${esc(d)}</span>`).join("")}</div>
+    ${g.tours.slice().sort((x, y) => T[x].dy - T[y].dy || x - y).map(id => tourRow(id, {noRoute: true, mark: advMark(g.advice, id)})).join("")}
+    <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Почему так</summary>${advBlock(g.advice)}</details></div>`).join("") || empty("Ничего не найдено.")}`;
+};
+
+V.overflow = () => {
+  let rows = D.directions.filter(d => d.status === "overflow" && !rejected(d.k) && passOwn(d.tours) && (!U.ovSeg || d.seg === U.ovSeg));
+  rows.sort(U.ovSort === "count" ? (a, b) => b.count - a.count : U.ovSort === "excess" ? (a, b) => b.excess - a.excess : (a, b) => b.ratio - a.ratio);
+  const max = Math.max(1, ...rows.map(d => d.count));
+  const segs = [...new Set(D.directions.filter(d => d.status === "overflow").map(d => d.seg))];
+  return `<h2 class="sec">Перебор по направлениям</h2>
+  <p class="hint">Перебор — туров на направлении больше среднего по сегменту в ${dec(M.factor.multi_day)} раза и более. Среднее считается отдельно для многодневных, зарубежья и однодневок: ${Object.entries(SUM.assortment.averages).map(([s, a]) => `${esc(M.seg_labels[s])} — ${dec(a)}`).join(", ")}. «Лишние» — превышение над средним. К снятию предлагаются только партнёрские туры.</p>
+  <div class="filters"><select id="ovseg" aria-label="Сегмент"><option value="">Все сегменты</option>${segs.map(s => `<option value="${s}"${U.ovSeg === s ? " selected" : ""}>${esc(M.seg_labels[s])}</option>`).join("")}</select>
+    <div class="chips" role="group" aria-label="Сортировка">${[["ratio", "К среднему"], ["excess", "По лишним"], ["count", "По числу туров"]].map(([k, l]) => `<button data-ovsort="${k}" aria-pressed="${U.ovSort === k}">${l}</button>`).join("")}</div>
+    <span class="small">Направлений: ${rows.length}</span></div>
+  ${rows.map(d => `<div class="card"><div class="row between"><h3>${esc(d.name)} <span class="small">· ${esc(M.seg_labels[d.seg])}</span></h3><span class="row"><span class="flag drop">×${dec(d.ratio)} к среднему</span>${fbBox(d.k)}</span></div>
+    <div style="margin:10px 0 6px">${sbar(d.own, d.partner, max, d.avg)}</div>
+    <div class="row small mono"><span><b>${d.count}</b> туров (своих ${d.own}, партнёрских ${d.partner})</span><span>среднее ${dec(d.avg)}</span><span>лишних ${d.excess}</span><span>продуктов ${d.products}</span>${d.peak ? `<span>пик ${fmtD(d.peak.date)}: ${d.peak.count} ${plural(d.peak.count, "тур", "тура", "туров")} в один день</span>` : ""}</div>
+    ${d.cut.length ? `<details style="margin-top:10px"><summary style="cursor:pointer"><b>Кандидаты на снятие (${d.cut.length})</b></summary><div style="margin-top:8px">${d.cut.map(id => tourRow(id, {noRoute: true})).join("")}</div></details>` : '<p class="small" style="margin:10px 0 0">Все туры направления наши: снимать решает продукт.</p>'}
+    <details style="margin-top:8px"><summary style="cursor:pointer" class="small">Все туры направления (${d.count})</summary><div style="margin-top:8px">${d.tours.map(id => tourRow(id, {noRoute: true})).join("")}</div></details></div>`).join("") || empty("Перебора нет.")}`;
+};
+
+V.clusters = () => {
+  const q = U.clQ.toLowerCase();
+  const rows = D.clusters.filter(k => k.tours.length >= U.clMin && passOwn(k.tours) && (!U.clOwn || k.own > 0) &&
+    (!q || k.dir.toLowerCase().includes(q) || k.tours.some(id => (T[id].n + " " + T[id].r + id).toLowerCase().includes(q))));
+  return `<h2 class="sec">Группы дублей</h2>
+  <p class="hint">Туры одного направления и одной длительности, которые сильно пересекаются по местам и датам. Если в группе есть наш тур, партнёрские туры группы предлагаются к снятию; если нет — остаются лучшие по числу заездов.</p>
+  <div class="filters"><input type="search" id="clq" placeholder="Направление или тур" value="${esc(U.clQ)}" aria-label="Поиск по группам">
+    <select id="clmin" aria-label="Размер группы">${[2, 3, 5].map(n => `<option value="${n}"${U.clMin === n ? " selected" : ""}>от ${n} туров</option>`).join("")}</select>
+    <div class="chips"><button data-toggle="clOwn" aria-pressed="${U.clOwn}">Только с нашими турами</button></div><span class="small">Групп: ${rows.length}</span></div>
+  ${rows.map(k => `<div class="card${k.own ? " own" : ""}"><div class="row between"><h3>${esc(k.dir)} · ${k.days} ${plural(k.days, "день", "дня", "дней")} <span class="small">· группа ${k.id}</span></h3><span class="row">${sevPill(k.worst)}<span class="small">${k.tours.length} туров, наших ${k.own}</span></span></div>
+    <div style="margin-top:10px">${k.tours.map(id => tourRow(id, {noRoute: true, mark: advMark(k.advice, id)})).join("")}</div>
+    <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Почему так</summary>${advBlock(k.advice)}</details></div>`).join("") || empty("Групп по фильтру нет.")}`;
+};
+
+function filteredConflicts() {
+  const q = U.cfQ.toLowerCase();
+  return D.conflicts.filter(c => !rejected(c.k) && (!U.cfSev.size || U.cfSev.has(c.sev)) && (!U.cfPair || c.pair === U.cfPair) &&
+    (!U.cfSeg || T[c.a].s === U.cfSeg) && (!U.cfBasis || c.bs === U.cfBasis) && (!U.cfUndercut || beats(c)) && (!U.cfDirect || c.direct) && passOwn([c.a, c.b]) &&
+    (!q || (c.a + " " + c.b + " " + T[c.a].n + " " + T[c.b].n + " " + T[c.a].d + " " + T[c.a].r + " " + T[c.b].r).toLowerCase().includes(q))).sort(sortConf);
+}
+V.conflicts = () => {
+  const rows = filteredConflicts();
+  const cell = id => `<div class="tour ${T[id].o ? "own" : "partner"}${dim(T[id]) ? " dim" : ""}" data-tour="${id}" tabindex="0" role="button" aria-label="Открыть тур ${id}"><div class="t-top">${badge(T[id])}<span class="t-id">${id}</span></div><div class="t-name">${esc(T[id].n)}</div><div class="t-meta">${T[id].dy} дн. · ${esc(price(T[id]))}</div></div>`;
+  return `<h2 class="sec">Все конфликты</h2>
+  <p class="hint">Пара туров конфликтует, если это один сегмент, то же направление и близкая длительность. Сначала идут пары, где один тур перебивает другой ценой, затем по серьёзности.</p>
+  <div class="filters"><input type="search" id="cfq" placeholder="Номер, название, место" value="${esc(U.cfQ)}" aria-label="Поиск по конфликтам">
+    <select id="cfpair" aria-label="Тип пары"><option value="">Любая пара</option>${Object.entries(PAIR).map(([k, l]) => `<option value="${k}"${U.cfPair === k ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+    <select id="cfseg" aria-label="Сегмент"><option value="">Все сегменты</option>${Object.entries(M.seg_labels).map(([k, l]) => `<option value="${k}"${U.cfSeg === k ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+  <div class="filters"><div class="chips" role="group" aria-label="Серьёзность">${SEVO.map(s => `<button data-cfsev="${s}" aria-pressed="${U.cfSev.has(s)}">${esc(SEV[s])}</button>`).join("")}</div>
+    <div class="chips"><button data-toggle="cfUndercut" aria-pressed="${U.cfUndercut}" title="Партнёрский тур дешевле нашего в те же даты">Партнёр перебивает наш ценой</button><button data-toggle="cfDirect" aria-pressed="${U.cfDirect}">Только общие заезды</button></div>
+    <div class="chips" role="group" aria-label="Основание пары"><button data-cfbasis="anchor" aria-pressed="${U.cfBasis === "anchor"}" title="Туры связаны только общим городом-базой, остальные места разные">Только общий город-база</button><button data-cfbasis="places" aria-pressed="${U.cfBasis === "places"}" title="Есть общие места маршрута">Есть общие места</button></div>
+    <span class="grow"></span><span class="small" aria-live="polite">Найдено: ${num(rows.length)}</span><button class="btn sm" id="csv">Скачать CSV</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Серьёзность</th><th>Тур A</th><th>Тур B</th><th>Почему</th><th>Оценка</th></tr></thead><tbody>${rows.slice(0, U.cfLimit).map(c =>
+    `<tr class="pair${beats(c) ? " hot" : ""}"><td>${sevPill(c.sev)}<div style="margin-top:6px">${undercutFlag(c)}</div></td><td>${cell(c.a)}</td><td>${cell(c.b)}</td><td class="small">${c.bs === "anchor" ? '<div><span class="chip ev" title="Туры связаны только общим городом-базой">только город-база</span></div>' : ""}${esc(whyText(c))}${fbl(c.k) === "yes" ? '<div><span class="flag keep">подтверждено</span></div>' : ""}</td><td>${fbBox(c.k)}</td></tr>`).join("") ||
+    '<tr><td colspan="5" class="empty">Ничего не найдено</td></tr>'}</tbody></table></div>
+  ${rows.length > U.cfLimit ? `<button class="btn" id="cfmore" style="margin-top:12px">Показать ещё ${Math.min(100, rows.length - U.cfLimit)} из ${num(rows.length - U.cfLimit)}</button>` : ""}`;
+};
+
+V.excluded = () => {
+  const total = D.excluded.reduce((n, r) => n + r.tours.length, 0);
+  const row = t => `<div class="tour ${t.o ? "own" : "partner"}" style="cursor:default">
+    <div class="t-top">${badge(t)}<span class="t-name">${esc(t.n)}</span><span class="t-id">${t.id}</span></div>
+    <div class="t-meta">${t.dy} дн. · ${esc(price(t))} · ${t.dt.length} ${plural(t.dt.length, "заезд", "заезда", "заездов")}${t.has_dates ? "" : " (нет заездов в продаже)"}</div>
+    <div class="t-route">${esc(t.r)}</div>
+    <div class="row small" style="margin-top:4px;gap:14px"><a href="${link("site", t.id)}" target="_blank" rel="noopener">на сайте</a><a href="${link("manager", t.id)}" target="_blank" rel="noopener">в менеджерке</a></div></div>`;
+  const cond = m => [m.name && `название: ${m.name}`, m.route && `маршрут: ${m.route}`, m.guide && `гид: ${m.guide}`, (m.ids || []).length && `номера: ${m.ids.join(", ")}`].filter(Boolean).join("; ");
+  return `<h2 class="sec">Вне анализа</h2>
+  <p class="hint">Туры, которые владелец вывел из анализа. Они не участвуют в конфликтах, группах дублей, переборе, средних, выводах и счётчиках, но остаются на сайте и показаны здесь. Правило задаёт агент по вашему слову (инструмент <b>assortment_exclude</b>), снимает <b>assortment_include</b>; решение записывается в журнал выученного.</p>
+  ${total ? D.excluded.map(r => `<div class="card"><div class="row between"><h3>${esc(r.rule.title)}</h3><span class="small">${r.tours.length} ${plural(r.tours.length, "тур", "тура", "туров")}</span></div>
+    ${r.rule.reason ? `<p style="margin:6px 0">${esc(r.rule.reason)}</p>` : ""}
+    <div class="small" style="margin-bottom:10px">Правило <b>${esc(r.rule.id)}</b> — ${esc(cond(r.rule.match))}</div>
+    ${r.tours.map(row).join("") || '<div class="small">Под это правило сейчас не попадает ни один тур каталога.</div>'}</div>`).join("") :
+    empty("Вне анализа пока ничего нет. Скажите агенту, какие туры не должны участвовать (по названию, гиду или номерам), и они появятся здесь.")}`;
+};
+
+V.learn = () => {
+  const items = Object.entries(FB).map(([k, v]) => ({k, ...v})).sort((a, b) => (b.a || "").localeCompare(a.a || ""));
+  const cnt = (kind, l) => items.filter(i => kindOf(i.k) === kind && i.l === l).length;
+  const cy = cnt("conflict", "yes"), cn = cnt("conflict", "no");
+  const prec = cy + cn ? Math.round(100 * cy / (cy + cn)) : null;
+  const desc = k => {
+    const kind = kindOf(k);
+    if (kind === "conflict") { const [a, b] = k.slice(2).split("-").map(Number); return T[a] && T[b] ? `${esc(T[a].n)} <span class="t-id">${a}</span> и ${esc(T[b].n)} <span class="t-id">${b}</span>` : esc(k); }
+    if (kind === "variants") { const g = D.variants.find(x => x.k === k), id = +k.slice(2); return g ? esc(g.title) : (T[id] ? esc(T[id].n) + " и другие" : esc(k)); }
+    return esc(k.slice(2).split("|").reverse().join(" · "));
+  };
+  const KN = {conflict: "Конфликт пары", variants: "Варианты", direction: "Перебор"};
+  const L = D.learning, lm = L.learned, WN = {geo: "география", duration: "длительность", dates: "общие заезды", price: "цена"};
+  const prog = Math.min(100, Math.round(100 * L.conflict_labels / L.min_labels));
+  const learnBlock = `<h2 class="sec">Самообучение</h2>
+    <p class="hint">Когда набирается ${L.min_labels} оценок конфликтов (не меньше 8 «конфликт» и 8 «не конфликт»), инструмент сам подбирает веса и пороги, которые лучше воспроизводят ваши оценки, и записывает это в журнал выученного. Принимается только то, что лучше и на отложенных данных; выученное можно сбросить инструментом <b>assortment_reset_learned</b>.</p>
+    <div class="card"><div class="row between"><b>Размечено конфликтов: ${L.conflict_labels} из ${L.min_labels}</b><span class="small">${lm ? "пороги выучены" : "ещё не обучался"}</span></div>
+      <div class="meter" style="margin:8px 0" role="img" aria-label="Прогресс разметки ${prog}%"><i style="width:${prog}%;background:var(--own)"></i></div>
+      <div class="small">${Object.entries(L.weights).map(([k, v]) => `${WN[k]} ${dec(v.toFixed(2))}`).join(" · ")} · порог балла ${dec(L.score_min)} · порог географии ${dec(L.geo_min)}${lm ? "" : " (значения по умолчанию)"}</div>
+      ${lm ? `<div style="margin-top:8px"><span class="flag keep">выучено по ${lm.labels} оценкам</span> <span class="small">F1 на отложенных данных ${pct(lm.cv_learned)} против ${pct(lm.cv_base)} у значений по умолчанию</span></div>` : ""}</div>`;
+  const rv = D.review.filter(c => !FB[c.k]);
+  const reviewBlock = rv.length ? `<h2 class="sec">Проверьте пропуски</h2>
+    <p class="hint">Пары, которые алгоритм не счёл конфликтом, хотя они близки к порогу (причина указана у каждой). Если это всё-таки конфликт, отметьте: пара появится в отчётах, а инструмент научится ловить такие. Если нет, это поможет не завышать чувствительность.</p>
+    ${rv.map(c => `<div class="card">${tourRow(c.a, {noRoute: true})}${tourRow(c.b, {noRoute: true})}
+      <div class="small" style="margin-top:6px"><b>Почему пропущено:</b> ${esc(c.miss)}. ${esc(whyText(c))}</div>
+      <div class="fbrow">${fbBox(c.k, ["Это конфликт", "Не конфликт"])}</div></div>`).join("")}` : "";
+  const logBlock = `<h2 class="sec">Что инструмент выучил</h2>
+    <p class="hint">Принципы, которые объяснил владелец, и журнал самообучения. Файл ведёт агент: читайте его, прежде чем менять правила.</p>
+    <div class="card"><pre style="white-space:pre-wrap;margin:0;max-height:460px;overflow:auto;font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace">${esc(D.learnings)}</pre></div>`;
+  return `<h2 class="sec">Обучение инструмента</h2>
+  <p class="hint">Оценивайте находки кнопками «Верно» и «Не конфликт» (или «Не варианты», «Не перебор»). При отклонении появится поле причины: выберите готовую или напишите своими словами. Отклонённая находка исчезает из отчётов и выводов после пересчёта, но остаётся здесь вместе с причиной, которую можно поправить; подтверждённая получает пометку. Все оценки конфликтов используются для подбора порогов: <b>python calibrate.py score</b> посчитает точность и предложит лучшие значения.</p>
+  <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+    <div class="kpi"><b>${items.filter(i => i.l === "yes").length}</b><span>подтверждено</span></div>
+    <div class="kpi"><b>${items.filter(i => i.l === "no").length}</b><span>отклонено</span></div>
+    <div class="kpi"><b>${prec == null ? "—" : prec + "%"}</b><span>точность находок-конфликтов по вашим оценкам${prec == null ? "" : ` (${cy} из ${cy + cn})`}</span></div></div>
+  ${learnBlock}${reviewBlock}
+  <h2 class="sec">Ваши оценки</h2>
+  <div class="filters"><button class="btn" data-fbexport>Скачать оценки (JSON)</button>
+    ${served ? '<button class="btn" data-reload>Пересчитать с учётом оценок</button>' : '<span class="small">Страница открыта без сервера: оценки хранятся в браузере. Для автоматического сохранения откройте её через run-local.cmd.</span>'}</div>
+  ${items.length ? `<div class="tablewrap"><table><thead><tr><th>Оценка</th><th>Вид</th><th>Находка</th><th>Причина</th><th></th></tr></thead><tbody>${items.map(i =>
+    `<tr><td>${i.l === "yes" ? '<span class="flag keep">подтверждено</span>' : '<span class="flag drop">отклонено</span>'}</td><td>${KN[kindOf(i.k)] || ""}</td><td>${desc(i.k)}</td>
+     <td><input class="note" list="reasons-${kindOf(i.k)}" data-fbnote="${esc(i.k)}" value="${esc(i.n || "")}" placeholder="${i.l === "no" ? "Причина отклонения" : "Почему верно (необязательно)"}" aria-label="Причина оценки">${i.l === "no" && !i.n ? '<div class="small" style="color:var(--warn)">причина не указана</div>' : ""}</td>
+     <td><button class="btn sm" data-fbundo="${esc(i.k)}">Снять оценку</button></td></tr>`).join("")}</tbody></table></div>` :
+    empty("Оценок пока нет. Откройте вкладку «Свои под ударом» или «Конфликты» и отметьте несколько находок.")}
+  ${Object.entries(REASONS).map(([k, v]) => `<datalist id="reasons-${k}">${v.map(r => `<option value="${esc(r)}">`).join("")}</datalist>`).join("")}
+  ${logBlock}`;
+};
+
+V.directions = () => {
+  const q = U.drQ.toLowerCase();
+  const cols = [["name", "Направление"], ["seg", "Сегмент"], ["count", "Туров"], ["ratio", "К среднему"], ["own", "Своих"], ["partner", "Партн."], ["products", "Продуктов"], ["status", "Статус"]];
+  const val = d => U.drSort === "status" ? ["overflow", "ok", "unchecked"].indexOf(d.status) : (d[U.drSort] ?? -1);
+  const rows = D.directions.filter(d => passOwn(d.tours) && (!q || d.name.toLowerCase().includes(q))).sort((a, b) => {
+    const x = val(a), y = val(b), r = typeof x === "string" ? x.localeCompare(y, "ru") : x - y;
+    return (U.drDesc ? -r : r) || a.name.localeCompare(b.name, "ru");
+  });
+  const max = Math.max(1, ...D.directions.map(d => d.count));
+  const sel = U.dirSel && dirs[U.dirSel];
+  return `<h2 class="sec">Все направления</h2>
+  <div class="filters"><input type="search" id="drq" placeholder="Направление" value="${esc(U.drQ)}" aria-label="Поиск направления"><span class="small">Направлений: ${rows.length}</span></div>
+  ${sel ? `<div class="card"><div class="row between"><h3>${esc(sel.name)} · ${esc(M.seg_labels[sel.seg])}</h3><button class="btn sm" data-dirclose>Закрыть</button></div><div style="margin-top:10px">${sel.tours.map(id => tourRow(id, {noRoute: true})).join("")}</div></div>` : ""}
+  <div class="tablewrap"><table><thead><tr>${cols.map(([k, l]) => `<th${["count", "ratio", "own", "partner", "products"].includes(k) ? ' class="num"' : ""} ${U.drSort === k ? `aria-sort="${U.drDesc ? "descending" : "ascending"}"` : ""}><button data-drsort="${k}">${l}</button></th>`).join("")}<th title="Длина полоски — число туров направления относительно самого большого. Синее — наши туры, штриховка — партнёрские.">Свои / партнёрские</th></tr></thead><tbody>${rows.map(d =>
+    `<tr><td><button class="btn sm" data-dir="${esc(dirKey(d.seg, d.name))}" style="border:0;background:none;padding:0;height:auto;font-weight:600;text-align:left">${esc(d.name)}</button></td><td>${esc(M.seg_labels[d.seg])}</td><td class="num${d.status === "overflow" ? " over" : ""}"><b>${d.count}</b></td><td class="num">${d.ratio ? "×" + dec(d.ratio) : "—"}</td><td class="num">${d.own}</td><td class="num">${d.partner}</td><td class="num">${d.products}</td><td>${d.status === "overflow" ? '<span class="flag drop">перебор</span>' : d.status === "ok" ? "в пределах среднего" : '<span class="small">не проверяется</span>'}</td><td style="min-width:140px">${sbar(d.own, d.partner, max, 0)}</td></tr>`).join("")}</tbody></table></div>`;
+};
+
+/* ---------- карточка тура ---------- */
+function drawerHtml(id) {
+  const t = T[id], cs = (byTour[id] || []).filter(c => !rejected(c.k)).sort(sortConf), d = dirOf(id), k = clusterOf[id], g = variantOf[id];
+  const rival = new Set(cs.map(c => c.a === id ? c.b : c.a));
+  const hot = new Set();
+  cs.forEach(c => { const o = T[c.a === id ? c.b : c.a]; near(t.dt, t.dy, o.dt, o.dy, M.window).forEach(x => hot.add(x)); });
+  const adv = (k && k.advice) || null, vadv = g ? g.advice : null;
+  const verdicts = [];
+  if (k && adv) { const m = advMark(adv, id); if (m) verdicts.push(`<div class="row" style="margin-bottom:6px">${m}<span class="small">в группе дублей ${k.id}: ${esc(([...adv.keep, ...adv.drop].find(p => p.id === id) || {}).why || "")}</span></div>`); }
+  if (g && vadv) { const m = advMark(vadv, id); if (m) verdicts.push(`<div class="row" style="margin-bottom:6px">${m}<span class="small">среди вариантов продукта: ${esc(([...vadv.keep, ...vadv.drop].find(p => p.id === id) || {}).why || "")}</span></div>`); }
+  return `<div class="dr-head"><div class="row between"><div class="row">${badge(t, true)}<span class="t-id">${id}</span></div>
+      <div class="row"><button class="btn sm" data-copy="${id}">Скопировать №</button><button class="icon-btn" data-close aria-label="Закрыть" style="height:34px;width:34px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div></div>
+      <h3 style="margin:8px 0 0;font-size:18px;line-height:1.3">${esc(t.n)}</h3><div class="small">${esc(t.r)}</div></div>
+    <div class="dr-body">
+      <div class="row"><a href="${link("site", id)}" target="_blank" rel="noopener">Открыть на сайте</a><a href="${link("manager", id)}" target="_blank" rel="noopener">Править в менеджерке</a></div>
+      <div class="facts" style="margin-top:12px"><div><b>Направление</b>${esc(t.d)}</div><div><b>Сегмент</b>${esc(M.seg_labels[t.s])}</div><div><b>Длительность</b>${t.dy} дн.</div><div><b>Цена от</b>${esc(price(t))}</div>
+        <div><b>Повод заездов</b>${t.ev.length ? esc(t.ev.join(", ")) + (t.eo ? " (только праздничные)" : " и обычные") : "обычные даты"}</div><div><b>Заездов</b>${t.dt.length}</div><div><b>Свободных мест</b>${t.hf ? num(t.st) : "нет"}</div></div>
+      ${verdicts.length ? `<h4>Рекомендация</h4>${verdicts.join("")}` : ""}
+      <h4>Заезды${hot.size ? ` <span class="chip hot">красным — в эти дни идёт поездка конкурента</span>` : ""}</h4>
+      <div>${t.dt.map(x => `<span class="chip${hot.has(x) ? " hot" : ""}">${fmtD(x)}</span>`).join("") || '<span class="small">нет заездов</span>'}</div>
+      <h4>Конфликты (${cs.length})</h4>
+      ${cs.length ? cs.slice(0, 25).map(c => { const oid = c.a === id ? c.b : c.a; return tourRow(oid, {noRoute: true, mark: `${sevPill(c.sev)}${undercutFlag(c)}`, extra: `${cmpPrice(c.a === id ? c : {...c, a: c.b, b: c.a, ch: c.ch === "a" ? "b" : "a"})}<div class="small">${esc(whyText(c))}</div>${fbRow(c.k)}`}); }).join("") + (cs.length > 25 ? `<div class="small">и ещё ${cs.length - 25}</div>` : "") : '<div class="small">Конфликтов нет.</div>'}
+      ${g ? `<h4>Варианты этого продукта (${g.tours.length})</h4>${g.tours.filter(x => x !== id).map(x => tourRow(x, {noRoute: true, mark: advMark(vadv, x)})).join("")}` : ""}
+      ${d ? `<h4>Направление «${esc(d.name)}»</h4>${sbar(d.own, d.partner, Math.max(d.count, 1), d.avg)}<div class="small" style="margin-top:6px">${d.count} туров (своих ${d.own}, партнёрских ${d.partner})${d.avg ? `, среднее ${dec(d.avg)}, ×${dec(d.ratio)}` : ""}${d.status === "overflow" ? " — перебор" : ""}</div>` : ""}
+    </div>`;
+}
+let lastFocus = null;
+function renderDrawer() {
+  const dr = $("#drawer"), sc = $("#scrim");
+  if (S.tour) {
+    const was = !dr.hidden;
+    dr.innerHTML = drawerHtml(S.tour); dr.hidden = sc.hidden = false;
+    if (!was) { lastFocus = document.activeElement; $("[data-close]", dr)?.focus(); }
+  } else if (!dr.hidden) { dr.hidden = sc.hidden = true; dr.innerHTML = ""; lastFocus?.focus?.(); }
+}
+
+/* ---------- каркас и события ---------- */
+function renderChrome() {
+  const sm = SUM.tours, p = sm.total ? 100 * sm.own / sm.total : 0;
+  $("#meta").textContent = "Каталог от " + new Date(M.snapshot_at).toLocaleString("ru-RU", {dateStyle: "short", timeStyle: "short"}) + " · конфиг " + M.config_hash;
+  $("#split").innerHTML = `<i class="o" style="width:${p}%"></i><i class="p" style="width:${100 - p}%"></i>`;
+  $("#split").setAttribute("aria-label", `Свои ${sm.own} из ${sm.total}`);
+  $("#split").title = `Свои ${sm.own} (${Math.round(p)}%), партнёрские ${sm.partner}`;
+  $("#splitnum").textContent = `${sm.own} своих из ${sm.total} (${Math.round(p)}%)`;
+  const counts = {own: D.threats.length, changes: D.changes ? D.changes.totals.added + D.changes.totals.new_critical : null, variants: D.variants.length,
+    overflow: SUM.directions.overflow, clusters: D.clusters.length, conflicts: D.conflicts.length, directions: D.directions.length, excluded: D.excluded.reduce((n, r) => n + r.tours.length, 0) || null, learn: Object.keys(FB).length || null};
+  $("#tabs").innerHTML = TABS.map(([k, l]) => `<button role="tab" id="tab-${k}" data-tab="${k}" aria-selected="${S.tab === k}" tabindex="${S.tab === k ? 0 : -1}">${l}${counts[k] != null ? `<span class="n${k === "own" && D.threats.some(r => r.undercut) ? " hot" : ""}">${num(counts[k])}</span>` : ""}</button>`).join("");
+  $$(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.own === S.own));
+  $("#legend-note")?.remove();
+}
+function renderFbBar() {
+  const bar = $("#fbbar");
+  if (!fbDirty && !fbError) { bar.hidden = true; return; }
+  const n = Object.keys(FB).length;
+  bar.hidden = false;
+  bar.innerHTML = `<div class="in">${fbError ? `<b style="color:var(--alarm)">${esc(fbError)}</b>` :
+    served ? `<span>Оценок: <b>${n}</b>. Они сохранены. Отклонённые уже скрыты; сводка, выводы и счётчики обновятся после пересчёта.</span><button class="btn sm primary" data-reload>Пересчитать</button>`
+      : `<span>Оценок: <b>${n}</b>. Страница открыта без сервера, оценки хранятся в этом браузере. Скачайте их на вкладке «Обучение».</span><button class="btn sm" data-fbexport>Скачать оценки</button>`}</div>`;
+}
+function renderBadge() { if (!BOOT.badge || document.getElementById('modebadge')) return; const b = document.createElement('div'); b.id = 'modebadge'; b.textContent = BOOT.badge;
+  b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:50;padding:6px 12px;border-radius:999px;font-size:12.5px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line,#444)'; document.body.appendChild(b); }
+function render() { renderChrome(); renderView(); renderDrawer(); renderFbBar(); renderBadge(); }
+function renderView() {
+  const v = $("#view"), y = window.scrollY;
+  v.innerHTML = V[S.tab]();
+  v.setAttribute("aria-labelledby", "tab-" + S.tab);
+  document.title = (TABS.find(t => t[0] === S.tab)[1]) + " · Ассортимент";
+  window.scrollTo(0, y);
+}
+
+document.addEventListener("click", e => {
+  const a = e.target.closest("a");
+  if (a && a.target === "_blank") return;
+  const fbB = e.target.closest("[data-fb]");
+  if (fbB) {
+    const k = fbB.dataset.fb, v = fbB.dataset.v, off = fbl(k) === v;
+    pendingNote = !off && v === "no" ? k : null; reasonPreset = ""; reasonText = "";
+    saveFb(k, off ? null : v); return;
+  }
+  const rp = e.target.closest("[data-reason-preset]");
+  if (rp) { reasonPreset = reasonPreset === rp.dataset.reasonPreset ? "" : rp.dataset.reasonPreset; render(); return; }
+  if (e.target.closest("[data-reason-save]") || e.target.closest("[data-reason-skip]")) {
+    const k = pendingNote, skip = !!e.target.closest("[data-reason-skip]");
+    const note = skip ? (FB[k] && FB[k].n) || "" : [reasonPreset, reasonText.trim()].filter(Boolean).join(": ");
+    pendingNote = null; reasonPreset = ""; reasonText = "";
+    if (k && FB[k]) saveFb(k, FB[k].l, note); else render();
+    return;
+  }
+  if (e.target.closest("[data-reload]")) { location.reload(); return; }
+  if (e.target.closest("[data-fbexport]")) { exportFb(); return; }
+  const fbU = e.target.closest("[data-fbundo]"); if (fbU) { saveFb(fbU.dataset.fbundo, null); return; }
+  const g = e.target.closest("[data-go]"); if (g) { go({tab: g.dataset.go, tour: null}); window.scrollTo(0, 0); return; }
+  const tab = e.target.closest("[data-tab]:not([data-act])"); if (tab) { go({tab: tab.dataset.tab, tour: null}); window.scrollTo(0, 0); return; }
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const k = act.dataset.act, ref = act.dataset.ref;
+    if (k === "own_threat") go({tab: "own", tour: +ref});
+    else if (k === "overflow") { U.ovSeg = ""; go({tab: "overflow", tour: null}); }
+    else if (k === "variants") { U.vQ = ""; U.vOwn = false; go({tab: "variants", tour: null}); }
+    else go({tab: act.dataset.tab, tour: +ref || null});
+    return;
+  }
+  const own = e.target.closest("[data-own]"); if (own) { go({own: own.dataset.own}); return; }
+  const tr = e.target.closest("[data-tour]"); if (tr) { e.preventDefault(); go({tour: +tr.dataset.tour}); return; }
+  if (e.target.closest("[data-close]") || e.target.id === "scrim") { go({tour: null}); return; }
+  const cp = e.target.closest("[data-copy]"); if (cp) { navigator.clipboard?.writeText(cp.dataset.copy).then(() => { cp.textContent = "Скопировано"; setTimeout(() => cp.textContent = "Скопировать №", 1200); }, () => {}); return; }
+  const cb = e.target.closest("[data-cfbasis]"); if (cb) { U.cfBasis = U.cfBasis === cb.dataset.cfbasis ? "" : cb.dataset.cfbasis; U.cfLimit = 100; renderView(); return; }
+  const os = e.target.closest("[data-ownsort]"); if (os) { U.ownSort = os.dataset.ownsort; renderView(); return; }
+  const om = e.target.closest("[data-ownmore]"); if (om) { U.ownMore[om.dataset.ownmore] = !U.ownMore[om.dataset.ownmore]; renderView(); return; }
+  const tg = e.target.closest("[data-toggle]"); if (tg) { U[tg.dataset.toggle] = !U[tg.dataset.toggle]; U.cfLimit = 100; renderView(); return; }
+  const ov = e.target.closest("[data-ovsort]"); if (ov) { U.ovSort = ov.dataset.ovsort; renderView(); return; }
+  const cs = e.target.closest("[data-cfsev]"); if (cs) { const s = cs.dataset.cfsev; U.cfSev.has(s) ? U.cfSev.delete(s) : U.cfSev.add(s); U.cfLimit = 100; renderView(); return; }
+  const ds = e.target.closest("[data-drsort]"); if (ds) { const k = ds.dataset.drsort; U.drDesc = U.drSort === k ? !U.drDesc : k !== "name" && k !== "seg"; U.drSort = k; renderView(); return; }
+  const dd = e.target.closest("[data-dir]"); if (dd) { U.dirSel = dd.dataset.dir; renderView(); return; }
+  if (e.target.closest("[data-dirclose]")) { U.dirSel = null; renderView(); return; }
+  if (e.target.id === "cfmore") { U.cfLimit += 100; renderView(); return; }
+  if (e.target.id === "csv") { exportCsv(); return; }
+  if (!e.target.closest(".search")) hidePop();
+});
+document.addEventListener("input", e => {
+  if (e.target.id === "reasonInput") { reasonText = e.target.value; return; }
+  const m = {vq: ["vQ"], clq: ["clQ"], cfq: ["cfQ"], drq: ["drQ"]}[e.target.id];
+  if (m) { U[m[0]] = e.target.value; U.cfLimit = 100; const pos = e.target.selectionStart; renderView(); const n = $("#" + e.target.id); n.focus(); n.setSelectionRange(pos, pos); }
+});
+document.addEventListener("change", e => {
+  if (e.target.dataset && e.target.dataset.fbnote) { const k = e.target.dataset.fbnote; if (FB[k]) saveFb(k, FB[k].l, e.target.value.trim()); return; }
+  if (e.target.id === "ovseg") { U.ovSeg = e.target.value; renderView(); }
+  if (e.target.id === "clmin") { U.clMin = +e.target.value; renderView(); }
+  if (e.target.id === "cfpair") { U.cfPair = e.target.value; U.cfLimit = 100; renderView(); }
+  if (e.target.id === "cfseg") { U.cfSeg = e.target.value; U.cfLimit = 100; renderView(); }
+});
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if ((e.key === "Enter" || e.key === " ") && t.matches?.("[data-tour][role=button]")) { e.preventDefault(); go({tour: +t.dataset.tour}); return; }
+  if (t.id === "reasonInput" && e.key === "Enter") { e.preventDefault(); $("[data-reason-save]").click(); return; }
+  if (t.id === "reasonInput" && e.key === "Escape") { e.preventDefault(); $("[data-reason-skip]").click(); return; }
+  if (e.key === "Escape") { if (!$("#pop").hidden) { hidePop(); return; } if (S.tour) { go({tour: null}); } return; }
+  if (e.key === "/" && !/input|select|textarea/i.test(t.tagName)) { e.preventDefault(); $("#q").focus(); return; }
+  if (t.matches?.("#tabs [role=tab]") && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+    const i = TABS.findIndex(x => x[0] === S.tab), n = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
+    go({tab: n, tour: null}); $("#tab-" + n)?.focus(); return;
+  }
+  if (S.tour && e.key === "Tab") {
+    const f = $$("#drawer a[href],#drawer button,#drawer [tabindex='0']").filter(x => x.offsetParent);
+    if (f.length) { const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } }
+  }
+});
+
+/* поиск тура */
+const hidePop = () => { $("#pop").hidden = true; $("#q").setAttribute("aria-expanded", "false"); };
+$("#q").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase().replace(/ё/g, "е"), pop = $("#pop");
+  if (!q) { hidePop(); return; }
+  const hits = Object.values(T).filter(t => String(t.id) === q || String(t.id).startsWith(q) || (t.n + " " + t.r + " " + t.d).toLowerCase().replace(/ё/g, "е").includes(q))
+    .sort((a, b) => (String(b.id) === q) - (String(a.id) === q) || a.id - b.id).slice(0, 8);
+  pop.innerHTML = hits.map(t => `<button role="option" data-tour="${t.id}">${badge(t)} <b>${esc(t.n)}</b> <span class="t-id">${t.id}</span><div class="small">${esc(t.d)} · ${t.dy} дн. · ${esc(price(t))}</div></button>`).join("") || '<div class="none">Ничего не найдено</div>';
+  pop.hidden = false; e.target.setAttribute("aria-expanded", "true");
+});
+$("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const f = $("#pop button"); if (f) f.click(); } });
+$("#pop").addEventListener("click", () => { hidePop(); $("#q").value = ""; });
+
+/* тема */
+$("#theme").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("vsa-theme", next); } catch (_) {}
+});
+try { const t = localStorage.getItem("vsa-theme"); if (t) document.documentElement.dataset.theme = t; } catch (_) {}
+
+/* CSV */
+function exportCsv() {
+  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  const head = ["Серьёзность", "Тип пары", "Перебивает ценой", "Тур A", "Название A", "Чей A", "Цена A", "Тур B", "Название B", "Чей B", "Цена B", "Дешевле на, %", "Общие заезды", "Почему", "Ссылка A", "Ссылка B"];
+  const lines = filteredConflicts().map(c => [SEV[c.sev], PAIR[c.pair], beats(c) ? "да" : "", c.a, T[c.a].n, T[c.a].o ? "свой" : "партнёр", T[c.a].p ?? "", c.b, T[c.b].n, T[c.b].o ? "свой" : "партнёр", T[c.b].p ?? "",
+    c.chp != null ? Math.round(c.chp * 100) : "", c.shared.join(" "), c.why, link("site", c.a), link("site", c.b)].map(q).join(";"));
+  const blob = new Blob(["﻿" + [head.map(q).join(";"), ...lines].join("\r\n")], {type: "text/csv;charset=utf-8"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "konflikty-" + M.snapshot_at.slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+window.addEventListener("hashchange", () => { pendingNote = null; parse(); render(); });
+parse(); render();
+</script>
+</body>
+</html>

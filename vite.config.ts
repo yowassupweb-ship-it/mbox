@@ -42,6 +42,9 @@ import { ensureItemIconsSchema, handleItemIconsApi } from "./server/item-icons.m
 import { canManageTool, ensureIntegrationsSchema, handleIntegrationsApi } from "./server/integrations.mjs";
 import { handleEmailCheckerApi } from "./server/email-checker.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./server/seo-wizard.mjs";
+import { ensureAssortment, handleAssortmentApi } from "./server/assortment-api.mjs";
+import { handleAssortmentChat } from "./server/assortment-chat.mjs";
+import { handleSharedAssortmentApi } from "./server/assortment-share.mjs";
 import { documentToDocx, docxFileName } from "./server/docx.mjs";
 import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./server/ui-open.mjs";
 import { handleBrowserAgentApi } from "./server/browser-agent.mjs";
@@ -1002,6 +1005,7 @@ function mboxDevApi() {
       ensureItemIconsSchema(queryPostgres).catch((error: Error) => console.error(`icons schema: ${error.message}`));
       ensureSkillAccessSchema(queryPostgres).then(() => ensureSkillStoreSchema(queryPostgres)).catch((error: Error) => console.error(`skill access schema: ${error.message}`));
       ensureSeoWizardSchema(queryPostgres).catch((error: Error) => console.error(`seo wizard schema: ${error.message}`));
+      ensureAssortment(queryPostgres).catch((error: Error) => console.error(`assortment schema: ${error.message}`));
       import("./server/migrations.mjs").then(({ runMigrations }) => runMigrations(getPool())).catch((error: Error) => console.error(`migrations: ${error.message}`));
       const realtimeServer = new WebSocketServer({ noServer: true });
 
@@ -1080,6 +1084,13 @@ function mboxDevApi() {
         // Зеркало прод-сервера: заметка по ссылке отвечает без входа (см. server/notes.mjs).
         if (req.url?.startsWith("/api/share/")) {
           const shareUrl = new URL(req.url, "http://localhost");
+          // Зеркало прод-ручек: Ассортимент по ссылке или паролю (server/assortment-share.mjs).
+          try {
+            if (await handleSharedAssortmentApi({ req, res, url: shareUrl, query: queryPostgres, readBody, sendJson, api: handleAssortmentApi, chat: handleAssortmentChat })) return;
+          } catch (error) {
+            sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+            return;
+          }
           const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
           try {
             const handled = await handleSharedNoteApi({
@@ -1188,6 +1199,8 @@ function mboxDevApi() {
           if (await handleEmailCheckerApi({ req, res, url, readBody, sendJson })) return;
           // Зеркало прод-ручек SEO Wizard (server/seo-wizard.mjs), доступ — только владельцу, как scope.all в проде.
           if (await handleSeoWizardApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: sessionUser.role === "owner" })) return;
+          // Зеркало прод-ручек Ассортимента (server/assortment-api.mjs), только владелец.
+          if (await handleAssortmentApi({ req, res, url, query: queryPostgres, readBody, sendJson, allowed: sessionUser.role === "owner", access: "owner", actor: "владелец" })) return;
 
           if (url.pathname === "/api/mbox/agent/structure") {
             return sendJson(res, 200, { structure: agentStructure });

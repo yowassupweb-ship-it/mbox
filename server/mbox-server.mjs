@@ -53,6 +53,10 @@ import { parseOpenRequest, sendOpenTab, tagSocketUser } from "./ui-open.mjs";
 import { createHelp, handleBrowserAgentApi, handleBrowserHelpApi, runBrowserOp, waitHelp } from "./browser-agent.mjs";
 import { ensureSeoWizardSchema, handleSeoWizardApi } from "./seo-wizard.mjs";
 import { handleSharedSeoApi } from "./seo-share.mjs";
+import { ensureAssortment, handleAssortmentApi } from "./assortment-api.mjs";
+import { handleAssortmentChat } from "./assortment-chat.mjs";
+import { handleSharedAssortmentApi } from "./assortment-share.mjs";
+import { startAssortmentScheduler } from "./assortment-scheduler.mjs";
 import { startSeoScheduler } from "./seo-scheduler.mjs";
 import { commitsForTodos, recordCommit } from "./todo-commits.mjs";
 import { handleGoogleDocsApi, gdocAppend, gdocCreate, gdocImport, gdocRead, gdocReplace, gdocSearch } from "./google-docs.mjs";
@@ -1209,6 +1213,7 @@ function memberRouteAllowed(pathname) {
     || /^\/api\/mbox\/agent\/skills\/packages(?:\/[a-z0-9-]+(?:\/(?:files|history|learnings))?)?$/.test(pathname)
     || pathname === "/api/mbox/email/check"
     || pathname.startsWith("/api/mbox/seo")
+    || pathname.startsWith("/api/mbox/assortment")
     || pathname === "/api/mbox/ui/open"
     || pathname === "/api/mbox/projects"
     // Компании своих проектов — только чтение: правка компаний у владельца (server/companies.mjs).
@@ -1404,6 +1409,8 @@ async function handleApiWithContext(req, res, url) {
   if (await handleGoogleDocsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), userId: user.id, broadcast: broadcastRealtime })) return;
   if (await handleIntegrationsApi({ req, res, url, query, readBody, sendJson, owner: isOwner(user), actor: actorFromReq(req), userId: user.id })) return;
   if (await handleSeoWizardApi({ req, res, url, query, readBody, sendJson, allowed: isOwner(user) })) return;
+  // Ассортимент: анализ каталога туров, оценки, инструменты агента (server/assortment-api.mjs); только владелец.
+  if (await handleAssortmentApi({ req, res, url, query, readBody, sendJson, allowed: isOwner(user), access: "owner", actor: "владелец" })) return;
 
   if (url.pathname === "/api/mbox/agent/structure") {
     return sendJson(res, 200, { structure: agentStructure });
@@ -3394,6 +3401,8 @@ const httpServer = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/api/share/")) {
       // SEO Wizard по ссылке или паролю: белый список вызовов внутри (server/seo-share.mjs), настройки и ключи недоступны.
       if (await handleSharedSeoApi({ req, res, url, query, readBody, sendJson, seoApi: handleSeoWizardApi })) return;
+      // Ассортимент по ссылке или паролю, с чатом или без: белый список вызовов внутри (server/assortment-share.mjs).
+      if (await handleSharedAssortmentApi({ req, res, url, query, readBody, sendJson, api: handleAssortmentApi, chat: handleAssortmentChat })) return;
       const secretKey = process.env.MBOX_SECRET_KEY || process.env.DATABASE_URL || "mbox-local-key";
       const handled = await handleSharedNoteApi({
         req, res, url, query, readBody, sendJson,
@@ -3518,6 +3527,7 @@ ensureSkillOverridesSchema(query).catch((error) => console.error(`skill override
 ensureSeoWizardSchema(query).catch((error) => console.error(`seo wizard schema: ${error.message}`));
 // Расписание сборов SEO Wizard — только при SEO_AUTORUN=1 на сервере (иначе сбор запускается кнопкой).
 startSeoScheduler({ query });
+ensureAssortment(query).then(() => startAssortmentScheduler({ query })).catch((error) => console.error(`assortment schema: ${error.message}`));
 
 /**
  * Автоматизация из календаря: в момент события агент получает задание — как если бы человек написал ему в чат.
