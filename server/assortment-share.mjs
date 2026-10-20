@@ -12,6 +12,9 @@ const SESSION_DAYS = 30;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{24,64}$/;
 const LOGIN_PATTERN = /^[a-z0-9][a-z0-9._-]{2,39}$/;
 const MODES = new Set(["view", "manage"]);
+// Кто отвечает в чате: Джарвис (изолированный, только инструменты ассортимента), облачные Claude и GPT (Codex) на сервере.
+export const CHAT_AGENTS = { jarvis: "Джарвис", claude: "Claude", codex: "GPT" };
+const agentOf = (value) => (Object.hasOwn(CHAT_AGENTS, value) ? value : "jarvis");
 const sha = (value) => createHash("sha256").update(String(value)).digest("hex");
 
 export async function ensureAssortmentShareSchema(query) {
@@ -20,6 +23,7 @@ export async function ensureAssortmentShareSchema(query) {
     kind TEXT NOT NULL CHECK (kind IN ('link', 'login')),
     mode TEXT NOT NULL CHECK (mode IN ('view', 'manage')),
     chat BOOLEAN NOT NULL DEFAULT false,
+    chat_agent TEXT NOT NULL DEFAULT 'jarvis',
     token TEXT UNIQUE,
     login TEXT UNIQUE,
     password_hash TEXT,
@@ -30,7 +34,9 @@ export async function ensureAssortmentShareSchema(query) {
     expires_at TIMESTAMPTZ,
     use_count INT NOT NULL DEFAULT 0
   )`);
-  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_assortment_shares_link ON assortment_shares(mode, chat) WHERE kind = 'link'");
+  await query("ALTER TABLE assortment_shares ADD COLUMN IF NOT EXISTS chat_agent TEXT NOT NULL DEFAULT 'jarvis'");
+  await query("DROP INDEX IF EXISTS idx_assortment_shares_link");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_assortment_shares_link_agent ON assortment_shares(mode, chat, chat_agent) WHERE kind = 'link'");
   await query(`CREATE TABLE IF NOT EXISTS assortment_share_sessions (
     token_hash TEXT PRIMARY KEY,
     share_id BIGINT NOT NULL REFERENCES assortment_shares(id) ON DELETE CASCADE,
@@ -46,8 +52,11 @@ export async function ensureAssortmentShareSchema(query) {
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
     tools JSONB NOT NULL DEFAULT '[]',
+    ref TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  await query("ALTER TABLE assortment_chat_messages ADD COLUMN IF NOT EXISTS ref TEXT");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_assortment_chat_ref ON assortment_chat_messages(share_id, ref) WHERE role = 'assistant' AND ref IS NOT NULL");
   await query("CREATE INDEX IF NOT EXISTS idx_assortment_chat_thread ON assortment_chat_messages(share_id, thread, id)");
 }
 
@@ -74,8 +83,8 @@ export const accessOf = (share) => (share.mode === "manage" ? "manage" : "read")
 
 // ─── Управление владельцем ───────────────────────────────────────────────────
 
-const rowOut = (row) => ({ id: row.id, mode: row.mode, chat: row.chat, label: row.label, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at, use_count: row.use_count });
-const labelOf = (mode, chat) => `${mode === "view" ? "Просмотр" : "Управление"}${chat ? " + чат с агентом" : ", без чата"}`;
+const rowOut = (row) => ({ id: row.id, mode: row.mode, chat: row.chat, chat_agent: row.chat_agent, label: row.label, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at, use_count: row.use_count });
+const labelOf = (mode, chat, agent = "jarvis") => `${mode === "view" ? "Просмотр" : "Управление"}${chat ? ` + чат (${CHAT_AGENTS[agent]})` : ", без чата"}`;
 
 /** Маршруты владельца: /api/mbox/assortment/shares… */
 export async function handleAssortmentShareAdmin({ req, res, url, query, readBody, sendJson, actor = "" }) {
@@ -87,7 +96,7 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
 
   if (!kind && req.method === "GET") {
     const rows = (await query(
-      `SELECT s.id::text, s.kind, s.mode, s.chat, s.token, s.login, s.label, s.created_at::text, s.last_used_at::text, s.expires_at::text, s.use_count,
+      `SELECT s.id::text, s.kind, s.mode, s.chat, s.chat_agent, s.token, s.login, s.label, s.created_at::text, s.last_used_at::text, s.expires_at::text, s.use_count,
               (SELECT count(*)::int FROM assortment_share_sessions x WHERE x.share_id = s.id AND x.expires_at > now()) AS sessions,
               (SELECT count(*)::int FROM assortment_chat_messages m WHERE m.share_id = s.id AND m.role = 'user') AS chat_messages
          FROM assortment_shares s ORDER BY s.created_at`,
@@ -103,12 +112,13 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     const body = await readBody(req);
     if (!MODES.has(body.mode)) return reply(400, { error: "invalid_mode" });
     const chat = body.chat === true;
-    const existing = (await query("SELECT id::text, token FROM assortment_shares WHERE kind = 'link' AND mode = $1 AND chat = $2", [body.mode, chat])).rows[0];
-    if (existing && !body.regenerate) return reply(200, { link: { mode: body.mode, chat, token: existing.token } });
+    const agent = chat ? agentOf(body.agent) : "jarvis";
+    const existing = (await query("SELECT id::text, token FROM assortment_shares WHERE kind = 'link' AND mode = $1 AND chat = $2 AND chat_agent = $3", [body.mode, chat, agent])).rows[0];
+    if (existing && !body.regenerate) return reply(200, { link: { mode: body.mode, chat, chat_agent: agent, token: existing.token } });
     if (existing) await query("DELETE FROM assortment_shares WHERE id = $1", [existing.id]);
     const token = newToken();
-    await query("INSERT INTO assortment_shares(kind, mode, chat, token, created_by, label) VALUES ('link', $1, $2, $3, $4, $5)", [body.mode, chat, token, String(actor).slice(0, 80), labelOf(body.mode, chat)]);
-    return reply(201, { link: { mode: body.mode, chat, token } });
+    await query("INSERT INTO assortment_shares(kind, mode, chat, chat_agent, token, created_by, label) VALUES ('link', $1, $2, $3, $4, $5, $6)", [body.mode, chat, agent, token, String(actor).slice(0, 80), labelOf(body.mode, chat, agent)]);
+    return reply(201, { link: { mode: body.mode, chat, chat_agent: agent, token } });
   }
   if (kind === "link" && id && /^\d+$/.test(id) && req.method === "DELETE") {
     await query("DELETE FROM assortment_shares WHERE id = $1 AND kind = 'link'", [id]);
@@ -126,10 +136,10 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     const days = Math.max(0, Math.min(365, Number(body.days) || 0));
     try {
       const row = (await query(
-        `INSERT INTO assortment_shares(kind, mode, chat, login, password_hash, label, created_by, expires_at)
-         VALUES ('login', $1, $2, $3, $4, $5, $6, CASE WHEN $7::int > 0 THEN now() + ($7::int || ' days')::interval END)
-         RETURNING id::text, mode, chat, label, created_at::text, last_used_at::text, expires_at::text, use_count`,
-        [body.mode, body.chat === true, login, await hashPassword(password), String(body.label || "").slice(0, 80), String(actor).slice(0, 80), days],
+        `INSERT INTO assortment_shares(kind, mode, chat, chat_agent, login, password_hash, label, created_by, expires_at)
+         VALUES ('login', $1, $2, $8, $3, $4, $5, $6, CASE WHEN $7::int > 0 THEN now() + ($7::int || ' days')::interval END)
+         RETURNING id::text, mode, chat, chat_agent, label, created_at::text, last_used_at::text, expires_at::text, use_count`,
+        [body.mode, body.chat === true, login, await hashPassword(password), String(body.label || "").slice(0, 80), String(actor).slice(0, 80), days, body.chat === true ? agentOf(body.agent) : "jarvis"],
       )).rows[0];
       return reply(201, { login: { ...rowOut(row), login }, ...(generated ? { password } : {}) });
     } catch (error) {
@@ -143,6 +153,7 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     const values = [id];
     if (body.mode !== undefined) { if (!MODES.has(body.mode)) return reply(400, { error: "invalid_mode" }); values.push(body.mode); sets.push(`mode = $${values.length}`); }
     if (body.chat !== undefined) { values.push(body.chat === true); sets.push(`chat = $${values.length}`); }
+    if (body.agent !== undefined) { values.push(agentOf(body.agent)); sets.push(`chat_agent = $${values.length}`); }
     if (body.label !== undefined) { values.push(String(body.label).slice(0, 80)); sets.push(`label = $${values.length}`); }
     let newPassword = null;
     if (body.password !== undefined || body.regeneratePassword) {
@@ -155,7 +166,7 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     const row = (await query(`UPDATE assortment_shares SET ${sets.join(", ")} WHERE id = $1 AND kind = 'login' RETURNING id::text`, values)).rows[0];
     if (!row) return reply(404, { error: "not_found" });
     // Смена пароля, режима или чата закрывает открытые сессии: старый доступ не должен пережить решение владельца.
-    if (newPassword !== null || body.mode !== undefined || body.chat !== undefined) await query("DELETE FROM assortment_share_sessions WHERE share_id = $1", [id]);
+    if (newPassword !== null || body.mode !== undefined || body.chat !== undefined || body.agent !== undefined) await query("DELETE FROM assortment_share_sessions WHERE share_id = $1", [id]);
     return reply(200, { ok: true, ...(body.regeneratePassword ? { password: newPassword } : {}) });
   }
   if (kind === "login" && id && /^\d+$/.test(id) && req.method === "DELETE") {
@@ -181,13 +192,13 @@ function setSessionCookie(req, res, value, maxAgeSeconds) {
 }
 async function shareByToken(query, token) {
   if (!TOKEN_PATTERN.test(token)) return null;
-  return (await query("SELECT id::text, mode, chat, label, kind FROM assortment_shares WHERE kind = 'link' AND token = $1 AND (expires_at IS NULL OR expires_at > now())", [token])).rows[0] || null;
+  return (await query("SELECT id::text, mode, chat, chat_agent, label, kind FROM assortment_shares WHERE kind = 'link' AND token = $1 AND (expires_at IS NULL OR expires_at > now())", [token])).rows[0] || null;
 }
 async function shareBySession(query, req) {
   const cookie = cookieOf(req, SESSION_COOKIE);
   if (!cookie) return null;
   const row = (await query(
-    `SELECT s.id::text, s.mode, s.chat, s.label, s.kind, x.token_hash
+    `SELECT s.id::text, s.mode, s.chat, s.chat_agent, s.label, s.kind, x.token_hash
        FROM assortment_share_sessions x JOIN assortment_shares s ON s.id = x.share_id
       WHERE x.token_hash = $1 AND x.expires_at > now() AND (s.expires_at IS NULL OR s.expires_at > now())`,
     [sha(cookie)],
@@ -214,7 +225,7 @@ export async function handleSharedAssortmentApi({ req, res, url, query, readBody
     const wait = waitSeconds(key);
     if (wait > 0) return reply(429, { error: "too_many_attempts", retry_after_seconds: wait });
     const share = login && LOGIN_PATTERN.test(login)
-      ? (await query("SELECT id::text, mode, chat, label, password_hash FROM assortment_shares WHERE kind = 'login' AND login = $1 AND (expires_at IS NULL OR expires_at > now())", [login])).rows[0]
+      ? (await query("SELECT id::text, mode, chat, chat_agent, label, password_hash FROM assortment_shares WHERE kind = 'login' AND login = $1 AND (expires_at IS NULL OR expires_at > now())", [login])).rows[0]
       : null;
     // Пароль проверяется и для несуществующего логина: время ответа не выдаёт, есть ли такой логин.
     const ok = await verifyPassword(String(body.password || ""), share?.password_hash || "00:00");
@@ -224,7 +235,7 @@ export async function handleSharedAssortmentApi({ req, res, url, query, readBody
     await query("INSERT INTO assortment_share_sessions(token_hash, share_id, expires_at, ip) VALUES ($1, $2, now() + ($3 || ' days')::interval, $4)", [sha(session), share.id, String(SESSION_DAYS), clientIp(req)]);
     await query("UPDATE assortment_shares SET last_used_at = now(), use_count = use_count + 1 WHERE id = $1", [share.id]);
     setSessionCookie(req, res, session, SESSION_DAYS * 86400);
-    return reply(200, { ok: true, mode: share.mode, chat: share.chat, label: share.label });
+    return reply(200, { ok: true, mode: share.mode, chat: share.chat, chat_agent: share.chat_agent, label: share.label });
   }
   if (rest === "logout" && req.method === "POST") {
     const cookie = cookieOf(req, SESSION_COOKIE);
@@ -241,7 +252,7 @@ export async function handleSharedAssortmentApi({ req, res, url, query, readBody
 
   if (inner === "me") {
     if (auth !== "session") await query("UPDATE assortment_shares SET last_used_at = now(), use_count = use_count + 1 WHERE id = $1", [share.id]).catch(() => {});
-    return reply(200, { mode: share.mode, chat: share.chat, label: share.label, kind: share.kind });
+    return reply(200, { mode: share.mode, chat: share.chat, chat_agent: share.chat_agent, label: share.label, kind: share.kind });
   }
   const verdict = isAllowed(share, req.method, inner);
   if (!verdict.ok) return reply(403, { error: verdict.reason, mode: share.mode, chat: share.chat });

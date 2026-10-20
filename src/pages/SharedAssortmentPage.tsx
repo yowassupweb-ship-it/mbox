@@ -14,7 +14,7 @@ const THEMES: Theme[] = ["light", "graphite", "black"];
 const THEME_LABEL: Record<Theme, string> = { light: "Светлая", graphite: "Графитовая", black: "Чёрная" };
 
 type Phase = "loading" | "login" | "ready" | "revoked" | "error";
-type Me = { mode: "view" | "manage"; chat: boolean; label: string; kind: "link" | "login" };
+type Me = { mode: "view" | "manage"; chat: boolean; chat_agent?: "jarvis" | "claude" | "codex"; label: string; kind: "link" | "login" };
 
 function readTheme(): Theme {
   try {
@@ -77,7 +77,7 @@ export function SharedAssortmentPage({ token }: { token: string | null }) {
     window.location.reload();
   };
 
-  const shared: AssortmentShared | null = me ? { base, mode: me.mode, chat: me.chat, label: me.label, kind: me.kind } : null;
+  const shared: AssortmentShared | null = me ? { base, mode: me.mode, chat: me.chat, agent: me.chat_agent ?? "jarvis", label: me.label, kind: me.kind } : null;
   const nextTheme = () => setTheme((value) => THEMES[(THEMES.indexOf(value) + 1) % THEMES.length]);
 
   return (

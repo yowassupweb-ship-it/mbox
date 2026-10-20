@@ -7,6 +7,7 @@ import { OctopusSpinner } from "../../components/OctopusSpinner";
  * Агент отвечает только по инструментам ассортимента: других данных MBOX у него нет. Текст показывается как есть, без разметки.
  */
 type Message = { role: "user" | "assistant"; content: string; tools?: string[] };
+const AGENT_NAME = { jarvis: "Джарвис", claude: "Claude", codex: "GPT" } as const;
 
 const STORAGE = "mbox.assortment-chat-thread";
 const ERRORS: Record<string, string> = {
@@ -30,7 +31,7 @@ function threadId(base: string) {
   return fresh;
 }
 
-export function AssortmentChat({ base, manage, onClose }: { base: string; manage: boolean; onClose: () => void }) {
+export function AssortmentChat({ base, manage, agent, onClose }: { base: string; manage: boolean; agent: "jarvis" | "claude" | "codex"; onClose: () => void }) {
   const thread = useRef(threadId(base)).current;
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [text, setText] = useState("");
@@ -60,7 +61,19 @@ export function AssortmentChat({ base, manage, onClose }: { base: string; manage
     try {
       const response = await fetch(`${base}chat`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ thread, text: question }) });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) { setError(ERRORS[body.error] || body.message || "Не удалось получить ответ."); return; }
+      if (!response.ok && response.status !== 202) { setError(ERRORS[body.error] || body.message || "Не удалось получить ответ."); return; }
+      if (body.pending) {
+        // Claude и GPT отвечают через очередь MBOX: ответ опрашиваем, пока он не придёт (до шести минут).
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 3000));
+          const poll = await fetch(`${base}chat/answer?thread=${thread}&ref=${encodeURIComponent(String(body.ref))}`, { credentials: "same-origin" });
+          const result = await poll.json().catch(() => ({}));
+          if (!poll.ok) { setError(ERRORS[result.error] || "Не удалось получить ответ."); return; }
+          if (result.done) { setMessages((list) => [...(list ?? []), { role: "assistant", content: String(result.reply || "") }]); return; }
+        }
+        setError(`${AGENT_NAME[agent]} пока не ответил. Откройте чат позже: ответ появится в переписке.`);
+        return;
+      }
       setMessages((list) => [...(list ?? []), { role: "assistant", content: String(body.reply || ""), tools: body.tools as string[] }]);
     } catch { setError("Нет связи с сервером."); } finally { setBusy(false); }
   };
@@ -73,7 +86,7 @@ export function AssortmentChat({ base, manage, onClose }: { base: string; manage
   return (
     <aside className="assortment-chat" aria-label="Чат с агентом">
       <header>
-        <strong>Чат с агентом</strong>
+        <strong>Чат: {AGENT_NAME[agent]}</strong>
         <span className="assortment-space" />
         <button type="button" onClick={() => void clear()} title="Очистить переписку" aria-label="Очистить переписку"><Trash2 size={14} /></button>
         <button type="button" onClick={onClose} title="Закрыть чат" aria-label="Закрыть чат"><X size={14} /></button>
@@ -89,7 +102,7 @@ export function AssortmentChat({ base, manage, onClose }: { base: string; manage
             {message.tools && message.tools.length > 0 && <small>Использовано: {message.tools.map((tool) => tool.replace(/^assortment_/, "")).join(", ")}</small>}
           </div>
         ))}
-        {busy && <div className="assortment-msg is-assistant"><OctopusSpinner compact label="Агент думает…" /></div>}
+        {busy && <div className="assortment-msg is-assistant"><OctopusSpinner compact label={`${AGENT_NAME[agent]} думает…`} /></div>}
         <div ref={end} />
       </div>
       {error && <p className="assortment-error" role="alert">{error}</p>}

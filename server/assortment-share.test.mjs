@@ -119,3 +119,49 @@ test("чат: агент получает только инструменты с
   await chatTurn(query, { share: { id: "7", label: "тест" }, access: "manage", thread: "abcdefgh12", text: "привет", completer: async (m, tools) => { manage.push(tools.map((t) => t.function.name)); return { content: "ок" }; } });
   assert.ok(manage[0].includes("assortment_rate") && manage[0].includes("assortment_exclude") && !manage[0].includes("assortment_refresh") && !manage[0].includes("assortment_import_sales"), "при управлении запись есть, владельческого нет");
 });
+
+test("чат с Claude или GPT: вопрос уходит облачному агенту с рамкой, ответ читается только по своей записи", async () => {
+  const { handleAssortmentChat, cloudQuestion } = await import("./assortment-chat.mjs");
+  const inbox = [];
+  const messages = [];
+  const query = async (sql, params = []) => {
+    if (/FROM users WHERE role = 'owner'/.test(sql)) return { rows: [{ id: "1" }] };
+    if (/INSERT INTO agent_inbox/.test(sql)) { const row = { id: String(100 + inbox.length), title: params[0], body: params[1], props: JSON.parse(params[2]) }; inbox.push(row); return { rows: [{ id: row.id }] }; }
+    if (/INSERT INTO assortment_chat_messages/.test(sql)) { messages.push(params); return { rows: [] }; }
+    if (/count\(\*\) FILTER/.test(sql)) return { rows: [{ hour: 0, day: 0 }] };
+    if (/AND NOT EXISTS/.test(sql)) return { rows: [] };
+    if (/SELECT 1 FROM agent_inbox WHERE id = \$1/.test(sql)) { const q = inbox.find((r) => r.id === params[0] && String(r.props.share_id) === params[1] && `ash${r.props.share_id}-abcdefgh12` === params[2]); return { rows: q ? [{}] : [] }; }
+    if (/WHERE props->>'re' = \$1/.test(sql)) return { rows: inbox.filter((r) => r.answer && r.id === params[0]).map((r) => ({ body: r.answer, item_type: "answer" })) };
+    throw new Error(`неожиданный запрос: ${sql.slice(0, 70)}`);
+  };
+  const call = async (method, path, body, share) => {
+    const res = {};
+    await handleAssortmentChat({ req: { method }, res, url: new URL(path, "http://x"), query, readBody: async () => body || {}, sendJson: (r, status, out) => { r.status = status; r.body = out; }, share, access: "read", route: path.includes("/answer") ? "answer" : "" });
+    return res;
+  };
+  const claude = { id: "7", mode: "view", chat: true, chat_agent: "claude", label: "тест" };
+  let r = await call("POST", "/c", { thread: "abcdefgh12", text: "Что с Татарстаном?" }, claude);
+  assert.equal(r.status, 202);
+  assert.equal(r.body.pending, true);
+  const q = inbox[0];
+  assert.equal(q.props.to, "ClaudeCloud");
+  assert.equal(q.props.source, "assortment-share");
+  assert.equal(q.props.thread, "ash7-abcdefgh12");
+  assert.match(q.body, /режим: просмотр/);
+  assert.match(q.body, /не вызывай инструменты записи/);
+  assert.match(q.body, /Что с Татарстаном\?/);
+  r = await call("GET", `/c/answer?thread=abcdefgh12&ref=${r.body.ref}`, null, claude);
+  assert.deepEqual([r.status, r.body.done], [200, false]);
+  q.answer = "В Татарстане 37 туров при среднем 14.";
+  r = await call("GET", `/c/answer?thread=abcdefgh12&ref=${q.id}`, null, claude);
+  assert.deepEqual([r.body.done, r.body.reply], [true, "В Татарстане 37 туров при среднем 14."]);
+  assert.ok(messages.some((m) => m[1] === "abcdefgh12" && m[2] === "assistant" || m[2] === "В Татарстане 37 туров при среднем 14."), "ответ сохранён в историю");
+  r = await call("GET", `/c/answer?thread=abcdefgh12&ref=${q.id}`, null, { ...claude, id: "8" });
+  assert.equal(r.status, 404, "чужая ссылка не читает записи этой");
+  r = await call("GET", "/c/answer?thread=abcdefgh12&ref=1;drop", null, claude);
+  assert.equal(r.status, 400);
+  const codex = { ...claude, chat_agent: "codex" };
+  await call("POST", "/c", { thread: "abcdefgh12", text: "привет" }, codex);
+  assert.equal(inbox[1].props.to, "CodexCloud");
+  assert.match(cloudQuestion("x", "manage"), /режим: управление/);
+});

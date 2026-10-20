@@ -10,7 +10,7 @@ import "../styles/assortment.css";
  * Сам отчёт — готовая страница с сервера в изолированной рамке: она не видит cookie и сессию MBOX, оценки за неё отправляет это окно.
  * У владельца (base = /api/mbox/assortment/) есть обновление данных и «Поделиться»; у человека по ссылке — только то, что дал владелец.
  */
-export type AssortmentShared = { base: string; mode: "view" | "manage"; chat: boolean; label: string; kind: "link" | "login" };
+export type AssortmentShared = { base: string; mode: "view" | "manage"; chat: boolean; agent: "jarvis" | "claude" | "codex"; label: string; kind: "link" | "login" };
 type Status = { has_data: boolean; snapshot_at: string | null; last_refresh: { at: string; ok: boolean; error?: string; tours?: number } | null; learned: { labels?: number } | null; chat_available?: boolean };
 
 const OWNER_BASE = "/api/mbox/assortment/";
@@ -100,7 +100,7 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
           {html === null && !error && <div className="assortment-center"><OctopusSpinner label="Загружаю отчёт…" /></div>}
           {html !== null && <iframe ref={frame} title="Ассортимент: отчёт" srcDoc={html} sandbox={SANDBOX} />}
         </div>
-        {chatAllowed && chatOpen && <AssortmentChat base={base} manage={shared?.mode === "manage"} onClose={() => setChatOpen(false)} />}
+        {chatAllowed && chatOpen && <AssortmentChat base={base} manage={shared?.mode === "manage"} agent={shared?.agent ?? "jarvis"} onClose={() => setChatOpen(false)} />}
       </div>
       {sharing && <AssortmentShareDialog onClose={() => setSharing(false)} />}
     </div>
