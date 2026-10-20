@@ -103,7 +103,12 @@ export function trimTour(raw) {
   return out;
 }
 
-export const moscowDay = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow" }).format(date);
+/** Части даты по Москве. Берутся через formatToParts в en-US: результат не зависит от того, какие локали есть в сборке Node (alpine). */
+export function moscowParts(date = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Moscow", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(date).map((p) => [p.type, p.value]));
+  return { year: parts.year, month: parts.month, day: parts.day, hour: parts.hour === "24" ? "00" : parts.hour, minute: parts.minute };
+}
+export const moscowDay = (date = new Date()) => { const p = moscowParts(date); return `${p.year}-${p.month}-${p.day}`; };
 
 let refreshing = null;
 
@@ -218,8 +223,8 @@ export async function getLearnings(query) {
   return state?.text || LEARNINGS_SEED;
 }
 const nowLabel = (d = new Date()) => {
-  const p = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" }).format(d);
-  return p.replace(",", "");
+  const p = moscowParts(d);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
 };
 
 export function learningsAddPrinciple(doc, title, text, now = new Date()) {

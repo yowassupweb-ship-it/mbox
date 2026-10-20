@@ -1,13 +1,13 @@
 // Ежедневное обновление каталога для «Ассортимента»: после 05:00 по Москве, если снимка за сегодня ещё нет.
 // ASSORTMENT_AUTORUN=0 отключает (по умолчанию включено). Неудача не страшна: повтор не чаще раза в 30 минут,
 // а экран честно показывает время последнего удачного снимка.
-import { maybeLearn, moscowDay, refreshSnapshot } from "./assortment-store.mjs";
+import { maybeLearn, moscowDay, moscowParts, refreshSnapshot } from "./assortment-store.mjs";
 
 const TICK_MS = 10 * 60_000;
 const RETRY_MS = 30 * 60_000;
 
 export async function runDailyTick(query, { now = new Date(), lastAttempt = 0, log = console.log } = {}) {
-  const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Moscow", hour: "2-digit", hour12: false }).format(now));
+  const hour = Number(moscowParts(now).hour);
   if (hour < 5) return { attempted: false };
   const today = moscowDay(now);
   const have = (await query("SELECT 1 FROM assortment_snapshots WHERE day = $1", [today])).rows.length > 0;
