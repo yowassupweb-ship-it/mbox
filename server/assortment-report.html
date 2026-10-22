@@ -265,6 +265,9 @@ tr.pair.hot td:first-child{box-shadow:inset 4px 0 0 var(--alarm)}
         <button data-own="own" class="is-own" aria-pressed="false">Свои</button>
         <button data-own="partner" aria-pressed="false">Партнёрские</button>
       </div>
+      <div class="seg" role="group" aria-label="Туры без продаж" id="nosales" hidden>
+        <button data-nosales="1" aria-pressed="false" title="Скрыть туры, у которых за период были даты, но не продано ни одного места. Новые туры и туры без данных остаются.">Без продаж</button>
+      </div>
       <button class="icon-btn" id="theme" aria-label="Сменить тему" title="Сменить тему">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
@@ -289,7 +292,9 @@ window.addEventListener("error", e => { try { parent.postMessage({source: "assor
 const D = /*DATA*/null;
 const T = D.tours, M = D.meta, SUM = D.summary;
 const SNAP_Y = M.snapshot_at.slice(0, 4);
-const TABS = [["overview", "Сводка"], ["own", "Свои под ударом"], ["changes", "Что нового"], ["variants", "Варианты"],
+const P = D.performance || null;
+const ADVICE = BOOT.advice !== false;
+const TABS = [["overview", "Сводка"], ["own", "Свои под ударом"], ...(P ? [["sales", "Продажи"]] : []), ["changes", "Что нового"], ["variants", "Варианты"],
   ["overflow", "Перебор"], ["clusters", "Дубли"], ["conflicts", "Конфликты"], ["directions", "Направления"], ["excluded", "Вне анализа"], ["learn", "Обучение"]];
 const SEV = M.sev_labels, SEVO = ["critical", "high", "medium", "low"];
 const PAIR = M.pair_labels;
@@ -324,7 +329,7 @@ const whyText = c => c.why.replace(/;\s*цены[^;]*/, "").replace(/;\s*(ПЕР
 const sortConf = (a, b) => (urank(b) - urank(a)) || (sevRank(a.sev) - sevRank(b.sev)) || (b.score - a.score) || (a.a - b.a) || (a.b - b.b);
 
 /* ---------- состояние ---------- */
-let S = {tab: "overview", own: "all", tour: null};
+let S = {tab: "overview", own: "all", tour: null, hideDead: false};
 const U = {ownSort: "risk", ownMore: {}, vOwn: false, vQ: "", ovSeg: "", ovSort: "ratio", clQ: "", clMin: 3, clOwn: false,
   cfSev: new Set(), cfBasis: "", cfPair: "", cfSeg: "", cfQ: "", cfUndercut: false, cfDirect: false, cfLimit: 100,
   drSort: "ratio", drDesc: true, drQ: "", dirSel: null};
@@ -333,12 +338,20 @@ const parse = () => {
   const p = new URLSearchParams(qs || "");
   S.tab = TABS.some(t => t[0] === path) ? path : "overview";
   S.own = ["own", "partner"].includes(p.get("own")) ? p.get("own") : "all";
+  S.hideDead = p.get("nosales") === "0";
   S.tour = p.get("tour") && T[p.get("tour")] ? +p.get("tour") : null;
   if (["light", "dark"].includes(p.get("theme"))) document.documentElement.dataset.theme = p.get("theme");
 };
-const fmtHash = () => "#/" + S.tab + "?" + new URLSearchParams({...(S.own !== "all" && {own: S.own}), ...(S.tour && {tour: S.tour})});
+const fmtHash = () => "#/" + S.tab + "?" + new URLSearchParams({...(S.own !== "all" && {own: S.own}), ...(S.hideDead && {nosales: "0"}), ...(S.tour && {tour: S.tour})});
 const go = patch => { pendingNote = null; Object.assign(S, patch); const h = fmtHash(); if (h === location.hash) render(); else location.hash = h; };
 const passOwn = ids => S.own === "all" || ids.some(id => S.own === "own" ? T[id].o : !T[id].o);
+/**
+ * Тур без продаж: за период даты в архиве были, а занятых мест ноль. Новые туры (дат в архиве нет)
+ * и туры, которых нет в выгрузке, сюда не попадают: по ним судить не по чему.
+ */
+const noSales = id => { const r = P && P.tours[id]; return Boolean(r && r.sold === 0 && r.dates_past > 0); };
+/** Прошёл ли набор туров фильтр «скрыть без продаж»: группа остаётся, если в ней есть хоть один продающийся. */
+const passSales = ids => !S.hideDead || !P || ids.some(id => !noSales(id));
 const dim = t => (S.own === "own" && !t.o) || (S.own === "partner" && t.o);
 
 /* ---------- компоненты ---------- */
@@ -482,6 +495,84 @@ V.overview = () => {
     ${sbar(d.own, d.partner, max, d.avg)}<span class="mono small">${d.count} · ×${dec(d.ratio)} · своих ${d.own}</span></div>`).join("")}</div>`;
 };
 
+/* ---------- продажи ---------- */
+// Заполнение с одним знаком: 1,7% читается, 2% врёт.
+const fill = x => (x === null || x === undefined ? "—" : dec(Math.round(x * 1000) / 10) + "%");
+const tourBtn = (id, name) => `<button class="btn sm" data-tour="${id}" style="border:0;background:none;padding:0;height:auto;font-weight:600;text-align:left">${esc(name || "")}</button>`;
+const salesRow = t => `<tr><td>${esc(t.dept_label || (t.own ? "свой" : ""))}</td>
+  <td>${tourBtn(t.id, t.name)}<div class="small mono">${t.id}${t.matched ? "" : " · нет в каталоге сайта"}</div></td>
+  <td>${esc(P.status_labels[t.status])}</td><td class="num">${num(t.sold)}</td><td class="num">${num(t.dates_past)}</td><td class="num">${num(t.dates_sold)}</td>
+  <td class="num">${fill(t.fill_past)}</td><td class="num">${num(t.dates_future)}</td><td class="num">${num(t.seats_future)}</td>
+  <td class="num">${t.days_since_sale === null ? "—" : num(t.days_since_sale)}</td><td>${esc(t.profile || "—")}</td></tr>`;
+const salesTable = (rowsIn, caption) => ((rows) => rows.length
+  ? `<div class="tablewrap"><table><caption class="small" style="text-align:left;padding:6px 0">${esc(caption)}</caption><thead><tr><th>Отдел</th><th>Тур</th><th>Статус</th>
+      <th class="num">Продано</th><th class="num">Дат в архиве</th><th class="num">С продажами</th><th class="num">Заполнение</th>
+      <th class="num">Дат впереди</th><th class="num">Мест впереди</th><th class="num">Дней без продаж</th><th>Сезонность</th></tr></thead>
+      <tbody>${rows.map(salesRow).join("")}</tbody></table></div>`
+  : `<p class="hint">${esc(caption)}: ${S.hideDead ? "всё скрыто кнопкой «Без продаж»." : "ничего не нашлось."}</p>`)(S.hideDead ? rowsIn.filter(t => !noSales(t.id)) : rowsIn);
+
+V.sales = () => {
+  const byId = P.tours, own = P.by_owner.own, partner = P.by_owner.partner, t = P.totals;
+  const pick = ids => ids.map(id => byId[id]).filter(Boolean);
+  const groups = [["Всего", t], ...P.by_dept.map(d => [d.dept_label, d]), ["Свой продукт", own], ["Партнёрский", partner]];
+  const metrics = [
+    ["Туров в выгрузке", g => num(g.tours)],
+    ["Не продали ни одного места", g => num(g.zero)],
+    ["Продано мест", g => num(g.sold)],
+    ["Мест выставлено", g => num(g.seats)],
+    ["Заполнение по всем датам", g => fill(g.fill)],
+    ["Заполнение архива", g => fill(g.fill_past)],
+    ["Заполнение глубины", g => fill(g.fill_future)],
+    ["Дат в архиве", g => num(g.dates_past)],
+    ["Из них с продажами", g => num(g.dates_sold)],
+    ["Мест на одну дату", g => (g.seats_per_date === null ? "—" : dec(g.seats_per_date))]];
+  const kpis = [
+    [num(t.zero), `туров без единой продажи из ${t.tours}`],
+    [fill(t.fill_past), "заполнение архива"],
+    [fill(t.fill_future), "заполнение глубины"],
+    [pct(P.concentration.top10_share), "дают топ-10 туров"]];
+  const period = P.period.archive ? `архив ${fmtD(P.period.archive[0])}–${fmtD(P.period.archive[1])}` : "период выгрузки";
+  const depth = P.period.depth ? `глубина ${fmtD(P.period.depth[0])}–${fmtD(P.period.depth[1])}` : "глубины нет";
+  const insights = D.insights.filter(i => i.tab === "performance");
+  return `<h2 class="sec">Что продаётся, а что занимает место</h2>
+  <p class="hint">Продажи считаются в местах: «продано» — занятые места. ${esc(period)}, ${esc(depth)}; точка слияния ${fmtD(P.period.cutoff)}.
+    Заполнение архива и глубины между собой не сравнивают: в глубине видны только текущие брони.
+    ${BOOT.exportUrl ? `<a href="${esc(BOOT.exportUrl)}">Скачать книгу Excel</a>` : ""}</p>
+  <div class="kpis">${kpis.map(k => `<div class="kpi"><b>${k[0]}</b><span>${esc(k[1])}</span></div>`).join("")}</div>
+  <h2 class="sec">Главные цифры</h2>
+  <div class="tablewrap"><table><thead><tr><th>Показатель</th>${groups.map(g => `<th class="num">${esc(g[0])}</th>`).join("")}</tr></thead>
+    <tbody>${metrics.map(([label, fn]) => `<tr><td>${esc(label)}</td>${groups.map(g => `<td class="num">${fn(g[1])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+  <p class="hint">${own.awaiting_api ? "Свой продукт пока приходит отдельной выгрузкой агрегатами по турам: разбивки мест на архив и глубину, дат продаж и сезонов в ней нет — поэтому в этих строках у него прочерк. Появятся, когда продажи переведут на API. " : ""}ЖД и ТА — разные отделы с разной экономикой, напрямую их заполнение не сравнивают. По абсолютным продажам свой и партнёрский продукт сравнивать нельзя: туров разное количество.</p>
+  <h2 class="sec">Туры по статусу</h2>
+  <div class="kpis">${P.status_order.map(k => `<div class="kpi"><b>${num(P.by_status[k] || 0)}</b><span>${esc(P.status_labels[k])}</span></div>`).join("")}</div>
+  ${insights.length ? `<h2 class="sec">Выводы по продажам</h2>${insights.map(i => `<div class="insight ${i.level}">
+    <span class="lvl ${i.level}">${{alarm: "Срочно", warn: "Разобрать", info: "К сведению"}[i.level]}</span>
+    <div><h3>${esc(i.title)}</h3><p>${esc(i.text)}</p></div><span></span></div>`).join("")}` : ""}
+  ${ADVICE && P.remove.length ? `<h2 class="sec">Убрать из продажи</h2>
+    <p class="hint">В архиве даты были, продаж ноль, при этом даты вперёд выставлены. Разбирать такие туры не нужно — их снимают. Свои туры не снимаются.</p>
+    ${salesTable(pick(P.remove), "Кандидаты на снятие")}` : ""}
+  <h2 class="sec">Ядро: что держит объём</h2>
+  <p class="hint">Топ-50 туров по проданным местам. Топ-10 дают ${pct(P.concentration.top10_share)}, топ-50 — ${pct(P.concentration.top50_share)} всех мест.</p>
+  ${salesTable(pick(P.top), "Топ по продажам")}
+  ${P.stale.length ? `<h2 class="sec">Продавались, но давно</h2>
+    <p class="hint">Последняя продажа больше полугода назад, а даты вперёд выставлены. Проверить: сезон кончился или тур умер.</p>
+    ${salesTable(pick(P.stale), "Давно без продаж")}` : ""}
+  ${P.trends.length ? `<h2 class="sec">Сезоны, которые не продались</h2>
+    <p class="hint">Тур продаётся в одном сезоне, а в другом даты стояли (от трёх) и не продались ни разу. Такие туры не снимают — у них убирают даты мёртвого сезона.
+      Осторожно: ноль может означать и неудачно поставленные даты, а не отсутствие спроса.</p>
+    <div class="tablewrap"><table><thead><tr><th>Отдел</th><th>Тур</th><th>Продаётся</th><th class="num">Мест в сезоне</th><th>Мёртвый сезон</th><th class="num">Дат</th><th class="num">Мест сгорело</th></tr></thead>
+      <tbody>${P.trends.slice(0, 100).map(x => `<tr><td>${esc(P.dept_labels[x.dept] || "")}</td><td>${tourBtn(x.id, x.name)}</td>
+        <td>${esc(x.sells_label)}</td><td class="num">${num(x.sells_sold)}</td><td>${esc(x.dead_label)}</td><td class="num">${num(x.dead_dates)}</td><td class="num">${num(x.dead_seats)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+  <h2 class="sec">Что не сошлось с каталогом</h2>
+  <p class="hint">Номера туров в CRM и на сайте — разные системы. Сопоставлено по номеру ${num(P.matching.matched)} из ${num(P.matching.feed)};
+    не найдено ${num(P.matching.unmatched)} — их продажи не участвуют в анализе конфликтов, направлений и дублей, но в цифрах по местам учтены.
+    Ещё по ${num(P.matching.no_data)} ${plural(P.matching.no_data, "карточке", "карточкам", "карточкам")} каталога продаж в выгрузке нет: нулевые продажи им не приписываются.</p>
+  <div class="tablewrap"><table><thead><tr><th>Отдел</th><th>ID в CRM</th><th>Название в выгрузке</th><th>Статус</th><th class="num">Продано</th><th class="num">Мест</th><th class="num">Дат в архиве</th><th class="num">Дат впереди</th></tr></thead>
+    <tbody>${P.unmatched.slice(0, 200).map(r => `<tr><td>${esc(r.dept_label || (r.own ? "свой продукт" : ""))}</td><td class="mono">${r.id}</td><td>${esc(r.name || "")}</td>
+      <td>${esc(P.status_labels[r.status] || "")}</td><td class="num">${num(r.sold)}</td><td class="num">${num(r.seats)}</td><td class="num">${num(r.dates_past)}</td><td class="num">${num(r.dates_future)}</td></tr>`).join("")}</tbody></table></div>
+  ${P.unmatched.length > 200 ? `<p class="hint">Показаны первые 200 из ${num(P.unmatched.length)}. Полный список — в книге Excel, лист «Нет в каталоге».</p>` : ""}`;
+};
+
 V.own = () => {
   let rows = D.threats.filter(r => r.conflicts.some(c => !rejected(c.k)));
   const key = {risk: null, share: (a, b) => b.share - a.share || b.conflicts.length - a.conflicts.length, count: (a, b) => b.conflicts.length - a.conflicts.length};
@@ -538,7 +629,7 @@ V.changes = () => {
 
 V.variants = () => {
   const q = U.vQ.toLowerCase();
-  let rows = D.variants.filter(g => !rejected(g.k) && passOwn(g.tours) && (!U.vOwn || g.own > 0) &&
+  let rows = D.variants.filter(g => !rejected(g.k) && passOwn(g.tours) && passSales(g.tours) && (!U.vOwn || g.own > 0) &&
     (!q || (g.title + " " + g.dir).toLowerCase().includes(q) || g.tours.some(id => (T[id].n + id).toLowerCase().includes(q))));
   return `<h2 class="sec">Варианты одного продукта</h2>
   <p class="hint">Один тур, заведённый несколькими карточками: на разное число дней, по сезонам, дням недели, отелям или один маршрут под разными названиями. Каждая карточка занимает место на направлении. Свой тур никогда не предлагается к снятию.</p>
@@ -552,7 +643,7 @@ V.variants = () => {
 };
 
 V.overflow = () => {
-  let rows = D.directions.filter(d => d.status === "overflow" && !rejected(d.k) && passOwn(d.tours) && (!U.ovSeg || d.seg === U.ovSeg));
+  let rows = D.directions.filter(d => d.status === "overflow" && !rejected(d.k) && passOwn(d.tours) && passSales(d.tours) && (!U.ovSeg || d.seg === U.ovSeg));
   rows.sort(U.ovSort === "count" ? (a, b) => b.count - a.count : U.ovSort === "excess" ? (a, b) => b.excess - a.excess : (a, b) => b.ratio - a.ratio);
   const max = Math.max(1, ...rows.map(d => d.count));
   const segs = [...new Set(D.directions.filter(d => d.status === "overflow").map(d => d.seg))];
@@ -570,7 +661,7 @@ V.overflow = () => {
 
 V.clusters = () => {
   const q = U.clQ.toLowerCase();
-  const rows = D.clusters.filter(k => k.tours.length >= U.clMin && passOwn(k.tours) && (!U.clOwn || k.own > 0) &&
+  const rows = D.clusters.filter(k => k.tours.length >= U.clMin && passOwn(k.tours) && passSales(k.tours) && (!U.clOwn || k.own > 0) &&
     (!q || k.dir.toLowerCase().includes(q) || k.tours.some(id => (T[id].n + " " + T[id].r + id).toLowerCase().includes(q))));
   return `<h2 class="sec">Группы дублей</h2>
   <p class="hint">Туры одного направления и одной длительности, которые сильно пересекаются по местам и датам. Если в группе есть наш тур, партнёрские туры группы предлагаются к снятию; если нет — остаются лучшие по числу заездов.</p>
@@ -585,7 +676,7 @@ V.clusters = () => {
 function filteredConflicts() {
   const q = U.cfQ.toLowerCase();
   return D.conflicts.filter(c => !rejected(c.k) && (!U.cfSev.size || U.cfSev.has(c.sev)) && (!U.cfPair || c.pair === U.cfPair) &&
-    (!U.cfSeg || T[c.a].s === U.cfSeg) && (!U.cfBasis || c.bs === U.cfBasis) && (!U.cfUndercut || beats(c)) && (!U.cfDirect || c.direct) && passOwn([c.a, c.b]) &&
+    (!U.cfSeg || T[c.a].s === U.cfSeg) && (!U.cfBasis || c.bs === U.cfBasis) && (!U.cfUndercut || beats(c)) && (!U.cfDirect || c.direct) && passOwn([c.a, c.b]) && passSales([c.a, c.b]) &&
     (!q || (c.a + " " + c.b + " " + T[c.a].n + " " + T[c.b].n + " " + T[c.a].d + " " + T[c.a].r + " " + T[c.b].r).toLowerCase().includes(q))).sort(sortConf);
 }
 V.conflicts = () => {
@@ -675,7 +766,7 @@ V.directions = () => {
   const q = U.drQ.toLowerCase();
   const cols = [["name", "Направление"], ["seg", "Сегмент"], ["count", "Туров"], ["ratio", "К среднему"], ["own", "Своих"], ["partner", "Партн."], ["products", "Продуктов"], ["status", "Статус"]];
   const val = d => U.drSort === "status" ? ["overflow", "ok", "unchecked"].indexOf(d.status) : (d[U.drSort] ?? -1);
-  const rows = D.directions.filter(d => passOwn(d.tours) && (!q || d.name.toLowerCase().includes(q))).sort((a, b) => {
+  const rows = D.directions.filter(d => passOwn(d.tours) && passSales(d.tours) && (!q || d.name.toLowerCase().includes(q))).sort((a, b) => {
     const x = val(a), y = val(b), r = typeof x === "string" ? x.localeCompare(y, "ru") : x - y;
     return (U.drDesc ? -r : r) || a.name.localeCompare(b.name, "ru");
   });
@@ -732,10 +823,18 @@ function renderChrome() {
   $("#split").setAttribute("aria-label", `Свои ${sm.own} из ${sm.total}`);
   $("#split").title = `Свои ${sm.own} (${Math.round(p)}%), партнёрские ${sm.partner}`;
   $("#splitnum").textContent = `${sm.own} своих из ${sm.total} (${Math.round(p)}%)`;
-  const counts = {own: D.threats.length, changes: D.changes ? D.changes.totals.added + D.changes.totals.new_critical : null, variants: D.variants.length,
+  const counts = {own: D.threats.length, sales: P ? P.totals.tours : null, changes: D.changes ? D.changes.totals.added + D.changes.totals.new_critical : null, variants: D.variants.length,
     overflow: SUM.directions.overflow, clusters: D.clusters.length, conflicts: D.conflicts.length, directions: D.directions.length, excluded: D.excluded.reduce((n, r) => n + r.tours.length, 0) || null, learn: Object.keys(FB).length || null};
   $("#tabs").innerHTML = TABS.map(([k, l]) => `<button role="tab" id="tab-${k}" data-tab="${k}" aria-selected="${S.tab === k}" tabindex="${S.tab === k ? 0 : -1}">${l}${counts[k] != null ? `<span class="n${k === "own" && D.threats.some(r => r.undercut) ? " hot" : ""}">${num(counts[k])}</span>` : ""}</button>`).join("");
-  $$(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.own === S.own));
+  $$(".seg button[data-own]").forEach(b => b.setAttribute("aria-pressed", b.dataset.own === S.own));
+  const ns = $("#nosales");
+  if (ns) {
+    ns.hidden = !P;
+    const dead = P ? Object.values(P.tours).filter(t => t.sold === 0 && t.dates_past > 0).length : 0;
+    const btn = ns.querySelector("button");
+    btn.setAttribute("aria-pressed", String(S.hideDead));
+    btn.textContent = S.hideDead ? `Без продаж скрыты (${num(dead)})` : `Скрыть без продаж (${num(dead)})`;
+  }
   $("#legend-note")?.remove();
 }
 function renderFbBar() {
@@ -791,6 +890,7 @@ document.addEventListener("click", e => {
     return;
   }
   const own = e.target.closest("[data-own]"); if (own) { go({own: own.dataset.own}); return; }
+  if (e.target.closest("[data-nosales]")) { go({hideDead: !S.hideDead}); return; }
   const tr = e.target.closest("[data-tour]"); if (tr) { e.preventDefault(); go({tour: +tr.dataset.tour}); return; }
   if (e.target.closest("[data-close]") || e.target.id === "scrim") { go({tour: null}); return; }
   const cp = e.target.closest("[data-copy]"); if (cp) { navigator.clipboard?.writeText(cp.dataset.copy).then(() => { cp.textContent = "Скопировано"; setTimeout(() => cp.textContent = "Скопировать №", 1200); }, () => {}); return; }

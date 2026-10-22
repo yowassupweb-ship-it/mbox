@@ -35,8 +35,11 @@ export async function ensureAssortmentShareSchema(query) {
     use_count INT NOT NULL DEFAULT 0
   )`);
   await query("ALTER TABLE assortment_shares ADD COLUMN IF NOT EXISTS chat_agent TEXT NOT NULL DEFAULT 'jarvis'");
+  // Рекомендации: ссылка для сотрудников отдаёт цифры без решений «что снять». Выключатель у каждой ссылки свой.
+  await query("ALTER TABLE assortment_shares ADD COLUMN IF NOT EXISTS advice BOOLEAN NOT NULL DEFAULT true");
   await query("DROP INDEX IF EXISTS idx_assortment_shares_link");
-  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_assortment_shares_link_agent ON assortment_shares(mode, chat, chat_agent) WHERE kind = 'link'");
+  await query("DROP INDEX IF EXISTS idx_assortment_shares_link_agent");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_assortment_shares_link_kind ON assortment_shares(mode, chat, chat_agent, advice) WHERE kind = 'link'");
   await query(`CREATE TABLE IF NOT EXISTS assortment_share_sessions (
     token_hash TEXT PRIMARY KEY,
     share_id BIGINT NOT NULL REFERENCES assortment_shares(id) ON DELETE CASCADE,
@@ -64,7 +67,7 @@ export async function ensureAssortmentShareSchema(query) {
 
 // ─── Что разрешено по ссылке и паролю ────────────────────────────────────────
 
-const READ_GET = [/^status$/, /^report$/];
+const READ_GET = [/^status$/, /^report$/, /^export\.xlsx$/];
 const MANAGE_POST = [/^feedback$/];
 
 /**
@@ -85,8 +88,10 @@ export const accessOf = (share) => (share.mode === "manage" ? "manage" : "read")
 
 // ─── Управление владельцем ───────────────────────────────────────────────────
 
-const rowOut = (row) => ({ id: row.id, mode: row.mode, chat: row.chat, chat_agent: row.chat_agent, label: row.label, created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at, use_count: row.use_count });
-const labelOf = (mode, chat, agent = "jarvis") => `${mode === "view" ? "Просмотр" : "Управление"}${chat ? ` + чат (${CHAT_AGENTS[agent]})` : ", без чата"}`;
+const rowOut = (row) => ({ id: row.id, mode: row.mode, chat: row.chat, chat_agent: row.chat_agent, advice: row.advice !== false, label: row.label,
+  created_at: row.created_at, last_used_at: row.last_used_at, expires_at: row.expires_at, use_count: row.use_count });
+const labelOf = (mode, chat, agent = "jarvis", advice = true) =>
+  `${mode === "view" ? "Просмотр" : "Управление"}${chat ? ` + чат (${CHAT_AGENTS[agent]})` : ", без чата"}${advice ? "" : ", без рекомендаций"}`;
 
 /** Маршруты владельца: /api/mbox/assortment/shares… */
 export async function handleAssortmentShareAdmin({ req, res, url, query, readBody, sendJson, actor = "" }) {
@@ -115,12 +120,15 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     if (!MODES.has(body.mode)) return reply(400, { error: "invalid_mode" });
     const chat = body.chat === true;
     const agent = chat ? agentOf(body.agent) : "jarvis";
-    const existing = (await query("SELECT id::text, token FROM assortment_shares WHERE kind = 'link' AND mode = $1 AND chat = $2 AND chat_agent = $3", [body.mode, chat, agent])).rows[0];
-    if (existing && !body.regenerate) return reply(200, { link: { mode: body.mode, chat, chat_agent: agent, token: existing.token } });
+    const advice = body.advice !== false;
+    const existing = (await query("SELECT id::text, token FROM assortment_shares WHERE kind = 'link' AND mode = $1 AND chat = $2 AND chat_agent = $3 AND advice = $4",
+      [body.mode, chat, agent, advice])).rows[0];
+    if (existing && !body.regenerate) return reply(200, { link: { mode: body.mode, chat, chat_agent: agent, advice, token: existing.token } });
     if (existing) await query("DELETE FROM assortment_shares WHERE id = $1", [existing.id]);
     const token = newToken();
-    await query("INSERT INTO assortment_shares(kind, mode, chat, chat_agent, token, created_by, label) VALUES ('link', $1, $2, $3, $4, $5, $6)", [body.mode, chat, agent, token, String(actor).slice(0, 80), labelOf(body.mode, chat, agent)]);
-    return reply(201, { link: { mode: body.mode, chat, chat_agent: agent, token } });
+    await query("INSERT INTO assortment_shares(kind, mode, chat, chat_agent, advice, token, created_by, label) VALUES ('link', $1, $2, $3, $4, $5, $6, $7)",
+      [body.mode, chat, agent, advice, token, String(actor).slice(0, 80), labelOf(body.mode, chat, agent, advice)]);
+    return reply(201, { link: { mode: body.mode, chat, chat_agent: agent, advice, token } });
   }
   if (kind === "link" && id && /^\d+$/.test(id) && req.method === "DELETE") {
     await query("DELETE FROM assortment_shares WHERE id = $1 AND kind = 'link'", [id]);
@@ -138,10 +146,11 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     const days = Math.max(0, Math.min(365, Number(body.days) || 0));
     try {
       const row = (await query(
-        `INSERT INTO assortment_shares(kind, mode, chat, chat_agent, login, password_hash, label, created_by, expires_at)
-         VALUES ('login', $1, $2, $8, $3, $4, $5, $6, CASE WHEN $7::int > 0 THEN now() + ($7::int || ' days')::interval END)
-         RETURNING id::text, mode, chat, chat_agent, label, created_at::text, last_used_at::text, expires_at::text, use_count`,
-        [body.mode, body.chat === true, login, await hashPassword(password), String(body.label || "").slice(0, 80), String(actor).slice(0, 80), days, body.chat === true ? agentOf(body.agent) : "jarvis"],
+        `INSERT INTO assortment_shares(kind, mode, chat, chat_agent, advice, login, password_hash, label, created_by, expires_at)
+         VALUES ('login', $1, $2, $8, $9, $3, $4, $5, $6, CASE WHEN $7::int > 0 THEN now() + ($7::int || ' days')::interval END)
+         RETURNING id::text, mode, chat, chat_agent, advice, label, created_at::text, last_used_at::text, expires_at::text, use_count`,
+        [body.mode, body.chat === true, login, await hashPassword(password), String(body.label || "").slice(0, 80), String(actor).slice(0, 80), days,
+          body.chat === true ? agentOf(body.agent) : "jarvis", body.advice !== false],
       )).rows[0];
       return reply(201, { login: { ...rowOut(row), login }, ...(generated ? { password } : {}) });
     } catch (error) {
@@ -156,6 +165,7 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     if (body.mode !== undefined) { if (!MODES.has(body.mode)) return reply(400, { error: "invalid_mode" }); values.push(body.mode); sets.push(`mode = $${values.length}`); }
     if (body.chat !== undefined) { values.push(body.chat === true); sets.push(`chat = $${values.length}`); }
     if (body.agent !== undefined) { values.push(agentOf(body.agent)); sets.push(`chat_agent = $${values.length}`); }
+    if (body.advice !== undefined) { values.push(body.advice !== false); sets.push(`advice = $${values.length}`); }
     if (body.label !== undefined) { values.push(String(body.label).slice(0, 80)); sets.push(`label = $${values.length}`); }
     let newPassword = null;
     if (body.password !== undefined || body.regeneratePassword) {
@@ -168,7 +178,9 @@ export async function handleAssortmentShareAdmin({ req, res, url, query, readBod
     const row = (await query(`UPDATE assortment_shares SET ${sets.join(", ")} WHERE id = $1 AND kind = 'login' RETURNING id::text`, values)).rows[0];
     if (!row) return reply(404, { error: "not_found" });
     // Смена пароля, режима или чата закрывает открытые сессии: старый доступ не должен пережить решение владельца.
-    if (newPassword !== null || body.mode !== undefined || body.chat !== undefined || body.agent !== undefined) await query("DELETE FROM assortment_share_sessions WHERE share_id = $1", [id]);
+    if (newPassword !== null || body.mode !== undefined || body.chat !== undefined || body.agent !== undefined || body.advice !== undefined) {
+      await query("DELETE FROM assortment_share_sessions WHERE share_id = $1", [id]);
+    }
     return reply(200, { ok: true, ...(body.regeneratePassword ? { password: newPassword } : {}) });
   }
   if (kind === "login" && id && /^\d+$/.test(id) && req.method === "DELETE") {
@@ -194,13 +206,13 @@ function setSessionCookie(req, res, value, maxAgeSeconds) {
 }
 async function shareByToken(query, token) {
   if (!TOKEN_PATTERN.test(token)) return null;
-  return (await query("SELECT id::text, mode, chat, chat_agent, label, kind FROM assortment_shares WHERE kind = 'link' AND token = $1 AND (expires_at IS NULL OR expires_at > now())", [token])).rows[0] || null;
+  return (await query("SELECT id::text, mode, chat, chat_agent, advice, label, kind FROM assortment_shares WHERE kind = 'link' AND token = $1 AND (expires_at IS NULL OR expires_at > now())", [token])).rows[0] || null;
 }
 async function shareBySession(query, req) {
   const cookie = cookieOf(req, SESSION_COOKIE);
   if (!cookie) return null;
   const row = (await query(
-    `SELECT s.id::text, s.mode, s.chat, s.chat_agent, s.label, s.kind, x.token_hash
+    `SELECT s.id::text, s.mode, s.chat, s.chat_agent, s.advice, s.label, s.kind, x.token_hash
        FROM assortment_share_sessions x JOIN assortment_shares s ON s.id = x.share_id
       WHERE x.token_hash = $1 AND x.expires_at > now() AND (s.expires_at IS NULL OR s.expires_at > now())`,
     [sha(cookie)],
@@ -227,7 +239,7 @@ export async function handleSharedAssortmentApi({ req, res, url, query, readBody
     const wait = waitSeconds(key);
     if (wait > 0) return reply(429, { error: "too_many_attempts", retry_after_seconds: wait });
     const share = login && LOGIN_PATTERN.test(login)
-      ? (await query("SELECT id::text, mode, chat, chat_agent, label, password_hash FROM assortment_shares WHERE kind = 'login' AND login = $1 AND (expires_at IS NULL OR expires_at > now())", [login])).rows[0]
+      ? (await query("SELECT id::text, mode, chat, chat_agent, advice, label, password_hash FROM assortment_shares WHERE kind = 'login' AND login = $1 AND (expires_at IS NULL OR expires_at > now())", [login])).rows[0]
       : null;
     // Пароль проверяется и для несуществующего логина: время ответа не выдаёт, есть ли такой логин.
     const ok = await verifyPassword(String(body.password || ""), share?.password_hash || "00:00");
@@ -267,8 +279,10 @@ export async function handleSharedAssortmentApi({ req, res, url, query, readBody
   }
   const inward = new URL(url.toString());
   inward.pathname = `/api/mbox/assortment/${clean}`;
-  return api({ req, res, url: inward, query, readBody, sendJson, allowed: true, access, actor: `по ссылке: ${share.label || share.kind}`,
-    runtime: { readOnly: access === "read", feedbackUrl: `${base}/feedback`, badge: share.mode === "view" ? "Режим просмотра" : "Режим управления" } });
+  const advice = share.advice !== false;
+  return api({ req, res, url: inward, query, readBody, sendJson, allowed: true, access, actor: `по ссылке: ${share.label || share.kind}`, view: { advice },
+    runtime: { readOnly: access === "read", feedbackUrl: `${base}/feedback`, exportUrl: `${base}/export.xlsx`,
+      badge: `${share.mode === "view" ? "Режим просмотра" : "Режим управления"}${advice ? "" : " · без рекомендаций"}` } });
 }
 
 export const newThreadId = () => randomBytes(12).toString("base64url");

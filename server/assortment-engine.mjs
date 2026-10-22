@@ -6,6 +6,7 @@
 // Сходимость с Python проверяет assortment-engine.test.mjs на реальном снимке каталога.
 
 import { createHash } from "node:crypto";
+import { buildPerformance, buildSalesRows, performanceData, performanceInsights } from "./assortment-performance.mjs";
 
 export const SEGMENT_LABELS = {
   multi_day: "Многодневные по России",
@@ -643,29 +644,55 @@ export function buildVariantGroups(toursIn) {
 // ---------- рекомендации ----------
 
 const rank = (t) => [!t.own, -(t.sold || 0), -t.dates.length, -t.seats, t.id];
-function facts(t) {
+/**
+ * Ранг с учётом продаж: сначала свои, затем проданные места, затем заполнение архива.
+ * Заполнение важно после абсолютных продаж: 20 мест из 20 — другой тур, чем 20 из 400.
+ */
+const rankBySales = (perf) => (t) => {
+  const r = salesOf(perf, t);
+  return [!t.own, -(r ? r.sold : t.sold || 0), -(r?.fill_past ?? 0), -t.dates.length, -t.seats, t.id];
+};
+/** Строка продаж тура из выгрузки CRM (null — продаж не загружали или тура в выгрузке нет). */
+const salesOf = (perf, t) => perf?.rows.get(t.id) || null;
+/**
+ * Судимый ноль: даты в архиве были, продаж ни одного места. По такому туру решение уже есть — снимать,
+ * разбирать его среди дублей не нужно. Туры без прошедших дат и туры вне выгрузки сюда не попадают:
+ * у них нет истории, по которой можно судить.
+ */
+const deadSales = (perf, t) => { const r = salesOf(perf, t); return Boolean(r && r.sold === 0 && r.dates_past > 0); };
+function facts(t, perf = null) {
   const n = t.dates.length;
-  const parts = t.sold !== null && t.sold !== undefined ? [`продано ${t.sold}`] : [];
+  const r = salesOf(perf, t);
+  const parts = [];
+  if (r) {
+    parts.push(r.sold ? `продано ${r.sold} ${plural(r.sold, "место", "места", "мест")}` : "продаж за период нет");
+    if (r.fill_past !== null && r.fill_past !== undefined) parts.push(`заполнение архива ${pyRound(r.fill_past * 100, 1)}%`.replace(".", ","));
+    if (r.days_since_sale !== null && r.days_since_sale !== undefined && r.sold) parts.push(`последняя продажа ${r.days_since_sale} дн. назад`);
+  } else if (t.sold !== null && t.sold !== undefined) parts.push(`продано ${t.sold}`);
   parts.push(n ? `${n} заезд.` : "нет заездов");
   if (t.seats) parts.push(`мест ${t.seats}`);
   if (!t.hasFree) parts.push("мест нет");
   return parts.join(", ");
 }
 
-export function adviseCluster(tours, edges, cfg) {
+export function adviseCluster(tours, edges, cfg, perf = null) {
   const single = cfg.conflicts.single_date_max ?? 1;
-  const own = sortedBy(tours.filter((t) => t.own), rank);
-  const partners = sortedBy(tours.filter((t) => !t.own), rank);
+  const by = perf ? rankBySales(perf) : rank;
+  const own = sortedBy(tours.filter((t) => t.own), by);
+  const partners = sortedBy(tours.filter((t) => !t.own), by);
   const near = new Map();
   const link = (id, o, c) => (near.get(id) || near.set(id, []).get(id)).push([o, c]);
   for (const c of edges) { link(c.a.id, c.b, c); link(c.b.id, c.a, c); }
   const ownIds = new Set(own.map((t) => t.id));
-  const adv = { keep: own.map((t) => ({ tour: t, why: "свой тур, не снимается" })), drop: [], note: "" };
+  const adv = {
+    keep: own.map((t) => ({ tour: t, why: deadSales(perf, t) ? `свой тур, не снимается, но продаж за период нет (${facts(t, perf)})` : "свой тур, не снимается" })),
+    drop: [], note: "",
+  };
   const dropped = new Map();
   for (const t of partners) {
     for (const [o, c] of near.get(t.id) || []) {
       if (ownIds.has(o.id) && direct(c)) {
-        dropped.set(t.id, `близкий дубль нашего тура ${o.id} «${o.name}» и идёт в те же даты (${facts(t)})`);
+        dropped.set(t.id, `близкий дубль нашего тура ${o.id} «${o.name}» и идёт в те же даты (${facts(t, perf)})`);
         break;
       }
     }
@@ -674,29 +701,36 @@ export function adviseCluster(tours, edges, cfg) {
   for (const t of partners) {
     if (dropped.has(t.id)) continue;
     if (t.dates.length <= single) {
-      adv.keep.push({ tour: t, why: `разовый тур на одну дату, не снимается (${facts(t)})` });
+      adv.keep.push({ tour: t, why: `разовый тур на одну дату, не снимается (${facts(t, perf)})` });
       continue;
     }
     const lead = (near.get(t.id) || []).map(([o]) => o).find((o) => leaders.some((l) => l.id === o.id));
     if (lead) {
       const common = near.get(t.id).find(([o]) => o.id === lead.id)[1].common;
-      const why = (lead.sold || 0) > (t.sold || 0) ? "продаж" : "заездов";
-      dropped.set(t.id, `близкий дубль тура ${lead.id} «${lead.name}» (общие места: ${common.slice(0, 4).join(", ")}); у того больше ${why} (${facts(lead)} против ${facts(t)})`);
+      const ls = salesOf(perf, lead), ts = salesOf(perf, t);
+      const why = ls && ts && ls.sold !== ts.sold ? "продаж"
+        : ls && ts && (ls.fill_past ?? 0) !== (ts.fill_past ?? 0) ? "заполнение дат"
+          : (lead.sold || 0) > (t.sold || 0) ? "продаж" : "заездов";
+      dropped.set(t.id, `близкий дубль тура ${lead.id} «${lead.name}» (общие места: ${common.slice(0, 4).join(", ")}); у того больше ${why} (${facts(lead, perf)} против ${facts(t, perf)})`);
       continue;
     }
     const hasTwin = (near.get(t.id) || []).some(([o]) => !ownIds.has(o.id));
     leaders.push(t);
-    adv.keep.push({ tour: t, why: hasTwin ? `лидер среди близких дублей (${facts(t)})` : `самостоятельный тур, близких дублей нет (${facts(t)})` });
+    adv.keep.push({ tour: t, why: hasTwin ? `лидер среди близких дублей (${facts(t, perf)})` : `самостоятельный тур, близких дублей нет (${facts(t, perf)})` });
   }
   for (const t of partners) if (dropped.has(t.id)) adv.drop.push({ tour: t, why: dropped.get(t.id) });
   if (own.length > 1) adv.note = "Свои туры дублируют друг друга: рассмотреть объединение в один.";
+  const deadCount = partners.filter((t) => deadSales(perf, t)).length;
+  if (deadCount) {
+    adv.note = `${adv.note ? adv.note + " " : ""}Из них ${deadCount} партнёрских за период не продали ни одного места: их можно скрыть кнопкой «Без продаж».`;
+  }
   return adv;
 }
 
 /** Похожие карточки объединять и снимать нельзя (решение владельца 20.10): рекомендаций «снять» нет. */
-export function adviseVariants(tours) {
+export function adviseVariants(tours, perf = null) {
   return {
-    keep: sortedBy(tours, rank).map((t) => ({ tour: t, why: `отдельная карточка, объединять нельзя (${facts(t)})` })),
+    keep: sortedBy(tours, perf ? rankBySales(perf) : rank).map((t) => ({ tour: t, why: `отдельная карточка, объединять нельзя (${facts(t, perf)})` })),
     drop: [],
     note: "Похожие карточки объединять нельзя: смотрите на пересечение по датам и цене, а не на число карточек.",
   };
@@ -710,8 +744,12 @@ export function configHash(cfg) {
 }
 
 /**
- * Полный анализ снимка. snap: {fetched_at, tours:[raw]}; opts: {feedback, sales, exclusions, learned}.
+ * Полный анализ снимка. snap: {fetched_at, tours:[raw]}; opts: {feedback, sales, salesDates, today, exclusions, learned}.
  * feedback: {ключ: {label, note, at}}; sales: {id: sold}; exclusions: [{id,title,reason,match}].
+ * salesDates: [{id, day, seats, sold, dept}] — выгрузка CRM по заездам; с ней считается результативность
+ * (заполнение мест, нулевые туры, концентрация). cutoff — точка слияния архива и глубины: последний день архива
+ * (по умолчанию день снимка). salesOwn: [{id, sold, seats, ...}] — свой продукт агрегатами по турам
+ * (временно, пока продажи не переведены на API: разбивки по датам в выгрузке нет).
  */
 export function analyze(snap, cfgIn, opts = {}) {
   const cfg = structuredClone(cfgIn);
@@ -726,7 +764,12 @@ export function analyze(snap, cfgIn, opts = {}) {
   const ruleOf = new Map(outRaw.map(([t, r]) => [t.id, r]));
   const excludedTours = buildTours(outRaw.map(([t]) => t), geo, cfg);
   const excluded = excludedTours.map((t) => [t, ruleOf.get(t.id)]);
-  for (const t of tours) t.sold = sales[t.id] ?? null;
+  const salesDates = opts.salesDates || [];
+  const salesOwn = opts.salesOwn || [];
+  const perf = salesDates.length || salesOwn.length
+    ? buildPerformance(tours, buildSalesRows(salesDates, opts.cutoff || String(snap.fetched_at).slice(0, 10)), { ownRows: salesOwn })
+    : null;
+  for (const t of tours) t.sold = (perf ? perf.rows.get(t.id)?.sold : undefined) ?? sales[t.id] ?? null;
 
   const conflicts = [], dismissed = [];
   for (const c of findConflicts(tours, geo, cfg)) {
@@ -751,15 +794,15 @@ export function analyze(snap, cfgIn, opts = {}) {
   for (const g of variants) for (const t of g.tours) groupOf2.set(t.id, g);
   for (const c of conflicts) if (c.undercut && groupOf2.get(c.a.id) && groupOf2.get(c.a.id) === groupOf2.get(c.b.id)) c.undercut = false;
   return makeAnalysis({ cfg, snapshotAt: snap.fetched_at, configHash: configHash(cfg), tours, conflicts, clusters, directions, variants,
-    feedback, dismissed, dismissedVariants, geo, sales, exclusions, excluded });
+    feedback, dismissed, dismissedVariants, geo, sales, perf, exclusions, excluded });
 }
 
 function makeAnalysis(a) {
   a.byId = new Map(a.tours.map((t) => [t.id, t]));
   a.variantOf = new Map();
   for (const g of a.variants) for (const t of g.tours) a.variantOf.set(t.id, g);
-  a.clusterAdvice = new Map(a.clusters.map((k) => [k.id, adviseCluster(k.tours, k.conflicts, a.cfg)]));
-  a.variantAdvice = new Map(a.variants.map((g) => [g.id, adviseVariants(g.tours)]));
+  a.clusterAdvice = new Map(a.clusters.map((k) => [k.id, adviseCluster(k.tours, k.conflicts, a.cfg, a.perf)]));
+  a.variantAdvice = new Map(a.variants.map((g) => [g.id, adviseVariants(g.tours, a.perf)]));
   return a;
 }
 
@@ -992,6 +1035,7 @@ export function buildInsights(an) {
       text: "Такие туры занимают место в выдаче и считаются в направлении, но продать их нельзя.",
       tours: sold.map((t) => t.id) });
   }
+  if (an.perf) out.unshift(...performanceInsights(an.perf));
   return out;
 }
 
@@ -1088,6 +1132,7 @@ export function reportData(an, ch = null, extra = {}) {
     feedback: Object.fromEntries(Object.entries(an.feedback).map(([k, v]) => [k, { l: v.label, n: v.note || "", a: v.at || "" }])),
     changes: null,
   };
+  if (an.perf) data.performance = performanceData(an.perf);
   if (ch) {
     data.changes = {
       since: ch.since, totals: ch.totals,

@@ -6,6 +6,8 @@ import {
   analyze, compare, conflictKey, exclusionsDigest, feedbackDigest, kindOf, normalizeKey, reportData, salesDigest, validateRule, YES, NO,
 } from "./assortment-engine.mjs";
 import { runLearning, shouldLearn, describeResult } from "./assortment-learn.mjs";
+import { salesDatesDigest } from "./assortment-performance.mjs";
+import { applyView, normalizeView } from "./assortment-view.mjs";
 
 export const DEFAULT_CONFIG = JSON.parse(readFileSync(new URL("./assortment-config.json", import.meta.url), "utf8"));
 const LEARNINGS_SEED = readFileSync(new URL("./assortment-learnings-seed.md", import.meta.url), "utf8");
@@ -41,6 +43,29 @@ export async function ensureAssortmentSchema(query) {
     sort_order BIGSERIAL
   )`);
   await query("CREATE TABLE IF NOT EXISTS assortment_sales (tour_id BIGINT PRIMARY KEY, sold INT NOT NULL)");
+  // Выгрузки CRM по датам: мест выставлено и занято на каждый заезд. Отсюда считается результативность
+  // (заполнение прошедших и будущих дат) — одного числа «продано» на тур для этого не хватает.
+  // Свой продукт: выгрузка приходит построчно по турам, без дат. Временная таблица на время файлового импорта:
+  // когда продажи переведут на API, свой продукт пойдёт заездами в assortment_sales_dates, и эта таблица уйдёт.
+  await query(`CREATE TABLE IF NOT EXISTS assortment_sales_own (
+    tour_id BIGINT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    dates_past INT NOT NULL DEFAULT 0,
+    dates_future INT NOT NULL DEFAULT 0,
+    dates_sold INT NOT NULL DEFAULT 0,
+    seats INT NOT NULL DEFAULT 0,
+    sold INT NOT NULL DEFAULT 0,
+    fill DOUBLE PRECISION,
+    fill_future DOUBLE PRECISION
+  )`);
+  await query(`CREATE TABLE IF NOT EXISTS assortment_sales_dates (
+    tour_id BIGINT NOT NULL,
+    day DATE NOT NULL,
+    seats INT NOT NULL DEFAULT 0,
+    sold INT NOT NULL DEFAULT 0,
+    dept TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (tour_id, day)
+  )`);
   await query("CREATE TABLE IF NOT EXISTS assortment_state (key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())");
   await seedDefaults(query);
 }
@@ -160,6 +185,15 @@ export async function loadSales(query) {
   const rows = (await query("SELECT tour_id::text, sold FROM assortment_sales")).rows;
   return Object.fromEntries(rows.map((r) => [Number(r.tour_id), r.sold]));
 }
+export async function loadSalesOwn(query) {
+  const rows = (await query("SELECT tour_id::text, name, dates_past, dates_future, dates_sold, seats, sold, fill, fill_future FROM assortment_sales_own ORDER BY tour_id")).rows;
+  return rows.map((r) => ({ id: Number(r.tour_id), name: r.name, dates_past: r.dates_past, dates_future: r.dates_future, dates_sold: r.dates_sold,
+    seats: r.seats, sold: r.sold, fill: r.fill, fill_future: r.fill_future }));
+}
+export async function loadSalesDates(query) {
+  const rows = (await query("SELECT tour_id::text, to_char(day, 'YYYY-MM-DD') AS day, seats, sold, dept FROM assortment_sales_dates ORDER BY tour_id, day")).rows;
+  return rows.map((r) => ({ id: Number(r.tour_id), day: r.day, seats: r.seats, sold: r.sold, dept: r.dept }));
+}
 async function loadSnapshot(query, day) {
   const sql = day
     ? "SELECT payload FROM assortment_snapshots WHERE day = $1"
@@ -181,13 +215,17 @@ let memo = null;
 
 /** Анализ по последнему снимку с учётом оценок, правил, продаж и выученного. null — снимка ещё нет. */
 export async function getAnalysis(query) {
-  const [snapshot, feedback, exclusions, sales, learned] = await Promise.all([
-    loadSnapshot(query), loadFeedback(query), loadExclusions(query), loadSales(query), getState(query, "learned"),
+  const [snapshot, feedback, exclusions, sales, salesDates, salesOwn, period, learned] = await Promise.all([
+    loadSnapshot(query), loadFeedback(query), loadExclusions(query), loadSales(query), loadSalesDates(query), loadSalesOwn(query),
+    getState(query, "sales_period"), getState(query, "learned"),
   ]);
   if (!snapshot) return null;
-  const key = [snapshot.fetched_at, feedbackDigest(feedback), exclusionsDigest(exclusions), salesDigest(sales), learned?.meta?.labels_hash || "", learned?.meta?.at || ""].join("|");
+  // Точка слияния архива и глубины приходит с выгрузкой: архив — продажи за прошедший период, глубина — на выставленные вперёд даты.
+  const cutoff = period?.cutoff || moscowDay();
+  const key = [snapshot.fetched_at, feedbackDigest(feedback), exclusionsDigest(exclusions), salesDigest(sales), salesDatesDigest(salesDates),
+    salesOwn.length + ":" + salesOwn.reduce((s, r) => s + r.sold, 0), cutoff, learned?.meta?.labels_hash || "", learned?.meta?.at || ""].join("|");
   if (memo?.key === key) return memo.an;
-  const an = analyze(snapshot, DEFAULT_CONFIG, { feedback, exclusions, sales, learned: learned || undefined });
+  const an = analyze(snapshot, DEFAULT_CONFIG, { feedback, exclusions, sales, salesDates, salesOwn, cutoff, learned: learned || undefined });
   memo = { key, an };
   return an;
 }
@@ -204,15 +242,36 @@ export async function getChanges(query, an, since = null) {
   return prev ? compare(prev, an) : null;
 }
 
-export async function getReportData(query, an) {
-  return reportData(an, await getChanges(query, an), { learnings: await getLearnings(query) });
+/**
+ * Данные отчёта в том составе, который видит этот читатель. view: { advice } — показывать ли рекомендации;
+ * по умолчанию берётся настройка владельца, а ссылка может её только ужесточить, но не вернуть обратно.
+ */
+export async function getReportData(query, an, view = null) {
+  const data = reportData(an, await getChanges(query, an), { learnings: await getLearnings(query) });
+  return applyView(data, await effectiveView(query, view));
 }
 
-/** Готовая страница отчёта. runtime: { readOnly, feedbackUrl, reloadUrl, shareBadge } — как страница общается с сервером. */
+/** Настройка состава у владельца: что видно в отчёте по умолчанию. */
+export async function getView(query) {
+  return normalizeView(await getState(query, "view"));
+}
+export async function setView(query, view) {
+  const next = normalizeView(view);
+  await setState(query, "view", next);
+  return next;
+}
+/** Итоговый состав: настройка владельца и ограничение ссылки складываются по самому строгому. */
+export async function effectiveView(query, override = null) {
+  const own = await getView(query);
+  return { advice: own.advice && normalizeView(override).advice };
+}
+
+/** Готовая страница отчёта. runtime: { readOnly, feedbackUrl, exportUrl, badge, view } — как страница общается с сервером. */
 export async function renderReport(query, an, runtime = {}) {
-  const data = await getReportData(query, an);
+  const data = await getReportData(query, an, runtime.view || null);
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
-  const boot = JSON.stringify({ readOnly: !!runtime.readOnly, feedbackUrl: runtime.feedbackUrl || "", canRate: !runtime.readOnly, badge: runtime.badge || "", viaParent: !!runtime.viaParent }).replace(/</g, "\\u003c");
+  const boot = JSON.stringify({ readOnly: !!runtime.readOnly, feedbackUrl: runtime.feedbackUrl || "", canRate: !runtime.readOnly, badge: runtime.badge || "",
+    viaParent: !!runtime.viaParent, advice: data.view.advice, exportUrl: runtime.exportUrl || "" }).replace(/</g, "\\u003c");
   return TEMPLATE.replace("/*BOOT*/null", boot).replace("/*DATA*/null", () => json);
 }
 
@@ -355,25 +414,110 @@ export async function removeExclusion(query, id) {
 
 // ---------- продажи ----------
 
+/** Разбор CSV/TSV: разделитель по первой строке, кавычки снимаются, заголовки в нижнем регистре. */
+function readTableText(text) {
+  const lines = String(text || "").replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return null;
+  const count = (ch) => (lines[0].split(ch).length - 1);
+  const delim = count("\t") > 0 ? "\t" : count(";") >= count(",") ? ";" : ",";
+  const split = (line) => line.split(delim).map((x) => x.trim().replace(/^"|"$/g, ""));
+  return { head: split(lines[0]).map((c) => c.toLowerCase().replace(/\s+/g, " ")), rows: lines.slice(1).map(split) };
+}
+const columnOf = (head, names) => head.findIndex((c) => names.some((n) => c === n || c.includes(n)));
+const numOf = (cell) => Math.trunc(Number(String(cell ?? "").replace(/\s| /g, "").replace(",", ".")));
+const intOf = (cell) => { const n = numOf(cell); return Number.isFinite(n) ? n : 0; };
+/** Дата заезда из выгрузки: ДД.ММ.ГГГГ, ДД/ММ/ГГГГ или ГГГГ-ММ-ДД (хвост со временем отбрасывается). */
+export function parseDay(cell) {
+  const s = String(cell ?? "").trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/.exec(s);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return null;
+}
+
 /** CSV с разделителем «;» или «,» и столбцами id и sold («ID тура», «Продано»). Возвращает {tours}. */
 export function parseSalesCsv(text) {
-  const lines = String(text || "").replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
-  if (!lines.length) return {};
-  const delim = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
-  const split = (line) => line.split(delim).map((x) => x.trim().replace(/^"|"$/g, ""));
-  const head = split(lines[0]).map((c) => c.toLowerCase());
-  const idc = head.findIndex((c) => ["id", "id тура", "tour_id"].includes(c));
-  const soldc = head.findIndex((c) => ["sold", "продано", "total_sales"].includes(c));
+  const table = readTableText(text);
+  if (!table) return {};
+  const idc = table.head.findIndex((c) => ["id", "id тура", "tour_id"].includes(c));
+  const soldc = table.head.findIndex((c) => ["sold", "продано", "total_sales"].includes(c));
   if (idc < 0 || soldc < 0) throw new Error("нужны столбцы id и sold (или «ID тура» и «Продано»)");
   const out = {};
-  for (const line of lines.slice(1)) {
-    const cells = split(line);
+  for (const cells of table.rows) {
     const id = Number.parseInt(cells[idc], 10);
-    const sold = Math.trunc(Number(String(cells[soldc] || "0").replace(/\s/g, "").replace(",", ".")));
+    const sold = numOf(cells[soldc]);
     if (Number.isFinite(id) && Number.isFinite(sold)) out[id] = (out[id] || 0) + sold;
   }
   return out;
 }
+
+/**
+ * Выгрузка CRM по датам: строка на заезд. Нужны столбцы тура, даты, мест выставлено и мест занято;
+ * отдел («ЖД отдел», «ТА отдел») — по желанию. Названия столбцов узнаются по вхождению, поэтому
+ * «ID тура», «Дата заезда», «Мест выставлено», «Мест занято» подходят как есть.
+ * Возвращает [{id, day, seats, sold, dept}]; повторы по туру и дате складываются.
+ */
+export function parseSalesDatesCsv(text) {
+  const table = readTableText(text);
+  if (!table) return [];
+  const idc = columnOf(table.head, ["id тура", "tour_id", "номер тура", "№ тура", "id"]);
+  const dayc = columnOf(table.head, ["дата заезда", "дата выезда", "дата", "day", "date", "заезд"]);
+  const seatsc = columnOf(table.head, ["мест выставлено", "выставлено", "всего мест", "мест всего", "квота", "seats", "places"]);
+  const soldc = columnOf(table.head, ["мест занято", "занято", "продано мест", "продано", "sold"]);
+  if (idc < 0 || dayc < 0) throw new Error("нужны столбцы тура и даты заезда («ID тура», «Дата заезда»)");
+  if (seatsc < 0 && soldc < 0) throw new Error("нужен хотя бы один столбец мест: «Мест выставлено» или «Мест занято»");
+  const deptc = columnOf(table.head, ["отдел", "dept", "department"]);
+  const by = new Map();
+  for (const cells of table.rows) {
+    const id = Number.parseInt(cells[idc], 10);
+    const day = parseDay(cells[dayc]);
+    if (!Number.isFinite(id) || !day) continue;
+    const key = `${id}\u0000${day}`;
+    const row = by.get(key) || { id, day, seats: 0, sold: 0, dept: deptc >= 0 ? cells[deptc] || "" : "" };
+    if (seatsc >= 0) row.seats += Math.max(0, intOf(cells[seatsc]));
+    if (soldc >= 0) row.sold += Math.max(0, intOf(cells[soldc]));
+    if (!row.dept && deptc >= 0) row.dept = cells[deptc] || "";
+    by.set(key, row);
+  }
+  // мест выставлено не меньше занятых: иначе заполнение выйдет больше 100%
+  for (const row of by.values()) if (row.seats < row.sold) row.seats = row.sold;
+  return [...by.values()];
+}
+/** Заменить агрегаты своего продукта целиком. */
+export async function replaceSalesOwn(query, rows) {
+  await query("DELETE FROM assortment_sales_own");
+  for (let i = 0; i < rows.length; i += 500) {
+    const part = rows.slice(i, i + 500);
+    await query(
+      `INSERT INTO assortment_sales_own(tour_id, name, dates_past, dates_future, dates_sold, seats, sold, fill, fill_future)
+       SELECT * FROM unnest($1::bigint[], $2::text[], $3::int[], $4::int[], $5::int[], $6::int[], $7::int[], $8::double precision[], $9::double precision[])
+       ON CONFLICT (tour_id) DO UPDATE SET name = excluded.name, dates_past = excluded.dates_past, dates_future = excluded.dates_future,
+         dates_sold = excluded.dates_sold, seats = excluded.seats, sold = excluded.sold, fill = excluded.fill, fill_future = excluded.fill_future`,
+      [part.map((r) => r.id), part.map((r) => String(r.name || "")), part.map((r) => r.dates_past), part.map((r) => r.dates_future),
+        part.map((r) => r.dates_sold), part.map((r) => r.seats), part.map((r) => r.sold), part.map((r) => r.fill), part.map((r) => r.fill_future)],
+    );
+  }
+  memo = null;
+  return { tours: rows.length };
+}
+
+/** Заменить выгрузку по датам целиком: одна выгрузка — один источник правды, догрузка частями путает заполнение. */
+export async function replaceSalesDates(query, rows) {
+  await query("DELETE FROM assortment_sales_dates");
+  for (let i = 0; i < rows.length; i += 500) {
+    const part = rows.slice(i, i + 500);
+    await query(
+      `INSERT INTO assortment_sales_dates(tour_id, day, seats, sold, dept)
+       SELECT * FROM unnest($1::bigint[], $2::date[], $3::int[], $4::int[], $5::text[])
+       ON CONFLICT (tour_id, day) DO UPDATE SET seats = excluded.seats, sold = excluded.sold, dept = excluded.dept`,
+      [part.map((r) => r.id), part.map((r) => r.day), part.map((r) => r.seats), part.map((r) => r.sold), part.map((r) => String(r.dept || ""))],
+    );
+  }
+  memo = null;
+  return { rows: rows.length, tours: new Set(rows.map((r) => r.id)).size };
+}
+
 export async function replaceSales(query, sales) {
   await query("DELETE FROM assortment_sales");
   const ids = Object.keys(sales);

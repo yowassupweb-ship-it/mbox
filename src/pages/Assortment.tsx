@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { BookOpen, MessageSquare, RefreshCw, Share2 } from "lucide-react";
+import { BookOpen, Download, Eye, EyeOff, MessageSquare, RefreshCw, Share2, Upload } from "lucide-react";
 import { ChatRenderContext } from "../app/workbench/chatRenderContext";
 import { AssortmentSkillPanel } from "./assortment/AssortmentSkillPanel";
 import { OctopusSpinner } from "../components/OctopusSpinner";
@@ -13,7 +13,8 @@ import "../styles/assortment.css";
  * У владельца (base = /api/mbox/assortment/) есть обновление данных и «Поделиться»; у человека по ссылке — только то, что дал владелец.
  */
 export type AssortmentShared = { base: string; mode: "view" | "manage"; chat: boolean; agent: "jarvis" | "claude" | "codex"; label: string; kind: "link" | "login" };
-type Status = { has_data: boolean; snapshot_at: string | null; last_refresh: { at: string; ok: boolean; error?: string; tours?: number } | null; learned: { labels?: number } | null; chat_available?: boolean };
+type Status = { has_data: boolean; snapshot_at: string | null; last_refresh: { at: string; ok: boolean; error?: string; tours?: number } | null; learned: { labels?: number } | null; chat_available?: boolean; view?: { advice: boolean }; owner_view?: { advice: boolean } };
+type ImportResult = { tours?: number; rows?: number; own_tours?: number; cutoff?: string; stats?: { sold?: number; seats?: number; archive?: number; depth?: number } };
 
 const OWNER_BASE = "/api/mbox/assortment/";
 const SANDBOX = "allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads";
@@ -34,6 +35,9 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
   const [sharing, setSharing] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [skillOpen, setSkillOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<ImportResult | null>(null);
+  const file = useRef<HTMLInputElement | null>(null);
   // У владельца справа настоящий чат MBOX (тот же, что в консоли): со всеми агентами, моделями, вложениями и историей чатов.
   const renderChat = useContext(ChatRenderContext);
   const frame = useRef<HTMLIFrameElement | null>(null);
@@ -86,6 +90,36 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
     } finally { setRefreshing(false); }
   };
 
+  // Состав отчёта: при «без рекомендаций» и экран, и ссылки, и книга отдают только факты.
+  const advice = status?.owner_view?.advice ?? status?.view?.advice ?? true;
+  const toggleAdvice = async () => {
+    await fetch(`${base}view`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ advice: !advice }) });
+    await loadStatus();
+    await loadReport();
+  };
+
+  // Выгрузка CRM книгой — временное решение: продажи ждут перевода на API.
+  const importSales = async (chosen: File) => {
+    setImporting(true);
+    setImported(null);
+    try {
+      const buffer = await chosen.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      const body = /\.(xlsx|xlsm)$/i.test(chosen.name) ? { xlsx_base64: btoa(binary) } : { csv: new TextDecoder().decode(bytes) };
+      const response = await fetch(`${base}sales/import`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = (await response.json()) as ImportResult & { message?: string };
+      if (!response.ok) { setError(result.message || "Не удалось прочитать выгрузку"); return; }
+      setImported(result);
+      setError("");
+      await loadReport();
+      await loadStatus();
+    } catch {
+      setError("Не удалось прочитать файл выгрузки");
+    } finally { setImporting(false); }
+  };
+
   const refreshInfo = status?.last_refresh;
   const stale = refreshInfo && refreshInfo.ok === false;
   const chatAllowed = Boolean(shared?.chat);
@@ -98,10 +132,28 @@ export function AssortmentBoard({ shared }: { shared?: AssortmentShared }) {
         <span className="assortment-space" />
         {owner && <button type="button" onClick={() => void refresh()} disabled={refreshing}><RefreshCw size={14} aria-hidden="true" className={refreshing ? "is-spinning" : undefined} /> {refreshing ? "Обновляю…" : "Обновить данные"}</button>}
         {(chatAllowed || ownerChat) && <button type="button" aria-pressed={chatOpen} onClick={() => setChatOpen((value) => !value)}><MessageSquare size={14} aria-hidden="true" /> Чат с агентом</button>}
+        <a className="assortment-link-btn" href={`${base}export.xlsx`} download><Download size={14} aria-hidden="true" /> Скачать Excel</a>
+        {owner && (
+          <>
+            <button type="button" onClick={() => file.current?.click()} disabled={importing}><Upload size={14} aria-hidden="true" /> {importing ? "Читаю выгрузку…" : "Загрузить продажи"}</button>
+            <input ref={file} type="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt" hidden onChange={(event) => { const chosen = event.target.files?.[0]; event.target.value = ""; if (chosen) void importSales(chosen); }} />
+            <button type="button" aria-pressed={!advice} onClick={() => void toggleAdvice()} title="Скрыть рекомендации «что снять» — у себя, в ссылках и в книге Excel">
+              {advice ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />} {advice ? "Рекомендации видны" : "Без рекомендаций"}
+            </button>
+          </>
+        )}
         {owner && <button type="button" onClick={() => setSkillOpen(true)}><BookOpen size={14} aria-hidden="true" /> Навык</button>}
         {owner && <button type="button" onClick={() => setSharing(true)}><Share2 size={14} aria-hidden="true" /> Поделиться</button>}
       </div>
       {error && <p className="assortment-error" role="alert">{error}</p>}
+      {imported && (
+        <p className="assortment-note" role="status">
+          Продажи заменены: {imported.tours ?? 0} туров, {imported.rows ?? 0} заездов
+          {imported.own_tours ? `, свой продукт — ${imported.own_tours} туров агрегатами` : ""}
+          {imported.stats?.sold ? `, продано ${imported.stats.sold} мест при ${imported.stats.seats} выставленных` : ""}.
+          Точка слияния архива и глубины — {imported.cutoff}. Выгрузка файлом — временное решение, ждём перевода продаж на API.
+        </p>
+      )}
       <div className="assortment-body">
         <div className="assortment-frame">
           {html === null && !error && <div className="assortment-center"><OctopusSpinner label="Загружаю отчёт…" /></div>}

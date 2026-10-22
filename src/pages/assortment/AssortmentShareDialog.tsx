@@ -12,8 +12,8 @@ import "../../styles/shared-seo.css";
  */
 type Mode = "view" | "manage";
 type Agent = "jarvis" | "claude" | "codex";
-type Link = { id: string; mode: Mode; chat: boolean; chat_agent: Agent; token: string; label: string; created_at: string; last_used_at: string | null; use_count: number; chat_messages: number };
-type Login = { id: string; login: string; mode: Mode; chat: boolean; chat_agent: Agent; label: string; created_at: string; last_used_at: string | null; expires_at: string | null; use_count: number; sessions: number; chat_messages: number };
+type Link = { id: string; mode: Mode; chat: boolean; chat_agent: Agent; advice: boolean; token: string; label: string; created_at: string; last_used_at: string | null; use_count: number; chat_messages: number };
+type Login = { id: string; login: string; mode: Mode; chat: boolean; chat_agent: Agent; advice: boolean; label: string; created_at: string; last_used_at: string | null; expires_at: string | null; use_count: number; sessions: number; chat_messages: number };
 type State = { base_url?: string; links: Link[]; logins: Login[] };
 
 const MODE_WORD: Record<Mode, string> = { view: "Просмотр", manage: "Управление" };
@@ -58,8 +58,8 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState("");
   const [copied, setCopied] = useState("");
   const [fresh, setFresh] = useState<{ login: string; password: string } | null>(null);
-  const [linkForm, setLinkForm] = useState<{ mode: Mode; chat: boolean; agent: Agent }>({ mode: "view", chat: false, agent: "jarvis" });
-  const [form, setForm] = useState({ login: "", password: "", mode: "view" as Mode, chat: false, agent: "jarvis" as Agent, label: "", days: "0" });
+  const [linkForm, setLinkForm] = useState<{ mode: Mode; chat: boolean; agent: Agent; advice: boolean }>({ mode: "view", chat: false, agent: "jarvis", advice: true });
+  const [form, setForm] = useState({ login: "", password: "", mode: "view" as Mode, chat: false, agent: "jarvis" as Agent, advice: true, label: "", days: "0" });
   const origin = (state?.base_url || serverOrigin()).replace(/\/+$/, "");
 
   const load = useCallback(async () => {
@@ -82,12 +82,12 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
     if (await copy(text)) { setCopied(key); window.setTimeout(() => setCopied((value) => (value === key ? "" : value)), 2000); }
   };
 
-  const createLink = (mode: Mode, chat: boolean, agent: Agent, regenerate = false) => act(`link:${mode}:${chat}:${agent}`, () => fetchJson(`${BASE}/link`, { method: "POST", headers: json, body: JSON.stringify({ mode, chat, agent, regenerate }) }));
+  const createLink = (mode: Mode, chat: boolean, agent: Agent, advice: boolean, regenerate = false) => act(`link:${mode}:${chat}:${agent}:${advice}`, () => fetchJson(`${BASE}/link`, { method: "POST", headers: json, body: JSON.stringify({ mode, chat, agent, advice, regenerate }) }));
   const removeLink = (item: Link) => act(`link:${item.id}`, () => fetchJson(`${BASE}/link/${item.id}`, { method: "DELETE" }));
   const createLogin = () => act("login:new", async () => {
-    const result = await fetchJson<{ login: Login; password?: string }>(`${BASE}/login`, { method: "POST", headers: json, body: JSON.stringify({ login: form.login, password: form.password, mode: form.mode, chat: form.chat, agent: form.agent, label: form.label, days: Number(form.days) || 0 }) });
+    const result = await fetchJson<{ login: Login; password?: string }>(`${BASE}/login`, { method: "POST", headers: json, body: JSON.stringify({ login: form.login, password: form.password, mode: form.mode, chat: form.chat, agent: form.agent, advice: form.advice, label: form.label, days: Number(form.days) || 0 }) });
     setFresh({ login: result.login.login, password: result.password || form.password });
-    setForm({ login: "", password: "", mode: form.mode, chat: form.chat, agent: form.agent, label: "", days: "0" });
+    setForm({ login: "", password: "", mode: form.mode, chat: form.chat, agent: form.agent, advice: form.advice, label: "", days: "0" });
   });
   const patchLogin = (item: Login, body: Record<string, unknown>) => act(`login:${item.id}`, () => fetchJson(`${BASE}/login/${item.id}`, { method: "PATCH", headers: json, body: JSON.stringify(body) }));
   const removeLogin = (item: Login) => act(`login:${item.id}`, () => fetchJson(`${BASE}/login/${item.id}`, { method: "DELETE" }));
@@ -98,7 +98,7 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
 
   const loginUrl = `${origin}/assortment-access`;
   const message = (value: { login: string; password: string }) => `Ассортимент: ${loginUrl}\nЛогин: ${value.login}\nПароль: ${value.password}`;
-  const exists = state?.links.some((item) => item.mode === linkForm.mode && item.chat === linkForm.chat && (!linkForm.chat || item.chat_agent === linkForm.agent));
+  const exists = state?.links.some((item) => item.mode === linkForm.mode && item.chat === linkForm.chat && item.advice === linkForm.advice && (!linkForm.chat || item.chat_agent === linkForm.agent));
 
   return (
     <div className="seo-detail-scrim" onClick={onClose}>
@@ -133,15 +133,21 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
                   </label>
                 )}
                 <label>Права
-                  <select value={linkForm.mode} onChange={(event) => setLinkForm({ ...linkForm, mode: event.currentTarget.value as Mode })}>
+                  <select value={linkForm.advice ? "full" : "facts"} onChange={(event) => setLinkForm({ ...linkForm, advice: event.currentTarget.value === "full" })} aria-label="Рекомендации в отчёте">
+                  <option value="full">С рекомендациями</option>
+                  <option value="facts">Без рекомендаций — только цифры</option>
+                </select>
+              </label>
+              <label>
+                <select value={linkForm.mode} onChange={(event) => setLinkForm({ ...linkForm, mode: event.currentTarget.value as Mode })}>
                     <option value="view">Просмотр</option>
                     <option value="manage">Управление</option>
                   </select>
                 </label>
               </div>
-              <small>{MODE_HINT[linkForm.mode]}{linkForm.chat ? ` ${CHAT_HINT} ${AGENT_HINT[linkForm.agent]}` : ""}</small>
+              <small>{MODE_HINT[linkForm.mode]}{linkForm.chat ? ` ${CHAT_HINT} ${AGENT_HINT[linkForm.agent]}` : ""}{linkForm.advice ? "" : " Рекомендации «что снять» скрыты: сотрудник видит продажи, заполнение и конфликты, а решения остаются у вас."}</small>
               <div className="seo-share-actions">
-                <button type="button" className="is-primary" disabled={busy.startsWith("link:") || exists} onClick={() => void createLink(linkForm.mode, linkForm.chat, linkForm.agent)}>
+                <button type="button" className="is-primary" disabled={busy.startsWith("link:") || exists} onClick={() => void createLink(linkForm.mode, linkForm.chat, linkForm.agent, linkForm.advice)}>
                   {linkForm.chat ? <MessageSquare size={13} aria-hidden="true" /> : <Wrench size={13} aria-hidden="true" />} {exists ? "Такая ссылка уже есть" : "Создать ссылку"}
                 </button>
               </div>
@@ -150,11 +156,11 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
               const url = `${origin}/a/${item.token}`;
               return (
                 <div key={item.id} className="seo-share-row">
-                  <div className="seo-share-head"><strong>{MODE_WORD[item.mode]} · {kindWord(item.chat, item.chat_agent)}</strong><span>{MODE_HINT[item.mode]}{item.chat ? ` ${CHAT_HINT} ${AGENT_HINT[item.chat_agent]}` : ""}</span></div>
+                  <div className="seo-share-head"><strong>{MODE_WORD[item.mode]} · {kindWord(item.chat, item.chat_agent)}{item.advice ? "" : " · без рекомендаций"}</strong><span>{MODE_HINT[item.mode]}{item.chat ? ` ${CHAT_HINT} ${AGENT_HINT[item.chat_agent]}` : ""}</span></div>
                   <input readOnly value={url} onFocus={(event) => event.currentTarget.select()} aria-label={`Ссылка: ${MODE_WORD[item.mode]}, ${kindWord(item.chat, item.chat_agent)}`} />
                   <div className="seo-share-actions">
                     <button type="button" onClick={() => void copyText(`link:${item.id}`, url)}>{copied === `link:${item.id}` ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />} {copied === `link:${item.id}` ? "Скопировано" : "Копировать"}</button>
-                    <button type="button" disabled={busy.startsWith("link:")} onClick={() => void createLink(item.mode, item.chat, item.chat_agent, true)} title="Старая ссылка перестанет работать"><RefreshCw size={13} aria-hidden="true" /> Заменить</button>
+                    <button type="button" disabled={busy.startsWith("link:")} onClick={() => void createLink(item.mode, item.chat, item.chat_agent, item.advice, true)} title="Старая ссылка перестанет работать"><RefreshCw size={13} aria-hidden="true" /> Заменить</button>
                     <button type="button" disabled={busy.startsWith("link:")} onClick={() => void removeLink(item)}><Trash2 size={13} aria-hidden="true" /> Отключить</button>
                   </div>
                   <small>Открывали: {item.use_count} · последний раз: {stamp(item.last_used_at)}{item.chat ? ` · вопросов агенту: ${item.chat_messages}` : ""}</small>
@@ -187,6 +193,10 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
                       <option value="tool">Только инструмент</option>
                       <option value="chat">Инструмент + чат</option>
                     </select>
+                    <select value={item.advice ? "full" : "facts"} onChange={(event) => void patchLogin(item, { advice: event.currentTarget.value === "full" })} disabled={busy === `login:${item.id}`} aria-label={`Рекомендации у ${item.login}`}>
+                      <option value="full">С рекомендациями</option>
+                      <option value="facts">Без рекомендаций</option>
+                    </select>
                     {item.chat && (
                       <select value={item.chat_agent} onChange={(event) => void patchLogin(item, { agent: event.currentTarget.value })} disabled={busy === `login:${item.id}`} aria-label={`Кто отвечает в чате ${item.login}`}>
                         <option value="jarvis">Джарвис</option>
@@ -210,6 +220,12 @@ export function AssortmentShareDialog({ onClose }: { onClose: () => void }) {
                 </select>
               </label>
               <label>Что дать
+                <select value={form.advice ? "full" : "facts"} onChange={(event) => setForm({ ...form, advice: event.currentTarget.value === "full" })} aria-label="Рекомендации в отчёте">
+                  <option value="full">С рекомендациями</option>
+                  <option value="facts">Без рекомендаций</option>
+                </select>
+              </label>
+              <label>
                 <select value={form.chat ? "chat" : "tool"} onChange={(event) => setForm({ ...form, chat: event.currentTarget.value === "chat" })}>
                   <option value="tool">Только инструмент</option>
                   <option value="chat">Инструмент + чат</option>

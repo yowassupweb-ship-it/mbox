@@ -7,9 +7,13 @@ import {
   SEVERITY_ORDER, feedbackStats, normalizeKey,
 } from "./assortment-engine.mjs";
 import {
-  addExclusion, getAnalysis, getChanges, getLearnings, loadFeedback, logLearning, parseSalesCsv, recordPrinciple, refreshSnapshot, removeExclusion,
-  replaceSales, resetLearned, runLearn, setFeedback, getState, DEFAULT_CONFIG, maybeLearn,
+  addExclusion, getAnalysis, getChanges, getLearnings, getReportData, getView, loadFeedback, logLearning, parseSalesCsv, recordPrinciple, refreshSnapshot,
+  removeExclusion, replaceSales, replaceSalesDates, replaceSalesOwn, resetLearned, runLearn, setFeedback, setState, setView, getState, DEFAULT_CONFIG, maybeLearn,
 } from "./assortment-store.mjs";
+import { DEPT_LABELS, STATUS_LABELS, performanceData, performanceInsights, SEASONS } from "./assortment-performance.mjs";
+import { feedFromCsv, feedFromWorkbook, DEFAULT_CUTOFF } from "./assortment-sales-import.mjs";
+import { buildAssortmentWorkbook, workbookFileName } from "./assortment-xlsx.mjs";
+import { normalizeView } from "./assortment-view.mjs";
 
 export { ASSORTMENT_INSTRUCTIONS, ASSORTMENT_TOOLS } from "./assortment-tool-defs.mjs";
 import { ASSORTMENT_TOOLS } from "./assortment-tool-defs.mjs";
@@ -98,6 +102,21 @@ export async function runAssortmentTool(query, name, args = {}, ctx = { access: 
   }
   if (name === "assortment_learn_now") return runLearn(query, { force: !!args.force });
   if (name === "assortment_reset_learned") return { reset: await resetLearned(query) };
+  if (name === "assortment_set_view") {
+    const view = await setView(query, { advice: args.advice !== false });
+    return { view, note: view.advice ? "Рекомендации показываются." : "Рекомендации скрыты: в отчёте, по ссылкам и в выгрузке остаются только факты." };
+  }
+  if (name === "assortment_import_sales_dates") {
+    const cutoff = String(args.cutoff || DEFAULT_CUTOFF).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) throw new ToolError("точка слияния архива и глубины задаётся как ГГГГ-ММ-ДД");
+    let feed;
+    try {
+      if (args.xlsx_base64) feed = await feedFromWorkbook(Buffer.from(String(args.xlsx_base64), "base64"), { cutoff });
+      else if (args.csv) feed = feedFromCsv(String(args.csv), { cutoff });
+      else throw new Error("нужна книга (xlsx_base64) или CSV (csv)");
+    } catch (e) { throw new ToolError(e.message); }
+    return importSalesFeed(query, feed, ctx.actor || "владелец");
+  }
   if (name === "assortment_import_sales") {
     let sales;
     try { sales = parseSalesCsv(args.csv); } catch (e) { throw new ToolError(e.message); }
@@ -171,8 +190,91 @@ export async function runAssortmentTool(query, name, args = {}, ctx = { access: 
       return { ...stamp(an), stats: feedbackStats(items), items: Object.entries(items).map(([key, v]) => ({ key, ...v })) };
     }
     case "assortment_learnings": return { ...stamp(an), text: await getLearnings(query) };
+
+    // ---------- продажи ----------
+    case "assortment_performance": {
+      const p = requirePerf(an);
+      const d = performanceData(p);
+      const picked = args.group && args.group !== "all" ? args.group : null;
+      const blocks = {
+        totals: d.totals, dept: d.by_dept, owner: { ...d.by_owner, note: d.own_product.awaiting_api
+          ? "Свой продукт приходит агрегатами по турам: заполнение архива и глубины, сезонность и давность по нему не считаются. Сравнение корректно по общему заполнению. Ждём перевода продаж на API."
+          : "" }, status: d.by_status, profile: d.by_profile };
+      return { ...stamp(an), period: d.period, matching: d.matching, status_labels: STATUS_LABELS,
+        ...(picked ? { [picked]: blocks[picked] } : blocks),
+        concentration: d.concentration, counts: { remove: d.remove.length, gone: d.gone.length, fresh: d.fresh.length, stale: d.stale.length,
+          dead_seasons: d.dead_seasons.length, trends: d.trends.length, unmatched: d.unmatched.length, no_data: d.no_data.length },
+        insights: performanceInsights(p).map((i) => ({ level: i.level, kind: i.kind, title: i.title, text: i.text, advice: !!i.advice, tours: i.tours.length })) };
+    }
+    case "assortment_sales_tours": {
+      const p = requirePerf(an);
+      const d = performanceData(p);
+      const want = args.status?.length ? new Set(args.status) : null;
+      const pool = args.unmatched ? d.unmatched.map((r) => d.tours[r.id] || r) : Object.values(d.tours).concat(d.own_product.tours);
+      const items = pool.filter((t) => (!want || want.has(t.status)) && (!args.dept || t.dept === args.dept)
+        && (!("own" in args) || Boolean(t.own) === !!args.own)
+        && (args.min_sold === undefined || t.sold >= args.min_sold) && (args.max_sold === undefined || t.sold <= args.max_sold)
+        && (args.stale_days === undefined || (t.days_since_sale !== null && t.days_since_sale >= args.stale_days))
+        && (!args.dead_season || (t.dead_seasons || []).includes(args.dead_season)));
+      sortBy(items, (t) => [-t.sold, t.id]);
+      return { ...stamp(an), period: d.period, total: items.length, offset, items: items.slice(offset, offset + limit) };
+    }
+    case "assortment_tour_sales": {
+      const p = requirePerf(an);
+      const id = Number(args.id);
+      const d = performanceData(p);
+      const row = d.tours[id] || d.own_product.tours.find((t) => t.id === id);
+      if (!row) throw new ToolError(`тура ${id} нет в выгрузке продаж (сопоставлено ${d.matching.matched} из ${d.matching.feed})`);
+      const t = tourOf(an, id);
+      return { ...stamp(an), period: d.period, sales: row, tour: t ? tourDict(an, t) : null,
+        dead_seasons: d.dead_seasons.filter((x) => x.id === id), trends: d.trends.filter((x) => x.id === id),
+        note: row.own && d.own_product.awaiting_api ? "Свой продукт пока приходит агрегатами: архив и глубина по местам, сезоны и давность не считаются." : "" };
+    }
+    case "assortment_sales_sources": {
+      const p = requirePerf(an);
+      const d = performanceData(p);
+      const source = await getState(query, "sales_period");
+      return { ...stamp(an), period: d.period, source: source || null, matching: d.matching,
+        unmatched: d.unmatched.slice(0, 200), no_data: d.no_data.slice(0, 200),
+        own_product: { aggregate: true, awaiting_api: true, tours: d.own_product.totals.tours,
+          note: "Свой продукт приходит отдельной выгрузкой построчно по турам. Разбивки мест на архив и глубину, дат продаж и сезонов в ней нет. Ждём перевода продаж на API." },
+        note: "Номера туров в CRM и в каталоге сайта — разные системы. Ненайденные туры в анализ конфликтов и направлений не попадают, в сводных цифрах по местам учтены." };
+    }
+    case "assortment_export_xlsx": {
+      const view = await effectiveExportView(query, ctx, args.advice);
+      const data = await getReportData(query, an, view);
+      const buffer = await buildAssortmentWorkbook(data, view);
+      return { file_name: workbookFileName(data, view), content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size: buffer.length, advice: view.advice, base64: buffer.toString("base64") };
+    }
     default: throw new ToolError(`неизвестный инструмент ${name}`);
   }
+}
+
+/** Продажи ещё не загружены — об этом надо сказать прямо, а не возвращать нули. */
+function requirePerf(an) {
+  if (!an.perf) throw new ToolError("продажи не загружены: владелец загружает выгрузку CRM инструментом assortment_import_sales_dates (пока файлом, ждём API)");
+  return an.perf;
+}
+
+/**
+ * Состав выгрузки складывается по самому строгому: настройка владельца, ограничение ссылки (ctx.view)
+ * и просьба самого вызова. Ссылка не может вернуть себе рекомендации, если владелец их выключил.
+ */
+async function effectiveExportView(query, ctx, advice) {
+  const own = await getView(query);
+  return { advice: own.advice && normalizeView(ctx?.view).advice && normalizeView({ advice }).advice };
+}
+
+/** Загрузка фида продаж в базу: заезды, свой продукт агрегатами и запись о источнике. */
+export async function importSalesFeed(query, feed, actor = "") {
+  const dates = await replaceSalesDates(query, feed.rows);
+  const own = await replaceSalesOwn(query, feed.own || []);
+  const source = { source: feed.source, cutoff: feed.cutoff, at: new Date().toISOString(), by: actor, stats: feed.stats,
+    temporary: true, awaiting_api: true };
+  await setState(query, "sales_period", source);
+  return { imported: true, ...dates, own_tours: own.tours, cutoff: feed.cutoff, stats: feed.stats,
+    note: "Продажи заменены целиком. Выгрузка файлом — временное решение: ждём перевода продаж на API." };
 }
 
 function changesDict(an, ch) {

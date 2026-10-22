@@ -14,6 +14,11 @@
 @keyframes assortment-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .assortment-bar .is-spinning { animation: none; } }
 .assortment-error { margin: 0; padding: var(--space-2) var(--space-4); color: var(--state-danger); font-size: var(--text-sm); }
+/* Скачивание книги — ссылка, а не кнопка: браузер сам сохраняет файл. Выглядит как остальные кнопки полосы. */
+.assortment-link-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border: var(--border-width) solid var(--border-color); border-radius: var(--radius-sm); background: var(--element-bg); color: var(--text-main); font-size: var(--text-sm); text-decoration: none; }
+.assortment-link-btn:hover { background: var(--surface-hover); }
+.assortment-link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.assortment-note { margin: 0; padding: var(--space-2) var(--space-4); color: var(--text-muted); font-size: var(--text-sm); }
 .assortment-body { flex: 1; min-height: 0; display: flex; }
 .assortment-frame { flex: 1; min-width: 0; position: relative; }
 .assortment-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }

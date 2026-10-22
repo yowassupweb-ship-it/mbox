@@ -3,6 +3,7 @@
 import { PAIR_LABELS, SEVERITY_ORDER } from "./assortment-engine.mjs";
 
 const SEGMENTS = ["multi_day", "abroad", "one_day"];
+const SALES_STATUSES = ["core", "working", "weak", "remove", "fresh", "gone"];
 const schema = (properties = {}, required = []) => ({ type: "object", properties, required, additionalProperties: false });
 const LIMIT = { type: "integer", minimum: 1, maximum: 500, description: "Сколько записей вернуть" };
 const OFFSET = { type: "integer", minimum: 0, description: "Сколько записей пропустить" };
@@ -14,7 +15,11 @@ export const ASSORTMENT_INSTRUCTIONS =
   "assortment_own_threats (свои не должны конкурировать с партнёрскими), assortment_overflow и assortment_duplicate_groups. Детали — assortment_tour и assortment_direction. " +
   "Похожие карточки (варианты, assortment_variant_groups) объединять и снимать нельзя: это справка о пересечении. " +
   "Результат детерминирован, ничего не придумывай сверх ответа инструментов. Перед выводами прочитай assortment_learnings. " +
-  "Когда владелец объясняет, почему находка верна или неверна, вызови assortment_rate с note и assortment_record_learning: инструмент учится на оценках.";
+  "Когда владелец объясняет, почему находка верна или неверна, вызови assortment_rate с note и assortment_record_learning: инструмент учится на оценках. " +
+  "Про продажи — assortment_performance (сводно), assortment_sales_tours (списки) и assortment_tour_sales (один тур). Продажи считаются в местах, не в деньгах. " +
+  "Архив (прошедшие даты) и глубину (выставленные вперёд) между собой не сравнивай: в глубине видны только текущие брони. ЖД и ТА — разные отделы, напрямую их заполнение не сравнивают. " +
+  "Свой продукт пока приходит агрегатами по турам: заполнение архива и глубины, сезонность и давность по нему не считаются, сравнение с партнёрским корректно только по общему заполнению. " +
+  "Номера туров в CRM и на сайте — разные системы: про ненайденные туры говори прямо, их список даёт assortment_sales_sources.";
 
 export const ASSORTMENT_TOOLS = [
   { name: "assortment_summary", level: "read", description: "Сводка: туры (свои/партнёрские), направления в норме и с перебором, конфликты по серьёзности, состояние обучения.", inputSchema: schema() },
@@ -45,5 +50,19 @@ export const ASSORTMENT_TOOLS = [
   { name: "assortment_refresh", level: "owner", description: "Заново скачать каталог с vs-travel.ru и пересчитать анализ (обращается к сайту: по ссылке и в чате по ссылке недоступно).", inputSchema: schema() },
   { name: "assortment_reset_learned", level: "owner", description: "Сбросить выученные пороги: вернуть значения по умолчанию.", inputSchema: schema() },
   { name: "assortment_import_sales", level: "owner", description: "Загрузить продажи (CSV со столбцами id и sold): лидером группы дублей станет тур с наибольшими продажами.", inputSchema: schema({ csv: { type: "string" } }, ["csv"]) },
+  { name: "assortment_performance", level: "read", description: "Результативность по местам: сколько туров не продали ничего, слабые, рабочие и ядро, заполнение архива и глубины, по отделам, свой продукт против партнёрского, концентрация продаж. Главный инструмент для вопроса «что продаётся, а что занимает место».", inputSchema: schema({ group: { type: "string", enum: ["all", "dept", "owner", "status", "profile"], description: "Какой срез вернуть; по умолчанию все" } }) },
+  { name: "assortment_sales_tours", level: "read", description: "Туры по продажам с фильтрами: статус (ядро, рабочий, слабый, убрать, новый, уже снят), отдел, мёртвый сезон, давность последней продажи. Сортировка — от больших продаж.", inputSchema: schema({
+    status: { type: "array", items: { type: "string", enum: SALES_STATUSES }, description: "Статусы туров" }, dept: { type: "string", enum: ["rail", "agency", "other"] },
+    own: { type: "boolean" }, min_sold: { type: "integer", minimum: 0 }, max_sold: { type: "integer", minimum: 0 },
+    stale_days: { type: "integer", minimum: 0, description: "Только туры без продаж столько дней и дольше" },
+    dead_season: { type: "string", enum: ["winter", "spring", "summer", "autumn"], description: "Только туры с мёртвым этим сезоном" },
+    unmatched: { type: "boolean", description: "true — только туры выгрузки, не найденные в каталоге сайта" }, limit: LIMIT, offset: OFFSET }) },
+  { name: "assortment_tour_sales", level: "read", description: "Продажи одного тура: архив и глубина, заполнение, даты с продажами, сезоны, профиль, давность последней продажи.", inputSchema: schema({ id: { type: "integer" } }, ["id"]) },
+  { name: "assortment_sales_sources", level: "read", description: "Откуда взяты продажи: источник (файл выгрузки или API), период, точка слияния архива и глубины, сколько туров сопоставлено с каталогом сайта и сколько не найдено, по каким карточкам каталога данных нет.", inputSchema: schema() },
+  { name: "assortment_import_sales_dates", level: "owner", description: "Загрузить выгрузку CRM по заездам (книга Excel в base64 или CSV со столбцами тура, даты, мест и продано). Заменяет продажи целиком. Это временный путь: ждём перевода продаж на API.", inputSchema: schema({
+    xlsx_base64: { type: "string", description: "Книга Excel целиком в base64" }, csv: { type: "string", description: "CSV или TSV со строками «тур + дата + мест + продано»" },
+    cutoff: { type: "string", description: "Точка слияния архива и глубины, ГГГГ-ММ-ДД; по умолчанию 2026-10-21" } }) },
+  { name: "assortment_export_xlsx", level: "read", description: "Собрать книгу Excel для отправки сотрудникам: сводка, выводы, все туры, продажи, сезонность, тренды, ненайденные в каталоге, методика. Возвращает файл в base64. С рекомендациями — только у владельца и ссылок, где они разрешены.", inputSchema: schema({ advice: { type: "boolean", description: "false — книга без рекомендаций «что снять»" } }) },
+  { name: "assortment_set_view", level: "owner", description: "Состав отчёта: показывать ли рекомендации («что снять», «что делать»). Выключение действует и на экран, и на ссылки, и на выгрузку.", inputSchema: schema({ advice: { type: "boolean" } }, ["advice"]) },
 ];
 
