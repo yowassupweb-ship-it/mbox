@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendRows, extractText, loadWorkbook, readTable, touchedRange, workbookFromRows, workbookToBase64, writeCells } from "./table-ops.mjs";
 import { announceAgentEdit } from "./presence.mjs";
+import { hasProjectAccess } from "./spaces.mjs";
 
 export const TABLES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tables (
@@ -93,11 +94,6 @@ export function tableScopeWhere(scope, alias = "tables") {
   }
   if (!scope || scope.all) return { sql: "TRUE", values: [] };
   return { sql: `${alias}.project_id = ANY($1::bigint[])`, values: [projectIds] };
-}
-
-function hasProjectAccess(scope, projectId) {
-  if (!scope || scope.all) return true;
-  return projectId != null && scope.projectIds.includes(String(projectId));
 }
 
 async function ownsTable(query, tableId, scope) {

@@ -53,6 +53,16 @@ export async function projectScopeFor(query, user) {
   }
 }
 
+/**
+ * Доступна ли запись (заметка, документ, таблица) в этом проекте. Запись без проекта — личная запись владельца
+ * инстанса; участнику она недоступна. Правило одно на все разделы, поэтому живёт здесь, а не копией в каждом модуле.
+ */
+export function hasProjectAccess(scope, projectId) {
+  if (!scope) return true;
+  if (projectId == null) return scope.all === true || scope.owner === true;
+  return scope.all === true || (Array.isArray(scope.projectIds) && scope.projectIds.includes(String(projectId)));
+}
+
 /** Новый проект принадлежит тому, кто его создал: без членства он бы его не увидел. */
 export async function addProjectMember(query, projectId, userId) {
   if (!projectId || !userId) return;

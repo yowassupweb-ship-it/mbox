@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import mammoth from "mammoth";
 import { documentToDocx, docxFileName } from "./docx.mjs";
+import { hasProjectAccess } from "./spaces.mjs";
 
 // Заметки — свои короткие записи человека (не память агентов): быстро записать, найти, закрепить.
 // Общий модуль для прод-сервера и dev-API в vite.config.ts, таблица создаётся при старте.
@@ -143,11 +144,6 @@ export function noteScopeWhere(scope, alias = "notes") {
   }
   if (!scope || scope.all) return { sql: "TRUE", values: [] };
   return { sql: `${alias}.project_id = ANY($1::bigint[])`, values: [projectIds] };
-}
-
-function hasProjectAccess(scope, projectId) {
-  if (!scope || scope.all) return true;
-  return projectId != null && scope.projectIds.includes(String(projectId));
 }
 
 export async function canAccessNote(query, noteId, scope) {

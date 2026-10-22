@@ -33,7 +33,7 @@ import { createPresenceHub, resolveSharedPresence } from "./presence.mjs";
 import { ensureChatThreadsSchema, handleChatThreadsApi, THREAD_ID } from "./chat-threads.mjs";
 import { ensureBrowserStateSchema, handleBrowserStateApi } from "./browser-state.mjs";
 import { ensureAgentPresenceSchema } from "./agent-presence.mjs";
-import { addProjectMember, ensureSpacesSchema, handleSpacesApi, projectScopeFor } from "./spaces.mjs";
+import { addProjectMember, ensureSpacesSchema, handleSpacesApi, hasProjectAccess, projectScopeFor } from "./spaces.mjs";
 import { auditVisibility, ensureAuditScopeSchema } from "./audit-scope.mjs";
 import { ensureNotificationsSchema, handleNotificationsApi } from "./notifications.mjs";
 import { applyProjectCompany, ensureCompaniesSchema, handleCompaniesApi } from "./companies.mjs";
@@ -1127,12 +1127,6 @@ function isOwner(user) {
 /** Что видит человек: только свои проекты (server/spaces.mjs); владельцу «всё» остаётся, пока режим личных пространств не включён. */
 function projectScope(user) {
   return projectScopeFor(query, user);
-}
-
-function hasProjectAccess(scope, projectId) {
-  // Запись без проекта — личная запись владельца инстанса; остальным она недоступна.
-  if (projectId == null) return scope.all || scope.owner === true;
-  return scope.all || scope.projectIds.includes(String(projectId));
 }
 
 function publicOrigin(req) {

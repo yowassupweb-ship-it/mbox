@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectScopeFor, resetSpacesCache } from "./spaces.mjs";
+import { hasProjectAccess, projectScopeFor, resetSpacesCache } from "./spaces.mjs";
 import { allowedSkills, canWriteSkill } from "./skill-access.mjs";
 
 // Минимальная «база»: отвечает на запросы по началу SQL.
@@ -33,6 +33,18 @@ test("в личных пространствах владелец видит т�
   resetSpacesCache();
   const other = await projectScopeFor(fakeDb({ flag: true, memberships: { 2: ["7"] } }), member);
   assert.deepEqual(other, { all: false, owner: false, projectIds: ["7"], companyIds: [] });
+});
+
+test("запись без проекта доступна владельцу и в личных пространствах", async () => {
+  resetSpacesCache();
+  const scope = await projectScopeFor(fakeDb({ flag: true, memberships: { 1: ["5"] } }), owner);
+  assert.equal(hasProjectAccess(scope, null), true);
+  assert.equal(hasProjectAccess(scope, "5"), true);
+  assert.equal(hasProjectAccess(scope, "7"), false);
+  resetSpacesCache();
+  const other = await projectScopeFor(fakeDb({ flag: true, memberships: { 2: ["7"] } }), member);
+  assert.equal(hasProjectAccess(other, null), false);
+  assert.equal(hasProjectAccess(other, "7"), true);
 });
 
 test("чужой личный навык владельцу не виден, общий и выданный — виден", async () => {
