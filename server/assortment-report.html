@@ -565,8 +565,10 @@ V.sales = () => {
       <tbody>${P.trends.slice(0, 100).map(x => `<tr><td>${esc(P.dept_labels[x.dept] || "")}</td><td>${tourBtn(x.id, x.name)}</td>
         <td>${esc(x.sells_label)}</td><td class="num">${num(x.sells_sold)}</td><td>${esc(x.dead_label)}</td><td class="num">${num(x.dead_dates)}</td><td class="num">${num(x.dead_seats)}</td></tr>`).join("")}</tbody></table></div>` : ""}
   <h2 class="sec">Что не сошлось с каталогом</h2>
-  <p class="hint">Номера туров в CRM и на сайте — разные системы. Сопоставлено по номеру ${num(P.matching.matched)} из ${num(P.matching.feed)};
-    не найдено ${num(P.matching.unmatched)} — их продажи не участвуют в анализе конфликтов, направлений и дублей, но в цифрах по местам учтены.
+  <p class="hint">Номера туров в CRM и на сайте общие: у всех ${num(P.matching.matched)} сведённых туров названия совпадают точно.
+    Не нашлось ${num(P.matching.unmatched)} из ${num(P.matching.feed)}, и ${num(P.unmatched.filter(r => !r.dates_future).length)} из них — без дат впереди:
+    каталог показывает то, что продаётся сейчас, а выгрузка охватывает ещё и прошедший год. Смотреть стоит на строки, где «Дат впереди» больше нуля —
+    тур продаётся, а карточки на сайте нет. Продажи несведённых туров не участвуют в анализе конфликтов, направлений и дублей, но в цифрах по местам учтены.
     Ещё по ${num(P.matching.no_data)} ${plural(P.matching.no_data, "карточке", "карточкам", "карточкам")} каталога продаж в выгрузке нет: нулевые продажи им не приписываются.</p>
   <div class="tablewrap"><table><thead><tr><th>Отдел</th><th>ID в CRM</th><th>Название в выгрузке</th><th>Статус</th><th class="num">Продано</th><th class="num">Мест</th><th class="num">Дат в архиве</th><th class="num">Дат впереди</th></tr></thead>
     <tbody>${P.unmatched.slice(0, 200).map(r => `<tr><td>${esc(r.dept_label || (r.own ? "свой продукт" : ""))}</td><td class="mono">${r.id}</td><td>${esc(r.name || "")}</td>
